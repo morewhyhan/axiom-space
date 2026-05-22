@@ -537,6 +537,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     function createClustersFromData(clustersData: GalaxyCluster[], nodesData: GalaxyNode[], edgesData: GalaxyEdge[]): void {
       const CLUSTER_COLORS = [0xa855f7, 0x22d3ee, 0xf472b6, 0x818cf8, 0x34d399, 0xfbbf24];
+      const mixColors = [0xa855f7, 0x22d3ee, 0xf472b6];
 
       if (clustersData.length === 0) {
         // Fallback: generate random clusters like original createClusters
@@ -545,6 +546,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         createLearningPath();
         return;
       }
+
+      // Build a lookup from node title to node data for edge matching
+      const nodeTitleToGroup = new Map<string, THREE.Group>();
 
       // Create sun for each cluster
       clustersData.forEach((cluster, i) => {
@@ -559,7 +563,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         const sun = createGlowNode(color, 6, cluster.name);
         sun.position.set(cx, cy, cz);
         sun.userData.isSun = true;
-        sun.userData.clusterId = cluster.id;
+        sun.userData.clusterId = i;
         sun.userData.clusterColor = color;
         nodesGroup.add(sun);
         clusterSuns.set(i, sun);
@@ -568,34 +572,62 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         const core = allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE')!;
         createCurve(core, sun, color, 0.1);
 
-        // Create nodes for cards in this cluster
+        // Create nodes for cards in this cluster — with organic positioning + mixed colors
         const clusterNodeData = nodesData.filter(n => n.clusterId === cluster.id);
+        const subNodes: THREE.Group[] = [];
         clusterNodeData.forEach((cardNode, j) => {
-          const radius = 40 + (j / Math.max(clusterNodeData.length, 1)) * 160;
-          const t = (j / Math.max(clusterNodeData.length, 1)) * Math.PI * 2;
-          const p = Math.acos(((j % 5) / 4) * 2 - 1);
+          // Use original random positioning for organic look
+          const radius = 40 + Math.pow(Math.random(), 0.7) * 160;
+          const t = Math.random() * Math.PI * 2;
+          const p = Math.acos(Math.random() * 2 - 1);
           const x = cx + radius * Math.sin(p) * Math.cos(t);
           const y = cy + radius * Math.sin(p) * Math.sin(t) * 0.7;
           const z = cz + radius * Math.cos(p);
+          const distToSun = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2);
+          const sizeFactor = Math.max(0.4, 1 - distToSun / 250);
 
-          const nodeSize = cardNode.type === 'permanent' ? 3.5 : cardNode.type === 'literature' ? 3 : 2.5;
+          const baseSize = cardNode.type === 'permanent' ? 3.5 : cardNode.type === 'literature' ? 3 : 2.5;
+          const nodeSize = baseSize * sizeFactor;
+          const trueColor = mixColors[Math.floor(Math.random() * 3)];
           const node = createGlowNode(color, nodeSize, cardNode.title);
           node.position.set(x, y, z);
           node.userData.id = cardNode.id;
-          node.userData.clusterId = cluster.id;
+          node.userData.clusterId = i;
           node.userData.clusterColor = color;
           node.userData.type = cardNode.type;
-          node.userData.trueColor = color;
+          node.userData.trueColor = trueColor;
           nodesGroup.add(node);
+          subNodes.push(node);
+
+          // Sun-to-node edge (like original: always visible)
+          createCurve(sun, node, color, 0.06, false, trueColor);
+
+          // Store title-to-group mapping for edge lookup
+          if (cardNode.title) nodeTitleToGroup.set(cardNode.title, node);
         });
+
+        // Save to clusterNodes for focus/zoom animations
+        clusterNodes.set(i, subNodes);
+
+        // Create random internal edges for visual density (like original)
+        for (let j = 0; j < subNodes.length; j++) {
+          const connCount = 2 + Math.floor(Math.random() * 3);
+          for (let k = 0; k < connCount; k++) {
+            const targetIdx = Math.floor(Math.random() * subNodes.length);
+            if (targetIdx !== j) {
+              const linkColor = mixColors[Math.floor(Math.random() * 3)];
+              createCurve(subNodes[j], subNodes[targetIdx], color, 0, true, linkColor);
+            }
+          }
+        }
       });
 
-      // Create edges from real data
+      // Create edges from real data (concept-to-concept connections)
       edgesData.forEach(edge => {
         const sourceNode = allNodes.find(n => n.userData.id === edge.sourceId);
         const targetNode = allNodes.find(n => n.userData.id === edge.targetId);
         if (sourceNode && targetNode) {
-          const edgeColor = sourceNode.userData.clusterColor || 0xffffff;
+          const edgeColor = sourceNode.userData.trueColor || sourceNode.userData.clusterColor || 0xffffff;
           createCurve(sourceNode, targetNode, edgeColor, 0.06, false, edgeColor);
         }
       });
