@@ -1,8 +1,10 @@
 'use client'
 
+import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAppStore } from '@/stores/mode-store'
 
 export default function GalaxyFilter() {
+  const { stats, loading } = useDashboardStats()
   const { openModal } = useAppStore()
 
   return (
@@ -12,9 +14,9 @@ export default function GalaxyFilter() {
       <div>
         <span className="mono opacity-20 uppercase block mb-2.5" style={{ fontSize: 'var(--f7)' }}>FILTER</span>
         <div className="space-y-2">
-          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" defaultChecked className="accent-purple-500" /><span className="mono text-purple-400" style={{ fontSize: 'var(--f10)' }}>永久</span><span className="mono opacity-25 ml-auto" style={{ fontSize: 'var(--f8)' }}>156</span></label>
-          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" defaultChecked className="accent-cyan-500" /><span className="mono text-cyan-400" style={{ fontSize: 'var(--f10)' }}>灵感</span><span className="mono opacity-25 ml-auto" style={{ fontSize: 'var(--f8)' }}>89</span></label>
-          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" defaultChecked className="accent-pink-500" /><span className="mono text-pink-400" style={{ fontSize: 'var(--f10)' }}>文献</span><span className="mono opacity-25 ml-auto" style={{ fontSize: 'var(--f8)' }}>133</span></label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" defaultChecked className="accent-purple-500" /><span className="mono text-purple-400" style={{ fontSize: 'var(--f10)' }}>永久</span><span className="mono opacity-25 ml-auto" style={{ fontSize: 'var(--f8)' }}>{loading ? '…' : stats?.permanent ?? 0}</span></label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" defaultChecked className="accent-cyan-500" /><span className="mono text-cyan-400" style={{ fontSize: 'var(--f10)' }}>灵感</span><span className="mono opacity-25 ml-auto" style={{ fontSize: 'var(--f8)' }}>{loading ? '…' : stats?.fleeting ?? 0}</span></label>
+          <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" defaultChecked className="accent-pink-500" /><span className="mono text-pink-400" style={{ fontSize: 'var(--f10)' }}>文献</span><span className="mono opacity-25 ml-auto" style={{ fontSize: 'var(--f8)' }}>{loading ? '…' : stats?.literature ?? 0}</span></label>
         </div>
       </div>
 
@@ -56,7 +58,7 @@ export default function GalaxyFilter() {
 
       <div className="hud-line"></div>
 
-      <div className="flex justify-between"><span className="mono opacity-30" style={{ fontSize: 'var(--f10)' }}>可视区域</span><span className="mono text-white/50" style={{ fontSize: 'var(--f10)' }}>42 节点 · 118 边</span></div>
+      <div className="flex justify-between"><span className="mono opacity-30" style={{ fontSize: 'var(--f10)' }}>可视区域</span><span className="mono text-white/50" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : `${stats?.totalNodes ?? 0} 节点 · ${stats?.totalEdges ?? 0} 边`}</span></div>
     </aside>
   )
 }

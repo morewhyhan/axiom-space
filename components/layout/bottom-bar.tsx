@@ -1,6 +1,9 @@
 'use client'
 
+import { useDashboardStats } from '@/hooks/use-dashboard'
+
 export default function BottomBar() {
+  const { stats, loading } = useDashboardStats()
   return (
     <div className="bottom-bar">
       <div className="flex items-stretch gap-6" style={{ height: 'var(--bottom-h)' }}>
@@ -82,8 +85,8 @@ export default function BottomBar() {
 
         {/* Right data */}
         <div className="flex flex-col justify-between flex-shrink-0 text-right py-1">
-          <div className="flex items-center gap-1 justify-end"><span className="w-1 h-1 rounded-full bg-purple-400"></span><span className="mono text-white/35" style={{ fontSize: 'var(--f7)' }}>NODES 378</span></div>
-          <div className="flex items-center gap-1 justify-end"><span className="w-1 h-1 rounded-full bg-cyan-400"></span><span className="mono text-white/35" style={{ fontSize: 'var(--f7)' }}>EDGES 1.8k</span></div>
+          <div className="flex items-center gap-1 justify-end"><span className="w-1 h-1 rounded-full bg-purple-400"></span><span className="mono text-white/35" style={{ fontSize: 'var(--f7)' }}>NODES {loading ? '…' : stats?.totalNodes ?? 0}</span></div>
+          <div className="flex items-center gap-1 justify-end"><span className="w-1 h-1 rounded-full bg-cyan-400"></span><span className="mono text-white/35" style={{ fontSize: 'var(--f7)' }}>EDGES {loading ? '…' : (stats?.totalEdges ?? 0) >= 1000 ? `${((stats?.totalEdges ?? 0) / 1000).toFixed(1)}k` : stats?.totalEdges ?? 0}</span></div>
           <span className="mono text-cyan-400/80 font-bold" style={{ fontSize: 'var(--f8)' }}>12/24</span>
           <span className="mono opacity-15" style={{ fontSize: 'var(--f7)' }}>MAT 1.14</span>
         </div>

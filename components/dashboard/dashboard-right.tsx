@@ -1,8 +1,10 @@
 'use client'
 
+import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAppStore } from '@/stores/mode-store'
 
 export default function DashboardRight() {
+  const { stats, loading } = useDashboardStats()
   const { openModal, setMode } = useAppStore()
 
   return (
@@ -65,29 +67,29 @@ export default function DashboardRight() {
 
           <div className="hud-line"></div>
 
-          {/* KNOWLEDGE with SVG ring progress */}
+          {/* KNOWLEDGE with ring progress */}
           <div>
             <span className="mono opacity-25 uppercase tracking-widest block mb-2.5" style={{ fontSize: 'var(--f8)' }}>KNOWLEDGE</span>
             <div className="bg-white/3 rounded-lg p-3 border border-white/5 flex items-center gap-4">
               <div className="flex-shrink-0 relative w-16 h-16">
                 <svg width="64" height="64" viewBox="0 0 64 64" className="-rotate-90">
                   <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="5"/>
-                  <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="5" strokeLinecap="round" strokeDasharray="175.93" strokeDashoffset="49.26"/>
+                  <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.75)" strokeWidth="5" strokeLinecap="round" strokeDasharray="175.93" strokeDashoffset={loading ? '175.93' : `${175.93 * (1 - (stats?.permanent ?? 0) / Math.max(stats?.totalNodes ?? 1, 1))}`}/>
                 </svg>
-                <span className="absolute inset-0 flex items-center justify-center serif text-sm font-bold text-white">72%</span>
+                <span className="absolute inset-0 flex items-center justify-center serif text-sm font-bold text-white">{loading ? '—' : stats ? `${Math.round((stats.permanent / Math.max(stats.totalNodes, 1)) * 100)}%` : '—'}</span>
               </div>
               <div className="flex-1 space-y-1.5">
                 <div>
-                  <div className="flex justify-between mono mb-0.5" style={{ fontSize: 'var(--f7)' }}><span className="text-purple-300/80">Thermo</span><span className="opacity-25">85</span></div>
-                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="bg-purple-500 h-full rounded-full" style={{ width: '85%' }}></div></div>
+                  <div className="flex justify-between mono mb-0.5" style={{ fontSize: 'var(--f7)' }}><span className="text-purple-300/80">永久</span><span className="opacity-25">{stats?.permanent ?? 0}</span></div>
+                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="bg-purple-500 h-full rounded-full" style={{ width: loading ? '0%' : `${((stats?.permanent ?? 0) / Math.max(stats?.totalNodes ?? 1, 1)) * 100}%` }}></div></div>
                 </div>
                 <div>
-                  <div className="flex justify-between mono mb-0.5" style={{ fontSize: 'var(--f7)' }}><span className="text-cyan-300/80">Complex</span><span className="opacity-25">62</span></div>
-                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="bg-cyan-400 h-full rounded-full" style={{ width: '62%' }}></div></div>
+                  <div className="flex justify-between mono mb-0.5" style={{ fontSize: 'var(--f7)' }}><span className="text-cyan-300/80">灵感</span><span className="opacity-25">{stats?.fleeting ?? 0}</span></div>
+                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="bg-cyan-400 h-full rounded-full" style={{ width: loading ? '0%' : `${((stats?.fleeting ?? 0) / Math.max(stats?.totalNodes ?? 1, 1)) * 100}%` }}></div></div>
                 </div>
                 <div>
-                  <div className="flex justify-between mono mb-0.5" style={{ fontSize: 'var(--f7)' }}><span className="text-pink-300/80">Info</span><span className="opacity-25">49</span></div>
-                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="bg-pink-400 h-full rounded-full" style={{ width: '49%' }}></div></div>
+                  <div className="flex justify-between mono mb-0.5" style={{ fontSize: 'var(--f7)' }}><span className="text-pink-300/80">文献</span><span className="opacity-25">{stats?.literature ?? 0}</span></div>
+                  <div className="h-1 bg-white/5 rounded-full overflow-hidden"><div className="bg-pink-400 h-full rounded-full" style={{ width: loading ? '0%' : `${((stats?.literature ?? 0) / Math.max(stats?.totalNodes ?? 1, 1)) * 100}%` }}></div></div>
                 </div>
               </div>
             </div>

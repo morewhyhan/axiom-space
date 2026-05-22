@@ -8,11 +8,43 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import gsap from 'gsap';
 
+export interface GalaxyNode {
+  id: string
+  title: string
+  type: 'fleeting' | 'permanent' | 'literature'
+  clusterId: string | null
+  clusterName: string | null
+  clusterColor: string | null
+  tags: string[]
+}
+
+export interface GalaxyEdge {
+  id: string
+  sourceId: string
+  targetId: string
+  weight: number
+  type: string
+}
+
+export interface GalaxyCluster {
+  id: string
+  name: string
+  color: string
+  position: number
+  cardCount: number
+}
+
 export interface GalaxyCanvasHandle {
   resetCameraView: () => void;
 }
 
-const GalaxyCanvas = forwardRef<GalaxyCanvasHandle>(function GalaxyCanvas(_props, ref) {
+interface GalaxyCanvasProps {
+  nodes?: GalaxyNode[]
+  edges?: GalaxyEdge[]
+  clusters?: GalaxyCluster[]
+}
+
+const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function GalaxyCanvas({ nodes = [], edges = [], clusters = [] }: GalaxyCanvasProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Three.js object refs so cleanup can access them without stale closures
@@ -67,6 +99,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle>(function GalaxyCanvas(_props
       }
     },
   }));
+
+  // Store data props in a ref so useEffect can access them
+  const dataRef = useRef({ nodes, edges, clusters });
+  dataRef.current = { nodes, edges, clusters };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -499,6 +535,87 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle>(function GalaxyCanvas(_props
       scene.add(learningPath.group);
     }
 
+    function createClustersFromData(clustersData: GalaxyCluster[], nodesData: GalaxyNode[], edgesData: GalaxyEdge[]): void {
+      const CLUSTER_COLORS = [0xa855f7, 0x22d3ee, 0xf472b6, 0x818cf8, 0x34d399, 0xfbbf24];
+
+      if (clustersData.length === 0) {
+        // Fallback: generate random clusters like original createClusters
+        createClusters();
+        buildDemoLearningPath();
+        createLearningPath();
+        return;
+      }
+
+      // Create sun for each cluster
+      clustersData.forEach((cluster, i) => {
+        const phi = Math.acos(1 - (2 * (i + 0.5)) / clustersData.length);
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+        const dist = 250 + Math.random() * 100;
+        const cx = dist * Math.sin(phi) * Math.cos(theta);
+        const cy = dist * Math.cos(phi) * 1.2;
+        const cz = dist * Math.sin(phi) * Math.sin(theta);
+
+        const color = parseInt(cluster.color.replace('#', ''), 16);
+        const sun = createGlowNode(color, 6, cluster.name);
+        sun.position.set(cx, cy, cz);
+        sun.userData.isSun = true;
+        sun.userData.clusterId = cluster.id;
+        sun.userData.clusterColor = color;
+        nodesGroup.add(sun);
+        clusterSuns.set(i, sun);
+
+        // Link sun to center
+        const core = allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE')!;
+        createCurve(core, sun, color, 0.1);
+
+        // Create nodes for cards in this cluster
+        const clusterNodeData = nodesData.filter(n => n.clusterId === cluster.id);
+        clusterNodeData.forEach((cardNode, j) => {
+          const radius = 40 + (j / Math.max(clusterNodeData.length, 1)) * 160;
+          const t = (j / Math.max(clusterNodeData.length, 1)) * Math.PI * 2;
+          const p = Math.acos(((j % 5) / 4) * 2 - 1);
+          const x = cx + radius * Math.sin(p) * Math.cos(t);
+          const y = cy + radius * Math.sin(p) * Math.sin(t) * 0.7;
+          const z = cz + radius * Math.cos(p);
+
+          const nodeSize = cardNode.type === 'permanent' ? 3.5 : cardNode.type === 'literature' ? 3 : 2.5;
+          const node = createGlowNode(color, nodeSize, cardNode.title);
+          node.position.set(x, y, z);
+          node.userData.id = cardNode.id;
+          node.userData.clusterId = cluster.id;
+          node.userData.clusterColor = color;
+          node.userData.type = cardNode.type;
+          node.userData.trueColor = color;
+          nodesGroup.add(node);
+        });
+      });
+
+      // Create edges from real data
+      edgesData.forEach(edge => {
+        const sourceNode = allNodes.find(n => n.userData.id === edge.sourceId);
+        const targetNode = allNodes.find(n => n.userData.id === edge.targetId);
+        if (sourceNode && targetNode) {
+          const edgeColor = sourceNode.userData.clusterColor || 0xffffff;
+          createCurve(sourceNode, targetNode, edgeColor, 0.06, false, edgeColor);
+        }
+      });
+
+      // Unclustered nodes — place around center
+      const unclusteredNodes = nodesData.filter(n => !n.clusterId);
+      unclusteredNodes.forEach((cardNode, j) => {
+        const angle = (j / Math.max(unclusteredNodes.length, 1)) * Math.PI * 2;
+        const radius = 100 + Math.random() * 60;
+        const x = Math.cos(angle) * radius;
+        const y = (Math.random() - 0.5) * 40;
+        const z = Math.sin(angle) * radius;
+        const node = createGlowNode(0xffffff, 2, cardNode.title);
+        node.position.set(x, y, z);
+        node.userData.id = cardNode.id;
+        node.userData.trueColor = 0xffffff;
+        nodesGroup.add(node);
+      });
+    }
+
     function resetCameraView(): void {
       const resetBtn = document.getElementById('reset-view-btn');
       if (resetBtn) resetBtn.classList.remove('visible');
@@ -750,11 +867,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle>(function GalaxyCanvas(_props
     scene.add(linksGroup);
 
     createCore();
-    createClusters();
 
-    // --- Learning Path ---
-    buildDemoLearningPath();
-    createLearningPath();
+    // Build from data props or fallback to demo clusters
+    const { nodes: dataNodes, edges: dataEdges, clusters: dataClusters } = dataRef.current;
+    createClustersFromData(dataClusters, dataNodes, dataEdges);
 
     // --- Event listeners ---
 

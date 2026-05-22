@@ -14,15 +14,21 @@ import CognitiveRadar from '@/components/cognition/cognitive-radar'
 import LearningProfile from '@/components/cognition/learning-profile'
 import LearnControls from '@/components/learn/learn-controls'
 import LearnList from '@/components/learn/learn-list'
+import { useGalaxyData, GalaxyNode, GalaxyEdge, GalaxyCluster } from '@/hooks/use-galaxy'
 
 const GalaxyCanvas = dynamic(() => import('@/components/three/galaxy-canvas'), { ssr: false })
 
 export default function Home() {
   const { mode, modal, closeModal } = useAppStore()
+  const { data: galaxyData, loading: galaxyLoading } = useGalaxyData()
 
   return (
     <>
-      <GalaxyCanvas />
+      <GalaxyCanvas
+        nodes={galaxyData?.nodes ?? []}
+        edges={galaxyData?.edges ?? []}
+        clusters={galaxyData?.clusters ?? []}
+      />
       <button id="reset-view-btn" onClick={() => {
         const w = window as unknown as Record<string, unknown>
         if (w.__resetCameraView) (w.__resetCameraView as () => void)()
@@ -135,8 +141,8 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="grid grid-cols-4 gap-3 mb-5">
-                  <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-purple-400">378</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>TOTAL</div></div>
-                  <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-cyan-400">1816</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>LINKS</div></div>
+                  <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-purple-400">{galaxyData?.nodes.length ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>TOTAL</div></div>
+                  <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-cyan-400">{galaxyData?.edges.length ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>LINKS</div></div>
                   <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-pink-400">24</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>ORPHANS</div></div>
                   <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-white/60">3</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>PENDING</div></div>
                 </div>

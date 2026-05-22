@@ -20,11 +20,12 @@ model user {
   emailVerified Boolean   @default(false)
   name          String?
   createdAt     DateTime  @default(now())
-  updatedAt     DateTime @updatedAt
+  updatedAt     DateTime  @updatedAt
 
-  sessions session[]
-  accounts account[]
-  vault    vault?
+  sessions        session[]
+  accounts        account[]
+  vault           vault?
+  learningSessions learningSession[]
 }
 
 model session {
@@ -82,14 +83,33 @@ model vault {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user  user   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user     user     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cards    card[]
+  clusters cluster[]
+  edges    edge[]
+}
+
+// 知识域/星团 — 对应 Galaxy 中的簇
+model cluster {
+  id        String   @id @default(uuid())
+  vaultId   String
+  name      String              // 如 "数据结构", "操作系统"
+  color     String   @default("#a855f7") // hex 颜色
+  position  Int      @default(0) // 排序位置
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
   cards card[]
+
+  @@index([vaultId])
 }
 
 model card {
   id        String   @id @default(uuid())
   vaultId   String
-  path      String   // 文件路径，如 "literature/涌现.md"
+  clusterId String?
+  path      String   // 文件路径，如 "数据结构/线性表.md"
   content   String   // 完整 Markdown 内容
   type      String   @default("fleeting") // "literature" | "fleeting" | "permanent"
   title     String?
@@ -97,8 +117,67 @@ model card {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  vault   vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  cluster cluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  edgesFrom edge[] @relation("EdgeSource")
+  edgesTo   edge[] @relation("EdgeTarget")
 
   @@unique([vaultId, path])
   @@index([vaultId, type])
+  @@index([clusterId])
+}
+
+// 卡片间关联 — 用于 Galaxy 图谱连线
+model edge {
+  id        String   @id @default(uuid())
+  vaultId   String
+  sourceId  String
+  targetId  String
+  weight    Float    @default(1.0)
+  type      String   @default("related") // "related" | "prerequisite" | "derived" | "counter"
+  createdAt DateTime @default(now())
+
+  vault  vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  source card  @relation("EdgeSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  target card  @relation("EdgeTarget", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@index([vaultId])
+  @@index([sourceId])
+  @@index([targetId])
+}
+
+// ═══════════════════════════════════════════════
+// Learning — 学习会话与消息持久化
+// ═══════════════════════════════════════════════
+
+model learningSession {
+  id        String             @id @default(uuid())
+  userId    String
+  domain    String
+  concept   String
+  status    String             @default("idle") // idle | active | paused | completed | interrupted
+  phase     String             @default("explore")
+  outcome   String?
+  metadata  String?            // JSON
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  user     user              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages learningMessage[]
+
+  @@index([userId])
+}
+
+model learningMessage {
+  id        String   @id @default(uuid())
+  sessionId String
+  role      String   // "system" | "user" | "assistant" | "tool_result"
+  content   String
+  timestamp DateTime @default(now())
+  metadata  String?  // JSON
+
+  session learningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
 }

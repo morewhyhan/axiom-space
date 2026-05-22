@@ -4,6 +4,8 @@ import agentRoutes from './routes/agent';
 import learningRoutes from './routes/learning';
 import sessionRoutes from './routes/session';
 import vaultRoutes from './routes/vault';
+import dashboardRoutes from './routes/dashboard';
+import galaxyRoutes from './routes/galaxy';
 
 const app = new Hono().basePath('/api')
 
@@ -20,6 +22,8 @@ app.route('/agent', agentRoutes)
 app.route('/learning', learningRoutes)
 app.route('/sessions', sessionRoutes)
 app.route('/vault', vaultRoutes)
+app.route('/dashboard', dashboardRoutes)
+app.route('/galaxy', galaxyRoutes)
 
 // Better Auth handler (keep existing)
 app.all('/auth/*', async (c) => {

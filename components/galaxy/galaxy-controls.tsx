@@ -1,8 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+import { useDashboardStats } from '@/hooks/use-dashboard'
 
 export default function GalaxyControls() {
+  const { stats, loading } = useDashboardStats()
   const [charge, setCharge] = useState(-80)
   const [dist, setDist] = useState(45)
   const [bloom, setBloom] = useState(15)
@@ -75,8 +77,8 @@ export default function GalaxyControls() {
       <div className="hud-line"></div>
 
       <div className="grid grid-cols-3 gap-3">
-        <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>CLUSTERS</span><div className="mono text-sm text-white font-bold mt-0.5">6</div></div>
-        <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>NODES</span><div className="mono text-sm text-white font-bold mt-0.5">481</div></div>
+        <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>CLUSTERS</span><div className="mono text-sm text-white font-bold mt-0.5">{loading ? '—' : stats?.clusters ?? 0}</div></div>
+        <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>NODES</span><div className="mono text-sm text-white font-bold mt-0.5">{loading ? '—' : stats?.totalNodes ?? 0}</div></div>
         <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>FPS</span><div className="mono text-sm text-white font-bold mt-0.5" id="fps-display">60</div></div>
       </div>
     </aside>
