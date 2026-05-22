@@ -1,5 +1,5 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// Axiom - Cognitive Operating System
+// Prisma Schema
 
 generator client {
   provider = "prisma-client-js"
@@ -10,30 +10,21 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Task model
-model task {
-  id        String   @id @default(uuid())
-  title     String
-  completed Boolean  @default(false)
-  userId    String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user user @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
+// ═══════════════════════════════════════════════
 // BetterAuth models
+// ═══════════════════════════════════════════════
+
 model user {
   id            String    @id @default(uuid())
   email         String    @unique
   emailVerified Boolean   @default(false)
   name          String?
   createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  updatedAt     DateTime @updatedAt
 
   sessions session[]
   accounts account[]
-  tasks   task[]
+  vault    vault?
 }
 
 model session {
@@ -50,17 +41,17 @@ model session {
 }
 
 model account {
-  id                String   @id @default(uuid())
-  userId            String
-  accountId         String
-  providerId        String
-  accessToken       String?
-  refreshToken      String?
-  idToken           String?
-  expiresAt         DateTime?
-  password          String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id           String   @id @default(uuid())
+  userId       String
+  accountId    String
+  providerId   String
+  accessToken  String?
+  refreshToken String?
+  idToken      String?
+  expiresAt    DateTime?
+  password     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   user user @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -76,4 +67,38 @@ model verification {
   updatedAt  DateTime @updatedAt
 
   @@unique([identifier, value])
+}
+
+// ═══════════════════════════════════════════════
+// Vault & Cards — MD 文件存储在数据库中
+// 一个用户一个 vault，每张卡片存一行
+// content 存完整 Markdown，Agent 通过 IFileStorage 读写
+// ═══════════════════════════════════════════════
+
+model vault {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  name      String   @default("My Vault")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  user   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cards card[]
+}
+
+model card {
+  id        String   @id @default(uuid())
+  vaultId   String
+  path      String   // 文件路径，如 "literature/涌现.md"
+  content   String   // 完整 Markdown 内容
+  type      String   @default("fleeting") // "literature" | "fleeting" | "permanent"
+  title     String?
+  tags      String?  // JSON 数组字符串
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, path])
+  @@index([vaultId, type])
 }

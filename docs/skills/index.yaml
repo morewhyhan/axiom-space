@@ -1,0 +1,18 @@
+# AXIOM Skill Index — 快速发现，避免逐个扫描 SKILL.md
+# 对标 Hermes: skill_index.yaml / iter_skill_index_files()
+skills:
+  axiom-learning:
+    path: skills/axiom-learning/SKILL.md
+    description: "AI learning guide that understands you. Invoke when user wants to learn."
+    phases: 2
+    triggers: ["学", "教", "解释", "什么是", "想了解", "帮我理解"]
+  axiom-forge:
+    path: skills/axiom-forge/SKILL.md
+    description: "AI resource generation for learning. Generates learning resources from literature content."
+    phases: 3
+    triggers: ["生成资源", "生成文档", "生成题目", "出题", "生成导图", "生成学习资料"]
+  axiom-ppt:
+    path: skills/axiom-ppt/SKILL.md
+    description: "Generate real PowerPoint (.pptx) files and put them in the literature box."
+    phases: 1
+    triggers: ["生成ppt", "做ppt", "演示文稿", "幻灯片", "PPT"]

@@ -1,0 +1,2999 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Axiom - Cognitive Operating System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,wght@0,700;1,700&family=JetBrains+Mono:wght@400;700&family=Noto+Sans+SC:wght@100;300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-purple: #a855f7;
+            --axiom-cyan: #22d3ee;
+            --axiom-pink: #f472b6;
+            --deep-space: #030305;
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --glass-bg: rgba(10, 10, 15, 0.7);
+        }
+        body {
+            background-color: var(--deep-space);
+            color: #f1f5f9;
+            font-family: 'Noto Sans SC', sans-serif;
+            overflow: hidden;
+            height: 100vh;
+            user-select: none;
+        }
+        .serif { font-family: 'Bodoni Moda', serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        .glass-panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+        }
+
+        .glow-text-purple { text-shadow: 0 0 10px var(--primary-purple); }
+        .glow-text-cyan { text-shadow: 0 0 10px var(--axiom-cyan); }
+        .glow-text-pink { text-shadow: 0 0 10px var(--axiom-pink); }
+
+        #canvas-container {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 0;
+            transition: opacity 0.4s ease;
+        }
+
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+
+        @keyframes wave {
+            0%, 100% { height: 10px; }
+            50% { height: 30px; }
+        }
+        .wave-bar {
+            width: 2px;
+            background: var(--axiom-cyan);
+            margin: 0 1px;
+            animation: wave 1.2s infinite ease-in-out;
+        }
+
+        .hud-line {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--glass-border), transparent);
+        }
+
+        /* Tab 激活样式 */
+        .tab-active {
+            color: var(--axiom-cyan);
+            border-bottom: 2px solid var(--axiom-cyan);
+        }
+
+        /* 打字机效果流 */
+        .stream-item {
+            border-left: 2px solid var(--primary-purple);
+            padding-left: 8px;
+            margin-bottom: 8px;
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; } }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+        /* 顶栏模式切换 */
+        .mode-btn {
+            position: relative;
+            padding: 6px 16px;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            color: rgba(255,255,255,0.35);
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.25s;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .mode-btn:hover { color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.1); }
+        .mode-btn.active {
+            color: var(--axiom-cyan);
+            border-color: rgba(34,211,238,0.3);
+            background: rgba(34,211,238,0.06);
+            text-shadow: 0 0 8px rgba(34,211,238,0.3);
+        }
+        .mode-btn.active.forge-mode {
+            color: var(--axiom-pink);
+            border-color: rgba(244,114,182,0.3);
+            background: rgba(244,114,182,0.06);
+            text-shadow: 0 0 8px rgba(244,114,182,0.3);
+        }
+        .mode-btn.active.cognition-mode {
+            color: var(--primary-purple);
+            border-color: rgba(168,85,247,0.3);
+            background: rgba(168,85,247,0.06);
+            text-shadow: 0 0 8px rgba(168,85,247,0.3);
+        }
+
+        /* === 主布局：flex 三列 === */
+        .main-grid {
+            display: flex;
+            flex: 1;
+            padding: 0 32px;
+            padding-bottom: 72px; /* 给底栏留空间 */
+            gap: 16px;
+            min-height: 0;
+            overflow: visible;
+            position: relative;
+        }
+        /* 底栏绝对定位贴底 */
+        .bottom-bar {
+            position: absolute;
+            bottom: 0;
+            left: 32px;
+            right: 432px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            padding: 10px 0;
+            pointer-events: auto;
+        }
+        /* 左区、右区：flex 横排 */
+        .left-zone, .right-zone {
+            display: flex;
+            flex-direction: row;
+            gap: 12px;
+            flex-shrink: 0;
+            align-items: stretch;
+            min-height: 0;
+        }
+        /* 3D 图 */
+        .main-grid > section {
+            flex: 1;
+            min-width: 0;
+            min-height: 0;
+        }
+        /* 面板 */
+        .side-slot { display: none !important; }
+        .side-slot.visible {
+            display: flex !important;
+            flex-direction: column;
+            min-height: 0;
+        }
+        /* 面板内 glass-panel 撑满 */
+        .side-slot.visible > .glass-panel:last-child {
+            flex: 1;
+            min-height: 0;
+        }
+
+        /* FORGE 编辑器 */
+        .forge-editor {
+            background: rgba(10,10,15,0.5);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            line-height: 1.8;
+            color: rgba(255,255,255,0.75);
+            resize: none;
+            outline: none;
+            padding: 32px;
+            width: 100%;
+            height: 100%;
+        }
+        .forge-editor::placeholder { color: rgba(255,255,255,0.15); }
+        .forge-editor:focus { border-color: rgba(244,114,182,0.3); }
+
+        /* FORGE 聊天 */
+        .forge-chat-input {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            color: rgba(255,255,255,0.7);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            padding: 12px 16px;
+            resize: none;
+            outline: none;
+            width: 100%;
+        }
+        .forge-chat-input:focus { border-color: rgba(244,114,182,0.3); }
+        .forge-chat-input::placeholder { color: rgba(255,255,255,0.15); }
+
+        /* COGNITION 画像 */
+        .cognition-radar {
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            border: 1px solid rgba(168,85,247,0.2);
+            position: relative;
+            background: radial-gradient(circle, rgba(168,85,247,0.05) 0%, transparent 70%);
+        }
+        .cognition-skill-bar {
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.06);
+            overflow: hidden;
+        }
+        .cognition-skill-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.5s ease;
+        }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 模态框系统 */
+        /* ═══════════════════════════════════════════════ */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 100;
+            background: rgba(3,3,5,0.75);
+            backdrop-filter: blur(12px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            pointer-events: all;
+            animation: fadeIn 0.2s ease;
+        }
+        .modal-overlay.hidden { display: none; }
+        .modal-panel {
+            background: rgba(15,15,22,0.95);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            max-width: 680px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            animation: slideUp 0.25s ease;
+            box-shadow: 0 0 60px rgba(168,85,247,0.08);
+        }
+        .modal-panel.hidden { display: none; }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .modal-close {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            border: 1px solid rgba(255,255,255,0.1);
+            background: transparent;
+            color: rgba(255,255,255,0.5);
+            cursor: pointer;
+            font-size: 14px;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+        .modal-close:hover { color: white; border-color: rgba(255,255,255,0.3); background: rgba(255,255,255,0.05); }
+        .modal-tab {
+            padding: 6px 14px;
+            font-size: 9px;
+            font-family: 'JetBrains Mono', monospace;
+            color: rgba(255,255,255,0.3);
+            border-bottom: 2px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        .modal-tab:hover { color: rgba(255,255,255,0.6); }
+        .modal-tab.active { color: var(--axiom-cyan); border-bottom-color: var(--axiom-cyan); }
+
+        /* ═══════════════════════════════════════════════ */
+        /* Toast 通知 */
+        /* ═══════════════════════════════════════════════ */
+        #toast-container {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            z-index: 90;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            pointer-events: none;
+        }
+        .toast {
+            pointer-events: all;
+            background: rgba(15,15,22,0.9);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            min-width: 280px;
+            max-width: 360px;
+            animation: slideInRight 0.3s ease;
+            transition: all 0.3s ease;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+        }
+        .toast.removing { opacity: 0; transform: translateX(40px); }
+        .toast-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
+        .toast-body { flex: 1; }
+        .toast-type { font-family: 'JetBrains Mono', monospace; font-size: 7px; letter-spacing: 0.15em; opacity: 0.4; text-transform: uppercase; }
+        .toast-msg { font-size: 11px; color: rgba(255,255,255,0.8); margin-top: 2px; }
+        .toast-close { color: rgba(255,255,255,0.3); cursor: pointer; font-size: 12px; flex-shrink: 0; transition: color 0.2s; }
+        .toast-close:hover { color: white; }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 通知铃铛 */
+        /* ═══════════════════════════════════════════════ */
+        .notif-bell { position: relative; cursor: pointer; color: rgba(255,255,255,0.35); transition: color 0.2s; }
+        .notif-bell:hover { color: rgba(255,255,255,0.7); }
+        .notif-badge {
+            position: absolute; top: -4px; right: -6px;
+            min-width: 16px; height: 16px;
+            border-radius: 8px;
+            background: var(--axiom-pink);
+            color: white;
+            font-size: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            display: flex; align-items: center; justify-content: center;
+            padding: 0 4px;
+            box-shadow: 0 0 8px rgba(244,114,182,0.5);
+        }
+        .notif-dropdown {
+            position: absolute; top: 100%; right: 0;
+            margin-top: 8px;
+            width: 320px; max-height: 360px;
+            background: rgba(15,15,22,0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            overflow-y: auto;
+            box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+            animation: slideUp 0.2s ease;
+            z-index: 50;
+        }
+        .notif-dropdown.hidden { display: none; }
+        .notif-item {
+            padding: 10px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            display: flex; gap: 10px; align-items: flex-start;
+            cursor: pointer; transition: background 0.15s;
+        }
+        .notif-item:hover { background: rgba(255,255,255,0.03); }
+        .notif-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+        .notif-dot.purple { background: var(--primary-purple); }
+        .notif-dot.cyan { background: var(--axiom-cyan); }
+        .notif-dot.pink { background: var(--axiom-pink); }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 命令面板 */
+        /* ═══════════════════════════════════════════════ */
+        .command-palette {
+            position: absolute; bottom: 100%;
+            left: 0; right: 0;
+            margin-bottom: 6px;
+            background: rgba(15,15,22,0.95);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            overflow: hidden;
+            animation: slideUp 0.15s ease;
+            z-index: 30;
+        }
+        .command-palette.hidden { display: none; }
+        .cmd-item {
+            padding: 8px 14px;
+            display: flex; align-items: center; gap: 10px;
+            cursor: pointer;
+            transition: background 0.1s;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+        }
+        .cmd-item:hover, .cmd-item.selected { background: rgba(168,85,247,0.1); }
+        .cmd-icon { font-size: 12px; width: 20px; text-align: center; flex-shrink: 0; }
+        .cmd-name { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--primary-purple); flex-shrink: 0; }
+        .cmd-desc { font-size: 10px; color: rgba(255,255,255,0.35); margin-left: auto; }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 右键菜单 */
+        /* ═══════════════════════════════════════════════ */
+        .context-menu {
+            position: fixed;
+            z-index: 80;
+            background: rgba(15,15,22,0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            min-width: 180px;
+            padding: 6px;
+            animation: fadeIn 0.1s ease;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+            pointer-events: all;
+        }
+        .context-menu.hidden { display: none; }
+        .ctx-item {
+            padding: 8px 12px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: rgba(255,255,255,0.6);
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex; align-items: center; gap: 8px;
+            transition: all 0.1s;
+        }
+        .ctx-item:hover { background: rgba(255,255,255,0.06); color: white; }
+        .ctx-item.danger { color: rgba(248,113,113,0.6); }
+        .ctx-item.danger:hover { background: rgba(248,113,113,0.1); color: #f87171; }
+        .ctx-sep { height: 1px; background: rgba(255,255,255,0.05); margin: 4px 0; }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 快捷操作 Chips */
+        /* ═══════════════════════════════════════════════ */
+        .quick-chips {
+            display: flex; flex-wrap: wrap; gap: 6px;
+            padding: 8px 0;
+        }
+        .quick-chip {
+            padding: 5px 12px;
+            font-size: 9px;
+            font-family: 'JetBrains Mono', monospace;
+            color: rgba(255,255,255,0.45);
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .quick-chip:hover {
+            color: white;
+            border-color: rgba(255,255,255,0.15);
+            background: rgba(255,255,255,0.06);
+        }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 学习阶段条 */
+        /* ═══════════════════════════════════════════════ */
+        .phase-bar {
+            display: flex; align-items: center; gap: 8px;
+            padding: 6px 12px;
+            background: rgba(168,85,247,0.08);
+            border: 1px solid rgba(168,85,247,0.15);
+            border-radius: 8px;
+            margin: 0 16px 8px;
+        }
+        .phase-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--primary-purple);
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--primary-purple); }
+            50% { opacity: 0.4; box-shadow: 0 0 8px var(--primary-purple); }
+        }
+        .phase-steps { display: flex; gap: 3px; margin-left: auto; }
+        .phase-step {
+            width: 16px; height: 3px; border-radius: 2px;
+            background: rgba(255,255,255,0.08);
+        }
+        .phase-step.done { background: var(--primary-purple); }
+        .phase-step.active { background: var(--axiom-cyan); }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 工具调用折叠 */
+        /* ═══════════════════════════════════════════════ */
+        .tool-group {
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 8px;
+            margin: 6px 0;
+            overflow: hidden;
+        }
+        .tool-group-header {
+            padding: 6px 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 8px;
+            color: rgba(255,255,255,0.35);
+            cursor: pointer;
+            display: flex; align-items: center; gap: 6px;
+            transition: background 0.15s;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        .tool-group-header:hover { background: rgba(255,255,255,0.03); }
+        .tool-status { width: 6px; height: 6px; border-radius: 50%; }
+        .tool-status.running { background: var(--axiom-cyan); animation: pulse 1.5s infinite; }
+        .tool-status.done { background: rgba(255,255,255,0.2); }
+        .tool-group-body { padding: 8px 10px; font-size: 10px; color: rgba(255,255,255,0.45); border-top: 1px solid rgba(255,255,255,0.03); display: none; }
+        .tool-group-body.open { display: block; }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 物理控制滑块 */
+        /* ═══════════════════════════════════════════════ */
+        .phys-slider {
+            -webkit-appearance: none;
+            width: 100%; height: 3px;
+            border-radius: 2px;
+            background: rgba(255,255,255,0.08);
+            outline: none;
+        }
+        .phys-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px; height: 12px;
+            border-radius: 50%;
+            background: var(--primary-purple);
+            cursor: pointer;
+            border: 1px solid rgba(168,85,247,0.4);
+        }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 编辑器模式切换 */
+        /* ═══════════════════════════════════════════════ */
+        .editor-mode-tab {
+            padding: 4px 10px;
+            font-size: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            color: rgba(255,255,255,0.25);
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+        .editor-mode-tab:hover { color: rgba(255,255,255,0.5); background: rgba(255,255,255,0.03); }
+        .editor-mode-tab.active { color: var(--axiom-pink); background: rgba(244,114,182,0.1); }
+
+        /* ═══════════════════════════════════════════════ */
+        /* Toggle Switch */
+        /* ═══════════════════════════════════════════════ */
+        .toggle-track {
+            width: 32px; height: 18px;
+            border-radius: 9px;
+            background: rgba(255,255,255,0.08);
+            cursor: pointer;
+            transition: background 0.2s;
+            position: relative;
+        }
+        .toggle-track.on { background: rgba(168,85,247,0.4); }
+        .toggle-knob {
+            position: absolute; top: 2px; left: 2px;
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: white;
+            transition: left 0.2s;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        .toggle-track.on .toggle-knob { left: 16px; }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 搜索 Modal 高亮 */
+        /* ═══════════════════════════════════════════════ */
+        .search-highlight { color: var(--axiom-cyan); background: rgba(34,211,238,0.1); padding: 0 2px; border-radius: 2px; }
+
+        /* ═══════════════════════════════════════════════ */
+        /* 输入框通用 */
+        /* ═══════════════════════════════════════════════ */
+        .axiom-input {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 8px;
+            color: rgba(255,255,255,0.7);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            padding: 8px 12px;
+            outline: none;
+            width: 100%;
+            transition: border-color 0.2s;
+        }
+        .axiom-input:focus { border-color: rgba(168,85,247,0.3); }
+        .axiom-input::placeholder { color: rgba(255,255,255,0.12); }
+
+        .axiom-btn {
+            padding: 7px 16px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            border: 1px solid transparent;
+        }
+        .axiom-btn.primary {
+            background: rgba(168,85,247,0.15);
+            border-color: rgba(168,85,247,0.25);
+            color: var(--primary-purple);
+        }
+        .axiom-btn.primary:hover { background: rgba(168,85,247,0.25); }
+        .axiom-btn.secondary {
+            background: transparent;
+            border-color: rgba(255,255,255,0.1);
+            color: rgba(255,255,255,0.5);
+        }
+        .axiom-btn.secondary:hover { border-color: rgba(255,255,255,0.2); color: white; }
+        .axiom-btn.danger {
+            background: transparent;
+            border-color: rgba(248,113,113,0.2);
+            color: rgba(248,113,113,0.6);
+        }
+        .axiom-btn.danger:hover { background: rgba(248,113,113,0.1); border-color: rgba(248,113,113,0.3); }
+
+        /* Oracle 头像 */
+        .oracle-avatar {
+            width: 40px; height: 40px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'Bodoni Moda', serif;
+            font-size: 18px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        /* mode transition */
+        /* 面板切换动效 */
+        .side-slot { display: none !important; }
+        /* 左面板滑入 */
+        @keyframes slideInLeft {
+            from { opacity: 0; transform: translateX(-28px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        /* 右面板滑入 */
+        @keyframes slideInRight {
+            from { opacity: 0; transform: translateX(28px); }
+            to   { opacity: 1; transform: translateX(0); }
+        }
+        /* 内容淡入 */
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        /* 3D 图脉冲 */
+        @keyframes graphPulse {
+            0%   { filter: brightness(1); }
+            50%  { filter: brightness(1.15); }
+            100% { filter: brightness(1); }
+        }
+        .side-slot.visible {
+            display: flex !important;
+            flex-direction: column;
+            animation-duration: 0.4s;
+            animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+            animation-fill-mode: both;
+        }
+        /* 左区面板从左边滑入 */
+        .left-zone .side-slot.visible {
+            animation-name: slideInLeft;
+        }
+        /* 右区面板从右边滑入 */
+        .right-zone .side-slot.visible {
+            animation-name: slideInRight;
+        }
+        /* 面板内部子元素依次淡入 */
+        .side-slot.visible > *:nth-child(1) { animation: fadeUp 0.35s 0.05s cubic-bezier(0.16,1,0.3,1) both; }
+        .side-slot.visible > *:nth-child(2) { animation: fadeUp 0.35s 0.1s cubic-bezier(0.16,1,0.3,1) both; }
+        .side-slot.visible > *:nth-child(3) { animation: fadeUp 0.35s 0.15s cubic-bezier(0.16,1,0.3,1) both; }
+        .side-slot.visible > *:nth-child(4) { animation: fadeUp 0.35s 0.2s cubic-bezier(0.16,1,0.3,1) both; }
+        .side-slot.visible > *:nth-child(5) { animation: fadeUp 0.35s 0.25s cubic-bezier(0.16,1,0.3,1) both; }
+        .side-slot.visible > *:nth-child(6) { animation: fadeUp 0.35s 0.3s cubic-bezier(0.16,1,0.3,1) both; }
+        .side-slot.visible > *:nth-child(7) { animation: fadeUp 0.35s 0.35s cubic-bezier(0.16,1,0.3,1) both; }
+
+        /* 3D 图 hover 提示 */
+        .graph-hint {
+            position: absolute; bottom: 120px;
+            left: 50%; transform: translateX(-50%);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 9px;
+            color: rgba(255,255,255,0.15);
+            pointer-events: none;
+            transition: opacity 0.8s ease;
+        }
+
+        /* 流光线条 */
+        @keyframes shimmer {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .shimmer-text {
+            background: linear-gradient(90deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0.1) 100%);
+            background-size: 200% 100%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmer 3s infinite;
+        }
+
+        /* Concept map tree lines */
+        .concept-tree-item {
+            position: relative;
+            padding-left: 16px;
+            border-left: 1px solid rgba(168,85,247,0.15);
+            margin-left: 8px;
+        }
+        .concept-tree-item::before {
+            content: '';
+            position: absolute; left: 0; top: 10px;
+            width: 10px; height: 1px;
+            background: rgba(168,85,247,0.15);
+        }
+        /* 返回全局视角按钮 */
+        #reset-view-btn {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            padding: 8px 20px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            letter-spacing: 0.15em;
+            color: rgba(255,255,255,0.6);
+            background: rgba(10,10,15,0.8);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            cursor: pointer;
+            z-index: 60;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        #reset-view-btn.visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(-50%) translateY(0);
+        }
+        #reset-view-btn:hover {
+            color: var(--axiom-cyan);
+            border-color: rgba(34,211,238,0.3);
+            background: rgba(34,211,238,0.08);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    <button id="reset-view-btn" onclick="resetCamera()">⊙ RESET VIEW</button>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- Toast 通知容器 -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="toast-container"></div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- 右键菜单 -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="context-menu" class="context-menu hidden">
+        <div class="ctx-item" data-action="focus">⊙ 聚焦节点</div>
+        <div class="ctx-item" data-action="detail">ⓘ 查看详情</div>
+        <div class="ctx-item" data-action="edit">✎ 编辑标题</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item" data-action="link">⛓ 创建关联</div>
+        <div class="ctx-item" data-action="favorite">★ 收藏</div>
+        <div class="ctx-sep"></div>
+        <div class="ctx-item danger" data-action="hide">⊗ 隐藏节点</div>
+    </div>
+
+    <div class="relative z-10 flex flex-col h-screen pointer-events-none">
+
+        <!-- ═══════════════════════════════════════════════ -->
+        <!-- 顶栏 -->
+        <!-- ═══════════════════════════════════════════════ -->
+        <header class="flex justify-between items-center px-10 py-5 pointer-events-auto">
+            <div class="flex items-center gap-8">
+                <div class="flex flex-col">
+                    <h1 class="serif text-3xl tracking-[0.5em] font-bold glow-text-purple uppercase leading-none">Axiom</h1>
+                    <span class="mono text-[8px] opacity-40 tracking-[0.4em] mt-1 ml-1">COGNITIVE OPERATING SYSTEM</span>
+                </div>
+                <div class="h-8 w-[1px] bg-white/10"></div>
+                <!-- 四模式切换 -->
+                <nav class="flex gap-3" id="mode-nav">
+                    <button class="mode-btn active" data-mode="dashboard" onclick="switchMode('dashboard')">
+                        <span class="block text-[8px] opacity-50 mb-0.5">COCKPIT</span>
+                        DASHBOARD
+                    </button>
+                    <button class="mode-btn forge-mode" data-mode="forge" onclick="switchMode('forge')">
+                        <span class="block text-[8px] opacity-50 mb-0.5">PRODUCTION</span>
+                        FORGE
+                    </button>
+                    <button class="mode-btn" data-mode="galaxy" onclick="switchMode('galaxy')">
+                        <span class="block text-[8px] opacity-50 mb-0.5">EXPLORE</span>
+                        GALAXY
+                    </button>
+                    <button class="mode-btn cognition-mode" data-mode="cognition" onclick="switchMode('cognition')">
+                        <span class="block text-[8px] opacity-50 mb-0.5">PORTRAIT</span>
+                        COGNITION
+                    </button>
+                </nav>
+                <!-- Oracle 角色切换 + 会话管理 -->
+                <div class="h-8 w-[1px] bg-white/10"></div>
+                <select id="oracle-select" class="bg-transparent border border-white/20 rounded px-2 py-1 outline-none text-purple-400 mono text-[10px] cursor-pointer" onchange="switchOracle(this.value)">
+                    <option>Oracle</option>
+                    <option>Forge</option>
+                    <option>Guide</option>
+                    <option>Assess</option>
+                    <option>Profile</option>
+                </select>
+                <div class="flex items-center gap-3 mono text-[10px] text-white/40">
+                    <button class="hover:text-white transition-colors" onclick="showToast('session', '新会话已创建', 'cyan')">+ NEW</button>
+                    <button class="hover:text-white transition-colors" onclick="openModal('oracle')">SWITCH</button>
+                </div>
+            </div>
+            <div class="flex items-center gap-5 mono text-xs">
+                <!-- 搜索入口 -->
+                <div class="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 cursor-pointer" onclick="openModal('search')">
+                    <span class="opacity-30 text-[10px]">⌘K</span>
+                    <span class="text-[10px] opacity-30">搜索节点...</span>
+                </div>
+                <!-- 通知铃铛 -->
+                <div class="notif-bell relative" onclick="toggleNotifDropdown(event)" id="notif-bell">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+                    <span class="notif-badge" id="notif-count">4</span>
+                    <div class="notif-dropdown hidden" id="notif-dropdown">
+                        <div style="padding:10px 14px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;align-items:center;">
+                            <span class="mono text-[8px] opacity-40 uppercase">Notifications</span>
+                            <button class="mono text-[7px] text-purple-400/60 hover:text-purple-400" onclick="clearNotifications(event)">CLEAR ALL</button>
+                        </div>
+                        <div class="notif-item"><span class="notif-dot purple"></span><div><div class="text-[10px] text-white/70">Agent 完成文献扫描</div><div class="mono text-[7px] opacity-35 mt-0.5">《逻辑哲学论》→ 提取 3 个概念</div></div></div>
+                        <div class="notif-item"><span class="notif-dot cyan"></span><div><div class="text-[10px] text-white/70">Forge 审核通过</div><div class="mono text-[7px] opacity-35 mt-0.5">「耗散结构」→ Permanent</div></div></div>
+                        <div class="notif-item"><span class="notif-dot pink"></span><div><div class="text-[10px] text-white/70">新关联发现</div><div class="mono text-[7px] opacity-35 mt-0.5">[熵] ↔ [信息论] 关联度 0.87</div></div></div>
+                        <div class="notif-item"><span class="notif-dot purple"></span><div><div class="text-[10px] text-white/50">Profile 已更新</div><div class="mono text-[7px] opacity-35 mt-0.5">学习天数 +1，当前连续 13 天</div></div></div>
+                    </div>
+                </div>
+                <!-- Profile 按钮 -->
+                <button class="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center hover:border-white/30 transition-colors" onclick="openModal('profile')">
+                    <span class="serif text-[10px]">W</span>
+                </button>
+                <div id="clock" class="opacity-50 text-[10px]">12:00:00</div>
+            </div>
+        </header>
+
+        <!-- ═══════════════════════════════════════════════ -->
+        <!-- 主体：左栏 + 3D星系 + 右栏 -->
+        <!-- ═══════════════════════════════════════════════ -->
+        <!-- 三列网格：左面板 | 3D图 | 右面板 -->
+        <main class="main-grid">
+
+            <!-- ═══════════════════ 左区容器 ═══════════════════ -->
+            <div class="left-zone">
+
+                <!-- ── DASHBOARD 左：核心体征 ── -->
+                <aside class="side-slot visible dashboard-panel w-[340px] flex-col pointer-events-auto" style="justify-content:space-evenly;">
+                    <div>
+                        <span class="mono text-[10px] text-white font-bold uppercase tracking-[0.2em]">NODES</span>
+                        <div class="serif text-8xl font-bold glow-text-purple leading-none mt-1">378</div>
+                        <span class="mono text-[9px] text-white/60 block mt-1">Total knowledge nodes</span>
+                    </div>
+                    <div>
+                        <span class="mono text-[10px] text-white font-bold uppercase tracking-[0.2em]">EDGES</span>
+                        <div class="serif text-7xl font-bold glow-text-cyan leading-none mt-1">1,816</div>
+                        <span class="mono text-[9px] text-white/60 block mt-1">Total connections in system</span>
+                    </div>
+
+                    <div class="hud-line"></div>
+
+                    <div>
+                        <span class="mono text-[10px] text-white font-bold uppercase tracking-[0.2em]">PERMANENT</span>
+                        <div class="serif text-6xl font-bold text-purple-300 leading-none mt-1">156</div>
+                        <span class="mono text-[9px] text-white/60 block mt-1">Solidified knowledge cards</span>
+                    </div>
+                    <div>
+                        <span class="mono text-[10px] text-white font-bold uppercase tracking-[0.2em]">FLEETING</span>
+                        <div class="serif text-6xl font-bold text-cyan-300 leading-none mt-1">89</div>
+                        <span class="mono text-[9px] text-white/60 block mt-1">Ideas awaiting refinement</span>
+                    </div>
+                    <div>
+                        <span class="mono text-[10px] text-white font-bold uppercase tracking-[0.2em]">LITERATURE</span>
+                        <div class="serif text-6xl font-bold text-pink-300 leading-none mt-1">133</div>
+                        <span class="mono text-[9px] text-white/60 block mt-1">Source materials imported</span>
+                    </div>
+
+                    <div class="hud-line"></div>
+
+                    <div class="flex gap-3">
+                        <div class="w-0.5 bg-green-400/60 rounded-full flex-shrink-0"></div>
+                        <div>
+                            <span class="mono text-[8px] opacity-30 uppercase tracking-widest block">STATUS</span>
+                            <div class="text-sm text-white font-bold mt-0.5">System stable — learning active</div>
+                            <p class="text-[10px] text-white/35 leading-relaxed mt-1">Knowledge base healthy. Agent online. All connections nominal.</p>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3">
+                        <div>
+                            <span class="mono text-[7px] opacity-30 uppercase tracking-widest block">CARDS TODAY</span>
+                            <div class="mono text-sm text-white font-bold mt-0.5">3</div>
+                        </div>
+                        <div>
+                            <span class="mono text-[7px] opacity-30 uppercase tracking-widest block">REVIEW RATE</span>
+                            <div class="mono text-sm text-white font-bold mt-0.5">83%</div>
+                        </div>
+                        <div>
+                            <span class="mono text-[7px] opacity-30 uppercase tracking-widest block">CONCEPTS</span>
+                            <div class="mono text-sm text-white font-bold mt-0.5">47</div>
+                        </div>
+                    </div>
+                </aside>
+
+            <!-- ── GALAXY 左：Physics + Visual ── -->
+            <aside class="side-slot galaxy-panel w-[340px] flex-col pointer-events-auto" style="justify-content:space-between;">
+                <span class="mono text-[8px] opacity-25 uppercase tracking-widest">GALAXY_CONTROLS</span>
+
+                <div>
+                    <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">PHYSICS</span>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">CHARGE</span><span class="opacity-50" id="charge-val">-80</span></div>
+                            <input type="range" min="-200" max="-5" value="-80" class="phys-slider" id="charge-slider" oninput="updatePhysics()">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">LINK DISTANCE</span><span class="opacity-50" id="dist-val">45</span></div>
+                            <input type="range" min="5" max="100" value="45" class="phys-slider" id="dist-slider" oninput="updatePhysics()">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">AUTO ROTATE</span></div>
+                            <div class="toggle-track on" id="rotate-toggle" onclick="toggleRotate()"><div class="toggle-knob"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hud-line"></div>
+
+                <div>
+                    <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">VISUAL</span>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">BLOOM</span><span class="opacity-50" id="bloom-val">1.5</span></div>
+                            <input type="range" min="0" max="30" value="15" class="phys-slider" id="bloom-slider" oninput="updateVisual()">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">GLOW SIZE</span><span class="opacity-50" id="glow-val">10</span></div>
+                            <input type="range" min="2" max="20" value="10" class="phys-slider" id="glow-slider" oninput="updateVisual()">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">NODE DENSITY</span><span class="opacity-50" id="density-val">80</span></div>
+                            <input type="range" min="10" max="150" value="80" class="phys-slider" id="density-slider" oninput="updateVisual()">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">COMET SPEED</span><span class="opacity-50" id="comet-val">1.0</span></div>
+                            <input type="range" min="0" max="30" value="10" class="phys-slider" id="comet-slider" oninput="updateVisual()">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">MILKY WAY</span></div>
+                            <div class="toggle-track on" id="milky-toggle" onclick="toggleMilkyWay()"><div class="toggle-knob"></div></div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">GRID</span></div>
+                            <div class="toggle-track" id="grid-toggle" onclick="toggleGrid()"><div class="toggle-knob"></div></div>
+                        </div>
+                        <div>
+                            <div class="flex justify-between mono text-[9px] mb-1"><span class="opacity-40">FLAT LAYOUT</span></div>
+                            <div class="toggle-track" id="flat-toggle" onclick="toggleFlatLayout()"><div class="toggle-knob"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="hud-line"></div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div>
+                        <span class="mono text-[7px] opacity-30 uppercase tracking-widest block">CLUSTERS</span>
+                        <div class="mono text-sm text-white font-bold mt-0.5">6</div>
+                    </div>
+                    <div>
+                        <span class="mono text-[7px] opacity-30 uppercase tracking-widest block">NODES</span>
+                        <div class="mono text-sm text-white font-bold mt-0.5">481</div>
+                    </div>
+                    <div>
+                        <span class="mono text-[7px] opacity-30 uppercase tracking-widest block">FPS</span>
+                        <div class="mono text-sm text-white font-bold mt-0.5" id="fps-display">60</div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- ── FORGE 左：Agent 对话 ── -->
+            <aside id="left-forge" class="side-slot forge-panel w-[420px] flex-col pointer-events-auto">
+                <div class="glass-panel rounded-2xl flex-1 flex flex-col overflow-hidden">
+                    <!-- 当前工作上下文 -->
+                    <div class="px-5 py-2.5 border-b border-white/5 flex items-center gap-2" id="forge-context">
+                        <span class="w-1.5 h-1.5 rounded-full bg-pink-400"></span>
+                        <span class="mono text-[8px] opacity-30 uppercase tracking-widest">Working_On:</span>
+                        <span class="text-[9px] text-white/70 font-medium truncate">耗散结构与社会熵增</span>
+                        <span class="mono text-[7px] text-pink-400/50 ml-auto">PERM</span>
+                    </div>
+                    <!-- 最近编辑 -->
+                    <div class="px-5 py-2 border-b border-white/5 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                        <span class="mono text-[7px] opacity-25 uppercase flex-shrink-0">Recent:</span>
+                        <span class="mono text-[7px] text-white/40 hover:text-white cursor-pointer flex-shrink-0 transition-colors" onclick="showToast('card','已切换到信息熵','cyan')">信息熵</span>
+                        <span class="opacity-20 text-[7px] flex-shrink-0">·</span>
+                        <span class="mono text-[7px] text-white/40 hover:text-white cursor-pointer flex-shrink-0 transition-colors" onclick="showToast('card','已切换到贝纳德对流','cyan')">贝纳德对流</span>
+                        <span class="opacity-20 text-[7px] flex-shrink-0">·</span>
+                        <span class="mono text-[7px] text-white/40 hover:text-white cursor-pointer flex-shrink-0 transition-colors" onclick="showToast('card','已切换到热力学第二定律','cyan')">热力学第二定律</span>
+                    </div>
+                    <!-- Chat Header -->
+                    <div class="flex justify-between items-center px-5 py-3 border-b border-white/10">
+                        <span class="mono text-[9px] text-pink-400 uppercase tracking-widest">Forge_Console</span>
+                        <div class="flex gap-3">
+                            <button class="mono text-[8px] text-red-400/60 hover:text-red-400 transition-colors" onclick="showToast('agent','Agent 已中止','pink')">STOP</button>
+                            <button class="mono text-[8px] text-cyan-400/60 hover:text-cyan-400 transition-colors" onclick="showToast('steer','方向修正已发送','cyan')">STEER</button>
+                            <button class="mono text-[8px] text-white/30 hover:text-white/60 transition-colors" onclick="showToast('session','新会话已创建','cyan')">+NEW</button>
+                        </div>
+                    </div>
+
+                    <!-- 学习阶段指示器 -->
+                    <div class="phase-bar hidden" id="learning-phase">
+                        <span class="mono text-[7px] text-purple-400/70 uppercase">🎓 Learning: <span id="phase-name">ASSESS</span></span>
+                        <span class="mono text-[8px] opacity-50 ml-2 truncate" id="phase-concept">耗散结构理论</span>
+                        <div class="phase-steps">
+                            <span class="phase-step done"></span>
+                            <span class="phase-step done"></span>
+                            <span class="phase-step active"></span>
+                            <span class="phase-step"></span>
+                            <span class="phase-step"></span>
+                            <span class="phase-step"></span>
+                        </div>
+                        <button class="mono text-[7px] text-red-400/50 hover:text-red-400 ml-2" onclick="document.getElementById('learning-phase').classList.add('hidden')">✕</button>
+                    </div>
+
+                    <!-- 消息区 -->
+                    <div class="flex-1 overflow-y-auto no-scrollbar px-5 pt-4 pb-2 space-y-4" id="forge-chat-msgs">
+                        <!-- 欢迎屏 -->
+                        <div id="forge-welcome" class="text-center py-8">
+                            <div class="serif text-lg text-white/20 mb-3">Forge</div>
+                            <div class="mono text-[9px] opacity-30 leading-relaxed">
+                                378 节点 · 1816 边<br>
+                                24 孤立节点 · 3 待审核
+                            </div>
+                            <div class="quick-chips justify-center mt-4" id="welcome-chips">
+                                <span class="quick-chip" onclick="sendQuickAction('总结今日学习')">总结今日学习</span>
+                                <span class="quick-chip" onclick="sendQuickAction('审查待审核卡片')">审查待审核卡片</span>
+                                <span class="quick-chip" onclick="sendQuickAction('发现新关联')">发现新关联</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 快捷操作 Chips -->
+                    <div class="px-5" id="forge-chips">
+                        <div class="quick-chips">
+                            <span class="quick-chip" onclick="sendQuickAction('解释这个概念')">💡 解释</span>
+                            <span class="quick-chip" onclick="sendQuickAction('给我一个例子')">📋 举例</span>
+                            <span class="quick-chip" onclick="sendQuickAction('关联到其他概念')">🔗 关联</span>
+                            <span class="quick-chip" onclick="startLearningDemo()">🎓 开始学习</span>
+                        </div>
+                    </div>
+
+                    <!-- 输入区 -->
+                    <div class="px-4 pb-4 pt-1 relative">
+                        <div id="command-palette" class="command-palette hidden">
+                            <div class="cmd-item selected" data-cmd="/clear"><span class="cmd-icon">⌫</span><span class="cmd-name">/clear</span><span class="cmd-desc">清空对话</span></div>
+                            <div class="cmd-item" data-cmd="/new"><span class="cmd-icon">+</span><span class="cmd-name">/new</span><span class="cmd-desc">新会话</span></div>
+                            <div class="cmd-item" data-cmd="/rollback"><span class="cmd-icon">↩</span><span class="cmd-name">/rollback</span><span class="cmd-desc">回滚检查点</span></div>
+                            <div class="cmd-item" data-cmd="/assess"><span class="cmd-icon">📊</span><span class="cmd-name">/assess</span><span class="cmd-desc">学习评估</span></div>
+                            <div class="cmd-item" data-cmd="/learn"><span class="cmd-icon">🎓</span><span class="cmd-name">/learn</span><span class="cmd-desc">学习模式</span></div>
+                            <div class="cmd-item" data-cmd="/help"><span class="cmd-icon">?</span><span class="cmd-name">/help</span><span class="cmd-desc">帮助</span></div>
+                        </div>
+                        <div class="flex gap-2">
+                            <textarea class="forge-chat-input" rows="2" placeholder="与 Agent 对话... (Enter 发送, / 命令)" id="chat-input" onkeydown="handleChatKey(event)" oninput="handleChatInput(event)"></textarea>
+                            <button class="self-end mb-1 mono text-[9px] bg-pink-500/20 text-pink-300 px-3 py-2 rounded-lg border border-pink-500/30 hover:bg-pink-500/30 transition-colors" onclick="sendChatMsg()">→</button>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- ── COGNITION 左：雷达 + 统计 ── -->
+                <aside class="side-slot cognition-panel w-[340px] flex-col gap-4 pointer-events-auto">
+                    <div class="glass-panel p-5 rounded-2xl">
+                        <span class="mono text-[10px] opacity-40 uppercase block mb-4">Cognitive_Radar</span>
+                        <div class="flex justify-center mb-4">
+                            <svg width="180" height="180" viewBox="0 0 200 200">
+                                <polygon points="100,20 173,55 173,145 100,180 27,145 27,55" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="1"/>
+                                <polygon points="100,45 155,70 155,130 100,155 45,130 45,70" fill="none" stroke="rgba(255,255,255,0.03)" stroke-width="1"/>
+                                <polygon points="100,30 160,65 145,135 100,165 40,125 45,60" fill="rgba(168,85,247,0.12)" stroke="rgba(168,85,247,0.6)" stroke-width="1.5"/>
+                                <text x="100" y="14" text-anchor="middle" fill="rgba(255,255,255,0.35)" font-size="7" font-family="JetBrains Mono">深度</text>
+                                <text x="183" y="55" text-anchor="start" fill="rgba(255,255,255,0.35)" font-size="7" font-family="JetBrains Mono">广度</text>
+                                <text x="183" y="148" text-anchor="start" fill="rgba(255,255,255,0.35)" font-size="7" font-family="JetBrains Mono">关联</text>
+                                <text x="100" y="196" text-anchor="middle" fill="rgba(255,255,255,0.35)" font-size="7" font-family="JetBrains Mono">表达</text>
+                                <text x="17" y="148" text-anchor="end" fill="rgba(255,255,255,0.35)" font-size="7" font-family="JetBrains Mono">应用</text>
+                                <text x="17" y="55" text-anchor="end" fill="rgba(255,255,255,0.35)" font-size="7" font-family="JetBrains Mono">批判</text>
+                            </svg>
+                        </div>
+                        <div class="hud-line mb-3"></div>
+                        <div class="space-y-2">
+                            <div><div class="flex justify-between mono text-[8px] mb-0.5"><span class="opacity-35">理解深度</span><span class="text-purple-400">0.85</span></div><div class="cognition-skill-bar"><div class="cognition-skill-fill bg-purple-500" style="width:85%"></div></div></div>
+                            <div><div class="flex justify-between mono text-[8px] mb-0.5"><span class="opacity-35">知识广度</span><span class="text-cyan-400">0.72</span></div><div class="cognition-skill-bar"><div class="cognition-skill-fill bg-cyan-400" style="width:72%"></div></div></div>
+                            <div><div class="flex justify-between mono text-[8px] mb-0.5"><span class="opacity-35">关联能力</span><span class="text-pink-400">0.68</span></div><div class="cognition-skill-bar"><div class="cognition-skill-fill bg-pink-400" style="width:68%"></div></div></div>
+                            <div><div class="flex justify-between mono text-[8px] mb-0.5"><span class="opacity-35">表达清晰度</span><span class="text-purple-400">0.91</span></div><div class="cognition-skill-bar"><div class="cognition-skill-fill bg-purple-400" style="width:91%"></div></div></div>
+                        </div>
+                    </div>
+                    <div class="glass-panel p-4 rounded-2xl">
+                        <span class="mono text-[10px] opacity-40 uppercase block mb-3">Learning_Stats</span>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="text-center"><span class="serif text-3xl font-bold text-purple-400">13</span><span class="mono text-[7px] opacity-25 block">天连续</span></div>
+                            <div class="text-center"><span class="serif text-3xl font-bold text-cyan-400">47</span><span class="mono text-[7px] opacity-25 block">已掌握</span></div>
+                            <div class="text-center"><span class="serif text-3xl font-bold text-pink-400">8</span><span class="mono text-[7px] opacity-25 block">待复习</span></div>
+                            <div class="text-center"><span class="serif text-3xl font-bold text-white/50">156</span><span class="mono text-[7px] opacity-25 block">对话轮次</span></div>
+                        </div>
+                    </div>
+                    <div class="glass-panel p-4 rounded-2xl">
+                        <span class="mono text-[10px] opacity-40 uppercase block mb-2">Active_Skills</span>
+                        <div class="flex flex-wrap gap-1.5">
+                            <span class="px-2 py-1 bg-purple-500/10 mono text-[8px] rounded text-purple-300/70">费曼技巧</span>
+                            <span class="px-2 py-1 bg-white/5 mono text-[8px] rounded text-white/40">系统思维</span>
+                            <span class="px-2 py-1 bg-white/5 mono text-[8px] rounded text-white/40">概念映射</span>
+                            <span class="px-2 py-1 bg-cyan-500/10 mono text-[8px] rounded text-cyan-300/70">苏格拉底提问</span>
+                        </div>
+                    </div>
+                </aside>
+
+            </div><!-- /left-zone -->
+
+            <!-- ── 中间：3D 星系 ── -->
+            <section class="flex-1 flex flex-col items-center justify-end pb-6 relative min-w-0">
+                <div class="graph-hint" id="graph-hint">拖拽旋转 · 滚轮缩放 · 右键选择节点</div>
+                <div class="mono text-[8px] text-white/20 mt-1 tracking-wider">FPS <span id="cluster-fps">60</span> &nbsp;│&nbsp; XYZ <span id="cluster-coords">0 / 0 / 0</span></div>
+                <div class="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
+                    <button class="mono text-[9px] hover:text-purple-400 transition-colors uppercase font-medium" onclick="showToast('card','新节点已创建','purple')">+ 新建</button>
+                    <div class="w-px h-3 bg-white/10"></div>
+                    <button class="mono text-[9px] hover:text-cyan-400 transition-colors uppercase font-medium" onclick="openModal('litimport')">导入</button>
+                    <div class="w-px h-3 bg-white/10"></div>
+                    <button class="mono text-[9px] hover:text-white/60 transition-colors uppercase" onclick="openModal('shortcuts')">⌨ 快捷键</button>
+                </div>
+            </section>
+
+            <!-- ═══════════════════ 右区容器 ═══════════════════ -->
+            <div class="right-zone">
+
+                <!-- ── GALAXY 右：Filter + Legend ── -->
+                <aside class="side-slot galaxy-panel w-[340px] flex-col pointer-events-auto" style="justify-content:space-between;">
+                    <span class="mono text-[8px] opacity-25 uppercase tracking-widest">GALAXY_FILTER</span>
+
+                    <div>
+                        <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">FILTER</span>
+                        <div class="space-y-2">
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked class="accent-purple-500"><span class="mono text-[10px] text-purple-400">永久</span><span class="mono text-[8px] opacity-25 ml-auto">156</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked class="accent-cyan-500"><span class="mono text-[10px] text-cyan-400">灵感</span><span class="mono text-[8px] opacity-25 ml-auto">89</span></label>
+                            <label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked class="accent-pink-500"><span class="mono text-[10px] text-pink-400">文献</span><span class="mono text-[8px] opacity-25 ml-auto">133</span></label>
+                        </div>
+                    </div>
+
+                    <div class="hud-line"></div>
+
+                    <div>
+                        <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">SCOPE</span>
+                        <div class="flex items-center justify-between"><span class="mono text-[9px] opacity-40">领域</span><select class="bg-white/5 border border-white/10 rounded px-2 py-1 mono text-[9px] text-white/50 outline-none cursor-pointer"><option>全部</option><option>热力学</option><option>复杂系统</option><option>信息论</option></select></div>
+                        <div class="mt-2 flex gap-3">
+                            <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" class="accent-purple-500"><span class="mono text-[8px] opacity-50">未连接</span></label>
+                            <label class="flex items-center gap-1.5 cursor-pointer"><input type="checkbox" checked class="accent-cyan-500"><span class="mono text-[8px] opacity-50">邻接高亮</span></label>
+                        </div>
+                    </div>
+
+                    <div class="hud-line"></div>
+
+                    <div>
+                        <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">SEARCH</span>
+                        <div class="flex items-center gap-2 bg-white/5 px-3 py-2 rounded-lg border border-white/5 cursor-pointer" onclick="openModal('search')">
+                            <span class="opacity-30 text-[11px] mono">⌘K</span>
+                            <span class="text-[11px] mono opacity-25">搜索节点...</span>
+                        </div>
+                    </div>
+
+                    <div class="hud-line"></div>
+
+                    <div>
+                        <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">LEGEND</span>
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-purple-400"></span><span class="mono text-[9px] opacity-40">PERM — 永久知识</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span><span class="mono text-[9px] opacity-40">FLEE — 灵感</span></div>
+                            <div class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-pink-400"></span><span class="mono text-[9px] opacity-40">LIT — 文献</span></div>
+                        </div>
+                    </div>
+
+                    <div class="hud-line"></div>
+
+                    <div class="flex justify-between"><span class="mono text-[10px] opacity-30">可视区域</span><span class="mono text-[10px] text-white/50">42 节点 · 118 边</span></div>
+                </aside>
+
+                <!-- ── DASHBOARD 右 ── -->
+                <aside class="side-slot visible dashboard-panel w-[400px] flex-col pointer-events-auto" style="justify-content:space-between;">
+
+                    <!-- NAVIGATION · 三列 · 带单选圆点 -->
+                    <span class="mono text-[8px] opacity-25 uppercase tracking-widest">NAVIGATION</span>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div>
+                            <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">VIEW</span>
+                            <div class="space-y-2 text-[10px]">
+                                <div class="flex items-center gap-2 text-white/45 cursor-pointer hover:text-white/80 transition-colors"><span class="text-[7px] text-white/45">○</span>All Nodes</div>
+                                <div class="flex items-center gap-2 text-white/80 cursor-pointer font-medium"><span class="text-[7px] text-white">●</span>Galaxy View</div>
+                                <div class="flex items-center gap-2 text-white/45 cursor-pointer hover:text-white/80 transition-colors"><span class="text-[7px] text-white/45">○</span>Card Grid</div>
+                            </div>
+                        </div>
+                        <div>
+                            <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">DATA</span>
+                            <div class="space-y-2 text-[10px]">
+                                <div class="flex items-center gap-2 text-cyan-400 cursor-pointer font-medium"><span class="text-[7px] text-cyan-400">●</span>Live Updates</div>
+                                <div class="flex items-center gap-2 text-white/45 cursor-pointer hover:text-white/80 transition-colors"><span class="text-[7px] text-white/45">○</span>Snapshot</div>
+                                <div class="flex items-center gap-2 text-white/45 cursor-pointer hover:text-white/80 transition-colors"><span class="text-[7px] text-white/45">○</span>Trend History</div>
+                            </div>
+                        </div>
+                        <div>
+                            <span class="mono text-[7px] opacity-20 uppercase block mb-2.5">SCOPE</span>
+                            <div class="space-y-2 text-[10px]">
+                                <div class="flex items-center gap-2 text-white/80 cursor-pointer font-medium"><span class="text-[7px] text-white">●</span>Domain</div>
+                                <div class="flex items-center gap-2 text-white/45 cursor-pointer hover:text-white/80 transition-colors"><span class="text-[7px] text-white/45">○</span>Full Vault</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="hud-line"></div>
+
+                    <!-- 下方双列 -->
+                    <div style="display:flex; gap:16px; flex:1; min-height:0;">
+
+                        <!-- 左子列 -->
+                        <div style="flex:1; display:flex; flex-direction:column; gap:18px; min-height:0;">
+
+                            <!-- PRESETS -->
+                            <div>
+                                <span class="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">PRESETS</span>
+                                <div class="space-y-2">
+                                    <div class="flex items-center gap-2.5 cursor-pointer hover:text-white transition-colors" onclick="switchMode('forge')">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-purple-400 flex-shrink-0"></span>
+                                        <span class="text-[10px] text-white/65 hover:text-white/90">New Card</span>
+                                        <span class="mono text-[7px] opacity-15 ml-auto">N</span>
+                                    </div>
+                                    <div class="flex items-center gap-2.5 cursor-pointer hover:text-white transition-colors" onclick="openModal('litimport')">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0"></span>
+                                        <span class="text-[10px] text-white/65 hover:text-white/90">Import Literature</span>
+                                        <span class="mono text-[7px] opacity-15 ml-auto">I</span>
+                                    </div>
+                                    <div class="flex items-center gap-2.5 cursor-pointer hover:text-white transition-colors" onclick="switchMode('forge')">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-pink-400 flex-shrink-0"></span>
+                                        <span class="text-[10px] text-white/65 hover:text-white/90">Start Learning</span>
+                                        <span class="mono text-[7px] opacity-15 ml-auto">L</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="hud-line"></div>
+
+                            <!-- KNOWLEDGE · SVG 环形进度条 -->
+                            <div>
+                                <span class="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">KNOWLEDGE</span>
+                                <div class="bg-white/3 rounded-lg p-3 border border-white/5 flex items-center gap-4">
+                                    <!-- SVG 环形进度条 -->
+                                    <div class="flex-shrink-0 relative w-16 h-16">
+                                        <svg width="64" height="64" viewBox="0 0 64 64" class="-rotate-90">
+                                            <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="5"/>
+                                            <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="5" stroke-linecap="round" stroke-dasharray="175.93" stroke-dashoffset="49.26"/>
+                                        </svg>
+                                        <span class="absolute inset-0 flex items-center justify-center serif text-sm font-bold text-white">72%</span>
+                                    </div>
+                                    <div class="flex-1 space-y-1.5">
+                                        <div><div class="flex justify-between mono text-[7px] mb-0.5"><span class="text-purple-300/80">Thermo</span><span class="opacity-25">85</span></div><div class="h-1 bg-white/5 rounded-full overflow-hidden"><div class="bg-purple-500 h-full rounded-full" style="width:85%"></div></div></div>
+                                        <div><div class="flex justify-between mono text-[7px] mb-0.5"><span class="text-cyan-300/80">Complex</span><span class="opacity-25">62</span></div><div class="h-1 bg-white/5 rounded-full overflow-hidden"><div class="bg-cyan-400 h-full rounded-full" style="width:62%"></div></div></div>
+                                        <div><div class="flex justify-between mono text-[7px] mb-0.5"><span class="text-pink-300/80">Info</span><span class="opacity-25">49</span></div><div class="h-1 bg-white/5 rounded-full overflow-hidden"><div class="bg-pink-400 h-full rounded-full" style="width:49%"></div></div></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="hud-line"></div>
+
+                            <!-- AGENT -->
+                            <div>
+                                <span class="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">AGENT</span>
+                                <div class="space-y-2 text-[10px]">
+                                    <div class="flex justify-between"><span class="text-white/55">Oracle · Socrates</span><span class="mono text-[8px] text-green-400 font-bold">ONLINE</span></div>
+                                    <div class="flex justify-between"><span class="text-white/55">Auto-review</span><span class="mono text-[8px] text-cyan-400/80">ON</span></div>
+                                    <div class="flex justify-between"><span class="text-white/55">Deep thinking</span><span class="mono text-[8px] text-cyan-400/80">ON</span></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="w-px bg-white/5 flex-shrink-0"></div>
+
+                        <!-- 右子列 -->
+                        <div style="flex:1; display:flex; flex-direction:column; gap:18px; min-height:0;">
+
+                            <!-- STATUS -->
+                            <div>
+                                <div class="flex justify-between items-center mb-2.5">
+                                    <span class="mono text-[8px] opacity-25 uppercase tracking-widest">STATUS</span>
+                                    <span class="mono text-[7px] text-green-400/70">ALL NOMINAL</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2 mb-2.5">
+                                    <div class="bg-white/3 rounded p-2.5 border border-white/5">
+                                        <span class="mono text-[6px] opacity-20 uppercase block mb-1.5">Growth 7D</span>
+                                        <svg width="100%" height="28" viewBox="0 0 100 28" class="block">
+                                            <polyline points="5,22 20,18 35,20 50,12 65,14 80,6 95,8"
+                                                fill="none" stroke="rgba(168,85,247,0.7)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                                            <polygon points="5,27 5,22 20,18 35,20 50,12 65,14 80,6 95,8 95,27"
+                                                fill="rgba(168,85,247,0.08)"/>
+                                        </svg>
+                                    </div>
+                                    <div class="bg-white/3 rounded p-2.5 border border-white/5">
+                                        <span class="mono text-[6px] opacity-20 uppercase block mb-1.5">Reviews</span>
+                                        <div class="flex items-end gap-px h-7">
+                                            <div class="flex-1 bg-cyan-400/20 rounded-t" style="height:50%"></div><div class="flex-1 bg-cyan-400/20 rounded-t" style="height:35%"></div><div class="flex-1 bg-cyan-400/35 rounded-t" style="height:60%"></div><div class="flex-1 bg-cyan-400/25 rounded-t" style="height:45%"></div><div class="flex-1 bg-cyan-400/50 rounded-t" style="height:75%"></div><div class="flex-1 bg-cyan-400/30 rounded-t" style="height:55%"></div><div class="flex-1 bg-cyan-400/40 rounded-t" style="height:65%"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <div class="flex items-center gap-2 text-[10px]"><span class="w-1 h-1 rounded-full bg-pink-400 flex-shrink-0"></span><span class="text-pink-300/70">3 cards pending review</span><span class="mono text-[7px] opacity-20 ml-auto">LOW</span></div>
+                                    <div class="flex items-center gap-2 text-[10px]"><span class="w-1 h-1 rounded-full bg-cyan-400 flex-shrink-0"></span><span class="text-cyan-300/70">24 orphan nodes</span><span class="mono text-[7px] opacity-20 ml-auto">INFO</span></div>
+                                </div>
+                            </div>
+
+                            <div class="hud-line"></div>
+
+                            <!-- NOTIFICATIONS -->
+                            <div style="flex:1; min-height:0;">
+                                <span class="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">NOTIFICATIONS</span>
+                                <div class="space-y-2">
+                                    <div class="text-[10px]"><span class="opacity-25 mono">09:16</span><span class="text-white/45 ml-2">Link latency stabilized</span></div>
+                                    <div class="text-[10px]"><span class="opacity-25 mono">09:12</span><span class="text-white/45 ml-2">Node sync complete</span></div>
+                                    <div class="text-[10px]"><span class="opacity-25 mono">09:05</span><span class="text-white/45 ml-2">Literature scan finished</span></div>
+                                </div>
+                            </div>
+
+                            <div class="hud-line"></div>
+
+                            <!-- OP LOG -->
+                            <div style="flex:1; min-height:0;">
+                                <span class="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">OP LOG · EVENTS</span>
+                                <div class="space-y-2">
+                                    <div class="text-[10px]"><span class="opacity-25 mono">13:21</span><span class="text-white/45 ml-2">Card handshake confirmed</span></div>
+                                    <div class="text-[10px]"><span class="opacity-25 mono">13:18</span><span class="text-white/45 ml-2">Link optimization: Route-33</span></div>
+                                    <div class="text-[10px]"><span class="opacity-25 mono">13:15</span><span class="text-white/45 ml-2">Core sync complete</span></div>
+                                    <div class="text-[10px]"><span class="opacity-25 mono">13:10</span><span class="text-white/45 ml-2">Threat scan: Clear</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+
+            <!-- ── FORGE 右：Markdown 编辑器（增强版） ── -->
+            <aside id="right-forge" class="side-slot forge-panel flex-1 flex-col pointer-events-auto" style="max-width: 600px; min-width: 420px;">
+                <div class="glass-panel rounded-2xl flex-1 flex flex-col overflow-hidden">
+                    <div class="flex justify-between items-center px-5 py-3 border-b border-white/10">
+                        <div class="flex items-center gap-4">
+                            <span class="mono text-[9px] opacity-40 uppercase">Editing</span>
+                            <span class="text-[11px] text-white/70">耗散结构与社会熵增</span>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <!-- 模式切换 -->
+                            <div class="flex bg-white/5 rounded-lg p-0.5" id="editor-modes">
+                                <button class="editor-mode-tab active" data-mode="live" onclick="switchEditorMode('live')">LIVE</button>
+                                <button class="editor-mode-tab" data-mode="read" onclick="switchEditorMode('read')">READ</button>
+                            </div>
+                            <button class="mono text-[9px] bg-pink-500/20 text-pink-300 px-3 py-1 rounded border border-pink-500/30 hover:bg-pink-500/30 transition-colors" onclick="showEvalModal()">FORGE →</button>
+                        </div>
+                    </div>
+                    <!-- 卡片状态条 -->
+                    <div class="px-5 py-2 border-b border-white/5 flex items-center gap-4">
+                        <div class="flex items-center gap-1.5">
+                            <span class="mono text-[7px] opacity-25 uppercase">Words</span>
+                            <span class="mono text-[9px] text-white/60">847</span>
+                        </div>
+                        <div class="w-px h-3 bg-white/5"></div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="mono text-[7px] opacity-25 uppercase">Links</span>
+                            <span class="mono text-[9px] text-white/60">21</span>
+                        </div>
+                        <div class="w-px h-3 bg-white/5"></div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="mono text-[7px] opacity-25 uppercase">Polish</span>
+                            <span class="mono text-[8px] text-pink-400/70">permanent</span>
+                        </div>
+                        <div class="w-px h-3 bg-white/5"></div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="mono text-[7px] opacity-25 uppercase">Review</span>
+                            <span class="mono text-[9px] text-cyan-400">0.88</span>
+                        </div>
+                    </div>
+                    <div class="flex-1 p-0 overflow-hidden" id="editor-live">
+                        <textarea class="forge-editor" placeholder="# 在此编写你的知识卡片..." id="editor-textarea"># 耗散结构与社会熵增
+
+## 01 定义
+远离平衡态的开放系统，通过与外部环境交换物质和能量，
+在内部产生负熵流，从而维持有序结构。
+
+## 02 举例
+- 城市系统：持续输入食物/能源，输出废料/产品
+- 生命体：新陈代谢维持低熵有序状态
+- [[贝纳德对流]]：液体加热后出现的规则六角形对流
+
+## 03 关联
+- [[热力学第二定律]] — 封闭系统熵增 vs 开放系统负熵
+- [[自组织临界性]] — 复杂系统的涌现行为
+- [[普利高津]] — 理论提出者
+
+## 04 应用
+用耗散结构的视角看社会：官僚体系如果不与外界交换信息，
+就会趋向熵增（僵化）→ 需要开放交流和变革来维持活力。</textarea>
+                    </div>
+                    <!-- READ 模式 - 渲染预览 -->
+                    <div class="flex-1 p-8 overflow-y-auto no-scrollbar hidden" id="editor-read">
+                        <div class="max-w-2xl mx-auto">
+                            <div class="mono text-[8px] text-purple-400 uppercase mb-2">Permanent Card</div>
+                            <h1 class="serif text-2xl font-bold mb-6">耗散结构与社会熵增</h1>
+                            <h2 class="mono text-[10px] text-purple-400/80 uppercase mb-3">01 定义</h2>
+                            <p class="text-[13px] leading-relaxed text-white/70 mb-6">远离平衡态的开放系统，通过与外部环境交换物质和能量，在内部产生负熵流，从而维持有序结构。</p>
+                            <h2 class="mono text-[10px] text-purple-400/80 uppercase mb-3">02 举例</h2>
+                            <ul class="text-[13px] leading-relaxed text-white/70 mb-6 space-y-2 list-disc list-inside">
+                                <li>城市系统：持续输入食物/能源，输出废料/产品</li>
+                                <li>生命体：新陈代谢维持低熵有序状态</li>
+                                <li><span class="text-purple-400 underline cursor-pointer">贝纳德对流</span>：液体加热后出现的规则六角形对流</li>
+                            </ul>
+                            <h2 class="mono text-[10px] text-purple-400/80 uppercase mb-3">03 关联</h2>
+                            <div class="text-[13px] leading-relaxed text-white/70 mb-6 space-y-1">
+                                <div>→ <span class="text-purple-400 underline cursor-pointer">热力学第二定律</span> — 封闭系统熵增 vs 开放系统负熵</div>
+                                <div>→ <span class="text-purple-400 underline cursor-pointer">自组织临界性</span> — 复杂系统的涌现行为</div>
+                            </div>
+                            <div class="flex flex-wrap gap-2 mt-8 pt-6 border-t border-white/5">
+                                <span class="px-2 py-0.5 bg-purple-500/15 text-purple-300 mono text-[9px] rounded">Thermodynamics</span>
+                                <span class="px-2 py-0.5 bg-cyan-500/15 text-cyan-300 mono text-[9px] rounded">Complexity</span>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Forge 审核历史 -->
+                    <div class="px-5 py-3 border-t border-white/5">
+                        <details class="cursor-pointer">
+                            <summary class="mono text-[8px] opacity-30 uppercase tracking-widest hover:opacity-50 transition-opacity">Forge_Review_History (2)</summary>
+                            <div class="mt-2 space-y-2">
+                                <div class="bg-white/5 rounded-lg p-2.5 border border-white/5">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="mono text-[7px] text-cyan-400">2026-05-18</span>
+                                        <span class="mono text-[7px] text-green-400/80">✓ 通过</span>
+                                    </div>
+                                    <div class="flex gap-3 mono text-[7px] opacity-40">
+                                        <span>定义 0.88</span><span>关联 0.79</span><span>实例 0.85</span><span>表达 0.91</span>
+                                    </div>
+                                    <div class="text-[8px] text-white/35 mt-1">实例丰富，建议补充数学判据</div>
+                                </div>
+                                <div class="bg-white/5 rounded-lg p-2.5 border border-white/5">
+                                    <div class="flex justify-between items-center mb-1">
+                                        <span class="mono text-[7px] text-cyan-400">2026-05-15</span>
+                                        <span class="mono text-[7px] text-green-400/80">✓ 通过</span>
+                                    </div>
+                                    <div class="flex gap-3 mono text-[7px] opacity-40">
+                                        <span>定义 0.82</span><span>关联 0.71</span><span>实例 0.80</span><span>表达 0.88</span>
+                                    </div>
+                                    <div class="text-[8px] text-white/35 mt-1">定义清晰，关联可以更丰富</div>
+                                </div>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- ── COGNITION 右：完整学习画像 ── -->
+                <aside class="side-slot cognition-panel flex-1 flex-col pointer-events-auto" style="max-width: 600px;">
+                    <div class="glass-panel p-5 rounded-2xl flex-1 flex flex-col overflow-hidden">
+                        <div class="flex items-center gap-4 mb-4">
+                            <div class="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center flex-shrink-0">
+                                <span class="serif text-base">W</span>
+                            </div>
+                            <div class="flex-1">
+                                <div class="text-sm font-medium">学习者 #041</div>
+                                <div class="mono text-[8px] opacity-30">Joined 2026-03-15 · 42 sessions · 13 天连续</div>
+                            </div>
+                            <button class="mono text-[8px] text-purple-400/50 hover:text-purple-400" onclick="openModal('profile')">FULL PROFILE →</button>
+                        </div>
+                        <div class="grid grid-cols-3 gap-3 mb-4">
+                            <div class="col-span-2 bg-white/5 rounded-xl p-4 border border-white/5">
+                                <span class="mono text-[9px] text-purple-400 uppercase block mb-2">Thinking_Pattern</span>
+                                <p class="text-[10px] text-white/50 leading-relaxed">倾向于通过<span class="text-white/80">类比和跨域关联</span>来理解新概念。在「复杂系统」领域表现出较强的系统性思维，但在「信息论」中容易停留在定义层面，缺少深层推演。</p>
+                            </div>
+                            <div class="bg-white/5 rounded-xl p-4 border border-white/5 space-y-2">
+                                <div><span class="mono text-[8px] text-cyan-400 uppercase block mb-1">Strengths</span><div class="flex flex-wrap gap-1"><span class="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-300/70 mono text-[7px] rounded">跨域关联</span><span class="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-300/70 mono text-[7px] rounded">表达清晰</span><span class="px-1.5 py-0.5 bg-cyan-500/10 text-cyan-300/70 mono text-[7px] rounded">实例构建</span></div></div>
+                                <div><span class="mono text-[8px] text-pink-400 uppercase block mb-1">Growth_Edges</span><div class="flex flex-wrap gap-1"><span class="px-1.5 py-0.5 bg-pink-500/10 text-pink-300/70 mono text-[7px] rounded">数学推导</span><span class="px-1.5 py-0.5 bg-pink-500/10 text-pink-300/70 mono text-[7px] rounded">批判性验证</span></div></div>
+                            </div>
+                        </div>
+
+                        <div class="glass-panel p-3 rounded-lg mb-4 bg-white/5 border border-white/5">
+                            <span class="mono text-[9px] opacity-40 uppercase block mb-2">Time_Distribution</span>
+                            <div class="grid grid-cols-5 gap-2">
+                                <div class="text-center"><span class="mono text-[7px] text-purple-300/80">热力学</span><span class="mono text-[9px] text-white/60 block">34h</span></div>
+                                <div class="text-center"><span class="mono text-[7px] text-cyan-300/80">复杂系统</span><span class="mono text-[9px] text-white/60 block">22h</span></div>
+                                <div class="text-center"><span class="mono text-[7px] text-pink-300/80">信息论</span><span class="mono text-[9px] text-white/60 block">18h</span></div>
+                                <div class="text-center"><span class="mono text-[7px] opacity-50">社会学</span><span class="mono text-[9px] text-white/60 block">12h</span></div>
+                                <div class="text-center"><span class="mono text-[7px] opacity-50">生物学</span><span class="mono text-[9px] text-white/60 block">8h</span></div>
+                            </div>
+                        </div>
+
+                        <div class="flex-1 overflow-hidden flex flex-col">
+                            <span class="mono text-[10px] opacity-40 uppercase block mb-2">Knowledge_Structure</span>
+                            <div class="flex-1 overflow-y-auto no-scrollbar space-y-1 mono text-[10px] bg-white/5 rounded-xl p-4 border border-white/5">
+                                <div class="flex items-center gap-2 text-purple-400 font-medium"><span class="text-[8px]">●</span> 耗散结构 <span class="mono text-[7px] opacity-30 ml-auto">85%</span></div>
+                                <div class="concept-tree-item text-white/55">热力学第二定律 <span class="mono text-[7px] opacity-20 ml-1">✓</span></div>
+                                <div class="concept-tree-item text-white/55">熵</div>
+                                <div class="concept-tree-item text-cyan-400/70">负熵流 <span class="mono text-[7px] text-cyan-400/50 ml-1">← 当前</span></div>
+                                <div class="concept-tree-item text-white/30">信息熵</div>
+                                <div class="flex items-center gap-2 text-purple-400 font-medium mt-3"><span class="text-[8px]">●</span> 复杂系统 <span class="mono text-[7px] opacity-30 ml-auto">72%</span></div>
+                                <div class="concept-tree-item text-white/55">涌现</div>
+                                <div class="concept-tree-item text-cyan-400/70">自组织临界性</div>
+                                <div class="concept-tree-item text-white/30">贝纳德对流</div>
+                                <div class="flex items-center gap-2 text-white/30 font-medium mt-3"><span class="text-[8px] opacity-40">○</span> 信息论 <span class="mono text-[7px] opacity-20 ml-auto">15%</span></div>
+                                <div class="concept-tree-item text-white/20">香农熵</div>
+                                <div class="concept-tree-item text-white/20">信道容量</div>
+                            </div>
+                        </div>
+                        <div class="mt-3 bg-purple-900/10 border border-purple-500/15 p-3 rounded-xl">
+                            <span class="mono text-[8px] text-purple-400 uppercase block mb-1.5">>> Next_Action</span>
+                            <div class="space-y-1">
+                                <div class="text-[10px] mono text-white/60 hover:text-white cursor-pointer transition-colors">巩固「信息熵」数学基础 — 完成信息论分支</div>
+                                <div class="text-[10px] mono text-white/60 hover:text-white cursor-pointer transition-colors">关联「耗散结构」→「社会学」 — 建立跨域连接</div>
+                            </div>
+                        </div>
+                    </div>
+                </aside>
+            </div><!-- /right-zone -->
+
+            <!-- 底栏：下行尖刺 Sparkline -->
+            <div class="bottom-bar">
+                <div class="flex items-stretch gap-6 h-16">
+                    <!-- NEURAL 光波 -->
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <span class="mono text-[8px] opacity-25 uppercase tracking-widest">NEURAL</span>
+                        <div class="flex items-end gap-px">
+                            <div class="wave-bar" style="animation-delay:0.1s"></div><div class="wave-bar" style="animation-delay:0.35s"></div><div class="wave-bar" style="animation-delay:0.2s"></div><div class="wave-bar" style="animation-delay:0.5s"></div><div class="wave-bar" style="animation-delay:0.3s"></div><div class="wave-bar" style="animation-delay:0.45s"></div><div class="wave-bar" style="animation-delay:0.15s"></div><div class="wave-bar" style="animation-delay:0.4s"></div><div class="wave-bar" style="animation-delay:0.25s"></div><div class="wave-bar" style="animation-delay:0.55s"></div><div class="wave-bar" style="animation-delay:0.05s"></div><div class="wave-bar" style="animation-delay:0.6s"></div>
+                        </div>
+                    </div>
+
+                    <!-- 左 sparkline：白色 · 单线下刺 -->
+                    <div class="flex-1 relative min-w-0 flex flex-col">
+                        <svg viewBox="0 0 400 100" preserveAspectRatio="none" class="flex-1 w-full">
+                            <defs>
+                                <linearGradient id="spWhite" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="white" stop-opacity="0.15"/><stop offset="100%" stop-color="white" stop-opacity="0"/></linearGradient>
+                            </defs>
+                            <line x1="0" y1="85" x2="400" y2="85" stroke="rgba(255,255,255,0.12)"/>
+                            <path d="M0,85 L140,85 L180,50 L220,85 L400,85 L400,100 L0,100 Z" fill="url(#spWhite)"/>
+                            <path d="M0,85 L140,85 L180,50 L220,85 L400,85" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.2" style="filter:drop-shadow(0 0 3px rgba(255,255,255,0.4))"/>
+                            <circle cx="140" cy="85" r="1.5" fill="white"/><circle cx="180" cy="50" r="1.5" fill="white"/><circle cx="220" cy="85" r="1.5" fill="white"/>
+                        </svg>
+                        <div class="flex justify-between text-[8px] opacity-25 uppercase tracking-widest px-1 border-t border-white/5 pt-1">
+                            <span><span class="w-1 h-1 rounded-full bg-white/40 inline-block mr-1"></span>T - 24 HR.</span>
+                            <span>-18 HOURS</span>
+                        </div>
+                    </div>
+
+                    <!-- 右 sparkline：紫+青双线交叉 -->
+                    <div class="flex-[2] relative min-w-0 flex flex-col">
+                        <svg viewBox="0 0 600 100" preserveAspectRatio="none" class="flex-1 w-full">
+                            <defs>
+                                <linearGradient id="spPurple" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#a855f7" stop-opacity="0.25"/><stop offset="100%" stop-color="#a855f7" stop-opacity="0"/></linearGradient>
+                                <linearGradient id="spCyan" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#22d3ee" stop-opacity="0.25"/><stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/></linearGradient>
+                            </defs>
+                            <line x1="0" y1="85" x2="600" y2="85" stroke="rgba(255,255,255,0.08)"/>
+                            <!-- 紫色线 -->
+                            <path d="M0,85 L80,85 L110,65 L140,85 L260,85 L290,18 L330,85 L370,72 L420,85 L600,85 L600,100 L0,100 Z" fill="url(#spPurple)" opacity="0.4"/>
+                            <path d="M0,85 L80,85 L110,65 L140,85 L260,85 L290,18 L330,85 L370,72 L420,85 L600,85" fill="none" stroke="#a855f7" stroke-width="1.5" style="filter:drop-shadow(0 0 5px #a855f7)"/>
+                            <!-- 青色线 -->
+                            <path d="M190,85 L240,70 L270,85 L290,55 L310,85 L390,85 L390,85 L600,85 L600,100 L190,100 Z" fill="url(#spCyan)" opacity="0.35"/>
+                            <path d="M190,85 L240,70 L270,85 L290,55 L310,85 L390,85" fill="none" stroke="#22d3ee" stroke-width="1.2" style="filter:drop-shadow(0 0 5px #22d3ee)"/>
+                            <!-- NOW 标记 -->
+                            <circle cx="290" cy="85" r="2.5" fill="#22d3ee" style="filter:drop-shadow(0 0 6px #22d3ee)"/>
+                        </svg>
+                        <div class="flex justify-between text-[8px] uppercase tracking-widest px-1 border-t border-white/5 pt-1">
+                            <span class="opacity-25">-12 HOURS</span>
+                            <span class="opacity-15">|</span>
+                            <span class="text-cyan-400/70 font-bold"><span class="w-1.5 h-1.5 rounded-full bg-cyan-400 inline-block mr-1" style="box-shadow:0 0 4px #22d3ee"></span>09:24:45 NOW</span>
+                            <span class="opacity-15">|</span>
+                            <span class="opacity-25">+12 HOURS</span>
+                            <span class="opacity-15">|</span>
+                            <span class="opacity-25">+24 HOURS</span>
+                        </div>
+                    </div>
+
+                    <!-- 右侧数据 -->
+                    <div class="flex flex-col justify-between flex-shrink-0 text-right py-1">
+                        <div class="flex items-center gap-1 justify-end"><span class="w-1 h-1 rounded-full bg-purple-400"></span><span class="mono text-[7px] text-white/35">NODES 378</span></div>
+                        <div class="flex items-center gap-1 justify-end"><span class="w-1 h-1 rounded-full bg-cyan-400"></span><span class="mono text-[7px] text-white/35">EDGES 1.8k</span></div>
+                        <span class="mono text-[8px] text-cyan-400/80 font-bold">12/24</span>
+                        <span class="mono text-[7px] opacity-15">MAT 1.14</span>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- 模态框覆盖层 -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="modal-overlay" class="modal-overlay hidden" onclick="if(event.target===this)closeModal()">
+
+        <!-- ── Search Modal ── -->
+        <div id="modal-search" class="modal-panel hidden">
+            <div class="modal-header">
+                <span class="mono text-[10px] text-purple-400 uppercase tracking-widest">Search_Nodes</span>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="p-5">
+                <input type="text" class="axiom-input" placeholder="输入关键词搜索全部节点..." id="search-input" autofocus oninput="filterSearchResults(this.value)">
+                <div class="mt-4 space-y-2" id="search-results"></div>
+                <div class="mt-3 mono text-[8px] opacity-25 text-center" id="search-hint">输入关键词开始搜索...</div>
+            </div>
+        </div>
+
+        <!-- ── Settings Modal ── -->
+        <div id="modal-settings" class="modal-panel hidden">
+            <div class="modal-header">
+                <div class="flex gap-4" id="settings-tabs">
+                    <span class="modal-tab active" data-stab="oracle">Oracle</span>
+                    <span class="modal-tab" data-stab="api">API Config</span>
+                    <span class="modal-tab" data-stab="advanced">Advanced</span>
+                </div>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="p-5">
+                <!-- Oracle Panel -->
+                <div id="stab-oracle" class="space-y-3">
+                    <div class="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                        <div class="oracle-avatar bg-purple-500/20 text-purple-400 border border-purple-500/30">S</div>
+                        <div class="flex-1"><div class="text-[11px] text-white/70">Socrates</div><div class="mono text-[8px] opacity-35">苏格拉底式导师 · 追问本质</div></div>
+                        <button class="axiom-btn secondary text-[8px]">EDIT</button>
+                    </div>
+                    <div class="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                        <div class="oracle-avatar bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">F</div>
+                        <div class="flex-1"><div class="text-[11px] text-white/70">Forge</div><div class="mono text-[8px] opacity-35">知识审核 · 质量锻造</div></div>
+                        <button class="axiom-btn secondary text-[8px]">EDIT</button>
+                    </div>
+                    <button class="axiom-btn primary w-full text-center mt-2">+ CREATE NEW ORACLE</button>
+                </div>
+                <!-- API Panel -->
+                <div id="stab-api" class="hidden space-y-3">
+                    <div><span class="mono text-[8px] opacity-35 block mb-1">MODEL</span><select class="axiom-input"><option>GLM-4-Flash</option><option>GLM-4</option><option>GLM-4-Plus</option></select></div>
+                    <div><span class="mono text-[8px] opacity-35 block mb-1">API KEY</span><input type="password" class="axiom-input" value="••••••••••••••••"></div>
+                    <div class="flex gap-2"><button class="axiom-btn primary flex-1 text-center">SAVE</button><button class="axiom-btn secondary flex-1 text-center" onclick="showToast('api','连接测试成功 ✓','cyan')">TEST</button></div>
+                </div>
+                <!-- Advanced Panel -->
+                <div id="stab-advanced" class="hidden space-y-3">
+                    <div class="flex justify-between items-center"><span class="text-[11px] text-white/60">Memory System</span><div class="toggle-track on" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div></div>
+                    <div class="flex justify-between items-center"><span class="text-[11px] text-white/60">Context Compression</span><div class="toggle-track on" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div></div>
+                    <div class="flex justify-between items-center"><span class="text-[11px] text-white/60">Skills System</span><div class="toggle-track on" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div></div>
+                    <div class="flex justify-between items-center"><span class="text-[11px] text-white/60">Deep Thinking</span><div class="toggle-track" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div></div>
+                    <div class="flex justify-between items-center"><span class="text-[11px] text-white/60">Streaming Output</span><div class="toggle-track on" onclick="this.classList.toggle('on')"><div class="toggle-knob"></div></div></div>
+                    <div><span class="mono text-[8px] opacity-35 block mb-1">MAX RETRIES</span><input type="number" class="axiom-input w-20" value="5"></div>
+                    <button class="axiom-btn primary w-full text-center mt-2">SAVE SETTINGS</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Profile Modal ── -->
+        <div id="modal-profile" class="modal-panel hidden">
+            <div class="modal-header">
+                <span class="mono text-[10px] text-purple-400 uppercase tracking-widest">User_Profile</span>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="p-6">
+                <div class="flex items-center gap-5 mb-6">
+                    <div class="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500/40 to-cyan-500/40 border border-white/10 flex items-center justify-center">
+                        <span class="serif text-2xl">W</span>
+                    </div>
+                    <div>
+                        <div class="text-lg font-medium">学习者 #041</div>
+                        <div class="mono text-[9px] opacity-35 mt-1">Last update: 2026-05-19 14:22</div>
+                    </div>
+                </div>
+                <div class="hud-line mb-5"></div>
+                <!-- Vault Stats -->
+                <div class="grid grid-cols-4 gap-3 mb-5">
+                    <div class="text-center bg-white/5 rounded-lg p-3"><div class="serif text-xl text-purple-400">378</div><div class="mono text-[7px] opacity-30 mt-1">TOTAL</div></div>
+                    <div class="text-center bg-white/5 rounded-lg p-3"><div class="serif text-xl text-cyan-400">1816</div><div class="mono text-[7px] opacity-30 mt-1">LINKS</div></div>
+                    <div class="text-center bg-white/5 rounded-lg p-3"><div class="serif text-xl text-pink-400">24</div><div class="mono text-[7px] opacity-30 mt-1">ORPHANS</div></div>
+                    <div class="text-center bg-white/5 rounded-lg p-3"><div class="serif text-xl text-white/60">3</div><div class="mono text-[7px] opacity-30 mt-1">PENDING</div></div>
+                </div>
+                <!-- Skill list -->
+                <span class="mono text-[8px] opacity-30 uppercase block mb-2">Active Skills (12)</span>
+                <div class="flex flex-wrap gap-1.5 mb-5">
+                    <span class="px-2 py-0.5 bg-purple-500/10 mono text-[8px] rounded text-purple-300/70">费曼技巧</span>
+                    <span class="px-2 py-0.5 bg-white/5 mono text-[8px] rounded text-white/40">系统思维</span>
+                    <span class="px-2 py-0.5 bg-white/5 mono text-[8px] rounded text-white/40">概念映射</span>
+                    <span class="px-2 py-0.5 bg-white/5 mono text-[8px] rounded text-white/40">文献精读</span>
+                    <span class="px-2 py-0.5 bg-cyan-500/10 mono text-[8px] rounded text-cyan-300/70">苏格拉底提问</span>
+                    <span class="px-2 py-0.5 bg-white/5 mono text-[8px] rounded text-white/40">类比构建</span>
+                </div>
+                <div class="flex gap-2">
+                    <button class="axiom-btn danger text-[8px]" onclick="showToast('profile','Profile 数据已清除','pink')">CLEAR ALL DATA</button>
+                    <button class="axiom-btn secondary text-[8px] ml-auto" onclick="closeModal()">CLOSE</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Oracle Switcher Modal ── -->
+        <div id="modal-oracle" class="modal-panel hidden">
+            <div class="modal-header">
+                <span class="mono text-[10px] text-purple-400 uppercase tracking-widest">Switch_Oracle</span>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="p-5 grid grid-cols-2 gap-3">
+                <div class="p-4 bg-white/5 rounded-xl border border-purple-500/20 cursor-pointer hover:bg-white/8 transition-colors" onclick="switchOracle('Oracle');closeModal()">
+                    <div class="oracle-avatar bg-purple-500/20 text-purple-400 border border-purple-500/30 mb-2">O</div>
+                    <div class="text-[11px] text-white/70 font-medium">Oracle</div>
+                    <div class="mono text-[8px] opacity-35 mt-1">苏格拉底导师 · 深度追问与概念引导</div>
+                </div>
+                <div class="p-4 bg-white/5 rounded-xl border border-white/5 cursor-pointer hover:bg-white/8 transition-colors" onclick="switchOracle('Forge');closeModal()">
+                    <div class="oracle-avatar bg-pink-500/20 text-pink-400 border border-pink-500/30 mb-2">F</div>
+                    <div class="text-[11px] text-white/70 font-medium">Forge</div>
+                    <div class="mono text-[8px] opacity-35 mt-1">知识审核官 · 卡片质量评估与锻造</div>
+                </div>
+                <div class="p-4 bg-white/5 rounded-xl border border-white/5 cursor-pointer hover:bg-white/8 transition-colors" onclick="switchOracle('Guide');closeModal()">
+                    <div class="oracle-avatar bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 mb-2">G</div>
+                    <div class="text-[11px] text-white/70 font-medium">Guide</div>
+                    <div class="mono text-[8px] opacity-35 mt-1">学习向导 · 路径规划与资源推荐</div>
+                </div>
+                <div class="p-4 bg-white/5 rounded-xl border border-white/5 cursor-pointer hover:bg-white/8 transition-colors" onclick="switchOracle('Assess');closeModal()">
+                    <div class="oracle-avatar bg-purple-500/20 text-purple-400 border border-purple-500/30 mb-2">A</div>
+                    <div class="text-[11px] text-white/70 font-medium">Assess</div>
+                    <div class="mono text-[8px] opacity-35 mt-1">评估专家 · 理解度检测与弱点诊断</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Shortcuts Modal ── -->
+        <div id="modal-shortcuts" class="modal-panel hidden">
+            <div class="modal-header">
+                <span class="mono text-[10px] text-purple-400 uppercase tracking-widest">Shortcuts</span>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="p-5 space-y-2">
+                <div class="flex justify-between items-center py-2 border-b border-white/5"><span class="mono text-[9px] text-white/50">⌘K</span><span class="text-[10px] text-white/35">搜索节点</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-white/5"><span class="mono text-[9px] text-white/50">⌘N</span><span class="text-[10px] text-white/35">新建节点</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-white/5"><span class="mono text-[9px] text-white/50">⌘,</span><span class="text-[10px] text-white/35">打开设置</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-white/5"><span class="mono text-[9px] text-white/50">⌘1/2/3/4</span><span class="text-[10px] text-white/35">Dashboard/Forge/Galaxy/Cognition</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-white/5"><span class="mono text-[9px] text-white/50">/</span><span class="text-[10px] text-white/35">命令面板</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-white/5"><span class="mono text-[9px] text-white/50">Esc</span><span class="text-[10px] text-white/35">关闭面板</span></div>
+                <div class="flex justify-between items-center py-2 border-b border-white/5"><span class="mono text-[9px] text-white/50">Ctrl+Z</span><span class="text-[10px] text-white/35">回滚检查点</span></div>
+                <div class="text-center mono text-[8px] opacity-20 mt-3">nvim-style keybindings</div>
+            </div>
+        </div>
+
+        <!-- ── Eval Modal (Forge 审核结果) ── -->
+        <div id="modal-eval" class="modal-panel hidden">
+            <div class="modal-header">
+                <span class="mono text-[10px] text-pink-400 uppercase tracking-widest">Forge_Evaluation</span>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="p-5 space-y-3">
+                <div class="flex items-center gap-2 text-[12px]">
+                    <span class="text-2xl">✓</span>
+                    <span class="text-white/80 font-medium">审核通过 — 卡片已升级为 Permanent</span>
+                </div>
+                <div class="hud-line"></div>
+                <div class="space-y-2">
+                    <div class="flex justify-between text-[10px]"><span class="opacity-40">定义清晰度</span><span class="text-purple-400">0.88</span></div>
+                    <div class="flex justify-between text-[10px]"><span class="opacity-40">关联丰富度</span><span class="text-cyan-400">0.79</span></div>
+                    <div class="flex justify-between text-[10px]"><span class="opacity-40">实例充分性</span><span class="text-pink-400">0.85</span></div>
+                    <div class="flex justify-between text-[10px]"><span class="opacity-40">表达清晰度</span><span class="text-purple-400">0.91</span></div>
+                </div>
+                <div class="bg-cyan-900/10 border border-cyan-500/15 p-3 rounded-xl">
+                    <span class="mono text-[7px] text-cyan-400 block mb-1">AI_FEEDBACK</span>
+                    <div class="text-[10px] text-white/50">卡片质量优秀。实例丰富（城市系统+生命体+贝纳德对流），与热力学第二定律、自组织临界性建立了清晰的跨域关联。建议下一步补充数学判据。</div>
+                </div>
+                <button class="axiom-btn primary w-full text-center" onclick="closeModal()">CLOSE</button>
+            </div>
+        </div>
+
+        <!-- ── LitImport Modal ── -->
+        <div id="modal-litimport" class="modal-panel hidden">
+            <div class="modal-header">
+                <span class="mono text-[10px] text-cyan-400 uppercase tracking-widest">Import_Literature</span>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="p-5 space-y-4">
+                <!-- 文件拖拽区 -->
+                <div class="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer hover:border-purple-500/30 transition-colors" style="border-color: rgba(255,255,255,0.08);" onclick="showToast('litimport','文件选择器已打开','cyan')">
+                    <div class="text-3xl opacity-30 mb-2">📂</div>
+                    <div class="mono text-[9px] text-white/30">拖拽文件到此处或点击选择</div>
+                    <div class="mono text-[7px] opacity-20 mt-1">支持 PDF · TXT · MD · PPTX (max 50MB)</div>
+                </div>
+                <div class="hud-line"></div>
+                <!-- AI 搜索文献 -->
+                <div>
+                    <span class="mono text-[8px] opacity-30 uppercase block mb-2">AI_Literature_Search</span>
+                    <div class="flex gap-2">
+                        <input type="text" class="axiom-input flex-1 text-[10px]" placeholder="描述你想要的文献主题..." onkeydown="if(event.key==='Enter'){this.nextElementSibling.click()}">
+                        <button class="axiom-btn primary text-[8px]" onclick="showToast('litimport','AI 正在搜索文献...','cyan')">SEARCH</button>
+                    </div>
+                </div>
+                <!-- 搜索结果预览 -->
+                <div class="space-y-2">
+                    <div class="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                        <input type="checkbox" class="accent-purple-500">
+                        <div class="flex-1"><div class="text-[10px] text-white/70">普利高津论文精选集</div><div class="mono text-[7px] opacity-25 mt-0.5">arxiv.org · PDF · 2.3MB</div></div>
+                        <button class="mono text-[7px] text-cyan-400/60 hover:text-cyan-400">ADD</button>
+                    </div>
+                    <div class="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/5">
+                        <input type="checkbox" class="accent-purple-500" checked>
+                        <div class="flex-1"><div class="text-[10px] text-white/70">复杂系统与自组织理论</div><div class="mono text-[7px] opacity-25 mt-0.5">Springer · PDF · 5.1MB</div></div>
+                        <button class="mono text-[7px] text-pink-400/60 hover:text-pink-400">RM</button>
+                    </div>
+                </div>
+                <!-- 执行按钮 -->
+                <button class="axiom-btn primary w-full text-center" onclick="showToast('litimport','已导入 2 篇文献','cyan');closeModal()">[ EXECUTE IMPORT (2) ]</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- 文本选择浮动菜单 -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div id="selection-menu" class="context-menu hidden" style="position: fixed; z-index: 85;">
+        <div class="ctx-item" data-action="copy" onclick="showToast('card','已复制到剪贴板','cyan');this.parentElement.classList.add('hidden')">⧉ 复制</div>
+        <div class="ctx-item" data-action="card" onclick="showToast('card','已从选中文本创建灵感节点','purple');this.parentElement.classList.add('hidden')">⊞ 创建卡片</div>
+        <div class="ctx-item" data-action="ask" onclick="switchMode('forge');document.getElementById('chat-input').value='帮我理解这段内容';document.getElementById('chat-input').focus();this.parentElement.classList.add('hidden')">⍰ 追问</div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import gsap from 'https://cdn.skypack.dev/gsap';
+
+        // ═══════════════════════════════════════════════
+        // 3D 核心逻辑 (CLUSTER 风格)
+        // ═══════════════════════════════════════════════
+        let scene, camera, renderer, controls, composer, nodesGroup, linksGroup, bloomPass, starField;
+        const allNodes = [];
+        const allLinks = [];
+        const adjMap = new Map();       // node → Set<node> 邻接表
+        const clusterNodes = new Map(); // clusterId → [nodes]
+        const clusterBaseColors = [0xa855f7, 0x22d3ee, 0xf472b6, 0x818cf8, 0x34d399, 0xfbbf24];
+        const clusterSuns = new Map();  // clusterId → sun node
+        const clusterColors = [0xa855f7, 0x22d3ee, 0xf472b6, 0xa855f7, 0x22d3ee, 0xf472b6];
+
+        function initThree() {
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 10000);
+            camera.position.set(700, 500, 700);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.toneMapping = THREE.ReinhardToneMapping;
+            document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+            // 后期处理：辉光 Bloom
+            composer = new EffectComposer(renderer);
+            composer.addPass(new RenderPass(scene, camera));
+            const bloomPass = new UnrealBloomPass(
+                new THREE.Vector2(window.innerWidth, window.innerHeight),
+                1.5, 0.4, 0.85
+            );
+            bloomPass.threshold = 0.05;
+            bloomPass.strength = 1.5;
+            bloomPass.radius = 0.8;
+            composer.addPass(bloomPass);
+
+            // 场景雾效 - 增加宇宙深度感
+            scene.fog = new THREE.FogExp2(0x020208, 0.00015);
+
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.rotateSpeed = 0.5;
+            controls.autoRotate = true;
+            controls.autoRotateSpeed = 0.2;
+
+            // ═══ 深空星场 ═══
+            // 远景星尘（密集小点）
+            const farStarGeo = new THREE.BufferGeometry();
+            const farStarPos = new Float32Array(30000);
+            const farStarColors = new Float32Array(30000);
+            for (let i = 0; i < 10000; i++) {
+                const r = 2000 + Math.random() * 3000;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(Math.random() * 2 - 1);
+                farStarPos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+                farStarPos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+                farStarPos[i*3+2] = r * Math.cos(phi);
+                // 星星颜色微变：偏蓝/偏黄/白
+                const tint = Math.random();
+                if (tint < 0.3) { farStarColors[i*3]=0.6; farStarColors[i*3+1]=0.7; farStarColors[i*3+2]=1; }
+                else if (tint < 0.5) { farStarColors[i*3]=1; farStarColors[i*3+1]=0.9; farStarColors[i*3+2]=0.6; }
+                else { farStarColors[i*3]=0.7; farStarColors[i*3+1]=0.7; farStarColors[i*3+2]=0.7; }
+            }
+            farStarGeo.setAttribute('position', new THREE.BufferAttribute(farStarPos, 3));
+            farStarGeo.setAttribute('color', new THREE.BufferAttribute(farStarColors, 3));
+            const farStarMat = new THREE.PointsMaterial({ size: 1.2, vertexColors: true, transparent: true, opacity: 0.6 });
+            starField = new THREE.Points(farStarGeo, farStarMat);
+            scene.add(starField);
+
+            // 近景亮星（稀疏大点）
+            const brightStarGeo = new THREE.BufferGeometry();
+            const brightStarPos = new Float32Array(600);
+            for (let i = 0; i < 200; i++) {
+                const r = 800 + Math.random() * 2000;
+                const theta = Math.random() * Math.PI * 2;
+                const phi = Math.acos(Math.random() * 2 - 1);
+                brightStarPos[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+                brightStarPos[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+                brightStarPos[i*3+2] = r * Math.cos(phi);
+            }
+            brightStarGeo.setAttribute('position', new THREE.BufferAttribute(brightStarPos, 3));
+            const brightStarMat = new THREE.PointsMaterial({ size: 3, color: 0xffffff, transparent: true, opacity: 0.8 });
+            scene.add(new THREE.Points(brightStarGeo, brightStarMat));
+
+            // ═══ 银河带 - 倾斜的粒子环 ═══
+            const milkyWayGeo = new THREE.BufferGeometry();
+            const milkyCount = 6000;
+            const milkyPos = new Float32Array(milkyCount * 3);
+            const milkyColors = new Float32Array(milkyCount * 3);
+            for (let i = 0; i < milkyCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const r = 200 + Math.random() * 600;
+                const spread = (Math.random() - 0.5) * 40; // 带宽收窄
+                milkyPos[i*3]   = Math.cos(angle) * r + (Math.random()-0.5)*30;
+                milkyPos[i*3+1] = spread;
+                milkyPos[i*3+2] = Math.sin(angle) * r + (Math.random()-0.5)*30;
+                // 淡蓝紫色调
+                const t = Math.random();
+                milkyColors[i*3]   = 0.3 + t * 0.3;
+                milkyColors[i*3+1] = 0.3 + t * 0.2;
+                milkyColors[i*3+2] = 0.5 + t * 0.5;
+            }
+            milkyWayGeo.setAttribute('position', new THREE.BufferAttribute(milkyPos, 3));
+            milkyWayGeo.setAttribute('color', new THREE.BufferAttribute(milkyColors, 3));
+            const milkyMat = new THREE.PointsMaterial({ size: 1.5, vertexColors: true, transparent: true, opacity: 0.25 });
+            const milkyWay = new THREE.Points(milkyWayGeo, milkyMat);
+            milkyWay.rotation.x = -0.4; // 倾斜（反向）
+            milkyWay.rotation.z = -0.2;
+            scene.add(milkyWay);
+
+            // ═══ 轨道彗尾 - 倾斜轨道上的粒子尾迹 ═══
+            const cometColors = [0xa855f7, 0x22d3ee, 0xf472b6, 0x818cf8, 0x34d399];
+            for (let c = 0; c < 5; c++) {
+                const cometGeo = new THREE.BufferGeometry();
+                const tailLen = 120;
+                const cometPos = new Float32Array(tailLen * 3);
+                const cometAlphas = new Float32Array(tailLen);
+                const orbitR = 160 + c * 50;
+                const orbitTilt = 0.2 + c * 0.25;
+                const orbitTwist = c * 1.2;
+                const startAngle = Math.random() * Math.PI * 2;
+                for (let i = 0; i < tailLen; i++) {
+                    const a = startAngle + (i / tailLen) * Math.PI * 0.8; // 尾迹跨越约144度
+                    const rr = orbitR + (Math.random() - 0.5) * 8;
+                    let x = Math.cos(a) * rr;
+                    let y = (Math.random() - 0.5) * 4;
+                    let z = Math.sin(a) * rr;
+                    // 倾斜旋转
+                    const cosT = Math.cos(orbitTilt), sinT = Math.sin(orbitTilt);
+                    const ny = y * cosT - z * sinT;
+                    const nz = y * sinT + z * cosT;
+                    const cosW = Math.cos(orbitTwist), sinW = Math.sin(orbitTwist);
+                    const nx = x * cosW - ny * sinW;
+                    const nny = x * sinW + ny * cosW;
+                    cometPos[i*3]   = nx;
+                    cometPos[i*3+1] = nny;
+                    cometPos[i*3+2] = nz;
+                    cometAlphas[i] = 1 - i / tailLen; // 头亮尾暗
+                }
+                cometGeo.setAttribute('position', new THREE.BufferAttribute(cometPos, 3));
+                const cometMat = new THREE.PointsMaterial({
+                    size: 2.5, color: 0xffffff, transparent: true, opacity: 0.4,
+                    blending: THREE.AdditiveBlending
+                });
+                const comet = new THREE.Points(cometGeo, cometMat);
+                comet.userData = { orbitR, orbitTilt, orbitTwist, startAngle, speed: 0.0003 + c * 0.0001, isComet: true, tailLen };
+                scene.add(comet);
+            }
+
+            nodesGroup = new THREE.Group();
+            linksGroup = new THREE.Group();
+            scene.add(nodesGroup);
+            scene.add(linksGroup);
+
+            createCore();
+            createClusters();
+
+            // 右键菜单
+            renderer.domElement.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                const menu = document.getElementById('context-menu');
+                menu.classList.remove('hidden');
+                menu.style.left = e.clientX + 'px';
+                menu.style.top = e.clientY + 'px';
+            });
+            document.addEventListener('click', () => {
+                document.getElementById('context-menu').classList.add('hidden');
+            });
+
+            // 点击聚焦
+            const raycaster = new THREE.Raycaster();
+            const mouse = new THREE.Vector2();
+            renderer.domElement.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                raycaster.setFromCamera(mouse, camera);
+                const hits = raycaster.intersectObjects(nodesGroup.children, true);
+                if (hits.length > 0) {
+                    let obj = hits[0].object;
+                    while (obj.parent && obj.parent !== nodesGroup && obj.parent !== scene) obj = obj.parent;
+                    if (obj.userData && obj.userData.name) focusNode(obj);
+                }
+            });
+        }
+
+        function createCore() {
+            const core = createGlowNode(0xffffff, 8, 'CENTRAL_INTELLIGENCE');
+            nodesGroup.add(core);
+        }
+
+        function createClusters() {
+            const clusterCount = 6;
+            const nodesPerCluster = 80;
+            const mixColors = [0xa855f7, 0x22d3ee, 0xf472b6]; // 点进去后三色混搭
+
+            for (let i = 0; i < clusterCount; i++) {
+                const clusterColor = clusterBaseColors[i];
+                // 球面分布 - Y轴大幅拉开，增强立体感
+                const phi = Math.acos(1 - 2 * (i + 0.5) / clusterCount);
+                const theta = Math.PI * (1 + Math.sqrt(5)) * i; // 黄金角
+                const dist = 250 + Math.random() * 100;
+                const cx = dist * Math.sin(phi) * Math.cos(theta);
+                const cy = dist * Math.cos(phi) * 1.2;
+                const cz = dist * Math.sin(phi) * Math.sin(theta);
+
+                // 星团主星
+                const sun = createGlowNode(clusterColor, 6, `CLUSTER_0${i + 1}`);
+                sun.position.set(cx, cy, cz);
+                sun.userData.isSun = true;
+                sun.userData.clusterId = i;
+                sun.userData.clusterColor = clusterColor;
+                nodesGroup.add(sun);
+                clusterSuns.set(i, sun);
+
+                // 中心→主星连线
+                const core = allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE');
+                createCurve(core, sun, clusterColor, 0.1);
+
+                // 子星节点：椭球分布 + 近大远小增强纵深
+                const subNodes = [];
+                for (let j = 0; j < nodesPerCluster; j++) {
+                    const radius = 40 + Math.pow(Math.random(), 0.7) * 160;
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos((Math.random() * 2) - 1);
+                    const x = cx + radius * Math.sin(phi) * Math.cos(theta);
+                    const y = cy + radius * Math.sin(phi) * Math.sin(theta) * 0.7;
+                    const z = cz + radius * Math.cos(phi);
+
+                    const distToSun = Math.sqrt((x-cx)**2 + (y-cy)**2 + (z-cz)**2);
+                    const sizeFactor = Math.max(0.4, 1 - distToSun / 250);
+                    const trueColor = mixColors[Math.floor(Math.random() * 3)]; // 内部真实颜色
+                    const node = createGlowNode(clusterColor, sizeFactor * 2.5 + 0.5, `NODE_${i}_${j}`);
+                    node.position.set(x, y, z);
+                    node.userData.clusterId = i;
+                    node.userData.clusterColor = clusterColor;
+                    node.userData.trueColor = trueColor;
+                    nodesGroup.add(node);
+                    subNodes.push(node);
+
+                    // 子星→主星连线（全局用星团色，内部用真实色）
+                    createCurve(sun, node, clusterColor, 0.06, false, trueColor);
+                }
+                clusterNodes.set(i, subNodes);
+
+                // 子星之间的密集互联
+                for (let j = 0; j < subNodes.length; j++) {
+                    const connCount = 2 + Math.floor(Math.random() * 3);
+                    for (let k = 0; k < connCount; k++) {
+                        const targetIdx = Math.floor(Math.random() * subNodes.length);
+                        if (targetIdx !== j) {
+                            const linkColor = mixColors[Math.floor(Math.random() * 3)];
+                            createCurve(subNodes[j], subNodes[targetIdx], clusterColor, 0, true, linkColor);
+                        }
+                    }
+                }
+            }
+        }
+
+        function createGlowNode(color, size, name) {
+            const group = new THREE.Group();
+
+            // 核心球体
+            const coreMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(size * 0.4, 16, 16),
+                new THREE.MeshBasicMaterial({ color: color })
+            );
+            group.add(coreMesh);
+
+            // 外围辉光 Sprite (多级渐变纹理)
+            const spriteMat = new THREE.SpriteMaterial({
+                map: createGlowTexture(color),
+                transparent: true,
+                blending: THREE.AdditiveBlending
+            });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(size * 10, size * 10, 1);
+            group.add(sprite);
+
+            group.userData.baseGlowSize = size;
+
+            // 装饰环 (仅限大节点)
+            if (size > 4) {
+                const ring = new THREE.Mesh(
+                    new THREE.RingGeometry(size * 1.5, size * 1.6, 64),
+                    new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide, transparent: true, opacity: 0.2 })
+                );
+                ring.rotation.x = Math.PI / 2;
+                group.add(ring);
+            }
+
+            group.userData = { name, color, baseSize: size };
+            allNodes.push(group);
+            return group;
+        }
+
+        function createGlowTexture(color) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const c = new THREE.Color(color);
+            const r = Math.round(c.r * 255), g = Math.round(c.g * 255), b = Math.round(c.b * 255);
+            const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            grad.addColorStop(0, 'rgba(255,255,255,1)');
+            grad.addColorStop(0.2, `rgba(${r},${g},${b},0.5)`);
+            grad.addColorStop(0.5, `rgba(${r},${g},${b},0.1)`);
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 64, 64);
+            const tex = new THREE.CanvasTexture(canvas);
+            return tex;
+        }
+
+        function createCurve(sourceNode, targetNode, color, opacity, isInternal, trueColor) {
+            const start = sourceNode.position;
+            const end = targetNode.position;
+            const mid = new THREE.Vector3().lerpVectors(start, end, 0.5);
+            mid.add(new THREE.Vector3(
+                (Math.random() - 0.5) * 100,
+                (Math.random() - 0.5) * 100,
+                (Math.random() - 0.5) * 100
+            ));
+            const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+            const geo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(50));
+            const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: opacity || 0.2
+            }));
+            line.userData = { source: sourceNode, target: targetNode, baseOpacity: opacity || 0.2, isInternal: !!isInternal, clusterColor: color, trueColor: trueColor || color };
+            if (isInternal) line.visible = false;
+            linksGroup.add(line);
+            allLinks.push(line);
+
+            // 维护邻接表
+            if (!adjMap.has(sourceNode)) adjMap.set(sourceNode, new Set());
+            if (!adjMap.has(targetNode)) adjMap.set(targetNode, new Set());
+            adjMap.get(sourceNode).add(targetNode);
+            adjMap.get(targetNode).add(sourceNode);
+        }
+
+        function focusNode(node) {
+            // 显示返回按钮
+            document.getElementById('reset-view-btn').classList.add('visible');
+
+            // GSAP 平滑转场
+            gsap.to(controls.target, {
+                x: node.position.x, y: node.position.y, z: node.position.z,
+                duration: 1.2, ease: 'expo.out'
+            });
+            gsap.to(camera.position, {
+                x: node.position.x + 200,
+                y: node.position.y + 100,
+                z: node.position.z + 200,
+                duration: 1.5, ease: 'expo.out'
+            });
+
+            if (node.userData.isSun) {
+                // ═══ 点击主星：显示整个星团的密集互联 + 切换到真实颜色 ═══
+                const cid = node.userData.clusterId;
+                const mySubNodes = clusterNodes.get(cid) || [];
+                const myClusterSet = new Set([node, ...mySubNodes]);
+
+                allNodes.forEach(n => {
+                    const inCluster = myClusterSet.has(n);
+                    gsap.to(n.scale, {
+                        x: inCluster ? 1 : 0.15,
+                        y: inCluster ? 1 : 0.15,
+                        z: inCluster ? 1 : 0.15,
+                        duration: 0.5
+                    });
+                    // 点进去后切换到真实颜色
+                    if (inCluster && n.userData.trueColor) {
+                        setNodeColor(n, n.userData.trueColor);
+                    }
+                });
+                allLinks.forEach(l => {
+                    const s = l.userData.source;
+                    const t = l.userData.target;
+                    const inCluster = myClusterSet.has(s) && myClusterSet.has(t);
+                    if (l.userData.isInternal) {
+                        l.visible = inCluster;
+                        if (inCluster) {
+                            l.material.color.set(l.userData.trueColor);
+                            gsap.to(l.material, { opacity: 0.3, duration: 0.5 });
+                        }
+                    } else {
+                        if (inCluster && l.userData.trueColor !== l.userData.clusterColor) {
+                            l.material.color.set(l.userData.trueColor);
+                        }
+                        gsap.to(l.material, { opacity: inCluster ? 0.5 : 0.01, duration: 0.5 });
+                    }
+                });
+            } else {
+                // ═══ 点击子节点：只亮它和直接邻居 + 切换到真实颜色 ═══
+                const neighbors = adjMap.get(node) || new Set();
+                const visibleSet = new Set([node, ...neighbors]);
+
+                allNodes.forEach(n => {
+                    const isVisible = visibleSet.has(n);
+                    gsap.to(n.scale, {
+                        x: isVisible ? (n === node ? 1.5 : 1) : 0.1,
+                        y: isVisible ? (n === node ? 1.5 : 1) : 0.1,
+                        z: isVisible ? (n === node ? 1.5 : 1) : 0.1,
+                        duration: 0.5
+                    });
+                    if (isVisible && n.userData.trueColor) {
+                        setNodeColor(n, n.userData.trueColor);
+                    }
+                });
+                allLinks.forEach(l => {
+                    const s = l.userData.source;
+                    const t = l.userData.target;
+                    const isRelated = (s === node || t === node);
+                    if (l.userData.isInternal) {
+                        l.visible = isRelated;
+                        if (isRelated) {
+                            l.material.color.set(l.userData.trueColor);
+                            gsap.to(l.material, { opacity: 0.6, duration: 0.5 });
+                        }
+                    } else {
+                        if (isRelated && l.userData.trueColor !== l.userData.clusterColor) {
+                            l.material.color.set(l.userData.trueColor);
+                        }
+                        gsap.to(l.material, { opacity: isRelated ? 0.8 : 0.01, duration: 0.5 });
+                    }
+                });
+            }
+        }
+
+        window.resetCamera = () => {
+            document.getElementById('reset-view-btn').classList.remove('visible');
+            gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.2 });
+            gsap.to(camera.position, { x: 700, y: 500, z: 700, duration: 1.5 });
+            allNodes.forEach(n => {
+                gsap.to(n.scale, { x: 1, y: 1, z: 1, duration: 0.5 });
+                // 恢复星团统一色
+                if (n.userData.clusterColor) {
+                    setNodeColor(n, n.userData.clusterColor);
+                }
+            });
+            allLinks.forEach(l => {
+                if (l.userData.isInternal) {
+                    l.visible = false;
+                } else {
+                    l.material.color.set(l.userData.clusterColor);
+                    gsap.to(l.material, { opacity: l.userData.baseOpacity, duration: 0.5 });
+                }
+            });
+        };
+
+        // 切换节点颜色（球体+精灵）
+        function setNodeColor(node, color) {
+            node.children.forEach(child => {
+                if (child.isMesh) child.material.color.set(color);
+                if (child.isSprite) {
+                    child.material.map = createGlowTexture(color);
+                    child.material.needsUpdate = true;
+                }
+            });
+        }
+
+        let frames = 0, lastTime = performance.now();
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            composer.render();
+            const floatY = 0;
+            nodesGroup.position.y = floatY;
+            linksGroup.position.y = floatY;
+
+            // 彗尾轨道动画
+            scene.children.forEach(child => {
+                if (child.userData && child.userData.isComet) {
+                    const d = child.userData;
+                    d.startAngle += d.speed * cometSpeedMultiplier;
+                    const posArr = child.geometry.attributes.position.array;
+                    for (let i = 0; i < d.tailLen; i++) {
+                        const a = d.startAngle + (i / d.tailLen) * Math.PI * 0.8;
+                        const rr = d.orbitR + (Math.random() - 0.5) * 4;
+                        let x = Math.cos(a) * rr;
+                        let y = (Math.random() - 0.5) * 3;
+                        let z = Math.sin(a) * rr;
+                        const cosT = Math.cos(d.orbitTilt), sinT = Math.sin(d.orbitTilt);
+                        const ny = y * cosT - z * sinT;
+                        const nz = y * sinT + z * cosT;
+                        const cosW = Math.cos(d.orbitTwist), sinW = Math.sin(d.orbitTwist);
+                        posArr[i*3]   = x * cosW - ny * sinW;
+                        posArr[i*3+1] = x * sinW + ny * cosW;
+                        posArr[i*3+2] = nz;
+                    }
+                    child.geometry.attributes.position.needsUpdate = true;
+                }
+            });
+
+            // FPS 监控
+            frames++;
+            const now = performance.now();
+            if (now > lastTime + 1000) {
+                const fps = Math.round((frames * 1000) / (now - lastTime));
+                const fpsEl = document.getElementById('cluster-fps');
+                if (fpsEl) fpsEl.textContent = fps;
+                const fpsDisplay = document.getElementById('fps-display');
+                if (fpsDisplay) fpsDisplay.textContent = fps;
+                frames = 0;
+                lastTime = now;
+            }
+            // 坐标 HUD
+            const coordsEl = document.getElementById('cluster-coords');
+            if (coordsEl) coordsEl.textContent = `${camera.position.x.toFixed(1)} / ${camera.position.y.toFixed(1)} / ${camera.position.z.toFixed(1)}`;
+        }
+
+        // ═══════════════════════════════════════════════
+        // 模式切换
+        // ═══════════════════════════════════════════════
+        function switchMode(mode) {
+            document.querySelectorAll('#mode-nav .mode-btn').forEach(btn => {
+                btn.classList.remove('active');
+                if (btn.dataset.mode === mode) btn.classList.add('active');
+            });
+            // Hide all panels
+            document.querySelectorAll('.side-slot').forEach(s => s.classList.remove('visible'));
+            // Show target panels + re-trigger animation
+            const panels = document.querySelectorAll('.' + mode + '-panel');
+            panels.forEach(s => {
+                s.classList.add('visible');
+                // Force animation replay
+                s.style.animation = 'none';
+                s.offsetHeight;
+                s.style.animation = '';
+            });
+            // Re-trigger child fade animations
+            panels.forEach(s => {
+                Array.from(s.children).forEach((child, i) => {
+                    child.style.animation = 'none';
+                    child.offsetHeight;
+                    child.style.animation = '';
+                    child.style.animationDelay = (0.05 + i * 0.05) + 's';
+                });
+            });
+            // 3D 脉冲
+            const section = document.querySelector('.main-grid > section');
+            if (section) {
+                section.style.animation = 'none';
+                section.offsetHeight;
+                section.style.animation = 'graphPulse 0.6s ease';
+            }
+            // Show/hide graph hint (only for galaxy mode)
+            const hint = document.getElementById('graph-hint');
+            if (hint) hint.style.display = mode === 'galaxy' ? 'block' : 'none';
+        }
+
+        // ═══════════════════════════════════════════════
+        // 模态框系统
+        // ═══════════════════════════════════════════════
+        let currentModal = null;
+
+        function openModal(name) {
+            document.getElementById('modal-overlay').classList.remove('hidden');
+            document.querySelectorAll('.modal-panel').forEach(p => p.classList.add('hidden'));
+            const panel = document.getElementById('modal-' + name);
+            if (panel) {
+                panel.classList.remove('hidden');
+                currentModal = name;
+                // Focus search input if search modal
+                if (name === 'search') {
+                    setTimeout(() => document.getElementById('search-input')?.focus(), 100);
+                }
+            }
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').classList.add('hidden');
+            document.querySelectorAll('.modal-panel').forEach(p => p.classList.add('hidden'));
+            // Clear search
+            const si = document.getElementById('search-input');
+            if (si) { si.value = ''; document.getElementById('search-results').innerHTML = ''; document.getElementById('search-hint').classList.remove('hidden'); }
+            currentModal = null;
+        }
+
+        // ═══════════════════════════════════════════════
+        // 搜索过滤 (Mock)
+        // ═══════════════════════════════════════════════
+        const MOCK_NODES = [
+            { title:'耗散结构与社会熵增', type:'PERM', color:'purple', snippet:'远离平衡态的开放系统...通过耗散结构理论...', score:0.94 },
+            { title:'自组织系统模拟', type:'FLEE', color:'cyan', snippet:'耗散判据的数值验证与系统建模...', score:0.87 },
+            { title:'自组织系统.pdf', type:'LIT', color:'pink', snippet:'普利高津关于耗散结构的原始论文...', score:0.72 },
+            { title:'热力学第二定律', type:'PERM', color:'purple', snippet:'封闭系统熵增原理及其数学表述...', score:0.91 },
+            { title:'信息熵基础', type:'PERM', color:'purple', snippet:'香农信息论中的熵概念及其应用...', score:0.85 },
+            { title:'贝纳德对流实验', type:'FLEE', color:'cyan', snippet:'液体受热后出现的规则六角形对流图案...', score:0.78 },
+            { title:'复杂系统导论.pdf', type:'LIT', color:'pink', snippet:'涌现、自组织与适应性的综合教材...', score:0.68 },
+            { title:'官僚体系的耗散机制', type:'PERM', color:'purple', snippet:'用耗散结构视角分析组织僵化问题...', score:0.83 },
+        ];
+
+        function filterSearchResults(query) {
+            const container = document.getElementById('search-results');
+            const hint = document.getElementById('search-hint');
+            if (!query.trim()) {
+                container.innerHTML = '';
+                hint.classList.remove('hidden');
+                return;
+            }
+            hint.classList.add('hidden');
+            const q = query.toLowerCase();
+            const results = MOCK_NODES.filter(n =>
+                n.title.toLowerCase().includes(q) || n.snippet.toLowerCase().includes(q) || n.type.toLowerCase().includes(q)
+            );
+            container.innerHTML = results.map(n => `
+                <div class="flex items-center gap-3 p-3 bg-white/5 rounded-lg border border-white/5 cursor-pointer hover:bg-white/8 transition-colors" onclick="showToast('search','打开节点: ${n.title}','cyan');closeModal()">
+                    <span class="w-2 h-2 rounded-full bg-${n.color}-500 flex-shrink-0"></span>
+                    <div class="flex-1"><div class="text-[11px] text-white/70">${highlightMatch(n.title, q)}</div><div class="mono text-[8px] opacity-30 mt-0.5">${n.type} · ${highlightMatch(n.snippet, q)}</div></div>
+                    <span class="mono text-[8px] opacity-25">${n.score}</span>
+                </div>
+            `).join('');
+        }
+
+        function highlightMatch(text, query) {
+            const idx = text.toLowerCase().indexOf(query);
+            if (idx < 0) return text;
+            return text.slice(0, idx) + '<em class="search-highlight not-italic">' + text.slice(idx, idx+query.length) + '</em>' + text.slice(idx+query.length);
+        }
+
+        // Settings tabs
+        document.getElementById('settings-tabs')?.addEventListener('click', (e) => {
+            if (e.target.classList.contains('modal-tab')) {
+                document.querySelectorAll('#settings-tabs .modal-tab').forEach(t => t.classList.remove('active'));
+                e.target.classList.add('active');
+                const stab = e.target.dataset.stab;
+                ['oracle','api','advanced'].forEach(s => {
+                    document.getElementById('stab-'+s).classList.toggle('hidden', s !== stab);
+                });
+            }
+        });
+
+        // ═══════════════════════════════════════════════
+        // Toast 通知系统
+        // ═══════════════════════════════════════════════
+        function showToast(type, msg, color) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            const icons = { purple: '⬤', cyan: '⬤', pink: '⬤', green: '⬤' };
+            const labels = { agent: 'AGENT', session: 'SESSION', card: 'CARD', search: 'SEARCH',
+                             forge: 'FORGE', steer: 'STEER', chat: 'CHAT', api: 'API',
+                             profile: 'PROFILE', fav: 'FAVORITE', delete: 'DELETED' };
+            toast.innerHTML = `
+                <span class="toast-icon" style="color:var(--axiom-${color||'cyan'})">${icons[color]||'●'}</span>
+                <div class="toast-body">
+                    <div class="toast-type">${labels[type]||type.toUpperCase()}</div>
+                    <div class="toast-msg">${msg}</div>
+                </div>
+                <span class="toast-close" onclick="this.parentElement.remove()">✕</span>
+            `;
+            container.appendChild(toast);
+
+            // Max 3 toasts
+            const toasts = container.querySelectorAll('.toast');
+            if (toasts.length > 3) toasts[0].remove();
+
+            // Auto dismiss
+            setTimeout(() => {
+                toast.classList.add('removing');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // ═══════════════════════════════════════════════
+        // 通知铃铛
+        // ═══════════════════════════════════════════════
+        function toggleNotifDropdown(e) {
+            e.stopPropagation();
+            document.getElementById('notif-dropdown').classList.toggle('hidden');
+        }
+        function clearNotifications(e) {
+            e.stopPropagation();
+            document.getElementById('notif-count').textContent = '0';
+            document.getElementById('notif-count').style.display = 'none';
+            document.getElementById('notif-dropdown').classList.add('hidden');
+        }
+        document.addEventListener('click', () => {
+            document.getElementById('notif-dropdown').classList.add('hidden');
+        });
+
+        // ═══════════════════════════════════════════════
+        // 右键菜单项
+        // ═══════════════════════════════════════════════
+        document.getElementById('context-menu')?.addEventListener('click', (e) => {
+            const action = e.target.closest('.ctx-item')?.dataset.action;
+            if (!action) return;
+            const msgs = {
+                focus: ['graph','聚焦节点，缩放中...','purple'],
+                detail: ['card','节点详情已打开','cyan'],
+                edit: ['card','切换到 Forge 编辑模式','pink'],
+                link: ['graph','关联模式已激活 · 选择目标节点','purple'],
+                favorite: ['fav','已收藏','purple'],
+                hide: ['delete','节点已隐藏','pink'],
+            };
+            const [type, msg, color] = msgs[action] || ['card', action, 'cyan'];
+            showToast(type, msg, color);
+            document.getElementById('context-menu').classList.add('hidden');
+        });
+
+        // ═══════════════════════════════════════════════
+        // 文本选择浮动菜单
+        // ═══════════════════════════════════════════════
+        document.addEventListener('mouseup', (e) => {
+            const sel = window.getSelection();
+            const menu = document.getElementById('selection-menu');
+            if (sel && sel.toString().trim().length > 0 && e.target.closest('.forge-editor')) {
+                menu.classList.remove('hidden');
+                menu.style.left = (e.clientX + 10) + 'px';
+                menu.style.top = (e.clientY - 40) + 'px';
+            } else if (!e.target.closest('#selection-menu')) {
+                setTimeout(() => { if (!document.querySelector('#selection-menu:hover')) menu.classList.add('hidden'); }, 200);
+            }
+        });
+
+        // ═══════════════════════════════════════════════
+        // 聊天交互
+        // ═══════════════════════════════════════════════
+        function handleChatKey(e) {
+            const input = e.target;
+            const palette = document.getElementById('command-palette');
+
+            // If command palette is visible, handle navigation
+            if (!palette.classList.contains('hidden')) {
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const items = palette.querySelectorAll('.cmd-item');
+                    const selected = palette.querySelector('.cmd-item.selected');
+                    const idx = Array.from(items).indexOf(selected);
+                    items.forEach(i => i.classList.remove('selected'));
+                    const next = e.key === 'ArrowDown' ? Math.min(idx + 1, items.length - 1) : Math.max(idx - 1, 0);
+                    items[next].classList.add('selected');
+                    return;
+                }
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const cmd = palette.querySelector('.cmd-item.selected')?.dataset.cmd;
+                    if (cmd) executeCommand(cmd);
+                    palette.classList.add('hidden');
+                    input.value = '';
+                    return;
+                }
+                if (e.key === 'Escape') {
+                    palette.classList.add('hidden');
+                    return;
+                }
+            }
+
+            // Send on Enter (without Shift)
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendChatMsg();
+            }
+        }
+
+        function handleChatInput(e) {
+            const val = e.target.value;
+            const palette = document.getElementById('command-palette');
+            if (val.startsWith('/')) {
+                palette.classList.remove('hidden');
+                // Filter items based on input
+                const query = val.slice(1).toLowerCase();
+                palette.querySelectorAll('.cmd-item').forEach(item => {
+                    const cmd = item.dataset.cmd;
+                    item.style.display = (!query || cmd.includes(query)) ? 'flex' : 'none';
+                });
+                // Select first visible
+                const visible = palette.querySelector('.cmd-item[style*="flex"], .cmd-item:not([style])');
+                palette.querySelectorAll('.cmd-item').forEach(i => i.classList.remove('selected'));
+                if (visible) visible.classList.add('selected');
+            } else {
+                palette.classList.add('hidden');
+            }
+        }
+
+        function executeCommand(cmd) {
+            switch(cmd) {
+                case '/clear': showToast('session','对话已清空','cyan'); break;
+                case '/new': showToast('session','新会话已创建','cyan'); break;
+                case '/rollback': showToast('session','已回滚到上一个检查点','purple'); break;
+                case '/assess': showToast('agent','学习评估已启动','purple'); break;
+                case '/learn': startLearningDemo(); break;
+                case '/help': openModal('shortcuts'); break;
+            }
+        }
+
+        function sendChatMsg() {
+            const input = document.getElementById('chat-input');
+            const msg = input.value.trim();
+            if (!msg) return;
+            showToast('chat','消息已发送','purple');
+            // Hide welcome if visible
+            const welcome = document.getElementById('forge-welcome');
+            if (welcome && !welcome.classList.contains('hidden')) {
+                welcome.classList.add('hidden');
+            }
+            input.value = '';
+            document.getElementById('command-palette').classList.add('hidden');
+        }
+
+        function sendQuickAction(text) {
+            document.getElementById('chat-input').value = text;
+            sendChatMsg();
+        }
+
+        function startLearningDemo() {
+            const bar = document.getElementById('learning-phase');
+            bar.classList.remove('hidden');
+            document.getElementById('phase-name').textContent = 'ASSESS';
+            document.getElementById('phase-concept').textContent = '耗散结构理论';
+            // Update phase steps
+            const steps = bar.querySelectorAll('.phase-step');
+            steps.forEach((s,i) => {
+                s.classList.remove('done','active');
+                if (i < 2) s.classList.add('done');
+                if (i === 2) s.classList.add('active');
+            });
+            // Hide welcome
+            document.getElementById('forge-welcome')?.classList.add('hidden');
+            showToast('agent','🎓 学习模式已启动 · Phase: ASSESS','purple');
+        }
+
+        // ═══════════════════════════════════════════════
+        // 编辑器模式切换
+        // ═══════════════════════════════════════════════
+        function switchEditorMode(mode) {
+            document.querySelectorAll('#editor-modes .editor-mode-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector(`#editor-modes [data-mode="${mode}"]`).classList.add('active');
+            ['live','read'].forEach(m => {
+                document.getElementById('editor-'+m).classList.toggle('hidden', m !== mode);
+            });
+        }
+
+        // ═══════════════════════════════════════════════
+
+        // ═══════════════════════════════════════════════
+        // 图谱物理控制
+        // ═══════════════════════════════════════════════
+        function updatePhysics() {
+            const charge = document.getElementById('charge-slider').value;
+            const dist = document.getElementById('dist-slider').value;
+            document.getElementById('charge-val').textContent = charge;
+            document.getElementById('dist-val').textContent = dist;
+            // In a real implementation, this would update the force graph simulation
+        }
+
+        function resetPhysics() {
+            document.getElementById('charge-slider').value = -80;
+            document.getElementById('dist-slider').value = 45;
+            document.getElementById('charge-val').textContent = '-80';
+            document.getElementById('dist-val').textContent = '45';
+            showToast('graph','物理参数已重置','cyan');
+        }
+
+        function toggleRotate() {
+            const track = document.getElementById('rotate-toggle');
+            track.classList.toggle('on');
+            controls.autoRotate = track.classList.contains('on');
+        }
+
+        // ═══════════════════════════════════════════════
+        // 3D 视觉控制
+        // ═══════════════════════════════════════════════
+        let glowSizeMultiplier = 10;
+        let cometSpeedMultiplier = 1.0;
+
+        function updateVisual() {
+            // Bloom 强度
+            const bloomVal = document.getElementById('bloom-slider').value / 10;
+            document.getElementById('bloom-val').textContent = bloomVal.toFixed(1);
+            if (bloomPass) bloomPass.strength = bloomVal;
+
+            // 光晕大小
+            glowSizeMultiplier = parseInt(document.getElementById('glow-slider').value);
+            document.getElementById('glow-val').textContent = glowSizeMultiplier;
+            allNodes.forEach(n => {
+                n.children.forEach(child => {
+                    if (child.isSprite) {
+                        const baseSize = n.userData.baseGlowSize || 6;
+                        child.scale.set(baseSize * glowSizeMultiplier / 10, baseSize * glowSizeMultiplier / 10, 1);
+                    }
+                });
+            });
+
+            // 彗星速度
+            cometSpeedMultiplier = document.getElementById('comet-slider').value / 10;
+            document.getElementById('comet-val').textContent = cometSpeedMultiplier.toFixed(1);
+        }
+
+        function toggleMilkyWay() {
+            const track = document.getElementById('milky-toggle');
+            track.classList.toggle('on');
+            const show = track.classList.contains('on');
+            scene.children.forEach(child => {
+                if (child.isPoints && child !== starField && !child.userData.isComet) {
+                    child.visible = show;
+                }
+            });
+        }
+
+        // ═══ 网格切换 ═══
+        let gridHelper = null;
+        function toggleGrid() {
+            const track = document.getElementById('grid-toggle');
+            track.classList.toggle('on');
+            const show = track.classList.contains('on');
+            if (show && !gridHelper) {
+                gridHelper = new THREE.GridHelper(2000, 40, 0x222244, 0x111133);
+                gridHelper.material.transparent = true;
+                gridHelper.material.opacity = 0.3;
+                scene.add(gridHelper);
+            }
+            if (gridHelper) gridHelper.visible = show;
+        }
+
+        // ═══ 平铺/立体布局切换 ═══
+        let isFlatLayout = false;
+        const originalPositions = new Map();
+        function toggleFlatLayout() {
+            const track = document.getElementById('flat-toggle');
+            track.classList.toggle('on');
+            isFlatLayout = track.classList.contains('on');
+
+            if (isFlatLayout) {
+                // 保存原始位置，将星团均匀平铺到同一高度
+                const flatDist = 400; // 平铺时星团间距
+                nodesGroup.children.forEach(node => {
+                    if (!originalPositions.has(node)) {
+                        originalPositions.set(node, node.position.clone());
+                    }
+                    if (node.userData.isSun) {
+                        const idx = node.userData.clusterId;
+                        const count = 6;
+                        const angle = (idx / count) * Math.PI * 2 - Math.PI / 2;
+                        node.position.set(
+                            Math.cos(angle) * flatDist,
+                            0,
+                            Math.sin(angle) * flatDist
+                        );
+                    } else if (node.userData.clusterId !== undefined) {
+                        const sun = clusterSuns.get(node.userData.clusterId);
+                        if (sun) {
+                            const orig = originalPositions.get(node);
+                            const origSun = originalPositions.get(sun);
+                            if (orig && origSun) {
+                                const relX = orig.x - origSun.x;
+                                const relY = orig.y - origSun.y;
+                                const relZ = orig.z - origSun.z;
+                                node.position.set(
+                                    sun.position.x + relX,
+                                    sun.position.y + relY,
+                                    sun.position.z + relZ
+                                );
+                            }
+                        }
+                    }
+                });
+            } else {
+                // 恢复原始位置
+                nodesGroup.children.forEach(node => {
+                    const orig = originalPositions.get(node);
+                    if (orig) node.position.copy(orig);
+                });
+                originalPositions.clear();
+            }
+
+            // 连线需要重新生成
+            rebuildLinks();
+            // 回到全局视角
+            window.resetCamera();
+        }
+
+        function rebuildLinks() {
+            // 清除旧连线
+            while (linksGroup.children.length > 0) {
+                const child = linksGroup.children[0];
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+                linksGroup.remove(child);
+            }
+            allLinks.length = 0;
+            adjMap.clear();
+            // 重新生成连线
+            const core = allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE');
+            clusterSuns.forEach((sun, idx) => {
+                createCurve(core, sun, clusterBaseColors[idx], 0.1);
+                const subs = clusterNodes.get(idx);
+                if (subs) {
+                    subs.forEach(sub => {
+                        createCurve(sun, sub, clusterBaseColors[idx], 0.06, false, sub.userData.trueColor);
+                    });
+                    // 子星互联
+                    for (let j = 0; j < subs.length; j++) {
+                        const connCount = 2 + Math.floor(Math.random() * 3);
+                        for (let k = 0; k < connCount; k++) {
+                            const targetIdx = Math.floor(Math.random() * subs.length);
+                            if (targetIdx !== j) {
+                                createCurve(subs[j], subs[targetIdx], clusterBaseColors[idx], 0.03, true, subs[j].userData.trueColor);
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // ═══════════════════════════════════════════════
+        // 节点过滤器
+        // ═══════════════════════════════════════════════
+        document.querySelectorAll('.node-filter-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                this.classList.toggle('opacity-50');
+                this.classList.toggle('bg-white/5');
+                this.classList.toggle('bg-purple-500/10');
+                this.classList.toggle('text-purple-300');
+                this.classList.toggle('border-purple-500/30');
+                this.classList.toggle('border-white/10');
+                const type = this.dataset.type;
+                showToast('graph',`${type==='perm'?'永久':type==='flee'?'灵感':'文献'} 节点 ${this.classList.contains('opacity-50')?'已隐藏':'已显示'}`,'purple');
+            });
+        });
+
+        // ═══════════════════════════════════════════════
+        // Oracle 切换
+        // ═══════════════════════════════════════════════
+
+        function switchOracle(name) {
+            document.getElementById('oracle-select').value = name;
+            showToast('agent',`Oracle 已切换为 ${name}`,'purple');
+        }
+
+        // ═══════════════════════════════════════════════
+        // Eval Modal
+        // ═══════════════════════════════════════════════
+        function showEvalModal() {
+            // 50% chance pass/fail for demo
+            const pass = Math.random() > 0.3;
+            const modal = document.getElementById('modal-eval');
+            const icon = modal.querySelector('.text-2xl');
+            const msg = modal.querySelector('.text-white\\/80');
+            if (pass) {
+                icon.textContent = '✓';
+                icon.style.color = '#22d3ee';
+                msg.textContent = '审核通过 — 卡片已升级为 Permanent';
+                modal.querySelector('.bg-cyan-900\\/10').style.display = 'block';
+            } else {
+                icon.textContent = '✗';
+                icon.style.color = '#f472b6';
+                msg.textContent = '审核未通过 — 请补充实例和关联后重试';
+                modal.querySelector('.bg-cyan-900\\/10').style.display = 'none';
+            }
+            openModal('eval');
+        }
+
+        // ═══════════════════════════════════════════════
+        // 键盘快捷键
+        // ═══════════════════════════════════════════════
+        document.addEventListener('keydown', (e) => {
+            // Don't capture when typing in inputs
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
+                if (e.key === 'Escape') {
+                    document.getElementById('command-palette')?.classList.add('hidden');
+                    e.target.blur();
+                }
+                return;
+            }
+            if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                e.preventDefault();
+                openModal('search');
+            } else if ((e.metaKey || e.ctrlKey) && e.key === ',') {
+                e.preventDefault();
+                openModal('settings');
+            } else if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+                e.preventDefault();
+                showToast('card','新节点已创建','purple');
+            } else if ((e.metaKey || e.ctrlKey) && e.key === '1') {
+                e.preventDefault(); switchMode('dashboard');
+            } else if ((e.metaKey || e.ctrlKey) && e.key === '2') {
+                e.preventDefault(); switchMode('forge');
+            } else if ((e.metaKey || e.ctrlKey) && e.key === '3') {
+                e.preventDefault(); switchMode('galaxy');
+            } else if ((e.metaKey || e.ctrlKey) && e.key === '4') {
+                e.preventDefault(); switchMode('cognition');
+            } else if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
+
+        // ═══════════════════════════════════════════════
+        // 暴露函数到 window (module scope 需要)
+        // ═══════════════════════════════════════════════
+        window.switchMode = switchMode;
+        window.openModal = openModal;
+        window.closeModal = closeModal;
+        window.filterSearchResults = filterSearchResults;
+        window.showToast = showToast;
+        window.toggleNotifDropdown = toggleNotifDropdown;
+        window.clearNotifications = clearNotifications;
+        window.handleChatKey = handleChatKey;
+        window.handleChatInput = handleChatInput;
+        window.sendChatMsg = sendChatMsg;
+        window.sendQuickAction = sendQuickAction;
+        window.startLearningDemo = startLearningDemo;
+        window.switchEditorMode = switchEditorMode;
+        window.updatePhysics = updatePhysics;
+        window.resetPhysics = resetPhysics;
+        window.toggleRotate = toggleRotate;
+        window.updateVisual = updateVisual;
+        window.toggleMilkyWay = toggleMilkyWay;
+        window.toggleGrid = toggleGrid;
+        window.toggleFlatLayout = toggleFlatLayout;
+        window.switchOracle = switchOracle;
+        window.showEvalModal = showEvalModal;
+        window.resetCamera = window.resetCamera; // already set above
+
+        // ═══════════════════════════════════════════════
+        // 初始化
+        // ═══════════════════════════════════════════════
+        window.onload = () => {
+            initThree();
+            animate();
+            switchMode('dashboard');
+            setInterval(() => {
+                document.getElementById('clock').innerText = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+            }, 1000);
+            // Welcome toast
+            setTimeout(() => showToast('session','欢迎回来 · 13 天连续学习','purple'), 800);
+            // Graph hint fade out
+            setTimeout(() => {
+                const hint = document.getElementById('graph-hint');
+                if (hint) { hint.style.opacity = '0'; setTimeout(() => hint.remove(), 800); }
+            }, 8000);
+            // Progress bar animation
+            setTimeout(() => {
+                const bar = document.getElementById('progress-bar');
+                if (bar) bar.style.width = '64%';
+            }, 500);
+            // Periodic demo activity (to DASHBOARD's recent activity)
+            setInterval(() => {
+                if (Math.random() > 0.6) {
+                    const stream = document.getElementById('dash-activity');
+                    if (stream) {
+                        const acts = [
+                            '<span class="text-purple-400/60">14:22</span> Oracle 扫描文献 · 提取 3 个概念',
+                            '<span class="text-cyan-400/60">13:41</span> Forge 审核通过 · Perm +1',
+                            '<span class="text-pink-400/60">11:08</span> 新关联发现',
+                            '<span class="text-purple-400/60">09:15</span> 学习会话完成',
+                        ];
+                        const item = document.createElement('div');
+                        item.className = 'text-[9px] mono text-white/40';
+                        item.innerHTML = acts[Math.floor(Math.random()*acts.length)];
+                        stream.appendChild(item);
+                        if (stream.children.length > 8) stream.children[0].remove();
+                    }
+                }
+            }, 5000);
+        };
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            composer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

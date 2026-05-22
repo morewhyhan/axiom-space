@@ -1,54 +1,31 @@
-import { handleError } from './error'
-import { Hono } from 'hono'
-import usersRoute from './routes/users'
-import tasksRoute from './routes/tasks'
-import { auth } from '@/lib/auth'
+import { Hono } from 'hono';
+import { handleError } from './error';
+import agentRoutes from './routes/agent';
+import learningRoutes from './routes/learning';
+import sessionRoutes from './routes/session';
+import vaultRoutes from './routes/vault';
 
 const app = new Hono().basePath('/api')
 
+// Global error handler
 app.onError(handleError)
-
-// CORS middleware for auth routes
-app.use('/auth/*', async (c, next) => {
-  // Handle OPTIONS preflight
-  if (c.req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, PATCH, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-        'Access-Control-Allow-Credentials': 'true',
-      },
-    })
-  }
-  await next()
-})
-
-// BetterAuth handler - handle all auth routes
-app.all('/auth/*', async (c) => {
-  const response = await auth.handler(c.req.raw)
-  // Add CORS headers to response
-  if (response instanceof Response) {
-    const newHeaders = new Headers(response.headers)
-    newHeaders.set('Access-Control-Allow-Origin', '*')
-    newHeaders.set('Access-Control-Allow-Credentials', 'true')
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: newHeaders,
-    })
-  }
-  return response as any
-})
 
 // Health check
 app.get('/health', (c) => {
-  return c.json({ status: 'ok', timestamp: new Date().toISOString() })
+  return c.json({ status: 'ok', timestamp: Date.now() })
 })
 
-const routes = app.route('/', usersRoute).route('/', tasksRoute)
+// Mount route groups
+app.route('/agent', agentRoutes)
+app.route('/learning', learningRoutes)
+app.route('/sessions', sessionRoutes)
+app.route('/vault', vaultRoutes)
 
+// Better Auth handler (keep existing)
+app.all('/auth/*', async (c) => {
+  const { auth } = await import('@/lib/auth')
+  return auth.handler(c.req.raw)
+})
+
+export type AppType = typeof app
 export default app
-
-export type AppType = typeof routes
