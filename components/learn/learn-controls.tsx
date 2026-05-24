@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useLearningPaths } from '@/hooks/use-learning'
 import { useAppStore } from '@/stores/mode-store'
 
@@ -12,23 +13,27 @@ export default function LearnControls({ onGenerate }: { onGenerate?: (topic: str
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
   const { data, loading } = useLearningPaths()
+  const queryClient = useQueryClient()
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
 
   const [selectedPath, setSelectedPath] = useState<string | null>(data?.activePath ?? null)
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!topic.trim()) return
     setGenerating(true)
-    onGenerate?.(topic)
-    // TODO: 接入真实 API — currently simulates delay with setTimeout
-    console.log('[LearnControls] handleGenerate: simulating AI planning for', topic)
-    setTimeout(() => {
-      setGenerating(false)
-      console.log('TODO: connect to real API')
+    try {
+      // 使学习路径缓存失效，强制从后端重新生成
+      await queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+      // 切换到显示第一条路径
       const w = window as any
-      if (w.__toggleLearningPath && !w.__isLearningPathVisible?.()) {
+      if (w.__toggleLearningPath && typeof w.__isLearningPathVisible === 'function' && !w.__isLearningPathVisible()) {
         w.__toggleLearningPath()
       }
-    }, 1500)
+    } catch (e) {
+      console.error('Failed to generate learning path:', e)
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const handleFileSelect = (file: File) => {

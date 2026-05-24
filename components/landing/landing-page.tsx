@@ -102,6 +102,7 @@ function CreateVault({ onCreated }: { onCreated: (id: string) => void }) {
     setError('')
     setCreating(true)
     try {
+      // TODO: add vault.create to ApiClient interface for full type safety
       const res = await (client as any).api.vaults.$post({ json: { name: name.trim() } })
       const data = await res.json()
       if (data.success && data.vault?.id) {

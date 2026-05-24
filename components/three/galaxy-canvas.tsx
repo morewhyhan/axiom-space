@@ -44,9 +44,10 @@ interface GalaxyCanvasProps {
   nodes?: GalaxyNode[]
   edges?: GalaxyEdge[]
   clusters?: GalaxyCluster[]
+  learningPathSteps?: { id: string; index: number; name: string }[]
 }
 
-const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function GalaxyCanvas({ nodes = [], edges = [], clusters = [], vaultId = null }: GalaxyCanvasProps, ref) {
+const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function GalaxyCanvas({ nodes = [], edges = [], clusters = [], vaultId = null, learningPathSteps = [] }: GalaxyCanvasProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Three.js object refs so cleanup can access them without stale closures
@@ -103,8 +104,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
   }));
 
   // Store data props in a ref so useEffect can access them
-  const dataRef = useRef({ nodes, edges, clusters });
-  dataRef.current = { nodes, edges, clusters };
+  const dataRef = useRef({ nodes, edges, clusters, learningPathSteps });
+  dataRef.current = { nodes, edges, clusters, learningPathSteps };
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -564,9 +565,28 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
 
     // --- Learning Path ---
-    // TODO: not currently in use — will be wired to learning path data in future
-    function buildDemoLearningPath(): void {
+    function buildDemoLearningPath(stepsFromProps?: { id: string; index: number; name: string }[]): void {
       const steps: { node: THREE.Group; stepIndex: number }[] = [];
+
+      // Try to map real card IDs to scene nodes
+      if (stepsFromProps && stepsFromProps.length > 0) {
+        for (const s of stepsFromProps) {
+          let found: THREE.Group | undefined;
+          for (const [, nodes] of clusterNodes) {
+            found = nodes.find(n => n.userData.id === s.id);
+            if (found) break;
+          }
+          if (found) steps.push({ node: found, stepIndex: s.index });
+        }
+        if (steps.length >= 2) {
+          learningPath.steps = steps;
+          return;
+        }
+        // Fall through to hardcoded fallback if not enough real nodes found
+        steps.length = 0;
+      }
+
+      // Fallback: hardcoded cluster indices
       const c0 = clusterNodes.get(0) || [];
       const c1 = clusterNodes.get(1) || [];
       const c2 = clusterNodes.get(2) || [];
@@ -581,7 +601,39 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       learningPath.steps = steps;
     }
 
-    // TODO: not currently in use — will be wired to learning path data in future
+    function clearLearningPath(): void {
+      while (learningPath.group.children.length > 0) {
+        const child = learningPath.group.children[0];
+        if ((child as THREE.Mesh).geometry) {
+          (child as THREE.Mesh).geometry.dispose();
+          const mat = (child as THREE.Mesh).material;
+          if (mat) {
+            if (Array.isArray(mat)) {
+              mat.forEach(m => m.dispose());
+            } else {
+              mat.dispose();
+            }
+          }
+        }
+        if ((child as THREE.Points).geometry) {
+          (child as THREE.Points).geometry.dispose();
+          const mat = (child as THREE.Points).material;
+          if (mat) {
+            if (Array.isArray(mat)) {
+              mat.forEach(m => m.dispose());
+            } else {
+              mat.dispose();
+            }
+          }
+        }
+        learningPath.group.remove(child);
+      }
+      learningPath.steps = [];
+      learningPath.curve = null;
+      learningPath.flowParticles = null;
+      learningPath.stepLabels = [];
+    }
+
     function createLearningPath(): void {
       if (learningPath.steps.length < 2) return;
       const points = learningPath.steps.map((s) => s.node.position.clone());
@@ -804,6 +856,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       };
     (window as unknown as Record<string, unknown>).__isLearningPathVisible =
       () => learningPath.visible;
+    (window as unknown as Record<string, unknown>).__rebuildLearningPath =
+      () => {
+        clearLearningPath();
+        buildDemoLearningPath(dataRef.current.learningPathSteps);
+        createLearningPath();
+        learningPath.group.visible = learningPath.visible;
+      };
     (window as unknown as Record<string, unknown>).__setAutoRotate =
       (on: boolean) => { controls.autoRotate = on; };
     (window as unknown as Record<string, unknown>).__getAutoRotate =
@@ -1206,6 +1265,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const storeVaults = useAppStore.getState().vaults; const vaultName = storeVaults.find(v => v.id === vid)?.name || vid || `CENTRAL_INTELLIGENCE`;
       createCore(vaultName);
       createClustersFromData(c, n, e);
+      // Build learning path from real data if available
+      clearLearningPath();
+      buildDemoLearningPath(dataRef.current.learningPathSteps);
+      createLearningPath();
       sceneDataRendered = true;
       lastVaultId = vid || null;
     };
@@ -1477,6 +1540,15 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       (buildFn as any)(nodes, edges, clusters, vaultId);
     }
   }, [clusters[0]?.id, nodes[0]?.id]);
+
+  // --- Phase 3: Rebuild learning path when learning path steps data changes ---
+  useEffect(() => {
+    if (!didBuild.current) return;
+    const rebuildFn = (window as unknown as Record<string, unknown>).__rebuildLearningPath;
+    if (typeof rebuildFn === 'function') {
+      (rebuildFn as () => void)();
+    }
+  }, [learningPathSteps]);
 
   return (
     <div

@@ -55,7 +55,7 @@ export default function DashboardRight() {
     setFocus(f)
     const safeCall = (fn: string) => {
       if (typeof (w as any)?.[fn] === 'function') (w as any)[fn]()
-      else console.warn('Galaxy canvas not ready yet —', fn, 'is not available')
+      else console.warn('Galaxy canvas not ready — 3D scene functions not yet mounted')
     }
     if (f === 'overview') safeCall('__focusOverview')
     else if (f === 'by-cluster') safeCall('__focusByCluster')
@@ -67,14 +67,14 @@ export default function DashboardRight() {
     setMetrics(m)
     const safeSetVisible = (type: string, visible: boolean) => {
       if (typeof (w as any)?.__setNodeTypeVisible === 'function') (w as any).__setNodeTypeVisible(type, visible)
-      else console.warn('Galaxy canvas not ready yet — __setNodeTypeVisible is not available')
+      else console.warn('Galaxy canvas not ready — 3D scene functions not yet mounted')
     }
     if (m === 'all') { safeSetVisible('permanent', true); safeSetVisible('fleeting', true); safeSetVisible('literature', true) }
     else if (m === 'perm') { safeSetVisible('permanent', true); safeSetVisible('fleeting', false); safeSetVisible('literature', false) }
     else if (m === 'fleet') { safeSetVisible('permanent', false); safeSetVisible('fleeting', true); safeSetVisible('literature', false) }
     else if (m === 'orphans') {
       if (typeof (w as any)?.__showOrphansOnly === 'function') (w as any).__showOrphansOnly()
-      else console.warn('Galaxy canvas not ready yet — __showOrphansOnly is not available')
+      else console.warn('Galaxy canvas not ready — 3D scene functions not yet mounted')
     }
   }
 

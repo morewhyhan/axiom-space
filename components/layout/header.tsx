@@ -113,7 +113,10 @@ export default function Header() {
           <div className={`notif-dropdown ${notifOpen ? '' : 'hidden'}`}>
             <div style={{padding:'10px 14px',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <span className="mono opacity-40 uppercase" style={{ fontSize: 'var(--f8)' }}>Recent Activity</span>
-              <button className="mono text-purple-400/60 hover:text-purple-400" style={{ fontSize: 'var(--f7)' }} onClick={() => { setNotifOpen(false); console.log('TODO: navigate to notifications page') }}>VIEW ALL</button>
+              <button className="mono text-purple-400/60 hover:text-purple-400" style={{ fontSize: 'var(--f7)' }} onClick={() => {
+                setNotifOpen(false)
+                useAppStore.getState().setMode('dashboard')
+              }}>VIEW ALL</button>
             </div>
             {notifications.length > 0 ? notifications.map((n: any, i: number) => (
               <div key={i} className="notif-item"><span className={`notif-dot ${n.dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{n.label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.detail} · {n.time}</div></div></div>

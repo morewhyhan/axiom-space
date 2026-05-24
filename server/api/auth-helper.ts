@@ -8,9 +8,10 @@ import { prisma } from '@/lib/db'
 export async function getUserId(c: any): Promise<string | null> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers })
   if (session?.user?.id) return session.user.id
-  if (process.env.NODE_ENV === 'development') {
-    const firstUser = await prisma.user.findFirst({ orderBy: { createdAt: 'asc' } })
-    return firstUser?.id || null
+  // 仅在非生产环境且明确配置了 DEV_MODE 时回退
+  if (process.env.NODE_ENV !== 'production' && process.env.DEV_MODE === 'true') {
+    const fallback = await prisma.user.findFirst({ orderBy: { createdAt: 'asc' } })
+    if (fallback) return fallback.id
   }
   return null
 }

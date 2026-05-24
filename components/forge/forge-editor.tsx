@@ -40,6 +40,7 @@ export default function ForgeEditor() {
 
     ;(async () => {
       try {
+        // TODO: add vault.card[:id] to ApiClient interface for full type safety
         const res = await (client as any).api.vault['card'][':id'].$get({
           param: { id: selectedNode.id },
         })
@@ -66,6 +67,7 @@ export default function ForgeEditor() {
     if (!selectedNode || !dirty) return
     setSaving(true)
     try {
+      // TODO: add vault.card[:id] to ApiClient interface for full type safety
       const res = await (client as any).api.vault['card'][':id'].$put({
         param: { id: selectedNode.id },
         json: { content: cardContent, title: cardTitle || undefined },

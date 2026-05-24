@@ -11,6 +11,7 @@ import LandingPage from '@/components/landing/landing-page'
 import { useGalaxyData } from '@/hooks/use-galaxy'
 import type { GalaxyNode, GalaxyEdge, GalaxyCluster } from '@/hooks/use-galaxy'
 import { useDashboardStats } from '@/hooks/use-dashboard'
+import { useLearningPaths } from '@/hooks/use-learning'
 import { client } from '@/lib/api-client'
 
 const GalaxyCanvas = dynamic(() => import('@/components/three/galaxy-canvas'), { ssr: false })
@@ -39,6 +40,7 @@ export default function Home() {
   const { data: session, isPending: authPending } = useAuthSession()
   const isLoggedIn = !!session?.session
   const { data: galaxyData, loading: galaxyLoading } = useGalaxyData()
+  const { data: learningData } = useLearningPaths()
   const { stats: dashStats } = useDashboardStats()
   const [showApp, setShowApp] = useState(false)
   const [showLoading, setShowLoading] = useState(false)
@@ -263,6 +265,10 @@ export default function Home() {
     cyan: { bg: 'bg-cyan-500/20', text: 'text-cyan-400', border: 'border-cyan-500/30' },
   }
 
+  // Derive learning path steps for 3D visualization from the active path
+  const activeLearningPath = learningData?.paths?.find(p => p.id === learningData?.activePath) ?? learningData?.paths?.[0] ?? null
+  const learningPathSteps = activeLearningPath?.steps?.map(s => ({ id: s.id, index: s.index, name: s.name })) ?? []
+
   return (
     <>
       {/* ── Main App ── */}
@@ -273,6 +279,7 @@ export default function Home() {
             edges={galaxyData?.edges ?? []}
             clusters={galaxyData?.clusters ?? []}
             vaultId={currentVaultId}
+            learningPathSteps={learningPathSteps}
           />
           <button id="reset-view-btn" onClick={() => {
             const w = window as unknown as Record<string, unknown>

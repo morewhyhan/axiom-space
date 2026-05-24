@@ -138,7 +138,17 @@ export default function LearningProfile() {
           <span className="mono text-purple-400 uppercase block mb-1.5" style={{ fontSize: 'var(--f8)' }}>&gt;&gt; Next_Action</span>
           <div className="space-y-1">
             {nextActions.map(action => (
-              <div key={action} className="mono text-white/60 hover:text-white cursor-pointer transition-colors" style={{ fontSize: 'var(--f10)' }} onClick={() => console.log('TODO: navigate to', action)}>{action}</div>
+              <div key={action} className="mono text-white/60 hover:text-white cursor-pointer transition-colors" style={{ fontSize: 'var(--f10)' }} onClick={() => {
+                // 导航到对应的模式
+                const modeMap: Record<string, string> = {
+                  'forge': 'forge',
+                  '学习': 'learn',
+                  'galaxy': 'galaxy',
+                  '探索': 'galaxy',
+                }
+                const targetMode = modeMap[action] || 'forge'
+                useAppStore.getState().setMode(targetMode as any)
+              }}>{action}</div>
             ))}
           </div>
         </div>
