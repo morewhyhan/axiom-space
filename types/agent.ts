@@ -146,6 +146,7 @@ export interface AxiomAgentConfig {
   thinkingLevel?: ThinkingLevel;
   toolExecution?: ToolExecutionMode;
   apiKey?: string;
+  userId?: string;
   oracleId?: string;
   maxRetries?: number;
   retryDelay?: number;

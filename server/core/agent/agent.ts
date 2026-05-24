@@ -35,6 +35,7 @@ import type { MemoryManager } from '../learning/memory/manager';
 import { GraphIntegrationManager } from '../learning/graph/integration';
 import { FileSafetyGuardrail } from './guardrails/FileSafetyGuardrail';
 import { OutputSchemaGuardrail } from './guardrails/OutputSchemaGuardrail';
+import { FactualCheckGuardrail } from './guardrails/FactualCheckGuardrail';
 import { createAgentServices, type AgentServices } from './pipeline/AgentServices';
 import { SessionService } from './pipeline/SessionService';
 import { MemoryService } from './pipeline/MemoryService';
@@ -200,8 +201,8 @@ export class AxiomAgent extends Interruptible {
    * Extracted from a .then() chain to avoid nested promise anti-pattern.
    */
   private async _initializeDatabaseAsync(): Promise<void> {
-    await (this.services.learning as any).database.initialize();
-    (this.services.learning as any).database.startExpiryWatcher(async (session: any) => {
+    await (this.services.learning as any).database?.initialize?.();
+    (this.services.learning as any).database?.startExpiryWatcher?.(async (session: any) => {
         await this.services.memoryService.onSessionEnd(session.messages);
 
         try {
@@ -211,10 +212,10 @@ export class AxiomAgent extends Interruptible {
             if (_vp()) {
               const sessionDir = `${_vp()}/.axiom/resources/会话摘要`;
               const summaryPath = `${sessionDir}/document.md`;
-              let readResult = await getFileStorage().readFile(summaryPath);
+              let readResult = await getFileStorage(this.services.config.userId).readFile(summaryPath);
               if (!readResult.success) {
-                await getFileStorage().ensureDir(sessionDir);
-                await getFileStorage().writeFile(summaryPath, summary);
+                await getFileStorage(this.services.config.userId).ensureDir(sessionDir);
+                await getFileStorage(this.services.config.userId).writeFile(summaryPath, summary);
               }
             }
           }
@@ -591,7 +592,6 @@ export class AxiomAgent extends Interruptible {
 
   private _getGuardrails(): ToolMiddleware[] {
     if (this._loadedGuardrails.length > 0) return this._loadedGuardrails;
-    const { FactualCheckGuardrail } = require('./guardrails/FactualCheckGuardrail');
     this._loadedGuardrails = [new FileSafetyGuardrail(), new OutputSchemaGuardrail(), new FactualCheckGuardrail()];
     for (const guardrail of this._loadedGuardrails) {
       toolRegistry.use(guardrail);
@@ -607,7 +607,7 @@ export class AxiomAgent extends Interruptible {
     try {
       if (!_vp()) return;
 
-      const result = await getFileStorage().readFile(`${_vp()}/.axiom/mcp.json`);
+      const result = await getFileStorage(this.services.config.userId).readFile(`${_vp()}/.axiom/mcp.json`);
       if (result?.success && result.content) {
         const configs = JSON.parse(result.content);
         if (Array.isArray(configs) && configs.length > 0) {
@@ -949,7 +949,7 @@ export class AxiomAgent extends Interruptible {
 
     // 1. 清空数据库（会话、轨迹、模式）
     try {
-      await (this.services.learning as any).database.clear();
+      await (this.services.learning as any).database?.clear?.();
       (this.services.learning as any).graphManager = new GraphIntegrationManager((this.services.learning as any).database);
     } catch (err) {
       console.debug('[Agent] Database clear failed:', err);
@@ -963,11 +963,11 @@ export class AxiomAgent extends Interruptible {
     if (_vp()) {
       try {
         const memoriesDir = `${_vp()}/.axiom/memories`;
-        const _list = await getFileStorage().listDir(memoriesDir);
+        const _list = await getFileStorage(this.services.config.userId).listDir(memoriesDir);
         if (_list.success && _list.entries) {
           for (const entry of _list.entries) {
             try {
-              getFileStorage().deleteFile(`${memoriesDir}/${entry.name}`);
+              getFileStorage(this.services.config.userId).deleteFile(`${memoriesDir}/${entry.name}`);
             } catch { /* skip individual failures */ }
           }
         }
@@ -976,10 +976,10 @@ export class AxiomAgent extends Interruptible {
       }
 
       try {
-        getFileStorage().deleteFile(`${_vp()}/.axiom/knowledge-graph.json`);
-        getFileStorage().deleteFile(`${_vp()}/.axiom/capability-tracking.json`);
-        getFileStorage().deleteFile(`${_vp()}/.axiom/memories/MEMORY.md`);
-        getFileStorage().deleteFile(`${_vp()}/.axiom/memories/USER.md`);
+        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/knowledge-graph.json`);
+        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/capability-tracking.json`);
+        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/memories/MEMORY.md`);
+        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/memories/USER.md`);
       } catch (err) {
         console.debug('[Agent] Graph/capability file cleanup failed:', err);
       }
@@ -1024,7 +1024,7 @@ export class AxiomAgent extends Interruptible {
   newSession(): void {
     this.services.sessionId = this.services.sessionService.generateSessionId();
     this.services.agent.state.messages = [];
-    (this.services.learning as any).budget.reset();
+    (this.services.learning as any).budget?.reset?.();
     this.resetInterrupt?.();
     this._turnCount = 0;
     this._lastUserMessage = '';
@@ -1158,14 +1158,14 @@ export class AxiomAgent extends Interruptible {
       const vaultPath = (process.env as any).VAULT_PATH || "./vault"
         || process.env["VAULT_PATH"] || "./vault" || '';
       if (_vp()) {
-        await (this.services.learning as any).patternExtractor.exportToJsonl(_vp());
+        await (this.services.learning as any).patternExtractor?.exportToJsonl?.(_vp());
       }
     } catch (e) {
       console.debug('[Agent] JSONL export skipped (non-fatal):', e);
     }
 
-    (this.services.learning as any).database.stopExpiryWatcher();
-    await (this.services.learning as any).database.close();
+    (this.services.learning as any).database?.stopExpiryWatcher?.();
+    await (this.services.learning as any).database?.close?.();
     await this.services.memoryService.shutdownAll();
   }
 
@@ -1173,8 +1173,10 @@ export class AxiomAgent extends Interruptible {
    * 获取预算状态
    */
   getBudgetStatus(): { remaining: number; used: number; total: number } {
-    const total = (this.services.learning as any).budget.remaining + (this.services.learning as any).budget.used;
-    return { remaining: (this.services.learning as any).budget.remaining, used: (this.services.learning as any).budget.used, total };
+    const budget = (this.services.learning as any).budget;
+    if (!budget) return { remaining: 0, used: 0, total: 0 };
+    const total = budget.remaining + budget.used;
+    return { remaining: budget.remaining, used: budget.used, total };
   }
 
   /**
@@ -1188,7 +1190,7 @@ export class AxiomAgent extends Interruptible {
    * 获取学习技能管理器
    */
   getLearningSkillManager(): null {
-    return (this.services.learning as any).learningSkillManager;
+    return (this.services.learning as any)?.learningSkillManager ?? null;
   }
 
   /**

@@ -22,6 +22,7 @@ export const DEFAULT_AGENT_CONFIG: Required<AxiomAgentConfig> = {
   enableSkills: true,
   sessionPersistence: true,
   vaultPath: '',
+  userId: '',
   temperature: 0.1,
   maxTokens: 8192,
   // Learning system configuration

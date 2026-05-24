@@ -24,6 +24,7 @@ import type { IAgentInfrastructure } from '@/server/core/agent/pipeline/interfac
 
 export interface AgentServicesFactoryConfig {
   vaultPath?: string;
+  userId?: string;
   config?: Partial<AxiomAgentConfig>;
 }
 

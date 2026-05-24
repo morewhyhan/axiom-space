@@ -62,13 +62,16 @@ export class AIManager {
   private models: Map<string, ModelConfig>;
   private config: AIManagerConfig;
 
-  // 全局上下文（Vault 数据、用户状态等）
-  private globalContext: {
+  // 全局上下文（Vault 数据、用户状态等）- per-user isolation
+  private globalContexts: Map<string, {
     vault: any;
     userSkills: any[];
     conversationHistory: ChatMessage[];
     sessionData: any;
-  };
+  }>;
+
+  // 使用统计（per-model）
+  private usageStats: Map<string, { calls: number; cost: number }>;
 
   // 当前活动的 AI Provider
   private activeProvider: string = '';
@@ -90,13 +93,11 @@ export class AIManager {
     this.currentModelId = DEFAULT_MODEL;
     this.currentProvider = 'zhipu';
 
-    // 初始化全局上下文
-    this.globalContext = {
-      vault: null,
-      userSkills: [],
-      conversationHistory: [],
-      sessionData: null,
-    };
+    // 初始化全局上下文（per-user isolation）
+    this.globalContexts = new Map();
+
+    // 初始化使用统计
+    this.usageStats = new Map();
 
     // 从环境加载配置
     this._loadEnvironmentConfig();
@@ -289,17 +290,30 @@ export class AIManager {
   }
 
   /**
-   * 设置全局上下文
+   * 设置全局上下文（per-user isolation）
    */
-  public setGlobalContext(context: Partial<AIManagerConfig['globalContext']>): void {
-    this.globalContext = { ...this.globalContext, ...context };
+  public setGlobalContext(context: Partial<AIManagerConfig['globalContext']>, userId?: string): void {
+    const key = userId || '__default__';
+    const existing = this.globalContexts.get(key) || {
+      vault: null,
+      userSkills: [],
+      conversationHistory: [],
+      sessionData: null,
+    };
+    this.globalContexts.set(key, { ...existing, ...context });
   }
 
   /**
    * 获取全局上下文
    */
-  public getGlobalContext() {
-    return this.globalContext;
+  public getGlobalContext(userId?: string) {
+    const key = userId || '__default__';
+    let ctx = this.globalContexts.get(key);
+    if (!ctx) {
+      ctx = { vault: null, userSkills: [], conversationHistory: [], sessionData: null };
+      this.globalContexts.set(key, ctx);
+    }
+    return ctx;
   }
 
   /**
@@ -382,11 +396,12 @@ export class AIManager {
     const basePrompt = customPrompt || oracle?.systemPrompt || 'You are a helpful AI assistant.';
 
     // 添加全局上下文信息
+    const ctx = this.getGlobalContext();
     const contextInfo = {
-      vaultName: this.globalContext.vault?.name || 'Unknown',
-      userSkillsCount: this.globalContext.userSkills.length,
-      conversationHistoryLength: this.globalContext.conversationHistory.length,
-      sessionData: this.globalContext.sessionData,
+      vaultName: ctx.vault?.name || 'Unknown',
+      userSkillsCount: ctx.userSkills.length,
+      conversationHistoryLength: ctx.conversationHistory.length,
+      sessionData: ctx.sessionData,
     };
 
     return `${basePrompt}
@@ -486,6 +501,7 @@ Please consider this global context in your responses.
         throw new Error('Empty response from API');
       }
 
+      this._recordUsage(model.modelId, model.costPerOutputToken || 0);
       return content;
     } catch (error) {
       console.error('[AIManager] OpenAI API error:', error);
@@ -504,6 +520,18 @@ Please consider this global context in your responses.
     const model = this.models.get(this.currentModelId)!;
     const apiKey = model.apiKey || this._getApiKey();
 
+    // Anthropic API format: system must be top-level string, not in messages array
+    const systemMessages = (request.messages || []).filter((m: any) => m.role === 'system');
+    const system = systemMessages.map((m: any) => m.content).join('\n');
+    const messages = (request.messages || []).filter((m: any) => m.role !== 'system');
+
+    const anthropicBody = {
+      model: request.model,
+      messages,
+      max_tokens: request.max_tokens || 4096,
+      ...(system ? { system } : {}),
+    };
+
     try {
       const response = await fetch(url, {
         method: 'POST',
@@ -512,7 +540,7 @@ Please consider this global context in your responses.
           'x-api-key': apiKey,
           'anthropic-version': '2023-06-01',
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(anthropicBody),
       });
 
       if (!response.ok) {
@@ -527,6 +555,7 @@ Please consider this global context in your responses.
         throw new Error('Empty response from API');
       }
 
+      this._recordUsage(model.modelId, model.costPerOutputToken || 0);
       return content;
     } catch (error) {
       console.error('[AIManager] Anthropic API error:', error);
@@ -544,6 +573,16 @@ Please consider this global context in your responses.
     } catch {
       return '';
     }
+  }
+
+  /**
+   * 记录 API 调用使用统计
+   */
+  private _recordUsage(modelId: string, costRate: number): void {
+    const current = this.usageStats.get(modelId) || { calls: 0, cost: 0 };
+    current.calls++;
+    current.cost += costRate;
+    this.usageStats.set(modelId, current);
   }
 
   /**
@@ -575,11 +614,16 @@ Please consider this global context in your responses.
     totalCost: number;
     modelUsage: Map<string, { calls: number; cost: number }>;
   } {
-    // 这里可以集成 LLMUsageTracker 的功能
+    let totalCalls = 0;
+    let totalCost = 0;
+    for (const entry of this.usageStats.values()) {
+      totalCalls += entry.calls;
+      totalCost += entry.cost;
+    }
     return {
-      totalCalls: 0,
-      totalCost: 0,
-      modelUsage: new Map(),
+      totalCalls,
+      totalCost,
+      modelUsage: new Map(this.usageStats),
     };
   }
 }

@@ -14,15 +14,23 @@ import { prisma } from '@/lib/db'
 export class DbAdapter implements IFileStorage {
   constructor(private userId: string) {}
 
-  private async getVaultId(): Promise<string | null> {
-    const vault = await prisma.vault.findUnique({
+  private async getVaultId(vaultId?: string): Promise<string | null> {
+    if (vaultId) {
+      const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
+      return vault?.id || null;
+    }
+    const vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
     })
     return vault?.id || null
   }
 
-  private async ensureVaultId(): Promise<string> {
-    let vault = await prisma.vault.findUnique({
+  private async ensureVaultId(vaultId?: string): Promise<string> {
+    if (vaultId) {
+      const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
+      if (vault) return vault.id;
+    }
+    let vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
     })
     if (!vault) {

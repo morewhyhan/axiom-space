@@ -20,6 +20,7 @@ app.post('/chat', zValidator('json', z.object({
   // 创建 Agent 服务（自动注入 LocalFSAdapter 到 vault 目录）
   const { infrastructure } = createServerAgentServices({
     vaultPath: process.env.VAULT_PATH || './vault',
+    userId: (c as any).get?.('user')?.id || '',
   })
 
   // 后续: const agent = new AxiomAgent(infrastructure, ...)
