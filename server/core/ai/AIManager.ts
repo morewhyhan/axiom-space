@@ -487,6 +487,9 @@ Please consider this global context in your responses.
           'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify(request),
+        // Bound how long we'll wait for the provider. Without this an
+        // unresponsive endpoint hangs the agent indefinitely.
+        signal: AbortSignal.timeout(60_000),
       });
 
       if (!response.ok) {
@@ -541,6 +544,7 @@ Please consider this global context in your responses.
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify(anthropicBody),
+        signal: AbortSignal.timeout(60_000),
       });
 
       if (!response.ok) {

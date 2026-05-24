@@ -12,6 +12,17 @@ import { zValidator } from '@/server/api/validator'
 import archiver from 'archiver'
 import { requireAuth } from '../middleware/auth'
 
+/** Defensive JSON.parse — never lets a corrupt tags column 500 the request. */
+function safeParseTags(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 const app = new Hono<{ Variables: { userId: string } }>()
 
 app.use('/*', requireAuth)
@@ -102,7 +113,7 @@ app.get('/card/:id', async (c) => {
       type: card.type,
       path: card.path,
       content: card.content,
-      tags: card.tags ? JSON.parse(card.tags) : [],
+      tags: safeParseTags(card.tags),
       clusterName: card.cluster?.name ?? null,
       clusterColor: card.cluster?.color ?? null,
       createdAt: card.createdAt,
@@ -169,9 +180,9 @@ app.delete('/card/:id', async (c) => {
 })
 
 // GET /api/vault/export — 下载全部卡片为 zip（兼容 Obsidian）
-// TODO: For large vaults, the in-memory buffering in archiver can cause OOM.
-// In production, switch to streaming response by piping archiver directly to
-// the response stream.
+// Streams the archive through a ReadableStream so the full zip never has to
+// live in memory at once — large vaults previously risked OOM via the
+// Buffer.concat path.
 app.get('/export', async (c) => {
   const userId = c.get('userId') as string
 
@@ -180,27 +191,29 @@ app.get('/export', async (c) => {
     select: { path: true, content: true },
   })
 
-  // 收集 zip 到 buffer
   const archive = archiver('zip', { zlib: { level: 9 } })
-  const chunks: Buffer[] = []
 
-  const promise = new Promise<void>((resolve, reject) => {
-    archive.on('data', (chunk: Buffer) => chunks.push(chunk))
-    archive.on('end', () => resolve())
-    archive.on('error', (e: Error) => reject(e))
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      archive.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)))
+      archive.on('end', () => controller.close())
+      archive.on('error', (err: Error) => controller.error(err))
+      for (const card of cards) {
+        archive.append(card.content, { name: card.path })
+      }
+      archive.finalize().catch((err) => controller.error(err))
+    },
+    cancel() {
+      archive.abort()
+    },
   })
 
-  // 把所有卡片按路径写入 zip
-  for (const card of cards) {
-    archive.append(card.content, { name: card.path })
-  }
-
-  await archive.finalize()
-  await promise
-
-  return c.newResponse(Buffer.concat(chunks as unknown as Uint8Array[]), 200, {
-    'Content-Type': 'application/zip',
-    'Content-Disposition': 'attachment; filename="vault-export.zip"',
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/zip',
+      'Content-Disposition': 'attachment; filename="vault-export.zip"',
+    },
   })
 })
 

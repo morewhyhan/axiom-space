@@ -18,8 +18,12 @@ export function useSignIn() {
       return response
     },
     onSuccess: async () => {
-      const { data: session } = await authClient.getSession()
-      if (session) queryClient.setQueryData(['session'], session)
+      // better-auth's useSession() owns its own internal query key — we cannot
+      // safely setQueryData(['session'], …) on the global QueryClient and expect
+      // the hook to pick it up. Invalidate broadly so any session-aware query
+      // re-fetches and the hook's own subscription reads fresh data.
+      await authClient.getSession()
+      await queryClient.invalidateQueries()
       toast.success('登录成功')
     },
     onError: (error: Error) => {
@@ -41,8 +45,8 @@ export function useSignUp() {
       return response
     },
     onSuccess: async () => {
-      const { data: session } = await authClient.getSession()
-      if (session) queryClient.setQueryData(['session'], session)
+      await authClient.getSession()
+      await queryClient.invalidateQueries()
       toast.success('注册成功')
     },
     onError: (error: Error) => {
@@ -63,9 +67,13 @@ export function useSignOut() {
       return response
     },
     onSuccess: () => {
-      queryClient.setQueryData(['session'], null)
-      window.location.reload()
+      // Toast first, give the user a beat to see it, THEN reload. Calling
+      // reload() synchronously after toast() drops the toast on the floor.
       toast.success('已登出')
+      queryClient.clear()
+      setTimeout(() => {
+        window.location.href = '/'
+      }, 800)
     },
     onError: (error: Error) => {
       toast.error(error.message || '登出失败')

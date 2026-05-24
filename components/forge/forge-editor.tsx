@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAppStore } from '@/stores/mode-store'
 import { client } from '@/lib/api-client'
+import { toast } from 'sonner'
 
 export default function ForgeEditor() {
   const [editorMode, setEditorMode] = useState<'live' | 'read'>('live')
@@ -75,9 +76,14 @@ export default function ForgeEditor() {
       const data = await res.json()
       if (data.success) {
         setDirty(false)
+        toast.success('已保存')
+      } else {
+        // Keep dirty so the user can retry; surface server-side reason.
+        toast.error(`保存失败: ${data?.error || '未知错误'}`)
       }
     } catch (err) {
       console.warn('[ForgeEditor] failed to save:', err)
+      toast.error(`保存失败: ${(err as Error)?.message || '网络异常'}`)
     } finally {
       setSaving(false)
     }

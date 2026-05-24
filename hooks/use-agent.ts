@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef } from 'react'
+import { getSiteUrl } from '@/lib/site-url'
 
 interface AgentMessage {
   role: 'user' | 'assistant'
@@ -28,14 +29,9 @@ export function useAgent() {
     abortRef.current = controller
 
     try {
-      const baseUrl =
-        process.env.NODE_ENV === 'development'
-          ? 'http://localhost:3000'
-          : (process.env.NEXT_PUBLIC_APP_URL || '')
-
       // 使用原生 fetch 因为 SSE 流式响应需要直接读取 ReadableStream，
       // ky 的 JSON 解析会破坏 SSE 事件流
-      const response = await fetch(`${baseUrl}/api/agent/chat`, {
+      const response = await fetch(`${getSiteUrl()}/api/agent/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text }),
@@ -118,11 +114,7 @@ export function useAgent() {
   const clearMessages = useCallback(async () => {
     // Clear on server too
     try {
-      const baseUrl =
-        process.env.NODE_ENV === 'development'
-          ? 'http://localhost:3000'
-          : (process.env.NEXT_PUBLIC_APP_URL || '')
-      await fetch(`${baseUrl}/api/agent/sessions`, {
+      await fetch(`${getSiteUrl()}/api/agent/sessions`, {
         method: 'DELETE',
         credentials: 'include',
       })

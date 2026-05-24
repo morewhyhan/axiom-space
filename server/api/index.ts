@@ -1,3 +1,7 @@
+// Bootstrap browser-style globals (CustomEvent / dispatchEvent shims)
+// before any Agent code can fire UI events on the server.
+import '@/server/core/safe-globals'
+
 import { Hono } from 'hono';
 import { handleError } from './error';
 import agentRoutes from './routes/agent';

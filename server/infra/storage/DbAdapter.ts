@@ -10,14 +10,50 @@
 
 import type { IFileStorage, ReadResult, WriteResult, ListResult, DeleteResult, SearchResult, FileEntry } from './IFileStorage'
 import { prisma } from '@/lib/db'
+import { getCurrentVaultId } from '@/server/core/agent/agent-context'
 
 export class DbAdapter implements IFileStorage {
   constructor(private userId: string) {}
 
+  /**
+   * Reject path-traversal and absolute paths before they ever reach Prisma.
+   * The vault is multi-tenant; even though the DbAdapter scopes by `vaultId`,
+   * we want defense-in-depth so a path like "../../etc/passwd.md" or
+   * "/abs/path" can never end up in the `card.path` column or be used to
+   * cross vault boundaries.
+   */
+  private assertSafePath(p: string): void {
+    if (!p || typeof p !== 'string') {
+      throw new Error('Invalid path: empty')
+    }
+    if (p.startsWith('/') || p.startsWith('\\')) {
+      throw new Error(`Invalid path: absolute paths are not allowed (${p})`)
+    }
+    // Drive letter on Windows (e.g. "C:\…")
+    if (/^[a-zA-Z]:/.test(p)) {
+      throw new Error(`Invalid path: drive-letter paths are not allowed (${p})`)
+    }
+    // Any segment equal to ".." — covers "../x", "x/../y", etc.
+    const segments = p.split(/[\\/]+/)
+    for (const seg of segments) {
+      if (seg === '..') {
+        throw new Error(`Invalid path: traversal segment "${seg}" in "${p}"`)
+      }
+    }
+  }
+
+  /**
+   * Resolve the active vault id. Precedence:
+   * 1. explicit argument (callers may pass their own override)
+   * 2. AsyncLocalStorage agent context (`runWithAgentContext({ userId, vaultId }, ...)`)
+   * 3. fall back to the user's oldest vault
+   */
   private async getVaultId(vaultId?: string): Promise<string | null> {
-    if (vaultId) {
-      const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
-      return vault?.id || null;
+    const ctxVaultId = vaultId ?? getCurrentVaultId();
+    if (ctxVaultId) {
+      const vault = await prisma.vault.findUnique({ where: { id: ctxVaultId } });
+      if (vault?.userId === this.userId) return vault.id;
+      // fall through if vault id is invalid or doesn't belong to this user
     }
     const vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
@@ -27,9 +63,10 @@ export class DbAdapter implements IFileStorage {
   }
 
   private async ensureVaultId(vaultId?: string): Promise<string> {
-    if (vaultId) {
-      const vault = await prisma.vault.findUnique({ where: { id: vaultId } });
-      if (vault) return vault.id;
+    const ctxVaultId = vaultId ?? getCurrentVaultId();
+    if (ctxVaultId) {
+      const vault = await prisma.vault.findUnique({ where: { id: ctxVaultId } });
+      if (vault?.userId === this.userId) return vault.id;
     }
     let vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
@@ -45,6 +82,7 @@ export class DbAdapter implements IFileStorage {
 
   async readFile(filePath: string): Promise<ReadResult> {
     try {
+      this.assertSafePath(filePath)
       const vaultId = await this.getVaultId()
       if (!vaultId) return { success: false, error: 'Vault not found' }
 
@@ -61,6 +99,7 @@ export class DbAdapter implements IFileStorage {
 
   async writeFile(filePath: string, content: string, cardType?: string): Promise<WriteResult> {
     try {
+      this.assertSafePath(filePath)
       const vaultId = await this.ensureVaultId()
 
       // 从路径推断 type (如果没提供)
@@ -86,6 +125,7 @@ export class DbAdapter implements IFileStorage {
 
   async deleteFile(filePath: string): Promise<DeleteResult> {
     try {
+      this.assertSafePath(filePath)
       const vaultId = await this.getVaultId()
       if (!vaultId) return { success: false, error: 'Vault not found' }
 
@@ -157,6 +197,8 @@ export class DbAdapter implements IFileStorage {
 
   async rename(oldPath: string, newPath: string): Promise<WriteResult> {
     try {
+      this.assertSafePath(oldPath)
+      this.assertSafePath(newPath)
       const vaultId = await this.getVaultId()
       if (!vaultId) return { success: false, error: 'Vault not found' }
 

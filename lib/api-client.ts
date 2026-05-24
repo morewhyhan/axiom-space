@@ -1,11 +1,9 @@
 import { hc } from 'hono/client'
 import type { Hono } from 'hono'
 import ky from 'ky'
+import { getSiteUrl } from './site-url'
 
-const baseUrl =
-  process.env.NODE_ENV === 'development'
-    ? 'http://localhost:3000'
-    : process.env.NEXT_PUBLIC_APP_URL!
+const baseUrl = getSiteUrl()
 
 export const fetch = ky.extend({
   credentials: 'include' as const,

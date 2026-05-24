@@ -3,6 +3,24 @@
 import { useState, useEffect } from 'react'
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAppStore } from '@/stores/mode-store'
+import { toast } from 'sonner'
+
+/** Call a Three.js canvas bridge function; warn the user if the canvas hasn't mounted yet. */
+function callCanvas<T extends (...args: any[]) => any>(name: string, args: Parameters<T>): boolean {
+  const fn = (window as any)[name] as T | undefined
+  if (typeof fn !== 'function') {
+    toast.error('Galaxy 画布尚未就绪，请稍后再试')
+    return false
+  }
+  try {
+    fn(...args)
+    return true
+  } catch (err) {
+    console.warn(`[GalaxyControls] ${name} failed:`, err)
+    toast.error(`操作失败: ${(err as Error)?.message || name}`)
+    return false
+  }
+}
 
 export default function GalaxyControls() {
   const { stats, loading } = useDashboardStats()
@@ -31,16 +49,16 @@ export default function GalaxyControls() {
     setTimeout(init, 800);
   }, [])
 
-  const toggleAutoRotate = () => { const v = !autoRotate; setAutoRotate(v); (window as any).__setAutoRotate?.(v) }
-  const handleSpeed = (e: any) => { const v = parseFloat(e.target.value); setRotateSpeed(v); (window as any).__setRotateSpeed?.(v) }
-  const handleBloom = (e: any) => { const v = parseFloat(e.target.value); setBloom(v); (window as any).__setBloom?.(v) }
-  const handleComet = (e: any) => { const v = parseFloat(e.target.value); setCometSpeed(v); (window as any).__setCometSpeed?.(v) }
-  const toggleMilkyWay = () => { const v = !milkyWay; setMilkyWay(v); (window as any).__setMilkyWay?.(v) }
-  const toggleIntEdges = () => { const v = !intEdges; setIntEdges(v); (window as any).__setInternalEdgesVisible?.(v) }
-  const toggleCometsVis = () => { const v = !cometsVis; setCometsVis(v); (window as any).__setCometsVisible?.(v) }
-  const toggleExtEdges = () => { const v = !extEdges; setExtEdges(v); (window as any).__setExternalEdgesVisible?.(v) }
-  const toggleType = (type: string, state: boolean, setter: any) => { const v = !state; setter(v); (window as any).__setNodeTypeVisible?.(type, v) }
-  const resetView = () => { (window as any).__resetCameraView?.() }
+  const toggleAutoRotate = () => { const v = !autoRotate; if (callCanvas('__setAutoRotate', [v])) setAutoRotate(v) }
+  const handleSpeed = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setRotateSpeed', [v])) setRotateSpeed(v) }
+  const handleBloom = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setBloom', [v])) setBloom(v) }
+  const handleComet = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setCometSpeed', [v])) setCometSpeed(v) }
+  const toggleMilkyWay = () => { const v = !milkyWay; if (callCanvas('__setMilkyWay', [v])) setMilkyWay(v) }
+  const toggleIntEdges = () => { const v = !intEdges; if (callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
+  const toggleCometsVis = () => { const v = !cometsVis; if (callCanvas('__setCometsVisible', [v])) setCometsVis(v) }
+  const toggleExtEdges = () => { const v = !extEdges; if (callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
+  const toggleType = (type: string, state: boolean, setter: any) => { const v = !state; if (callCanvas('__setNodeTypeVisible', [type, v])) setter(v) }
+  const resetView = () => { callCanvas('__resetCameraView', []) }
 
   return (
     <aside className="side-slot visible galaxy-panel flex-col pointer-events-auto" style={{ width: 'var(--panel-sm)', justifyContent: 'space-between' }}>
@@ -88,20 +106,20 @@ export default function GalaxyControls() {
               <span className={`orbit-toggle-dot ${milkyWay ? 'orbit-toggle-dot-on' : ''}`} />
             </button>
           </div>
-        </div>
           <div className="flex justify-between items-center">
             <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>内部连线</span>
             <button className={`orbit-toggle ${intEdges ? 'orbit-toggle-on' : ''}`} onClick={toggleIntEdges}>
               <span className={`orbit-toggle-dot ${intEdges ? 'orbit-toggle-dot-on' : ''}`} />
             </button>
           </div>
-      </div>
           <div className="flex justify-between items-center">
             <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>外部连线</span>
             <button className={`orbit-toggle ${extEdges ? 'orbit-toggle-on' : ''}`} onClick={toggleExtEdges}>
               <span className={`orbit-toggle-dot ${extEdges ? 'orbit-toggle-dot-on' : ''}`} />
             </button>
           </div>
+        </div>
+      </div>
 
       <div className="hud-line"></div>
 

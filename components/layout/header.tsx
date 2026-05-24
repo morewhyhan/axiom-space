@@ -97,7 +97,7 @@ export default function Header() {
         </nav>
         <div className="w-[1px] bg-white/10" style={{ height: 'var(--divider-h)' }}></div>
         <select value={oracle} onChange={e => setOracle(e.target.value)} className="bg-transparent border border-white/20 rounded px-2 py-1 outline-none text-purple-400 mono cursor-pointer" style={{ fontSize: 'var(--f10)' }}>
-          <option>Oracle</option><option>Forge</option><option>Guide</option><option>Assess</option><option>Profile</option>
+          <option>Oracle</option><option>Forge</option><option>Guide</option><option>Assess</option>
         </select>
       </div>
       <div className="flex items-center gap-5 mono text-xs">

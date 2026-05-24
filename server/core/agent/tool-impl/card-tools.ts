@@ -163,7 +163,7 @@ const searchCardsTool = createTool(
         }
       }
       if (type === 'all' || type === 'fleeing') {
-        const fleeResult = await axiom.loadPermanent?.(vaultPath);
+        const fleeResult = await axiom.loadFleeing?.(vaultPath);
         if (fleeResult?.success && fleeResult.data) {
           results = results.concat(
             fleeResult.data

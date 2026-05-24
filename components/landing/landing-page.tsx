@@ -124,7 +124,7 @@ function CreateVault({ onCreated }: { onCreated: (id: string) => void }) {
       <h2 className="landing-section-title">创建你的第一个知识库</h2>
       <p className="landing-desc" style={{ marginBottom: 20 }}>知识库用于存放你的知识卡片，你可以创建多个知识库来管理不同领域的学习。</p>
       <div className="landing-create-form">
-        <input className="landing-input" placeholder="知识库名称" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} autoFocus />
+        <input className="landing-input" placeholder="知识库名称" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} autoFocus maxLength={100} />
         <button className="landing-btn landing-btn-primary" onClick={handleCreate} disabled={creating || !name.trim()}>
           {creating ? '创建中...' : '创建'}
         </button>

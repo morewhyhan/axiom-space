@@ -8,24 +8,36 @@ import { zValidator } from '@/server/api/validator';
 import { requireAuth } from '../middleware/auth';
 import { streamSSE } from 'hono/streaming';
 import { createAgent, AxiomAgent } from '@/server/core/agent/agent';
+import { runWithAgentContext } from '@/server/core/agent/agent-context';
 import type { StreamCallbacks } from '@/types/agent';
 
 const app = new Hono<{ Variables: { userId: string } }>()
 
 // ── Agent instance cache per user ──────────────────────────
-// Each user gets a persistent agent that retains conversation memory
-const agentCache = new Map<string, { agent: AxiomAgent; lastUsed: number }>()
+// Each user gets a persistent agent that retains conversation memory.
+// Use globalThis to survive Next.js HMR module reloads in dev.
+const globalForAgent = globalThis as unknown as {
+  __axiomAgentCache?: Map<string, { agent: AxiomAgent; lastUsed: number }>
+  __axiomAgentInterval?: ReturnType<typeof setInterval>
+}
 
-// Cleanup stale agents every 10 minutes (idle > 30 min)
-setInterval(() => {
-  const now = Date.now()
-  for (const [key, entry] of agentCache) {
-    if (now - entry.lastUsed > 30 * 60 * 1000) {
-      entry.agent.dispose().catch(() => {})
-      agentCache.delete(key)
+const agentCache: Map<string, { agent: AxiomAgent; lastUsed: number }> =
+  globalForAgent.__axiomAgentCache ?? new Map()
+globalForAgent.__axiomAgentCache = agentCache
+
+// Cleanup stale agents every 10 minutes (idle > 30 min). HMR-safe: guard against
+// duplicate intervals on hot reload.
+if (!globalForAgent.__axiomAgentInterval) {
+  globalForAgent.__axiomAgentInterval = setInterval(() => {
+    const now = Date.now()
+    for (const [key, entry] of agentCache) {
+      if (now - entry.lastUsed > 30 * 60 * 1000) {
+        entry.agent.dispose().catch(() => {})
+        agentCache.delete(key)
+      }
     }
-  }
-}, 10 * 60 * 1000)
+  }, 10 * 60 * 1000)
+}
 
 function getAgentForUser(userId: string): AxiomAgent {
   const cached = agentCache.get(userId)
@@ -70,6 +82,7 @@ app.post('/chat', requireAuth, zValidator('json', z.object({
   const { message } = c.req.valid('json')
 
   return streamSSE(c, async (stream) => {
+    await runWithAgentContext({ userId }, async () => {
     const agent = getAgentForUser(userId)
 
     try {
@@ -111,6 +124,7 @@ app.post('/chat', requireAuth, zValidator('json', z.object({
         }),
       })
     }
+    })
   })
 })
 
@@ -125,7 +139,7 @@ app.post('/chat/simple', requireAuth, zValidator('json', z.object({
   const agent = getAgentForUser(userId)
 
   try {
-    const result = await agent.run(message)
+    const result = await runWithAgentContext({ userId }, () => agent.run(message))
     // Extract last assistant message
     const msgs = result.messages || []
     const lastAssistant = [...msgs].reverse().find((m: any) => m.role === 'assistant')
@@ -149,17 +163,19 @@ app.post('/chat/simple', requireAuth, zValidator('json', z.object({
 app.get('/sessions', requireAuth, async (c) => {
   const userId = c.get('userId') as string
 
-  const agent = getAgentForUser(userId)
-  const messages = agent.getMessages()
+  return runWithAgentContext({ userId }, async () => {
+    const agent = getAgentForUser(userId)
+    const messages = agent.getMessages()
 
-  return c.json({
-    success: true,
-    sessionId: agent.getSessionId(),
-    messages: messages.map((m: any) => ({
-      role: m.role,
-      content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
-      timestamp: m.timestamp,
-    })),
+    return c.json({
+      success: true,
+      sessionId: agent.getSessionId(),
+      messages: messages.map((m: any) => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        timestamp: m.timestamp,
+      })),
+    })
   })
 })
 
@@ -167,10 +183,12 @@ app.get('/sessions', requireAuth, async (c) => {
 app.delete('/sessions', requireAuth, async (c) => {
   const userId = c.get('userId') as string
 
-  const agent = getAgentForUser(userId)
-  agent.newSession()
+  return runWithAgentContext({ userId }, async () => {
+    const agent = getAgentForUser(userId)
+    agent.newSession()
 
-  return c.json({ success: true })
+    return c.json({ success: true })
+  })
 })
 
 // GET /api/agent/health — Agent health check
@@ -182,18 +200,20 @@ app.get('/health', (c) => {
 app.get('/status', requireAuth, async (c) => {
   const userId = c.get('userId') as string
 
-  const agent = getAgentForUser(userId)
-  const config = agent.getConfig()
-  const budget = agent.getBudgetStatus()
+  return runWithAgentContext({ userId }, async () => {
+    const agent = getAgentForUser(userId)
+    const config = agent.getConfig()
+    const budget = agent.getBudgetStatus()
 
-  return c.json({
-    success: true,
-    status: {
-      sessionId: agent.getSessionId(),
-      model: config.modelId,
-      budget,
-      turnCount: agent.getTurnCount(),
-    },
+    return c.json({
+      success: true,
+      status: {
+        sessionId: agent.getSessionId(),
+        model: config.modelId,
+        budget,
+        turnCount: agent.getTurnCount(),
+      },
+    })
   })
 })
 

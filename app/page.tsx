@@ -212,10 +212,27 @@ export default function Home() {
     if (!newCardTitle.trim() || !currentVaultId) return
     setCreating(true)
     try {
+      // Sanitize title to a safe filename slug — strip path separators, dot-only
+      // segments, and any char outside a conservative whitelist. Prevents the
+      // user accidentally (or maliciously) writing to "../../foo.md" or
+      // creating nested folders by typing slashes.
+      const rawTitle = newCardTitle.trim()
+      const safeTitle = rawTitle
+        .replace(/[\/\\]/g, '_')
+        .replace(/\.+/g, '_')
+        .replace(/[^\p{L}\p{N}_\-\s]/gu, '')
+        .replace(/\s+/g, ' ')
+        .slice(0, 100)
+        .trim()
+      if (!safeTitle) {
+        console.warn('[Home] card title became empty after sanitization')
+        setCreating(false)
+        return
+      }
       const res = await client.api.vault.write.$post({
         json: {
-          path: `${newCardTitle.trim()}.md`,
-          content: `# ${newCardTitle.trim()}\n\n${newCardContent}`,
+          path: `${safeTitle}.md`,
+          content: `# ${rawTitle}\n\n${newCardContent}`,
           type: newCardType,
         },
       })

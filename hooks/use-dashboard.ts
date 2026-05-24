@@ -39,7 +39,12 @@ async function fetchDashboard(vaultId?: string | null): Promise<DashboardData> {
   const params = vaultId ? { query: { vid: vaultId } } : {}
   const res = await client.api.dashboard.$get(params)
   const data = await res.json()
-  if (!data.success) return { stats: {} as DashboardStats, growth: [], recentActivity: [] }
+  if (!data.success) {
+    // Throw so React Query treats this as an error and `query.data` stays undefined,
+    // letting downstream `?? null` produce a clean "no stats" fallback instead of `{}`
+    // which is truthy and renders as "undefined%" in dashboard-left.tsx.
+    throw new Error((data as any).error || 'Failed to load dashboard')
+  }
   return {
     stats: data.stats,
     growth: data.growth ?? [],

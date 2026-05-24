@@ -4,6 +4,7 @@ import React from 'react'
 import { useCognition } from '@/hooks/use-cognition'
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAppStore } from '@/stores/mode-store'
+import type { Mode } from '@/stores/mode-store'
 
 export default function LearningProfile() {
   const { openModal } = useAppStore()
@@ -139,9 +140,9 @@ export default function LearningProfile() {
           <div className="space-y-1">
             {nextActions.map(action => (
               <div key={action} className="mono text-white/60 hover:text-white cursor-pointer transition-colors" style={{ fontSize: 'var(--f10)' }} onClick={() => {
-                // 根据 action 文本智能匹配目标模式
+                // 根据 action 文本智能匹配目标模式（仅在已知模式集合内切换）
                 const actionLower = action.toLowerCase()
-                let targetMode = 'forge'
+                let targetMode: Mode = 'forge'
                 if (actionLower.includes('fleeting') || actionLower.includes('卡片') || actionLower.includes('permanent')) {
                   targetMode = 'forge'
                 } else if (actionLower.includes('学习') || actionLower.includes('路径') || actionLower.includes('path')) {
@@ -149,7 +150,7 @@ export default function LearningProfile() {
                 } else if (actionLower.includes('探索') || actionLower.includes('星系') || actionLower.includes('图谱')) {
                   targetMode = 'galaxy'
                 }
-                useAppStore.getState().setMode(targetMode as any)
+                useAppStore.getState().setMode(targetMode)
               }}>{action}</div>
             ))}
           </div>

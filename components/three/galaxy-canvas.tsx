@@ -1171,6 +1171,16 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const orbitTilt = 0.2 + c * 0.25;
       const orbitTwist = c * 1.2;
       const startAngle = Math.random() * Math.PI * 2;
+      // Pre-roll per-tail-vertex random offsets ONCE at creation. Calling
+      // Math.random() inside the animation loop every frame produced visible
+      // jitter (each frame re-sampled R and Y offsets). Stash them on
+      // userData so the loop reads stable values.
+      const rOffsets = new Float32Array(tailLen);
+      const yOffsets = new Float32Array(tailLen);
+      for (let i = 0; i < tailLen; i++) {
+        rOffsets[i] = (Math.random() - 0.5) * 4;
+        yOffsets[i] = (Math.random() - 0.5) * 3;
+      }
       for (let i = 0; i < tailLen; i++) {
         const a = startAngle + (i / tailLen) * Math.PI * 0.8;
         const rr = orbitR + (Math.random() - 0.5) * 8;
@@ -1211,6 +1221,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         speed: 0.0003 + c * 0.0001,
         isComet: true,
         tailLen,
+        rOffsets,
+        yOffsets,
       };
       scene.add(comet);
     }
@@ -1338,9 +1350,12 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
             .array as Float32Array;
           for (let i = 0; i < d.tailLen; i++) {
             const a = d.startAngle + (i / d.tailLen) * Math.PI * 0.8;
-            const rr = d.orbitR + (Math.random() - 0.5) * 4;
+            // Use stable per-vertex offsets sampled at comet-creation time
+            // instead of resampling Math.random() each frame (which produced
+            // jitter in the tail).
+            const rr = d.orbitR + (d.rOffsets ? d.rOffsets[i] : 0);
             let x = Math.cos(a) * rr;
-            let y = (Math.random() - 0.5) * 3;
+            let y = d.yOffsets ? d.yOffsets[i] : 0;
             let z = Math.sin(a) * rr;
             const cosT = Math.cos(d.orbitTilt),
               sinT = Math.sin(d.orbitTilt);
@@ -1530,16 +1545,19 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
   }, [vaultId, nodes.length > 0]);
 
-  // --- Phase 2: Vault switch — rebuild when new vault data actually arrives ---
-  // (vaultId changes before data, so we wait for nodes[0]?.id to differ)
+  // --- Phase 2: Vault switch — rebuild when vaultId changes after initial build.
+  // Previously this keyed off `nodes[0]?.id`/`clusters[0]?.id`, which means
+  // switching to an empty vault left both undefined and the effect never fired,
+  // so the old scene stayed on screen. Keying on `vaultId` guarantees a rebuild
+  // whether the new vault has data or not. The Phase 1 effect handles the very
+  // first build; this one only fires on subsequent vault switches.
   useEffect(() => {
     if (!didBuild.current || !vaultId) return;
-    if (nodes.length === 0) return;
     const buildFn = (window as unknown as Record<string, unknown>).__buildGalaxyScene;
     if (typeof buildFn === 'function') {
       (buildFn as any)(nodes, edges, clusters, vaultId);
     }
-  }, [clusters[0]?.id, nodes[0]?.id]);
+  }, [vaultId]);
 
   // --- Phase 3: Rebuild learning path when learning path steps data changes ---
   useEffect(() => {
