@@ -216,6 +216,7 @@ export default function Home() {
         json: {
           path: `${newCardTitle.trim()}.md`,
           content: `# ${newCardTitle.trim()}\n\n${newCardContent}`,
+          type: newCardType,
         },
       })
       const data = await res.json()
@@ -351,8 +352,13 @@ export default function Home() {
                               key={i}
                               className="p-3 bg-white/5 rounded-lg border border-white/5 cursor-pointer hover:bg-white/8 transition-colors"
                               onClick={() => {
-                                // Find matching node in galaxy and select it
-                                const node = galaxyData?.nodes.find(n => n.title === r.title || r.path.includes(n.title ?? ''))
+                                // Find matching node in galaxy and select it (case-insensitive)
+                                const node = galaxyData?.nodes.find(n => {
+                                  const nodeTitle = (n.title ?? '').toLowerCase().trim()
+                                  const resultTitle = (r.title ?? '').toLowerCase().trim()
+                                  const resultPath = (r.path ?? '').toLowerCase()
+                                  return nodeTitle === resultTitle || resultPath.includes(nodeTitle)
+                                })
                                 if (node) {
                                   setSelectedNode({ id: node.id, title: node.title, type: node.type })
                                   useAppStore.getState().setMode('forge')

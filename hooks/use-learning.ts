@@ -30,19 +30,21 @@ export interface LearningPathsData {
   activeStep: number
 }
 
-async function fetchLearningPaths(vaultId?: string | null): Promise<LearningPathsData> {
-  const params = vaultId ? { query: { vid: vaultId } } : {}
-  const res = await client.api.learning.paths.$get(params)
+async function fetchLearningPaths(vaultId?: string | null, topic?: string): Promise<LearningPathsData> {
+  const params: Record<string, string> = {}
+  if (vaultId) params.vid = vaultId
+  if (topic) params.topic = topic
+  const res = await client.api.learning.paths.$get({ query: params })
   const data = await res.json()
   if (!data.success) return { paths: [], activePath: null, activeStep: 0 }
   return { paths: data.paths, activePath: data.activePath, activeStep: data.activeStep }
 }
 
-export function useLearningPaths() {
+export function useLearningPaths(topic?: string) {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const query = useQuery({
-    queryKey: ['learning-paths', currentVaultId],
-    queryFn: () => fetchLearningPaths(currentVaultId),
+    queryKey: ['learning-paths', currentVaultId, topic],
+    queryFn: () => fetchLearningPaths(currentVaultId, topic),
     enabled: !!currentVaultId,
   })
   return {

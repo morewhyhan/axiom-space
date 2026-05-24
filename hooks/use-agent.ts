@@ -33,6 +33,8 @@ export function useAgent() {
           ? 'http://localhost:3000'
           : (process.env.NEXT_PUBLIC_APP_URL || '')
 
+      // 使用原生 fetch 因为 SSE 流式响应需要直接读取 ReadableStream，
+      // ky 的 JSON 解析会破坏 SSE 事件流
       const response = await fetch(`${baseUrl}/api/agent/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -42,7 +44,8 @@ export function useAgent() {
       })
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+        const err = await response.json().catch(() => ({ error: 'Agent request failed' }))
+        throw new Error(err.error || `HTTP ${response.status}`)
       }
 
       // Read SSE stream

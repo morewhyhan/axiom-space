@@ -40,7 +40,7 @@ export class LocalFSAdapter implements IFileStorage {
     }
   }
 
-  async writeFile(filePath: string, content: string): Promise<WriteResult> {
+  async writeFile(filePath: string, content: string, _cardType?: string): Promise<WriteResult> {
     try {
       const fullPath = this.resolvePath(filePath)
       // 确保父目录存在

@@ -59,6 +59,7 @@ app.get('/paths', async (c) => {
   if (!vault) return c.json({ success: true, paths: [], activePath: null, activeStep: 0 })
 
   const vid = vault.id
+  const topic = c.req.query('topic')?.trim().toLowerCase()
 
   const clusters = await prisma.cluster.findMany({
     where: { vaultId: vid },
@@ -71,13 +72,18 @@ app.get('/paths', async (c) => {
     orderBy: { position: 'asc' },
   })
 
+  // Filter clusters by topic if provided
+  const filteredClusters = topic
+    ? clusters.filter(cl => cl.name.toLowerCase().includes(topic))
+    : clusters
+
   const difficultyMap = (cardCount: number, permRatio: number) => {
     if (permRatio > 0.6) return '进阶'
     if (cardCount > 5) return '综合'
     return '基础'
   }
 
-  const paths = clusters.map(cl => {
+  const paths = filteredClusters.map(cl => {
     const cards = cl.cards
     const permCards = cards.filter(c => c.type === 'permanent')
     const permRatio = cards.length > 0 ? permCards.length / cards.length : 0
@@ -115,8 +121,8 @@ app.get('/paths', async (c) => {
   })
 
   // Also include a cross-domain path if there are multiple clusters
-  if (clusters.length >= 2) {
-    const allCards = clusters.flatMap(cl =>
+  if (filteredClusters.length >= 2) {
+    const allCards = filteredClusters.flatMap(cl =>
       cl.cards.map(card => ({
         ...card,
         clusterName: cl.name,

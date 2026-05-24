@@ -46,10 +46,14 @@ app.get('/nodes', async (c) => {
     nodes: cards.map((card) => ({
       id: card.id, title: card.title, type: card.type, clusterId: card.clusterId,
       clusterName: card.cluster?.name ?? null, clusterColor: card.cluster?.color ?? null,
-      tags: card.tags ? JSON.parse(card.tags) : [],
+      tags: card.tags ? safeParseTags(card.tags) : [],
     })),
   })
 })
+
+function safeParseTags(tags: string): string[] {
+  try { return JSON.parse(tags) } catch { return [] }
+}
 
 app.get('/edges', async (c) => {
   const userId = c.get('userId') as string

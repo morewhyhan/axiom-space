@@ -139,14 +139,16 @@ export default function LearningProfile() {
           <div className="space-y-1">
             {nextActions.map(action => (
               <div key={action} className="mono text-white/60 hover:text-white cursor-pointer transition-colors" style={{ fontSize: 'var(--f10)' }} onClick={() => {
-                // 导航到对应的模式
-                const modeMap: Record<string, string> = {
-                  'forge': 'forge',
-                  '学习': 'learn',
-                  'galaxy': 'galaxy',
-                  '探索': 'galaxy',
+                // 根据 action 文本智能匹配目标模式
+                const actionLower = action.toLowerCase()
+                let targetMode = 'forge'
+                if (actionLower.includes('fleeting') || actionLower.includes('卡片') || actionLower.includes('permanent')) {
+                  targetMode = 'forge'
+                } else if (actionLower.includes('学习') || actionLower.includes('路径') || actionLower.includes('path')) {
+                  targetMode = 'learn'
+                } else if (actionLower.includes('探索') || actionLower.includes('星系') || actionLower.includes('图谱')) {
+                  targetMode = 'galaxy'
                 }
-                const targetMode = modeMap[action] || 'forge'
                 useAppStore.getState().setMode(targetMode as any)
               }}>{action}</div>
             ))}

@@ -59,14 +59,15 @@ export class DbAdapter implements IFileStorage {
     }
   }
 
-  async writeFile(filePath: string, content: string): Promise<WriteResult> {
+  async writeFile(filePath: string, content: string, cardType?: string): Promise<WriteResult> {
     try {
       const vaultId = await this.ensureVaultId()
 
-      // 从路径推断 type
-      const type = filePath.startsWith('literature/') ? 'literature'
-        : filePath.startsWith('permanent/') ? 'permanent'
-        : 'fleeting'
+      // 从路径推断 type (如果没提供)
+      const type = cardType
+        ?? (filePath.startsWith('literature/') ? 'literature'
+          : filePath.startsWith('permanent/') ? 'permanent'
+          : 'fleeting')
 
       // 从路径提取 title
       const title = filePath.replace(/\.md$/, '').split('/').pop() || 'untitled'

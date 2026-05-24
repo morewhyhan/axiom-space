@@ -42,12 +42,13 @@ app.get('/read', async (c) => {
 app.post('/write', zValidator('json', z.object({
   path: z.string(),
   content: z.string(),
+  type: z.string().optional(),
 })), async (c) => {
   const userId = c.get('userId') as string
 
-  const { path, content } = c.req.valid('json')
+  const { path, content, type } = c.req.valid('json')
   const storage = getFileStorage(userId)
-  const result = await storage.writeFile(path, content)
+  const result = await storage.writeFile(path, content, type)
   return c.json(result)
 })
 

@@ -10,9 +10,10 @@ export default function LearnControls({ onGenerate }: { onGenerate?: (topic: str
   const [topic, setTopic] = useState('')
   const [material, setMaterial] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [generatedTopic, setGeneratedTopic] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null)
-  const { data, loading } = useLearningPaths()
+  const { data, loading } = useLearningPaths(generatedTopic || undefined)
   const queryClient = useQueryClient()
   const currentVaultId = useAppStore((s) => s.currentVaultId)
 
@@ -21,8 +22,9 @@ export default function LearnControls({ onGenerate }: { onGenerate?: (topic: str
   const handleGenerate = async () => {
     if (!topic.trim()) return
     setGenerating(true)
+    setGeneratedTopic(topic)
     try {
-      // 使学习路径缓存失效，强制从后端重新生成
+      // 使学习路径缓存失效，强制用 topic 参数从后端重新生成
       await queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
       // 切换到显示第一条路径
       const w = window as any

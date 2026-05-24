@@ -48,7 +48,7 @@ export interface IFileStorage {
   readFile(path: string): Promise<ReadResult>
 
   /** 写入文件内容（覆盖） */
-  writeFile(path: string, content: string): Promise<WriteResult>
+  writeFile(path: string, content: string, cardType?: string): Promise<WriteResult>
 
   /** 追加内容到文件 */
   appendFile?(path: string, content: string): Promise<WriteResult>
