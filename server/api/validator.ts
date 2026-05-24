@@ -62,7 +62,7 @@ export const zValidator = <
   schema: T,
   hook?: Hook<z.infer<T>, E, P, Target>,
 ): MiddlewareHandler<E, P, V> =>
-  // @ts-expect-error not typed well
+  // @ts-expect-error — Hono's zValidator types don't extend properly for generic error formatters
   validator(target, async (value, c) => {
     const result = await schema.safeParseAsync(value)
 

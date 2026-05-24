@@ -5,6 +5,8 @@ const prisma = new PrismaClient()
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+function randomPastDate(daysBack: number): Date { const d = new Date(); d.setDate(d.getDate() - Math.floor(Math.random() * daysBack)); d.setHours(Math.floor(Math.random() * 24), 0, 0, 0); return d; }
+
 function slugify(text: string): string {
   return text
     .replace(/[《》()（）,，：、\s]+/g, '')
@@ -594,14 +596,22 @@ async function main() {
   // ── Step 2: Create vault ──────────────────────────────────────────────────
   console.log('[2/5] Creating vault...')
 
-  const vault = await prisma.vault.upsert({
+  let vault = await prisma.vault.findFirst({
     where: { userId: user.id },
-    update: { name: 'CS408 Knowledge Graph' },
-    create: {
-      userId: user.id,
-      name: 'CS408 Knowledge Graph',
-    },
   })
+  if (vault) {
+    vault = await prisma.vault.update({
+      where: { id: vault.id },
+      data: { name: 'CS408 Knowledge Graph' },
+    })
+  } else {
+    vault = await prisma.vault.create({
+      data: {
+        userId: user.id,
+        name: 'CS408 Knowledge Graph',
+      },
+    })
+  }
   console.log(`  Vault: "${vault.name}" (id: ${vault.id})`)
 
   // ── Step 3: Create clusters ───────────────────────────────────────────────
@@ -677,6 +687,7 @@ async function main() {
           title: card.title,
           type: card.type,
           tags: JSON.stringify(card.tags),
+          createdAt: randomPastDate(30),
           clusterId,
         },
         create: {
@@ -687,6 +698,7 @@ async function main() {
           content: '',
           type: card.type,
           tags: JSON.stringify(card.tags),
+          createdAt: randomPastDate(30),
         },
       })
     })

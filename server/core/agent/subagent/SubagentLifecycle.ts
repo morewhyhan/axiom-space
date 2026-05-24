@@ -508,7 +508,7 @@ export class SubagentLifecycle {
       let loadUserProfile: any, saveUserProfile: any, createDefaultProfile: any, mergeProfileUpdate: any;
       try {
         // @ts-ignore — module may not exist; try/catch handles it
-        const mod = await import('@/learning/memory/profile-manager');
+        const mod = await import('@/server/core/learning/memory/profile-manager');
         loadUserProfile = mod.loadUserProfile;
         saveUserProfile = mod.saveUserProfile;
         createDefaultProfile = mod.createDefaultProfile;

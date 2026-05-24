@@ -24,7 +24,7 @@ model user {
 
   sessions        session[]
   accounts        account[]
-  vault           vault?
+  vaults          vault[]
   learningSessions learningSession[]
 }
 
@@ -78,7 +78,7 @@ model verification {
 
 model vault {
   id        String   @id @default(uuid())
-  userId    String   @unique
+  userId    String
   name      String   @default("My Vault")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -87,6 +87,8 @@ model vault {
   cards    card[]
   clusters cluster[]
   edges    edge[]
+
+  @@index([userId])
 }
 
 // 知识域/星团 — 对应 Galaxy 中的簇

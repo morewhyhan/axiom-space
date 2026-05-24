@@ -1,40 +1,65 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useDashboardStats } from '@/hooks/use-dashboard'
+import { useAppStore } from '@/stores/mode-store'
 
 export default function GalaxyControls() {
   const { stats, loading } = useDashboardStats()
-  const [charge, setCharge] = useState(-80)
-  const [dist, setDist] = useState(45)
-  const [bloom, setBloom] = useState(15)
-  const [glow, setGlow] = useState(10)
-  const [density, setDensity] = useState(80)
-  const [comet, setComet] = useState(10)
-  const [rotate, setRotate] = useState(true)
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+
+  const [autoRotate, setAutoRotate] = useState(true)
+  const [rotateSpeed, setRotateSpeed] = useState(0.2)
+  const [bloom, setBloom] = useState(2.5)
+  const [cometSpeed, setCometSpeed] = useState(1)
   const [milkyWay, setMilkyWay] = useState(true)
-  const [grid, setGrid] = useState(false)
-  const [flat, setFlat] = useState(false)
+  const [intEdges, setIntEdges] = useState(false)
+  const [extEdges, setExtEdges] = useState(false)
+  const [cometsVis, setCometsVis] = useState(true)
+  const [filterPerm, setFilterPerm] = useState(true)
+  const [filterFleet, setFilterFleet] = useState(true)
+  const [filterLit, setFilterLit] = useState(true)
+
+  useEffect(() => {
+    const init = () => {
+      const ar = (window as any).__getAutoRotate?.(); if (ar !== undefined) setAutoRotate(ar);
+      const sr = (window as any).__getRotateSpeed?.(); if (sr !== undefined) setRotateSpeed(sr);
+      const bl = (window as any).__getBloom?.(); if (bl !== undefined) setBloom(bl);
+      const cs = (window as any).__getCometSpeed?.(); if (cs !== undefined) setCometSpeed(cs);
+      const mw = (window as any).__getMilkyWay?.(); if (mw !== undefined) setMilkyWay(mw);
+    };
+    setTimeout(init, 800);
+  }, [])
+
+  const toggleAutoRotate = () => { const v = !autoRotate; setAutoRotate(v); (window as any).__setAutoRotate?.(v) }
+  const handleSpeed = (e: any) => { const v = parseFloat(e.target.value); setRotateSpeed(v); (window as any).__setRotateSpeed?.(v) }
+  const handleBloom = (e: any) => { const v = parseFloat(e.target.value); setBloom(v); (window as any).__setBloom?.(v) }
+  const handleComet = (e: any) => { const v = parseFloat(e.target.value); setCometSpeed(v); (window as any).__setCometSpeed?.(v) }
+  const toggleMilkyWay = () => { const v = !milkyWay; setMilkyWay(v); (window as any).__setMilkyWay?.(v) }
+  const toggleIntEdges = () => { const v = !intEdges; setIntEdges(v); (window as any).__setInternalEdgesVisible?.(v) }
+  const toggleCometsVis = () => { const v = !cometsVis; setCometsVis(v); (window as any).__setCometsVisible?.(v) }
+  const toggleExtEdges = () => { const v = !extEdges; setExtEdges(v); (window as any).__setExternalEdgesVisible?.(v) }
+  const toggleType = (type: string, state: boolean, setter: any) => { const v = !state; setter(v); (window as any).__setNodeTypeVisible?.(type, v) }
+  const resetView = () => { (window as any).__resetCameraView?.() }
 
   return (
     <aside className="side-slot visible galaxy-panel flex-col pointer-events-auto" style={{ width: 'var(--panel-sm)', justifyContent: 'space-between' }}>
       <span className="mono opacity-25 uppercase tracking-widest" style={{ fontSize: 'var(--f8)' }}>GALAXY_CONTROLS</span>
 
       <div>
-        <span className="mono opacity-20 uppercase block mb-2.5" style={{ fontSize: 'var(--f7)' }}>PHYSICS</span>
+        <span className="mono opacity-20 uppercase block mb-2.5" style={{ fontSize: 'var(--f7)' }}>ORBIT</span>
         <div className="space-y-3">
-          <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">CHARGE</span><span className="opacity-50">{charge}</span></div>
-            <input type="range" min="-200" max="-5" value={charge} className="phys-slider" onChange={e => setCharge(Number(e.target.value))} />
+          <div className="flex justify-between items-center">
+            <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>自动旋转</span>
+            <button className={`orbit-toggle ${autoRotate ? 'orbit-toggle-on' : ''}`} onClick={toggleAutoRotate}>
+              <span className={`orbit-toggle-dot ${autoRotate ? 'orbit-toggle-dot-on' : ''}`} />
+            </button>
           </div>
           <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">LINK DISTANCE</span><span className="opacity-50">{dist}</span></div>
-            <input type="range" min="5" max="100" value={dist} className="phys-slider" onChange={e => setDist(Number(e.target.value))} />
+            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">旋转速度</span><span className="opacity-50">{rotateSpeed.toFixed(1)}</span></div>
+            <input type="range" min="0" max="2" step="0.1" value={rotateSpeed} onChange={handleSpeed} className="orbit-slider" />
           </div>
-          <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">AUTO ROTATE</span></div>
-            <div className={`toggle-track ${rotate ? 'on' : ''}`} onClick={() => setRotate(!rotate)}><div className="toggle-knob"></div></div>
-          </div>
+          <button className="axiom-btn secondary w-full" style={{ fontSize: 'var(--f9)' }} onClick={resetView}>重置视角</button>
         </div>
       </div>
 
@@ -44,33 +69,57 @@ export default function GalaxyControls() {
         <span className="mono opacity-20 uppercase block mb-2.5" style={{ fontSize: 'var(--f7)' }}>VISUAL</span>
         <div className="space-y-3">
           <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">BLOOM</span><span className="opacity-50">{(bloom / 10).toFixed(1)}</span></div>
-            <input type="range" min="0" max="30" value={bloom} className="phys-slider" onChange={e => setBloom(Number(e.target.value))} />
+            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">BLOOM</span><span className="opacity-50">{bloom.toFixed(1)}</span></div>
+            <input type="range" min="0" max="2.5" step="0.1" value={bloom} onChange={handleBloom} className="orbit-slider" />
           </div>
           <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">GLOW SIZE</span><span className="opacity-50">{glow}</span></div>
-            <input type="range" min="2" max="20" value={glow} className="phys-slider" onChange={e => setGlow(Number(e.target.value))} />
+            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">COMET SPEED</span><span className="opacity-50">{cometSpeed.toFixed(1)}</span></div>
+            <input type="range" min="0" max="3" step="0.1" value={cometSpeed} onChange={handleComet} className="orbit-slider" />
           </div>
-          <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">NODE DENSITY</span><span className="opacity-50">{density}</span></div>
-            <input type="range" min="10" max="150" value={density} className="phys-slider" onChange={e => setDensity(Number(e.target.value))} />
+          <div className="flex justify-between items-center">
+            <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>彗星</span>
+            <button className={`orbit-toggle ${cometsVis ? 'orbit-toggle-on' : ''}`} onClick={toggleCometsVis}>
+              <span className={`orbit-toggle-dot ${cometsVis ? 'orbit-toggle-dot-on' : ''}`} />
+            </button>
           </div>
-          <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">COMET SPEED</span><span className="opacity-50">{(comet / 10).toFixed(1)}</span></div>
-            <input type="range" min="0" max="30" value={comet} className="phys-slider" onChange={e => setComet(Number(e.target.value))} />
+          <div className="flex justify-between items-center">
+            <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>银河带</span>
+            <button className={`orbit-toggle ${milkyWay ? 'orbit-toggle-on' : ''}`} onClick={toggleMilkyWay}>
+              <span className={`orbit-toggle-dot ${milkyWay ? 'orbit-toggle-dot-on' : ''}`} />
+            </button>
           </div>
-          <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">MILKY WAY</span></div>
-            <div className={`toggle-track ${milkyWay ? 'on' : ''}`} onClick={() => setMilkyWay(!milkyWay)}><div className="toggle-knob"></div></div>
+        </div>
+          <div className="flex justify-between items-center">
+            <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>内部连线</span>
+            <button className={`orbit-toggle ${intEdges ? 'orbit-toggle-on' : ''}`} onClick={toggleIntEdges}>
+              <span className={`orbit-toggle-dot ${intEdges ? 'orbit-toggle-dot-on' : ''}`} />
+            </button>
           </div>
-          <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">GRID</span></div>
-            <div className={`toggle-track ${grid ? 'on' : ''}`} onClick={() => setGrid(!grid)}><div className="toggle-knob"></div></div>
+      </div>
+          <div className="flex justify-between items-center">
+            <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>外部连线</span>
+            <button className={`orbit-toggle ${extEdges ? 'orbit-toggle-on' : ''}`} onClick={toggleExtEdges}>
+              <span className={`orbit-toggle-dot ${extEdges ? 'orbit-toggle-dot-on' : ''}`} />
+            </button>
           </div>
-          <div>
-            <div className="flex justify-between mono mb-1" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">FLAT LAYOUT</span></div>
-            <div className={`toggle-track ${flat ? 'on' : ''}`} onClick={() => setFlat(!flat)}><div className="toggle-knob"></div></div>
-          </div>
+
+      <div className="hud-line"></div>
+
+      <div>
+        <span className="mono opacity-20 uppercase block mb-2.5" style={{ fontSize: 'var(--f7)' }}>FILTER</span>
+        <div className="space-y-2">
+          <label className="flex items-center justify-between cursor-pointer" onClick={() => toggleType('permanent', filterPerm, setFilterPerm)}>
+            <span className="mono text-purple-400" style={{ fontSize: 'var(--f10)' }}>◆ 永久</span>
+            <button className={`orbit-toggle ${filterPerm ? 'orbit-toggle-on' : ''}`}><span className={`orbit-toggle-dot ${filterPerm ? 'orbit-toggle-dot-on' : ''}`} /></button>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer" onClick={() => toggleType('fleeting', filterFleet, setFilterFleet)}>
+            <span className="mono text-cyan-400" style={{ fontSize: 'var(--f10)' }}>◇ 灵感</span>
+            <button className={`orbit-toggle ${filterFleet ? 'orbit-toggle-on' : ''}`}><span className={`orbit-toggle-dot ${filterFleet ? 'orbit-toggle-dot-on' : ''}`} /></button>
+          </label>
+          <label className="flex items-center justify-between cursor-pointer" onClick={() => toggleType('literature', filterLit, setFilterLit)}>
+            <span className="mono text-pink-400" style={{ fontSize: 'var(--f10)' }}>○ 文献</span>
+            <button className={`orbit-toggle ${filterLit ? 'orbit-toggle-on' : ''}`}><span className={`orbit-toggle-dot ${filterLit ? 'orbit-toggle-dot-on' : ''}`} /></button>
+          </label>
         </div>
       </div>
 
@@ -79,7 +128,7 @@ export default function GalaxyControls() {
       <div className="grid grid-cols-3 gap-3">
         <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>CLUSTERS</span><div className="mono text-sm text-white font-bold mt-0.5">{loading ? '—' : stats?.clusters ?? 0}</div></div>
         <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>NODES</span><div className="mono text-sm text-white font-bold mt-0.5">{loading ? '—' : stats?.totalNodes ?? 0}</div></div>
-        <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>FPS</span><div className="mono text-sm text-white font-bold mt-0.5" id="fps-display">60</div></div>
+        <div><span className="mono opacity-30 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>FPS</span><div className="mono text-sm text-white font-bold mt-0.5" id="fps-display">—</div></div>
       </div>
     </aside>
   )

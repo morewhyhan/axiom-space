@@ -56,3 +56,7 @@ export type {
 export { SessionService } from './pipeline/SessionService';
 export { MemoryService } from './pipeline/MemoryService';
 export { PromptService } from './pipeline/PromptService';
+
+// 错误分类
+export { AgentErrorClassifier } from './errors';
+export type { ClassifiedApiError } from './errors';

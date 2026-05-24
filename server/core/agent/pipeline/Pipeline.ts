@@ -25,8 +25,7 @@ import { toolRegistry } from '../tools';
 import { InterruptError } from '@/server/core/learning/core/interrupt';
 import { LogCategory } from '../audit/AuditLogger';
 import { getVaultPath } from '@/lib/platform';
-// TODO
-// import { null as any } from '@/server/core/learning/memory/capability-tracking-provider'
+// (Capability tracking integrated via MemoryManager)
 import { MessageRole } from '@/types/learning';
 
 // ── Types ──
@@ -242,7 +241,7 @@ export class AgentPipeline {
       intentRoute.confidence >= INTENT_THRESHOLD
     ) {
       try {
-        this.services.learning.patternExtractor.inferUserResponse(
+        await this.services.learning.patternExtractor.inferUserResponse(
           '', // previousUserMessage is no longer tracked; PatternExtractor handles this internally
           userMessage,
           this.services.sessionId,

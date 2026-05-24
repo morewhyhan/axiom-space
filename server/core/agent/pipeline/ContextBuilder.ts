@@ -157,7 +157,7 @@ export class ContextBuilder {
         let loadUserProfile: any, createDefaultProfile: any;
         try {
           // @ts-ignore — module may not exist; try/catch handles it
-          const mod = await import('@/learning/memory/profile-manager');
+          const mod = await import('@/server/core/learning/memory/profile-manager');
           loadUserProfile = mod.loadUserProfile;
           createDefaultProfile = mod.createDefaultProfile;
         } catch {

@@ -1,7 +1,6 @@
 'use client'
 
-import { client } from '@/lib/api-client'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 
 interface AgentMessage {
   role: 'user' | 'assistant'
@@ -11,20 +10,125 @@ interface AgentMessage {
 export function useAgent() {
   const [messages, setMessages] = useState<AgentMessage[]>([])
   const [streaming, setStreaming] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const sendMessage = useCallback(async (text: string) => {
+    if (!text.trim()) return
+
     setStreaming(true)
+    setError(null)
+
+    // Add user message immediately
+    setMessages(prev => [...prev, { role: 'user', content: text }])
+
+    // Abort any previous request
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
     try {
-      const res = await (client as any).api.agent.chat.$post({ json: { message: text } })
-      const data = await res.json()
-      if (data.success) {
-        setMessages(prev => [...prev, { role: 'user', content: text }])
-        // TODO: handle reply from agent
+      const baseUrl =
+        process.env.NODE_ENV === 'development'
+          ? 'http://localhost:3000'
+          : (process.env.NEXT_PUBLIC_APP_URL || '')
+
+      const response = await fetch(`${baseUrl}/api/agent/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+        credentials: 'include',
+        signal: controller.signal,
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
       }
+
+      // Read SSE stream
+      const reader = response.body?.getReader()
+      if (!reader) throw new Error('No response body')
+
+      const decoder = new TextDecoder()
+      let assistantContent = ''
+      let buffer = ''
+
+      // Add placeholder assistant message
+      setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+
+        // Parse SSE events
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data:')) {
+            try {
+              const payload = JSON.parse(line.slice(5).trim())
+              if (payload.text) {
+                assistantContent += payload.text
+                setMessages(prev => {
+                  const updated = [...prev]
+                  updated[updated.length - 1] = {
+                    role: 'assistant',
+                    content: assistantContent,
+                  }
+                  return updated
+                })
+              }
+              if (payload.error) {
+                setError(payload.error)
+              }
+            } catch {
+              // Skip unparseable lines
+            }
+          }
+        }
+      }
+
+      // If no content was streamed, try non-streaming fallback
+      if (!assistantContent) {
+        setMessages(prev => {
+          const updated = [...prev]
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: '收到，但未能生成回复。请重试。',
+          }
+          return updated
+        })
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return
+      const errorMsg = err?.message || '网络连接异常，请稍后重试。'
+      setError(errorMsg)
+      setMessages(prev => [...prev, { role: 'assistant', content: errorMsg }])
     } finally {
       setStreaming(false)
     }
   }, [])
 
-  return { messages, streaming, sendMessage }
+  const clearMessages = useCallback(async () => {
+    // Clear on server too
+    try {
+      const baseUrl =
+        process.env.NODE_ENV === 'development'
+          ? 'http://localhost:3000'
+          : (process.env.NEXT_PUBLIC_APP_URL || '')
+      await fetch(`${baseUrl}/api/agent/sessions`, {
+        method: 'DELETE',
+        credentials: 'include',
+      })
+    } catch (e) {
+      console.warn('clearMessages failed:', e)
+    }
+    setMessages([])
+    setError(null)
+  }, [])
+
+  return { messages, streaming, error, sendMessage, clearMessages }
 }

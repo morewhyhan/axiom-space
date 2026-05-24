@@ -21,6 +21,7 @@ export class DbAdapter implements IFileStorage {
     }
     const vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
+      orderBy: { createdAt: 'asc' },
     })
     return vault?.id || null
   }
@@ -32,6 +33,7 @@ export class DbAdapter implements IFileStorage {
     }
     let vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
+      orderBy: { createdAt: 'asc' },
     })
     if (!vault) {
       vault = await prisma.vault.create({

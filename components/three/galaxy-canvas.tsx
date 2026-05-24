@@ -7,6 +7,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import gsap from 'gsap';
+import { useAppStore } from '@/stores/mode-store';
 
 export interface GalaxyNode {
   id: string
@@ -39,12 +40,13 @@ export interface GalaxyCanvasHandle {
 }
 
 interface GalaxyCanvasProps {
+  vaultId?: string | null
   nodes?: GalaxyNode[]
   edges?: GalaxyEdge[]
   clusters?: GalaxyCluster[]
 }
 
-const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function GalaxyCanvas({ nodes = [], edges = [], clusters = [] }: GalaxyCanvasProps, ref) {
+const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function GalaxyCanvas({ nodes = [], edges = [], clusters = [], vaultId = null }: GalaxyCanvasProps, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Three.js object refs so cleanup can access them without stale closures
@@ -141,6 +143,88 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       flowOffset: 0,
     };
 
+    // --- HTML Label Overlay (avoids Three.js bloom/fog issues) ---
+    const labelOverlay = document.createElement('div');
+    labelOverlay.id = 'galaxy-label-overlay';
+    labelOverlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;overflow:hidden;';
+    containerRef.current!.appendChild(labelOverlay);
+
+    // Cluster labels (persistent, always visible)
+    const clusterLabelData: { name: string; color: number; position: THREE.Vector3 }[] = [];
+
+    function addClusterLabel(name: string, color: number, pos: THREE.Vector3) {
+      clusterLabelData.push({ name, color, position: pos.clone() });
+    }
+
+    // Node labels (temporary, cleared on click)
+    let nodeLabelItems: { text: string; position: THREE.Vector3; isFocused: boolean }[] = [];
+
+    function setNodeLabelsFromNode(focusedNode: THREE.Group): void {
+      nodeLabelItems = [];
+      const shown = new Set<THREE.Group>();
+      // Focused node — skip if sun (cluster name already shown persistently)
+      const isSun = focusedNode.userData.isSun === true;
+      if (!isSun) {
+        const fName: string = focusedNode.userData.name || '';
+        if (fName) {
+          nodeLabelItems.push({ text: fName, position: focusedNode.position.clone(), isFocused: true });
+          shown.add(focusedNode);
+        }
+      }
+      // Neighbors
+      const neighbors = adjMap.get(focusedNode);
+      if (neighbors) {
+        neighbors.forEach((n) => {
+          if (!shown.has(n) && !n.userData.isSun) {
+            shown.add(n);
+            const nName: string = n.userData.name || '';
+            if (nName) nodeLabelItems.push({ text: nName, position: n.position.clone(), isFocused: false });
+          }
+        });
+      }
+    }
+
+    function clearNodeLabels(): void {
+      nodeLabelItems = [];
+    }
+
+    function renderLabels(): void {
+      if (!labelOverlay.parentNode) return;
+      // Use document fragment to batch DOM operations
+      const frag = document.createDocumentFragment();
+      const halfW = window.innerWidth / 2;
+      const halfH = window.innerHeight / 2;
+
+      // Render cluster labels
+      for (const cl of clusterLabelData) {
+        const v = cl.position.clone().project(camera);
+        if (v.z > 1) continue;
+        const x = v.x * halfW + halfW;
+        const y = -(v.y * halfH) + halfH;
+        const div = document.createElement('div');
+        div.textContent = cl.name;
+        div.style.cssText = `position:absolute;left:${x}px;top:${y}px;transform:translate(-50%,-100%);padding:1px 8px;border-radius:4px;font-family:"Noto Sans SC","JetBrains Mono",sans-serif;font-weight:700;font-size:15px;color:rgba(255,255,255,0.3);background:rgba(0,0,0,0.25);white-space:nowrap;pointer-events:none;user-select:none;letter-spacing:0.15em;text-transform:uppercase;`;
+        frag.appendChild(div);
+      }
+
+      // Render node labels (clicked node + neighbors)
+      for (const nl of nodeLabelItems) {
+        const v = nl.position.clone().project(camera);
+        if (v.z > 1) continue;
+        const x = v.x * halfW + halfW;
+        const y = -(v.y * halfH) + halfH;
+        const div = document.createElement('div');
+        div.textContent = nl.text;
+        const top = y - (nl.isFocused ? 28 : 20);
+        div.style.cssText = `position:absolute;left:${x}px;top:${top}px;transform:translateX(-50%);padding:2px 8px;border-radius:3px;font-family:"Noto Sans SC","JetBrains Mono",sans-serif;font-weight:${nl.isFocused ? '700' : '400'};font-size:${nl.isFocused ? '15px' : '12px'};color:rgba(255,255,255,${nl.isFocused ? '0.9' : '0.6'});background:rgba(0,0,0,0.35);white-space:nowrap;pointer-events:none;user-select:none;`;
+        frag.appendChild(div);
+      }
+
+      // Replace overlay content
+      labelOverlay.innerHTML = '';
+      labelOverlay.appendChild(frag);
+    }
+
     // Store refs for cleanup
     mutableState.current.allNodes = allNodes;
     mutableState.current.allLinks = allLinks;
@@ -191,6 +275,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false })
       );
     }
+
 
     function createGlowNode(
       color: number,
@@ -286,7 +371,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
-    function createCore(): void {
+    function createCore(name: string): void {
       const core = createGlowNode(0xffffff, 8, 'CENTRAL_INTELLIGENCE');
       nodesGroup.add(core);
     }
@@ -385,10 +470,12 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
 
       if (node.userData.isSun) {
+        currentClusterId = node.userData.clusterId;
         const cid = node.userData.clusterId;
         const mySubNodes = clusterNodes.get(cid) || [];
         const myClusterSet = new Set<THREE.Group>([node, ...mySubNodes]);
         allNodes.forEach((n) => {
+          if (!n.visible) return;
           const inCluster = myClusterSet.has(n);
           gsap.to(n.scale, {
             x: inCluster ? 1 : 0.15,
@@ -399,6 +486,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
           if (inCluster && n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
         });
         allLinks.forEach((l) => {
+          if (l.userData._filtered) return;
           const s = l.userData.source as THREE.Group;
           const t = l.userData.target as THREE.Group;
           const inCluster = myClusterSet.has(s) && myClusterSet.has(t);
@@ -422,8 +510,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         });
       } else {
         const neighbors = adjMap.get(node) || new Set<THREE.Group>();
-        const visibleSet = new Set<THREE.Group>([node, ...neighbors]);
+        // Only include visible neighbors
+        const visibleNeighbors = new Set(Array.from(neighbors).filter(n => n.visible));
+        const visibleSet = new Set<THREE.Group>([node, ...visibleNeighbors]);
         allNodes.forEach((n) => {
+          if (!n.visible) return;
           const isVisible = visibleSet.has(n);
           gsap.to(n.scale, {
             x: isVisible ? (n === node ? 1.5 : 1) : 0.1,
@@ -435,6 +526,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
             setNodeColor(n, n.userData.trueColor);
         });
         allLinks.forEach((l) => {
+          if (l.userData._filtered) return;
           const s = l.userData.source as THREE.Group;
           const t = l.userData.target as THREE.Group;
           const isRelated = s === node || t === node;
@@ -457,9 +549,22 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
           }
         });
       }
+      // Show card name labels for focused node + neighbors
+      setNodeLabelsFromNode(node);
+
+      // Propagate selected node to React store for editing
+      if (node.userData && node.userData.id) {
+        useAppStore.getState().setSelectedNode({
+          id: node.userData.id as string,
+          title: (node.userData.name as string) || '',
+          type: (node.userData.type as string) || 'fleeting',
+        });
+        useAppStore.getState().setMode('forge');
+      }
     }
 
     // --- Learning Path ---
+    // TODO: not currently in use — will be wired to learning path data in future
     function buildDemoLearningPath(): void {
       const steps: { node: THREE.Group; stepIndex: number }[] = [];
       const c0 = clusterNodes.get(0) || [];
@@ -476,6 +581,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       learningPath.steps = steps;
     }
 
+    // TODO: not currently in use — will be wired to learning path data in future
     function createLearningPath(): void {
       if (learningPath.steps.length < 2) return;
       const points = learningPath.steps.map((s) => s.node.position.clone());
@@ -536,16 +642,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
 
     function createClustersFromData(clustersData: GalaxyCluster[], nodesData: GalaxyNode[], edgesData: GalaxyEdge[]): void {
+      // Skip if no real data — wait for async fetch
+      if (clustersData.length === 0 && nodesData.length === 0) return;
+
       const CLUSTER_COLORS = [0xa855f7, 0x22d3ee, 0xf472b6, 0x818cf8, 0x34d399, 0xfbbf24];
       const mixColors = [0xa855f7, 0x22d3ee, 0xf472b6];
-
-      if (clustersData.length === 0) {
-        // Fallback: generate random clusters like original createClusters
-        createClusters();
-        buildDemoLearningPath();
-        createLearningPath();
-        return;
-      }
 
       // Build a lookup from node title to node data for edge matching
       const nodeTitleToGroup = new Map<string, THREE.Group>();
@@ -568,6 +669,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         nodesGroup.add(sun);
         clusterSuns.set(i, sun);
 
+        // Cluster name label — always visible above the sun
+        const clusterPos = new THREE.Vector3(cx, cy, cz);
+        addClusterLabel(cluster.name, color, clusterPos);
+
         // Link sun to center
         const core = allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE')!;
         createCurve(core, sun, color, 0.1);
@@ -588,19 +693,19 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
           const baseSize = cardNode.type === 'permanent' ? 3.5 : cardNode.type === 'literature' ? 3 : 2.5;
           const nodeSize = baseSize * sizeFactor;
-          const trueColor = mixColors[Math.floor(Math.random() * 3)];
-          const node = createGlowNode(color, nodeSize, cardNode.title);
+          const nodeTypeColor = cardNode.type === 'permanent' ? 0xa855f7 : cardNode.type === 'literature' ? 0xf472b6 : 0x22d3ee;
+          const node = createGlowNode(nodeTypeColor, nodeSize, cardNode.title);
           node.position.set(x, y, z);
           node.userData.id = cardNode.id;
           node.userData.clusterId = i;
           node.userData.clusterColor = color;
           node.userData.type = cardNode.type;
-          node.userData.trueColor = trueColor;
+          node.userData.trueColor = nodeTypeColor;
           nodesGroup.add(node);
           subNodes.push(node);
 
           // Sun-to-node edge (like original: always visible)
-          createCurve(sun, node, color, 0.06, false, trueColor);
+          createCurve(sun, node, color, 0.06, false, nodeTypeColor);
 
           // Store title-to-group mapping for edge lookup
           if (cardNode.title) nodeTitleToGroup.set(cardNode.title, node);
@@ -615,7 +720,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
           for (let k = 0; k < connCount; k++) {
             const targetIdx = Math.floor(Math.random() * subNodes.length);
             if (targetIdx !== j) {
-              const linkColor = mixColors[Math.floor(Math.random() * 3)];
+              const linkColor = subNodes[j].userData.trueColor || color;
               createCurve(subNodes[j], subNodes[targetIdx], color, 0, true, linkColor);
             }
           }
@@ -623,12 +728,18 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
 
       // Create edges from real data (concept-to-concept connections)
+      // Same-cluster edges are internal (hidden by default, shown on cluster focus)
       edgesData.forEach(edge => {
         const sourceNode = allNodes.find(n => n.userData.id === edge.sourceId);
         const targetNode = allNodes.find(n => n.userData.id === edge.targetId);
         if (sourceNode && targetNode) {
           const edgeColor = sourceNode.userData.trueColor || sourceNode.userData.clusterColor || 0xffffff;
-          createCurve(sourceNode, targetNode, edgeColor, 0.06, false, edgeColor);
+          const sameCluster = sourceNode.userData.clusterId !== undefined && sourceNode.userData.clusterId !== null
+            && sourceNode.userData.clusterId === targetNode.userData.clusterId;
+          // Cross-cluster edges always visible; same-cluster edges hidden until focused
+          const isCrossCluster = sourceNode.userData.clusterId !== targetNode.userData.clusterId;
+          createCurve(sourceNode, targetNode, edgeColor, 0.06, !isCrossCluster, edgeColor);
+          if (isCrossCluster) { const lastLink = allLinks[allLinks.length - 1]; if (lastLink) lastLink.userData.isExternal = true; lastLink.visible = false; }
         }
       });
 
@@ -640,10 +751,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         const x = Math.cos(angle) * radius;
         const y = (Math.random() - 0.5) * 40;
         const z = Math.sin(angle) * radius;
-        const node = createGlowNode(0xffffff, 2, cardNode.title);
+        const utc = cardNode.type === 'permanent' ? 0xa855f7 : cardNode.type === 'literature' ? 0xf472b6 : 0x22d3ee;
+        const node = createGlowNode(utc, 2, cardNode.title);
         node.position.set(x, y, z);
         node.userData.id = cardNode.id;
-        node.userData.trueColor = 0xffffff;
+        node.userData.trueColor = utc;
         nodesGroup.add(node);
       });
     }
@@ -651,6 +763,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     function resetCameraView(): void {
       const resetBtn = document.getElementById('reset-view-btn');
       if (resetBtn) resetBtn.classList.remove('visible');
+      clearNodeLabels();
       gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.2 });
       gsap.to(camera.position, {
         x: 700,
@@ -661,8 +774,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       allNodes.forEach((n) => {
         gsap.to(n.scale, { x: 1, y: 1, z: 1, duration: 0.5 });
         if (n.userData.clusterColor) setNodeColor(n, n.userData.clusterColor);
+        // Reapply type visibility filter
+        const t = n.userData.type as string;
+        if (t && typeVisible[t] !== undefined) n.visible = typeVisible[t];
       });
+      reapplyFilters();
       allLinks.forEach((l) => {
+        if (l.userData._filtered) return;
         if (l.userData.isInternal) {
           l.visible = false;
         } else {
@@ -686,6 +804,152 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       };
     (window as unknown as Record<string, unknown>).__isLearningPathVisible =
       () => learningPath.visible;
+    (window as unknown as Record<string, unknown>).__setAutoRotate =
+      (on: boolean) => { controls.autoRotate = on; };
+    (window as unknown as Record<string, unknown>).__getAutoRotate =
+      () => controls.autoRotate;
+    (window as unknown as Record<string, unknown>).__setRotateSpeed =
+      (s: number) => { controls.autoRotateSpeed = s; };
+    (window as unknown as Record<string, unknown>).__getRotateSpeed =
+      () => controls.autoRotateSpeed;
+    (window as unknown as Record<string, unknown>).__setBloom =
+      (v: number) => { if (bloomPass) bloomPass.strength = v; };
+    (window as unknown as Record<string, unknown>).__getBloom =
+      () => bloomPass?.strength ?? 1.1;
+    (window as unknown as Record<string, unknown>).__setMilkyWay =
+      (v: boolean) => { if (milkyWay) milkyWay.visible = v; };
+    (window as unknown as Record<string, unknown>).__getMilkyWay =
+      () => milkyWay?.visible ?? true;
+    (window as unknown as Record<string, unknown>).__setCometSpeed =
+      (v: number) => { cometSpeedMultiplier = Math.max(0, Math.min(3, v)); };
+    (window as unknown as Record<string, unknown>).__getCometSpeed =
+      () => cometSpeedMultiplier;
+    (window as unknown as Record<string, unknown>).__setCometsVisible =
+      (v: boolean) => { scene.children.forEach(c => { if (c.userData && c.userData.isComet) c.visible = v; }); };
+    (window as unknown as Record<string, unknown>).__getCometsVisible =
+      () => { const c = scene.children.find(c => c.userData && c.userData.isComet); return c ? c.visible !== false : true; };
+    const reapplyFilters = () => {
+        allNodes.forEach(n => {
+          const t = n.userData.type as string;
+          if (t && typeVisible[t] !== undefined) n.visible = typeVisible[t];
+        });
+        refreshLinksAndLabels();
+      };
+    const refreshLinksAndLabels = () => {
+      // Memory-based: save original visibility before hiding, restore when unhiding
+      allLinks.forEach(l => {
+        const s = l.userData.source as THREE.Group;
+        const t = l.userData.target as THREE.Group;
+        if (!s.visible || !t.visible) {
+          // Link should be hidden by filter — save its current state first
+          if (!l.userData._filtered) {
+            l.userData._filtered = true;
+            l.userData._wasVisible = l.visible;
+          }
+          l.visible = false;
+        } else if (l.userData._filtered) {
+          // Both endpoints visible again — restore previous visibility
+          if (l.userData._wasVisible !== undefined) l.visible = l.userData._wasVisible;
+          l.userData._filtered = false;
+        }
+      });
+    };
+    (window as unknown as Record<string, unknown>).__setNodeTypeVisible =
+      (type: string, visible: boolean) => {
+        typeVisible[type] = visible;
+        allNodes.forEach(n => {
+          if (n.userData.type === type) n.visible = visible;
+        });
+        refreshLinksAndLabels();
+        clearNodeLabels();
+      };
+    (window as unknown as Record<string, unknown>).__getTypeVisible =
+      (type: string) => {
+        const node = allNodes.find(n => n.userData.type === type);
+        return node ? node.visible !== false : true;
+      };
+    (window as unknown as Record<string, unknown>).__setExternalEdgesVisible =
+      (v: boolean) => {
+        allLinks.forEach(l => {
+          if (l.userData.isExternal && !l.userData._filtered) {
+            l.visible = v;
+          }
+        });
+      };
+    (window as unknown as Record<string, unknown>).__setInternalEdgesVisible =
+      (v: boolean) => {
+        allLinks.forEach(l => {
+          if (l.userData.isInternal && !l.userData._filtered) {
+            // Only toggle edges that are internal by default (same-cluster)
+            l.visible = v && (!l.userData._wasVisible === false || true);
+          }
+        });
+      };
+    (window as unknown as Record<string, unknown>).__setAllNodesVisible =
+      (v: boolean) => {
+        allNodes.forEach(n => { n.visible = v; });
+        refreshLinksAndLabels();
+        clearNodeLabels();
+      };
+
+    // ── FOCUS mode functions ──
+    (window as unknown as Record<string, unknown>).__focusOverview = () => {
+      allNodes.forEach(n => { n.visible = true; n.scale.set(1, 1, 1); });
+      allLinks.forEach(l => {
+        if (!l.userData._filtered) {
+          if (l.userData.isInternal) l.visible = false;
+          else l.visible = true;
+        }
+      });
+      clearNodeLabels();
+    };
+    (window as unknown as Record<string, unknown>).__focusByCluster = () => {
+      if (currentClusterId === null) return;
+      allNodes.forEach(n => {
+        if (n.userData.clusterId === currentClusterId || n.userData.isSun) {
+          n.visible = true;
+          gsap.to(n.scale, { x: 1, y: 1, z: 1, duration: 0.5 });
+        } else {
+          gsap.to(n.scale, { x: 0.15, y: 0.15, z: 0.15, duration: 0.5 });
+        }
+      });
+      refreshLinksAndLabels();
+      clearNodeLabels();
+    };
+    (window as unknown as Record<string, unknown>).__focusZenMode = () => {
+      if (currentClusterId === null) return;
+      allNodes.forEach(n => {
+        n.visible = n.userData.clusterId === currentClusterId || n.userData.isSun;
+      });
+      allLinks.forEach(l => {
+        const s = l.userData.source as THREE.Group;
+        const t = l.userData.target as THREE.Group;
+        l.visible = s.visible && t.visible && !l.userData._filtered;
+      });
+      clearNodeLabels();
+    };
+    (window as unknown as Record<string, unknown>).__showOrphansOnly = () => {
+      allNodes.forEach(n => {
+        if (n.userData.isSun) { n.visible = true; return; }
+        const neighbors = adjMap.get(n);
+        n.visible = !neighbors || neighbors.size === 0;
+      });
+      refreshLinksAndLabels();
+    };
+    (window as unknown as Record<string, unknown>).__showAllNodes = () => {
+      allNodes.forEach(n => { n.visible = true; });
+      refreshLinksAndLabels();
+    };
+    (window as unknown as Record<string, unknown>).__focusRecent = () => {
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      allNodes.forEach(n => {
+        if (n.userData.createdAt) {
+          n.visible = new Date(n.userData.createdAt).getTime() > weekAgo;
+        }
+      });
+      refreshLinksAndLabels();
+      clearNodeLabels();
+    };
 
     // --- Init Three.js ---
 
@@ -700,7 +964,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ReinhardToneMapping;
     containerRef.current.appendChild(renderer.domElement);
 
@@ -713,7 +977,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       0.85
     );
     bloomPass.threshold = 0.08;
-    bloomPass.strength = 1.1;
+    bloomPass.strength = 2.5;
     bloomPass.radius = 0.6;
     composer.addPass(bloomPass);
 
@@ -897,12 +1161,62 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     linksGroup = new THREE.Group();
     scene.add(nodesGroup);
     scene.add(linksGroup);
+    // Labels are now HTML overlay, not Three.js sprites
 
-    createCore();
+    createCore('CENTRAL_INTELLIGENCE');
 
-    // Build from data props or fallback to demo clusters
-    const { nodes: dataNodes, edges: dataEdges, clusters: dataClusters } = dataRef.current;
-    createClustersFromData(dataClusters, dataNodes, dataEdges);
+    // --- Deferred data-driven scene builder ---
+    // Waits for real data to arrive via async API, then builds nodes/edges/clusters.
+    // Never shows demo/fallback data.
+    let sceneDataRendered = false;
+    let lastVaultId: string | null = null;
+    let currentClusterId: number | null = null;
+    const typeVisible: Record<string, boolean> = {};
+    (window as unknown as Record<string, unknown>).__buildGalaxyScene = (
+      n: GalaxyNode[],
+      e: GalaxyEdge[],
+      c: GalaxyCluster[],
+      vid?: string | null
+    ) => {
+      if (sceneDataRendered && vid === lastVaultId) return;
+      if (n.length === 0 && c.length === 0) return;
+
+      // Clear any previous nodes/edges (nodesGroup keeps background scene clean)
+      while (nodesGroup.children.length > 0) {
+        const child = nodesGroup.children[0];
+        if ((child as THREE.Mesh).geometry) (child as THREE.Mesh).geometry.dispose();
+        nodesGroup.remove(child);
+      }
+      while (linksGroup.children.length > 0) {
+        const child = linksGroup.children[0];
+        if ((child as THREE.Line).geometry) (child as THREE.Line).geometry.dispose();
+        linksGroup.remove(child);
+      }
+      allNodes.length = 0;
+      allLinks.length = 0;
+      // Reset filter state for new vault
+      Object.keys(typeVisible).forEach(k => delete typeVisible[k]);
+      adjMap.clear();
+      clusterNodes.clear();
+      clusterSuns.clear();
+      clusterLabelData.length = 0;
+      nodeLabelItems.length = 0;
+      clearNodeLabels();
+
+      const storeVaults = useAppStore.getState().vaults; const vaultName = storeVaults.find(v => v.id === vid)?.name || vid || `CENTRAL_INTELLIGENCE`;
+      createCore(vaultName);
+      createClustersFromData(c, n, e);
+      sceneDataRendered = true;
+      lastVaultId = vid || null;
+    };
+
+    // If data already available at mount time (fast fetch), render immediately
+    const { nodes: dn, edges: de, clusters: dc } = dataRef.current;
+    if (dc.length > 0 || dn.length > 0) {
+      // Look up vaultId from store for proper core naming
+      const initVid = useAppStore.getState().currentVaultId;
+      ((window as unknown as Record<string, unknown>).__buildGalaxyScene as (n: GalaxyNode[], e: GalaxyEdge[], c: GalaxyCluster[], vid?: string | null) => void)(dn, de, dc, initVid);
+    }
 
     // --- Event listeners ---
 
@@ -949,6 +1263,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       animationId = requestAnimationFrame(animate);
       controls.update();
       composer.render();
+      renderLabels();
       nodesGroup.position.y = 0;
       linksGroup.position.y = 0;
 
@@ -1052,6 +1367,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       delete (window as unknown as Record<string, unknown>).__resetCameraView;
       delete (window as unknown as Record<string, unknown>).__toggleLearningPath;
       delete (window as unknown as Record<string, unknown>).__isLearningPathVisible;
+      delete (window as unknown as Record<string, unknown>).__buildGalaxyScene;
 
       // Dispose learning path
       learningPath.group.traverse((obj) => {
@@ -1063,6 +1379,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         }
       });
       scene.remove(learningPath.group);
+
+      // Clean up HTML label overlay
+      if (labelOverlay.parentNode) {
+        labelOverlay.parentNode.removeChild(labelOverlay);
+      }
 
       // Dispose all geometries and materials in nodesGroup
       nodesGroup.traverse((obj) => {
@@ -1128,8 +1449,34 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       adjMap.clear();
       clusterNodes.clear();
       clusterSuns.clear();
+      clusterLabelData.length = 0;
+      nodeLabelItems.length = 0;
+      clearNodeLabels();
     };
   }, []);
+
+  // --- Phase 1: Initial build when vault is first set + data arrives ---
+  const didBuild = useRef(false);
+  useEffect(() => {
+    if (didBuild.current) return;
+    if (!vaultId || nodes.length === 0) return;
+    didBuild.current = true;
+    const buildFn = (window as unknown as Record<string, unknown>).__buildGalaxyScene;
+    if (typeof buildFn === 'function') {
+      (buildFn as any)(nodes, edges, clusters, vaultId);
+    }
+  }, [vaultId, nodes.length > 0]);
+
+  // --- Phase 2: Vault switch — rebuild when new vault data actually arrives ---
+  // (vaultId changes before data, so we wait for nodes[0]?.id to differ)
+  useEffect(() => {
+    if (!didBuild.current || !vaultId) return;
+    if (nodes.length === 0) return;
+    const buildFn = (window as unknown as Record<string, unknown>).__buildGalaxyScene;
+    if (typeof buildFn === 'function') {
+      (buildFn as any)(nodes, edges, clusters, vaultId);
+    }
+  }, [clusters[0]?.id, nodes[0]?.id]);
 
   return (
     <div

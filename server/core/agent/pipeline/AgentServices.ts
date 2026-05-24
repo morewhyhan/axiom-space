@@ -21,20 +21,9 @@ import { EmptyResponseHandler } from '../feedback/EmptyResponseHandler';
 import { IterationBudget } from '@/server/core/learning/core/budget';
 import { ContextCompressor } from '@/server/core/learning/context/compressor';
 import { MemoryManager } from '@/server/core/learning/memory/manager';
-// TODO: Replace with server DB adapter
-// import { null } from '../../learning/storage/browser-db'
-// TODO: Replace with server implementation
-// import { null } from '../../learning/pattern'
-// TODO: Replace with server implementation
-// import { null } from '../../learning/skills'
-// TODO: Replace with server implementation
-// import { null } from '../../learning/memory/browser-memory-provider'
-// TODO: Replace with server implementation
-// import { null } from '@/server/core/learning/memory/capability-tracking-provider'
-// TODO: Replace with server implementation
-// import { null } from '@/server/core/learning/memory/knowledge-graph-provider'
-// TODO: Replace with server implementation
-// import { null } from '@/server/core/learning/memory/profile-auto-extraction'
+import { PrismaLearningAdapter } from '@/server/core/learning/storage/PrismaLearningAdapter';
+import { PatternExtractorAdapter } from '@/server/core/learning/pattern/PatternExtractorAdapter';
+// (Learning subsystems imported above — server-side implementations)
 import { GraphIntegrationManager } from '@/server/core/learning/graph/integration';
 import { LearningFacade } from '@/server/core/learning/LearningFacade';
 import { PRESET_MODELS, DEFAULT_MODEL } from '@/types/agent';
@@ -225,18 +214,21 @@ export function createAgentServices(config: AxiomAgentConfig = {}): AgentService
   }
 
   // ── 11. Database & learning subsystems ──────────────────
-  const database = (null as any)(
+  const database = new PrismaLearningAdapter(
     { dataPath: normalizedConfig.dataPath },
-    normalizedConfig.sessionResetPolicy,
   );
 
-  const patternExtractor = (null as any)({
+  const patternExtractor = new PatternExtractorAdapter({
     trajectoryPath: `${normalizedConfig.dataPath}/trajectories`,
   });
 
-  const learningSkillManager = (null as any)({
-    enablePersistence: true,
-  });
+  const learningSkillManager = {
+    // Stub: LearningSkillManager — tracks skill progression
+    // Full implementation deferred; non-fatal for agent operation
+    getSkillLevel: () => 0,
+    updateSkill: () => {},
+    getRecommendedSkills: () => [],
+  };
 
   const graphManager = new GraphIntegrationManager(database);
 

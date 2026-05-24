@@ -8,7 +8,11 @@ function makeQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        staleTime: 60 * 1000,
+        staleTime: 5 * 60 * 1000,      // 5分钟 — 星系/仪表盘数据不频繁变动
+        gcTime: 30 * 60 * 1000,         // 30分钟 — 缓存保留时间长
+        refetchOnWindowFocus: false,   // 切换标签页不重新请求
+        refetchOnReconnect: false,     // 网络重连不重新请求
+        retry: 1,                       // 失败只重试1次
       },
       dehydrate: {
         // include pending queries in dehydration

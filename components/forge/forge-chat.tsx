@@ -6,7 +6,7 @@ import { useAgent } from '@/hooks/use-agent'
 export default function ForgeChat() {
   const [inputValue, setInputValue] = useState('')
   const [showPalette, setShowPalette] = useState(false)
-  const { messages, streaming, sendMessage } = useAgent()
+  const { messages, streaming, sendMessage, clearMessages } = useAgent()
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Auto-scroll on new messages
@@ -14,11 +14,22 @@ export default function ForgeChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const handleSend = () => {
-    const text = inputValue.trim()
-    if (!text || streaming) return
-    sendMessage(text).then(() => setInputValue(''))
+  const handleSend = async (text?: string) => {
+    const msg = (text ?? inputValue).trim()
+    if (!msg || streaming) return
+    setInputValue('')
     setShowPalette(false)
+    await sendMessage(msg)
+  }
+
+  const handleCommand = (cmd: string) => {
+    if (cmd === '/clear') {
+      clearMessages()
+    } else if (cmd === '/new') {
+      clearMessages()
+    }
+    setShowPalette(false)
+    setInputValue('')
   }
 
   return (
@@ -28,15 +39,15 @@ export default function ForgeChat() {
         <div className="px-5 py-2.5 border-b border-white/5 flex items-center gap-2">
           <span className="w-1.5 h-1.5 rounded-full bg-pink-400"></span>
           <span className="mono opacity-30 uppercase tracking-widest" style={{ fontSize: 'var(--f8)' }}>Working_On:</span>
-          <span className="text-white/70 font-medium truncate" style={{ fontSize: 'var(--f9)' }}>{messages.length > 0 ? '对话进行中...' : '等待输入'}</span>
+          <span className="text-white/70 font-medium truncate" style={{ fontSize: 'var(--f9)' }}>{messages.length > 0 ? '对话进行中' : '等待输入'}</span>
           <span className="mono text-pink-400/50 ml-auto" style={{ fontSize: 'var(--f7)' }}>{streaming ? '● 思考中' : '○ 待机'}</span>
         </div>
         {/* Chat header */}
         <div className="flex justify-between items-center px-5 py-3 border-b border-white/10">
           <span className="mono text-pink-400 uppercase tracking-widest" style={{ fontSize: 'var(--f9)' }}>Forge_Console</span>
           <div className="flex gap-3">
-            <button className="mono text-red-400/60 hover:text-red-400 transition-colors" style={{ fontSize: 'var(--f8)' }}>STOP</button>
-            <button className="mono text-white/30 hover:text-white/60 transition-colors" style={{ fontSize: 'var(--f8)' }}>+NEW</button>
+            <button className="mono text-white/30 hover:text-white/60 transition-colors" style={{ fontSize: 'var(--f8)' }} onClick={clearMessages}>CLEAR</button>
+            <button className="mono text-white/30 hover:text-white/60 transition-colors" style={{ fontSize: 'var(--f8)' }} onClick={clearMessages}>+NEW</button>
           </div>
         </div>
         {/* Messages area */}
@@ -49,17 +60,17 @@ export default function ForgeChat() {
                 AI Agent 控制台 · 输入消息开始对话
               </div>
               <div className="quick-chips justify-center mt-4">
-                <span className="quick-chip" onClick={() => { setInputValue('总结今日学习'); handleSend() }}>总结今日学习</span>
-                <span className="quick-chip" onClick={() => { setInputValue('审查待审核卡片'); handleSend() }}>审查待审核卡片</span>
-                <span className="quick-chip" onClick={() => { setInputValue('发现新关联'); handleSend() }}>发现新关联</span>
+                <span className="quick-chip" onClick={() => handleSend('总结今日学习')}>总结今日学习</span>
+                <span className="quick-chip" onClick={() => handleSend('审查待审核卡片')}>审查待审核卡片</span>
+                <span className="quick-chip" onClick={() => handleSend('发现新关联')}>发现新关联</span>
               </div>
             </div>
           ) : (
             /* Messages */
             messages.map((msg, idx) => (
-              <div key={idx} className={`stream-item ${msg.role === 'user' ? '' : ''}`}>
+              <div key={idx} className="stream-item">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`mono uppercase text-${msg.role === 'user' ? 'white/40' : 'pink-400/60'}`} style={{ fontSize: 'var(--f7)' }}>
+                  <span className={`mono uppercase ${msg.role === 'user' ? 'text-white/40' : 'text-pink-400/60'}`} style={{ fontSize: 'var(--f7)' }}>
                     {msg.role === 'user' ? 'YOU' : 'AGENT'}
                   </span>
                 </div>
@@ -80,21 +91,21 @@ export default function ForgeChat() {
         {/* Quick chips */}
         <div className="px-5">
           <div className="quick-chips">
-            <span className="quick-chip" onClick={() => { setInputValue('💡 解释 '); handleSend() }}>💡 解释</span>
-            <span className="quick-chip" onClick={() => { setInputValue('📋 举例 '); handleSend() }}>📋 举例</span>
-            <span className="quick-chip" onClick={() => { setInputValue('🔗 关联 '); handleSend() }}>🔗 关联</span>
-            <span className="quick-chip" onClick={() => { setInputValue('🎓 开始学习 '); handleSend() }}>🎓 开始学习</span>
+            <span className="quick-chip" onClick={() => handleSend('💡 解释这个概念')}>💡 解释</span>
+            <span className="quick-chip" onClick={() => handleSend('📋 举个例子')}>📋 举例</span>
+            <span className="quick-chip" onClick={() => handleSend('🔗 发现关联')}>🔗 关联</span>
+            <span className="quick-chip" onClick={() => handleSend('🎓 学习建议')}>🎓 学习</span>
           </div>
         </div>
         {/* Input area */}
         <div className="px-4 pb-4 pt-1 relative">
           {showPalette && (
             <div className="command-palette">
-              <div className="cmd-item selected" data-cmd="/clear"><span className="cmd-icon">⌫</span><span className="cmd-name">/clear</span><span className="cmd-desc">清空对话</span></div>
-              <div className="cmd-item" data-cmd="/new"><span className="cmd-icon">+</span><span className="cmd-name">/new</span><span className="cmd-desc">新会话</span></div>
-              <div className="cmd-item" data-cmd="/assess"><span className="cmd-icon">📊</span><span className="cmd-name">/assess</span><span className="cmd-desc">学习评估</span></div>
-              <div className="cmd-item" data-cmd="/learn"><span className="cmd-icon">🎓</span><span className="cmd-name">/learn</span><span className="cmd-desc">学习模式</span></div>
-              <div className="cmd-item" data-cmd="/help"><span className="cmd-icon">?</span><span className="cmd-name">/help</span><span className="cmd-desc">帮助</span></div>
+              <div className="cmd-item selected" onClick={() => handleCommand('/clear')}><span className="cmd-icon">⌫</span><span className="cmd-name">/clear</span><span className="cmd-desc">清空对话</span></div>
+              <div className="cmd-item" onClick={() => handleCommand('/new')}><span className="cmd-icon">+</span><span className="cmd-name">/new</span><span className="cmd-desc">新会话</span></div>
+              <div className="cmd-item" onClick={() => { setShowPalette(false); setInputValue('/assess ') }}><span className="cmd-icon">📊</span><span className="cmd-name">/assess</span><span className="cmd-desc">学习评估</span></div>
+              <div className="cmd-item" onClick={() => { setShowPalette(false); setInputValue('/learn ') }}><span className="cmd-icon">🎓</span><span className="cmd-name">/learn</span><span className="cmd-desc">学习模式</span></div>
+              <div className="cmd-item" onClick={() => { setShowPalette(false); handleSend('/help') }}><span className="cmd-icon">?</span><span className="cmd-name">/help</span><span className="cmd-desc">帮助</span></div>
             </div>
           )}
           <div className="flex gap-2">
@@ -115,7 +126,7 @@ export default function ForgeChat() {
             <button
               className="self-end mb-1 mono bg-pink-500/20 text-pink-300 px-3 py-2 rounded-lg border border-pink-500/30 hover:bg-pink-500/30 transition-colors disabled:opacity-30"
               style={{ fontSize: 'var(--f9)' }}
-              onClick={handleSend}
+              onClick={() => handleSend()}
               disabled={streaming || !inputValue.trim()}
             >→</button>
           </div>

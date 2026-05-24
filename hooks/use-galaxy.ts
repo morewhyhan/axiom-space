@@ -1,9 +1,8 @@
 'use client'
 
+import { useQuery } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
-import { useState, useEffect } from 'react'
-
-const typedClient = client as any
+import { useAppStore } from '@/stores/mode-store'
 
 export interface GalaxyNode {
   id: string
@@ -37,40 +36,37 @@ export interface GalaxyData {
   clusters: GalaxyCluster[]
 }
 
+async function fetchGalaxyData(vaultId?: string | null): Promise<GalaxyData> {
+  const params = vaultId ? { query: { vid: vaultId } } : {}
+  const [nodesRes, edgesRes, clustersRes] = await Promise.all([
+    client.api.galaxy.nodes.$get(params),
+    client.api.galaxy.edges.$get(params),
+    client.api.galaxy.clusters.$get(params),
+  ])
+  const [nodesData, edgesData, clustersData] = await Promise.all([
+    nodesRes.json(),
+    edgesRes.json(),
+    clustersRes.json(),
+  ])
+  return {
+    nodes: nodesData.nodes ?? [],
+    edges: edgesData.edges ?? [],
+    clusters: clustersData.clusters ?? [],
+  }
+}
+
 export function useGalaxyData() {
-  const [data, setData] = useState<GalaxyData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const [nodesRes, edgesRes, clustersRes] = await Promise.all([
-          typedClient.api.galaxy.nodes.$get(),
-          typedClient.api.galaxy.edges.$get(),
-          typedClient.api.galaxy.clusters.$get(),
-        ])
-        const [nodesData, edgesData, clustersData] = await Promise.all([
-          nodesRes.json(),
-          edgesRes.json(),
-          clustersRes.json(),
-        ])
-
-        if (!cancelled) {
-          setData({
-            nodes: (nodesData as any).nodes ?? [],
-            edges: (edgesData as any).edges ?? [],
-            clusters: (clustersData as any).clusters ?? [],
-          })
-        }
-      } catch (err) {
-        console.warn('[useGalaxyData] failed to fetch:', err)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
-
-  return { data, loading }
+  const query = useQuery({
+    queryKey: ['galaxy', currentVaultId],
+    queryFn: () => fetchGalaxyData(currentVaultId),
+    enabled: !!currentVaultId,
+  })
+  return {
+    data: query.data ?? null,
+    loading: query.isLoading,
+    error: (query.error as any)?.error ?? query.error?.message ?? null,
+    refetch: query.refetch,
+  }
 }

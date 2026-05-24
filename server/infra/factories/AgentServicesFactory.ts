@@ -12,7 +12,10 @@ import { CredentialPool } from '@/server/core/agent/CredentialPool';
 import { IterationBudget } from '@/server/core/learning/core/budget';
 import { ContextCompressor } from '@/server/core/learning/context/compressor';
 import { MemoryManager } from '@/server/core/learning/memory/manager';
-// import { LearningFacade } ... temporarily disabled
+import { PrismaLearningAdapter } from '@/server/core/learning/storage/PrismaLearningAdapter';
+import { PatternExtractorAdapter } from '@/server/core/learning/pattern/PatternExtractorAdapter';
+import { GraphIntegrationManager } from '@/server/core/learning/graph/integration';
+import { LearningFacade } from '@/server/core/learning/LearningFacade';
 import { CheckpointManager } from '@/server/core/agent/feedback/CheckpointManager';
 import { SteerMechanism } from '@/server/core/agent/feedback/SteerMechanism';
 import { EmptyResponseHandler } from '@/server/core/agent/feedback/EmptyResponseHandler';
@@ -49,8 +52,21 @@ export function createServerAgentServices(cfg: AgentServicesFactoryConfig = {}) 
   const vaultPath = cfg.vaultPath || process.env.VAULT_PATH || './vault'
   const fileStorage: IFileStorage = new LocalFSAdapter(vaultPath || "./vault")
 
-  // Learning facade (temporarily disabled)
-  const learningFacade = null as any;
+  // Learning facade — wired to Prisma for persistence
+  const database = new PrismaLearningAdapter({ dataPath: cfg.vaultPath });
+  const patternExtractor = new PatternExtractorAdapter({
+    trajectoryPath: `${cfg.vaultPath || './vault'}/trajectories`,
+  });
+  const graphManager = new GraphIntegrationManager(database);
+  const learningFacade = new LearningFacade(
+    memoryManager,
+    database,
+    compressor,
+    budget,
+    patternExtractor,
+    { getSkillLevel: () => 0, updateSkill: () => {}, getRecommendedSkills: () => [] },
+    graphManager,
+  );
 
   const infrastructure: IAgentInfrastructure = {
     stateMachine,
@@ -65,6 +81,7 @@ export function createServerAgentServices(cfg: AgentServicesFactoryConfig = {}) 
 
   return {
     infrastructure,
+    learning: learningFacade,
     stateMachine,
     budget,
     compressor,

@@ -1,9 +1,8 @@
 'use client'
 
+import { useQuery } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
-import { useState, useEffect } from 'react'
-
-const typedClient = client as any
+import { useAppStore } from '@/stores/mode-store'
 
 export interface DashboardStats {
   totalNodes: number
@@ -18,27 +17,49 @@ export interface DashboardStats {
   clusters: number
 }
 
+export interface GrowthPoint {
+  date: string
+  count: number
+  cumulative: number
+}
+
+export interface RecentActivity {
+  title: string
+  type: string
+  time: string
+}
+
+export interface DashboardData {
+  stats: DashboardStats
+  growth: GrowthPoint[]
+  recentActivity: RecentActivity[]
+}
+
+async function fetchDashboard(vaultId?: string | null): Promise<DashboardData> {
+  const params = vaultId ? { query: { vid: vaultId } } : {}
+  const res = await client.api.dashboard.$get(params)
+  const data = await res.json()
+  if (!data.success) return { stats: {} as DashboardStats, growth: [], recentActivity: [] }
+  return {
+    stats: data.stats,
+    growth: data.growth ?? [],
+    recentActivity: data.recentActivity ?? [],
+  }
+}
+
 export function useDashboardStats() {
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await typedClient.api.dashboard.$get()
-        const data = await res.json()
-        if (!cancelled && data.success) {
-          setStats(data.stats as DashboardStats)
-        }
-      } catch (err) {
-        console.warn('[useDashboardStats] failed to fetch:', err)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
-
-  return { stats, loading }
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const query = useQuery({
+    queryKey: ['dashboard', currentVaultId],
+    queryFn: () => fetchDashboard(currentVaultId),
+    enabled: !!currentVaultId,
+  })
+  return {
+    stats: query.data?.stats ?? null,
+    growth: query.data?.growth ?? [],
+    recentActivity: query.data?.recentActivity ?? [],
+    loading: query.isLoading,
+    error: (query.error as any)?.error ?? query.error?.message ?? null,
+    refetch: query.refetch,
+  }
 }
