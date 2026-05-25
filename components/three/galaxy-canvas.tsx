@@ -7,33 +7,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import gsap from 'gsap';
-import { useAppStore } from '@/stores/mode-store';
-
-export interface GalaxyNode {
-  id: string
-  title: string
-  type: 'fleeting' | 'permanent' | 'literature'
-  clusterId: string | null
-  clusterName: string | null
-  clusterColor: string | null
-  tags: string[]
-}
-
-export interface GalaxyEdge {
-  id: string
-  sourceId: string
-  targetId: string
-  weight: number
-  type: string
-}
-
-export interface GalaxyCluster {
-  id: string
-  name: string
-  color: string
-  position: number
-  cardCount: number
-}
+import type { GalaxyNode, GalaxyEdge, GalaxyCluster } from '@/types/galaxy';
 
 export interface GalaxyCanvasHandle {
   resetCameraView: () => void;
