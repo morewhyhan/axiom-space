@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { useLearningPaths, useExecuteStep, useUpdateStepProgress } from '@/hooks/use-learning'
-import { useAppStore } from '@/stores/mode-store'
+import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { toast } from 'sonner'
-import PathAdjustmentHistoryPanel from './path-adjustment-history-panel'
 
 export default function LearnList() {
   const { data, loading, refetch } = useLearningPaths()
@@ -18,8 +17,8 @@ export default function LearnList() {
   const setSelectedNode = useAppStore(s => s.setSelectedNode)
   const setMode = useAppStore(s => s.setMode)
 
-  // View toggle: 'steps' | 'history'
-  const [viewMode, setViewMode] = useState<'steps' | 'history'>('steps')
+  // Galaxy path toggle
+  const [galaxyPathVisible, setGalaxyPathVisible] = useState(false)
 
   // Track evaluation results per step
   const [evalResults, setEvalResults] = useState<Record<string, { passed: boolean; feedback: string }>>({})
@@ -44,6 +43,14 @@ export default function LearnList() {
   const allDone = steps.length > 0 && steps.every(s => s.status === 'completed' || s.status === 'mastered')
   const totalDone = steps.filter(s => s.status === 'completed' || s.status === 'mastered').length
   const totalProgress = steps.length > 0 ? Math.round((totalDone / steps.length) * 100) : 0
+
+  const handleToggleGalaxyPath = () => {
+    const toggle = useGalaxyActions.getState().actions.toggleLearningPath
+    if (typeof toggle === 'function') {
+      toggle()
+      setGalaxyPathVisible(v => !v)
+    }
+  }
 
   const handleStart = async (step: (typeof steps)[0]) => {
     if (!currentPath || !(step.status === 'available' || step.status === 'learning')) return
@@ -210,33 +217,21 @@ export default function LearnList() {
             </span>
           </div>
 
-          {/* ── View Toggle ── */}
-          <div className="mt-3 flex gap-1 bg-black/30 rounded-lg p-1">
-            <button
-              className={`flex-1 py-1.5 rounded-md text-center mono transition-all text-[9px] ${
-                viewMode === 'steps'
-                  ? 'bg-purple-500/20 text-purple-400'
-                  : 'text-white/25 hover:text-white/45'
-              }`}
-              onClick={() => setViewMode('steps')}
-            >
-              学习步骤
-            </button>
-            <button
-              className={`flex-1 py-1.5 rounded-md text-center mono transition-all text-[9px] ${
-                viewMode === 'history'
-                  ? 'bg-cyan-500/20 text-cyan-400'
-                  : 'text-white/25 hover:text-white/45'
-              }`}
-              onClick={() => setViewMode('history')}
-            >
-              调整历史
-            </button>
-          </div>
+          {/* ── Galaxy Path Toggle ── */}
+          <button
+            onClick={handleToggleGalaxyPath}
+            className={`mt-3 w-full py-2 rounded-lg mono text-[10px] font-bold transition-all flex items-center justify-center gap-2 ${
+              galaxyPathVisible
+                ? 'text-red-300 bg-red-500/20 border border-red-500/40 shadow-[0_0_12px_rgba(239,68,68,0.3)]'
+                : 'text-red-400/80 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50'
+            }`}
+          >
+            <span>{galaxyPathVisible ? '🔴' : '🔗'}</span>
+            {galaxyPathVisible ? '隐藏星系路径红线' : '在星系中显示学习路径'}
+          </button>
         </div>
 
-        {/* ── Content: Steps or History ── */}
-        {viewMode === 'steps' ? (
+        {/* ── Steps ── */}
           <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 px-4 py-4 space-y-5">
             {chapterList.map(([chapter, chapterSteps]) => {
             const chDone = chapterSteps.filter(
@@ -391,17 +386,12 @@ export default function LearnList() {
             )
           })}
         </div>
-        ) : (
-          <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 px-4 py-4">
-            <PathAdjustmentHistoryPanel />
-          </div>
-        )}
 
         {/* ── Footer ── */}
         <div className="px-6 py-3 bg-black/20 border-t border-white/5 flex items-center justify-between opacity-25">
-          <span className="mono text-[7px]">{viewMode === 'steps' ? `${chapterList.length} 个概念组` : 'AI 动态调整'}</span>
+          <span className="mono text-[7px]">{chapterList.length} 个概念组</span>
           <span className="mono text-[7px]">
-            {viewMode === 'steps' ? `${totalDone}/${steps.length} 已掌握` : '基于真实评估'}
+            {totalDone}/{steps.length} 已掌握
           </span>
         </div>
       </div>

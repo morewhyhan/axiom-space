@@ -27,7 +27,7 @@ const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
 const CognitiveRadar = dynamic(() => import('@/components/cognition/cognitive-radar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
 const ProfileBar = dynamic(() => import('@/components/cognition/profile-bar'))
-const InsightsPanel = dynamic(() => import('@/components/cognition/insights-diagnostic-panel'))
+const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
 const LearnControls = dynamic(() => import('@/components/learn/learn-controls'))
 const LearnList = dynamic(() => import('@/components/learn/learn-list'))
 const PanelBar = dynamic(() => import('@/components/layout/panel-bar'))
@@ -399,7 +399,7 @@ export default function Home() {
         import('@/components/cognition/cognitive-radar'),
         import('@/components/cognition/learning-profile'),
         import('@/components/cognition/profile-bar'),
-        import('@/components/cognition/insights-diagnostic-panel'),
+        import('@/components/cognition/observations-panel'),
         import('@/components/learn/learn-controls'),
         import('@/components/learn/learn-list'),
       ])

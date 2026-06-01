@@ -605,15 +605,16 @@ function PathCard({
       {/* Show path on galaxy toggle */}
       <div className="mt-2 flex items-center gap-2">
         <button
-          className={`mono text-[8px] transition-all flex items-center gap-1 px-2 py-1 rounded-md ${
+          className={`mono text-[10px] font-bold transition-all flex items-center gap-1.5 px-3 py-1.5 rounded-lg ${
             pathVisible
-              ? 'text-red-400 bg-red-500/10 border border-red-500/20'
-              : 'text-white/20 hover:text-white/40 bg-white/[0.02] border border-white/5 hover:border-white/10'
+              ? 'text-red-300 bg-red-500/20 border border-red-500/40 shadow-[0_0_12px_rgba(239,68,68,0.3)]'
+              : 'text-red-400/80 bg-red-500/10 border border-red-500/30 hover:bg-red-500/20 hover:border-red-500/50'
           }`}
           onClick={togglePath}
+          title={pathVisible ? '在星系中隐藏学习路径' : '在星系中显示学习路径红线'}
         >
-          <span className="text-[10px]">{pathVisible ? '●' : '○'}</span>
-          图谱路径
+          <span className="text-xs">{pathVisible ? '🔴' : '🔗'}</span>
+          {pathVisible ? '隐藏路径' : '在星系中显示'}
         </button>
       </div>
 

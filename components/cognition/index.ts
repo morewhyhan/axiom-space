@@ -1,7 +1,6 @@
 export { default as CognitiveRadar } from './cognitive-radar'
 export { default as LearningProfile } from './learning-profile'
 export { default as ObservationsPanel } from './observations-panel'
-export { default as InsightsDiagnosticPanel } from './insights-diagnostic-panel'
 export { default as ProfileBar } from './profile-bar'
 
 // P1 Learning Components
