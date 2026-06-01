@@ -25,6 +25,7 @@ import { toolRegistry } from '../tools';
 import { InterruptError } from '@/server/core/learning/core/interrupt';
 import { LogCategory } from '../audit/AuditLogger';
 import { getVaultPath } from '@/lib/platform';
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 // (Capability tracking integrated via MemoryManager)
 import { MessageRole } from '@/types/learning';
 
@@ -172,39 +173,10 @@ export class AgentPipeline {
       console.debug('[Agent] buildSystemPrompt failed (non-fatal):', err);
     }
 
-    // ── Tool filtering by intent ──
-    if (
-      intentRoute &&
-      intentRoute.intent !== 'chat' &&
-      intentRoute.confidence >= INTENT_THRESHOLD
-    ) {
-      try {
-        const allTools = toolRegistry.getAll();
-        let matchedTools: string[] | null = null;
-
-        if (shouldDelegate(intentRoute.intent, userMessage)) {
-          matchedTools = getToolsForIntent(intentRoute.intent);
-        }
-
-        if (!matchedTools) {
-          const allToolNames = allTools.map((t) => t.name);
-          matchedTools = filterToolsByIntent(intentRoute, allToolNames);
-        }
-
-        if (matchedTools && matchedTools.length > 0) {
-          this.services.agent.state.tools = allTools.filter((t) =>
-            matchedTools!.includes(t.name),
-          );
-          console.log(
-            `[Agent] Intent tools: ${intentRoute.intent} -> ${this.services.agent.state.tools.map((t) => t.name).join(', ')}`,
-          );
-        }
-      } catch (err: any) {
-        console.debug('[Agent] Tool filtering failed (non-fatal):', err);
-      }
-    } else {
-      this.services.agent.state.tools = toolRegistry.getAll();
-    }
+    // ── Tool availability: always provide all tools ──
+    // The LLM is smart enough to decide which tools to use.
+    // Intent routing is used only for prompt hints, not tool restriction.
+    this.services.agent.state.tools = toolRegistry.getAll();
 
     // ── Budget check ──
     if (this.services.config.enableBudget) {
@@ -294,17 +266,14 @@ export class AgentPipeline {
         '\n</memory-context>'
       : userMessage;
 
-    // ── Phase 3: Dynamic context — learning intents only ──
-    if (
-      intentRoute &&
-      LEARNING_CONTEXTS.has(intentRoute.intent) &&
-      intentRoute.confidence >= INTENT_THRESHOLD
-    ) {
-      const dynamicContext =
-        await this.services.promptService.buildDynamicContext();
-      if (dynamicContext) {
-        userMessageWithContext += '\n\n' + dynamicContext;
-      }
+    // ── Phase 3: Dynamic context — always injected ──
+    // Knowledge overview, learning context, user profile are lightweight
+    // and essential for every conversation. The ContextBuilder handles
+    // empty vaults gracefully (returns empty blocks).
+    const dynamicContext =
+      await this.services.promptService.buildDynamicContext();
+    if (dynamicContext) {
+      userMessageWithContext += '\n\n' + dynamicContext;
     }
 
     // ── Graph learning path — learning intents only ──
@@ -373,9 +342,12 @@ export class AgentPipeline {
             } else if (
               event.assistantMessageEvent?.type === 'thinking_delta'
             ) {
-              callbacks?.onThinkingDelta?.(
-                event.assistantMessageEvent.delta,
-              );
+              const thinkingText = event.assistantMessageEvent.delta;
+              // Push thinking deltas to textQueue too — some providers (e.g.
+              // DeepSeek V4 Flash via relay) stream all visible text through
+              // reasoning_content, leaving content=null in the delta.
+              textQueue.push(thinkingText);
+              callbacks?.onThinkingDelta?.(thinkingText);
             }
             break;
 
@@ -696,7 +668,7 @@ export class AgentPipeline {
 
     // ── Background analysis (Agent B) ──
     const vaultPath =
-      this.services.config.vaultPath || getVaultPath() || '';
+      this.services.config.vaultPath || getVaultPath() || getCurrentVaultId() || '';
     if (vaultPath) {
       this.agent.getBackgroundAnalyzer().setVaultPath(vaultPath);
       this.agent
@@ -712,7 +684,7 @@ export class AgentPipeline {
           })),
           async (systemPrompt: string, userMessage: string) => {
             return this.services.promptService.callLLMForSummary(
-              systemPrompt + '\n\n---\n\n' + userMessage,
+              userMessage, systemPrompt
             );
           },
         )
@@ -809,6 +781,36 @@ export class AgentPipeline {
       shouldRotate: classified.shouldRotateCredential,
     });
 
+    // Strategy 0: Timeout retry (timeout / connection errors) - highest priority
+    if (classified.reason === 'timeout' && classified.retryable) {
+      const maxTimeoutRetries = 2;
+      const timeoutKey = 'timeout_retry_count';
+      const retryCount = (this.services.agent as any)[timeoutKey] || 0;
+
+      if (retryCount < maxTimeoutRetries) {
+        (this.services.agent as any)[timeoutKey] = retryCount + 1;
+        const delay = 1000 * Math.pow(2, retryCount) + Math.random() * 500;
+        console.log(
+          `[Agent] Timeout detected (${classified.message}), retrying in ${delay.toFixed(0)}ms (attempt ${retryCount + 1}/${maxTimeoutRetries})`,
+        );
+
+        // Wait with exponential backoff
+        await new Promise((resolve) => setTimeout(resolve, delay));
+
+        try {
+          await this.services.agent.prompt(userMessageWithContext);
+          (this.services.agent as any)[timeoutKey] = 0; // Reset on success
+          return; // Recovery succeeded
+        } catch (retryErr: any) {
+          console.warn('[Agent] Timeout retry failed:', retryErr);
+          // Continue to other strategies
+        }
+      } else {
+        (this.services.agent as any)[timeoutKey] = 0; // Reset counter
+        console.warn('[Agent] Max timeout retries exceeded, falling back');
+      }
+    }
+
     // Strategy 1: Credential rotation (429/402/401)
     if (classified.shouldRotateCredential) {
       const statusCode = classified.statusCode || 0;
@@ -823,7 +825,7 @@ export class AgentPipeline {
         );
         this.services.config.apiKey = nextCred.runtimeApiKey;
         try {
-          this.services.agent.state.model = this.agent.resolveModel();
+          this.services.agent.state.model = this.agent.resolveModel()!;
           await this.services.agent.prompt(userMessageWithContext);
           return; // recovery succeeded
         } catch (retryErr: any) {

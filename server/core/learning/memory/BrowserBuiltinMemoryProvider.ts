@@ -1,16 +1,17 @@
 /**
- * BrowserBuiltinMemoryProvider — 内置记忆提供者
+ * BrowserBuiltinMemoryProvider — 内置记忆提供者（纯数据库模式）
  *
- * 提供基于内存的短期记忆存储，包括：
+ * 提供基于数据库的短期记忆存储，包括：
  * - 用户偏好和期望
  * - 工作风格
  * - 会话级上下文
  *
- * 数据保存在内存 Map 中，定期通过 IFileStorage 持久化。
+ * 数据存储在 vaultMemory 表中，替代原来的 .axiom/memories/MEMORY.md 文件。
  */
 
 import { MemoryProvider, ToolSchema, MemorySearchResult } from './provider'
-import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
+import { prisma } from '@/lib/db'
+import { getCurrentVaultId, getCurrentUserId } from '@/server/core/agent/agent-context'
 
 interface MemoryEntry {
   key: string
@@ -19,9 +20,18 @@ interface MemoryEntry {
   timestamp: number
 }
 
+async function resolveVaultId(): Promise<string | null> {
+  const ctxVaultId = getCurrentVaultId()
+  if (ctxVaultId) return ctxVaultId
+  const userId = getCurrentUserId()
+  if (!userId) return null
+  const vault = await prisma.vault.findFirst({ where: { userId }, orderBy: { createdAt: 'asc' } })
+  return vault?.id || null
+}
+
 export class BrowserBuiltinMemoryProvider extends MemoryProvider {
   private memories: Map<string, MemoryEntry> = new Map()
-  private vaultPath: string = ''
+  private vaultId: string = ''
 
   get name(): string {
     return 'builtin'
@@ -32,7 +42,7 @@ export class BrowserBuiltinMemoryProvider extends MemoryProvider {
   }
 
   async initialize(_sessionId: string, _config?: Record<string, any>): Promise<void> {
-    this.vaultPath = process.env.VAULT_PATH || './vault'
+    this.vaultId = (await resolveVaultId()) || ''
     await this._load()
   }
 
@@ -119,7 +129,6 @@ export class BrowserBuiltinMemoryProvider extends MemoryProvider {
     _assistantContent: string,
     _sessionId?: string
   ): Promise<void> {
-    // 自动从对话中提取有用的记忆
     const preferenceMatch = userContent.match(/我(喜欢|不喜欢|习惯|倾向于)([^。；]+)/)
     if (preferenceMatch) {
       const pref = `${preferenceMatch[1]}${preferenceMatch[2]}`
@@ -150,32 +159,35 @@ export class BrowserBuiltinMemoryProvider extends MemoryProvider {
   }
 
   private async _load(): Promise<void> {
+    if (!this.vaultId) return
     try {
-      const result = await getFileStorage().readFile(`${this.vaultPath}/.axiom/memories/MEMORY.md`)
-      if (result.success && result.content) {
-        const lines = result.content.split('\n').filter(l => l.startsWith('- **'))
-        for (const line of lines) {
-          const match = line.match(/\*\*(.+?)\*\*:\s*(.+)/)
-          if (match) {
-            this.memories.set(match[1], {
-              key: match[1],
-              value: match[2],
-              category: 'fact',
-              timestamp: Date.now(),
-            })
-          }
-        }
+      const records = await prisma.vaultMemory.findMany({ where: { vaultId: this.vaultId } })
+      for (const r of records) {
+        this.memories.set(r.key, {
+          key: r.key,
+          value: r.value,
+          category: r.category as MemoryEntry['category'],
+          timestamp: r.createdAt.getTime(),
+        })
       }
     } catch { /* 首次启动无数据 */ }
   }
 
   private async _save(): Promise<void> {
+    if (!this.vaultId) return
     try {
-      await getFileStorage().ensureDir(`${this.vaultPath}/.axiom/memories`)
-      const content = Array.from(this.memories.values())
-        .map(e => `- **${e.key}**: ${e.value} [${e.category}]`)
-        .join('\n')
-      await getFileStorage().writeFile(`${this.vaultPath}/.axiom/memories/MEMORY.md`, content)
+      // 全量替换：删旧写新
+      await prisma.vaultMemory.deleteMany({ where: { vaultId: this.vaultId } })
+      if (this.memories.size > 0) {
+        await prisma.vaultMemory.createMany({
+          data: Array.from(this.memories.values()).map(e => ({
+            vaultId: this.vaultId,
+            key: e.key,
+            value: e.value,
+            category: e.category,
+          })),
+        })
+      }
     } catch { /* 静默失败 */ }
   }
 }

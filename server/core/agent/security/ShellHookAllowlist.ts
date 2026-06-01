@@ -1,15 +1,10 @@
 /**
- * ShellHookAllowlist — Shell Hook 白名单机制
+ * ShellHookAllowlist — Shell Hook 白名单机制（纯内存模式）
  *
- * 对标 Hermes: agent/shell_hooks.py
  *
- * 用户显式 opt-in 后，只在白名单内的 shell 命令模式被允许执行。
- * 默认禁用（宽松模式）：所有命令允许（仅受 IPC bash 拦截器限制）。
- * 启用后（严格模式）：仅匹配白名单模式的命令被允许。
+ * 纯内存实现，默认启用白名单。运行时修改只影响当前进程。
  */
 
-import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
-import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { getAuditLogger, LogCategory } from '../audit/AuditLogger';
 
 /** 白名单条目 */
@@ -20,9 +15,7 @@ export interface ShellHookRule {
   description?: string;
 }
 
-const ALLOWLIST_PATH = '.axiom/shell-hooks-allowlist.json';
-
-/** 默认白名单（对标 Hermes 常用安全命令） */
+/** 默认白名单 */
 const DEFAULT_ALLOWLIST: ShellHookRule[] = [
   { pattern: 'git *', description: 'Git 版本控制' },
   { pattern: 'ls *', description: '列出目录' },
@@ -46,39 +39,24 @@ const DEFAULT_ALLOWLIST: ShellHookRule[] = [
 export class ShellHookAllowlist {
   private enabled = false;
   private rules: ShellHookRule[] = [];
-  private vaultPath = '';
 
-  /**
-   * 启用严格模式并加载白名单
-   */
-  async enable(vaultPath: string): Promise<void> {
-    this.vaultPath = vaultPath;
+  async enable(_vaultPath: string): Promise<void> {
     this.enabled = true;
-    await this.loadRules();
+    this.rules = [...DEFAULT_ALLOWLIST];
     getAuditLogger().info(LogCategory.GUARDRAIL, 'shell_hook_strict_mode_enabled', {
       rulesCount: this.rules.length,
     });
   }
 
-  /**
-   * 禁用严格模式（回到宽松模式）
-   */
   disable(): void {
     this.enabled = false;
     getAuditLogger().info(LogCategory.GUARDRAIL, 'shell_hook_strict_mode_disabled');
   }
 
-  /**
-   * 当前是否启用严格模式
-   */
   isEnabled(): boolean {
     return this.enabled;
   }
 
-  /**
-   * 检查命令是否被允许
-   * @returns { allowed: boolean; matchedRule?: string }
-   */
   check(command: string): { allowed: boolean; matchedRule?: string } {
     if (!this.enabled) return { allowed: true };
 
@@ -95,79 +73,22 @@ export class ShellHookAllowlist {
     return { allowed: false };
   }
 
-  /**
-   * 添加规则
-   */
   addRule(rule: ShellHookRule): void {
     this.rules.push(rule);
   }
 
-  /**
-   * 移除规则
-   */
   removeRule(pattern: string): void {
     this.rules = this.rules.filter(r => r.pattern !== pattern);
   }
 
-  /**
-   * 获取当前规则列表
-   */
   getRules(): ShellHookRule[] {
     return [...this.rules];
   }
 
-  /**
-   * 保存白名单到磁盘
-   */
-  async save(): Promise<void> {
-    if (!this.vaultPath) return;
-    const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-    if (!axiom) return;
-
-    const filePath = `${this.vaultPath}/${ALLOWLIST_PATH}`;
-    await axiom.ensureDirectory?.(`${this.vaultPath}/.axiom`);
-    await axiom.writeFile(filePath, JSON.stringify({
-      enabled: this.enabled,
-      rules: this.rules,
-    }, null, 2));
-  }
-
-  /**
-   * 从磁盘加载白名单
-   */
-  private async loadRules(): Promise<void> {
-    const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-    if (!axiom || !this.vaultPath) {
-      this.rules = [...DEFAULT_ALLOWLIST];
-      return;
-    }
-
-    try {
-      const filePath = `${this.vaultPath}/${ALLOWLIST_PATH}`;
-      const result = await axiom.readFile(filePath);
-      if (result?.success && result.content) {
-        const data = JSON.parse(result.content);
-        if (Array.isArray(data.rules)) {
-          this.rules = data.rules;
-          return;
-        }
-      }
-    } catch {
-      // 文件不存在或解析失败，使用默认
-    }
-    this.rules = [...DEFAULT_ALLOWLIST];
-  }
-
-  /**
-   * glob 模式匹配（支持 * 通配符）
-   */
   private matchPattern(command: string, pattern: string): boolean {
-    // 将 glob * 转为正则
     const regexStr = pattern
-      .replace(/[.+^${}()|[\]\\]/g, '\\$&') // 转义特殊字符
-      .replace(/\*/g, '.*'); // * → .*
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*');
     try {
       const regex = new RegExp(`^${regexStr}$`, 'i');
       return regex.test(command);

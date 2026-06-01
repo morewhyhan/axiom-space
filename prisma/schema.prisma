@@ -14,33 +14,6 @@ datasource db {
 // BetterAuth models
 // ═══════════════════════════════════════════════
 
-model user {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  emailVerified Boolean   @default(false)
-  name          String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  sessions        session[]
-  accounts        account[]
-  vaults          vault[]
-  learningSessions learningSession[]
-}
-
-model session {
-  id        String   @id @default(uuid())
-  userId    String
-  expiresAt DateTime
-  token     String   @unique
-  ipAddress String?
-  userAgent String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user user @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
 model account {
   id           String   @id @default(uuid())
   userId       String
@@ -76,21 +49,6 @@ model verification {
 // content 存完整 Markdown，Agent 通过 IFileStorage 读写
 // ═══════════════════════════════════════════════
 
-model vault {
-  id        String   @id @default(uuid())
-  userId    String
-  name      String   @default("My Vault")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user     user     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  cards    card[]
-  clusters cluster[]
-  edges    edge[]
-
-  @@index([userId])
-}
-
 // 知识域/星团 — 对应 Galaxy 中的簇
 model cluster {
   id        String   @id @default(uuid())
@@ -124,6 +82,7 @@ model card {
 
   edgesFrom edge[] @relation("EdgeSource")
   edgesTo   edge[] @relation("EdgeTarget")
+  learningPathSteps learningPathStep[]
 
   @@unique([vaultId, path])
   @@index([vaultId, type])
@@ -182,4 +141,236 @@ model learningMessage {
   session learningSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
+}
+
+model learningPathStep {
+  id               String   @id @default(uuid())
+  pathId           String
+  cardId           String?
+  order            Int
+  title            String
+  description      String?
+  concept          String?
+  chapter          String?  // 概念组名称，同一组步骤的 chapter 值相同
+  status           String   @default("locked") // locked | available | learning | completed | mastered
+  mastery          Int      @default(0)
+  estimatedMinutes Int?
+  prerequisites    String?  // JSON array of step IDs
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  path   learningPath @relation(fields: [pathId], references: [id], onDelete: Cascade)
+  card   card?        @relation(fields: [cardId], references: [id], onDelete: SetNull)
+
+  @@index([pathId])
+}
+
+// ═══════════════════════════════════════════════
+// Agent Session — 替代 .axiom/sessions/{id}.json
+// ═══════════════════════════════════════════════
+
+model agentSession {
+  id        String   @id
+  vaultId   String
+  name      String
+  messages  String   // JSON: 消息数组
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@index([vaultId])
+}
+
+// ═══════════════════════════════════════════════
+// Vault Memory — 替代 .axiom/memories/MEMORY.md
+// ═══════════════════════════════════════════════
+
+model vaultMemory {
+  id        String   @id @default(uuid())
+  vaultId   String
+  key       String
+  value     String
+  category  String   // preference | style | context | fact
+  createdAt DateTime @default(now())
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, key])
+  @@index([vaultId])
+}
+
+// ═══════════════════════════════════════════════
+// Vault Capability — 替代 .axiom/capabilities.json
+// ═══════════════════════════════════════════════
+
+model vaultCapability {
+  id           String   @id @default(uuid())
+  vaultId      String
+  concept      String
+  masteryLevel Int      @default(10)
+  status       String   @default("learning") // known | learning | mastered
+  lastAccessed DateTime @default(now())
+  accessCount  Int      @default(1)
+  weakAreas    String   @default("[]")   // JSON array
+  strongAreas  String   @default("[]")   // JSON array
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, concept])
+  @@index([vaultId])
+}
+
+// ═══════════════════════════════════════════════
+// Vault Skill — 替代 .axiom/skills/**/*.md
+// ═══════════════════════════════════════════════
+
+model vaultSkill {
+  id            String   @id @default(uuid())
+  vaultId       String
+  name          String
+  description   String
+  category      String   @default("未分类")
+  tags          String   @default("[]")        // JSON array
+  confidence    Float    @default(0.5)
+  demonstratedAt DateTime @default(now())
+  evidence      String   @default("")
+  source        String   @default("conversation")
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@unique([vaultId, name])
+  @@index([vaultId])
+}
+
+// ═══════════════════════════════════════════════════════════════
+// P1: 6 维学习画像、路径调整、资源推送
+// ═══════════════════════════════════════════════════════════════
+
+// 教育画像历史记录
+model EducationProfileHistory {
+  id        String   @id @default(uuid())
+  vaultId   String
+  profile   String   // JSON: EducationProfile（6维数据 + 历史）
+  snapshot  String?  // 简要快照用于快速查询
+  createdAt DateTime @default(now())
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@index([vaultId, createdAt])
+  @@index([createdAt])
+}
+
+// 学习路径调整历史
+model PathAdjustmentHistory {
+  id          String   @id @default(uuid())
+  pathId      String
+  adjustment  String   // JSON: DynamicAdjustment（调整类型、原因、变化）
+  trigger     String   // session_end | assessment | manual
+  appliedAt   DateTime @default(now())
+  feedback    String?  // JSON: 用户反馈
+
+  path learningPath @relation(fields: [pathId], references: [id], onDelete: Cascade)
+
+  @@index([pathId, appliedAt])
+  @@index([appliedAt])
+}
+
+// 资源推送记录
+model PushRecord {
+  id              String   @id @default(uuid())
+  userId          String
+  resources       String   // JSON: PushableResource[]（推送的资源列表）
+  trigger         String   // stage_completion | assessment_pass | low_dimension | scheduled
+  reason          String   // 推送理由
+  sentAt          DateTime @default(now())
+  expiresAt       DateTime // 推送过期时间（30天后）
+  viewedAt        DateTime?
+  engagedCount    Int      @default(0)
+  feedback        String?  // JSON: { engagedResourceIds: [], feedbackText: '' }
+
+  user user @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, sentAt])
+  @@index([sentAt])
+  @@index([expiresAt])
+}
+
+// ═══════════════════════════════════════════════
+// Complete model definitions (at end)
+// ═══════════════════════════════════════════════
+
+model user {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  name          String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions               session[]
+  accounts               account[]
+  vaults                 vault[]
+  learningSessions       learningSession[]
+  learningPaths          learningPath[]
+  pushRecords            PushRecord[]
+}
+
+model session {
+  id        String   @id @default(uuid())
+  userId    String
+  expiresAt DateTime
+  token     String   @unique
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user user @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model vault {
+  id           String   @id @default(uuid())
+  userId       String
+  name         String   @default("My Vault")
+  profileCache String?  // JSON — 认知画像缓存，避免每次重算
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user                      user                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cards                     card[]
+  clusters                  cluster[]
+  edges                     edge[]
+  agentSessions             agentSession[]
+  vaultMemories             vaultMemory[]
+  vaultCapabilities         vaultCapability[]
+  vaultSkills               vaultSkill[]
+  learningPaths             learningPath[]
+  educationProfileHistory   EducationProfileHistory[]
+
+
+  @@index([userId])
+}
+
+model learningPath {
+  id          String   @id @default(uuid())
+  userId      String
+  vaultId     String
+  name        String
+  topic       String
+  description String?
+  difficulty  String   @default("beginner")
+  totalSteps  Int      @default(0)
+  doneSteps   Int      @default(0)
+  status      String   @default("active") // active | completed | archived
+  source      String   @default("ai")     // ai | graph | manual
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  steps              learningPathStep[]
+  user               user                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vault              vault                  @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  adjustmentHistory  PathAdjustmentHistory[]
+
+  @@index([userId, vaultId])
 }

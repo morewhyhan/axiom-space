@@ -6,15 +6,18 @@
  * using the existing learningSession / learningMessage Prisma models.
  */
 import { prisma } from '@/lib/db'
+import { getCurrentUserId } from '@/server/core/agent/agent-context'
 import type { TrajectoryEntry } from '../pattern/PatternDetector'
 
 export class PrismaLearningAdapter {
   private vaultPath: string
+  private userId: string
   private expiryWatcher: ReturnType<typeof setInterval> | null = null
   private onExpiry: ((session: any) => Promise<void>) | null = null
 
-  constructor(config: { dataPath?: string }) {
+  constructor(config: { dataPath?: string; userId?: string }) {
     this.vaultPath = config.dataPath ?? ''
+    this.userId = config.userId ?? getCurrentUserId() ?? ''
   }
 
   /** Initialize the adapter (idempotent) */
@@ -28,8 +31,9 @@ export class PrismaLearningAdapter {
     // Check every 60 seconds for expired sessions
     this.expiryWatcher = setInterval(async () => {
       try {
+        if (!this.userId) return
         const expired = await prisma.learningSession.findMany({
-          where: { status: 'active', updatedAt: { lt: new Date(Date.now() - 3600_000) } },
+          where: { userId: this.userId, status: 'active', updatedAt: { lt: new Date(Date.now() - 3600_000) } },
           include: { messages: true },
         })
         for (const session of expired) {
@@ -60,10 +64,15 @@ export class PrismaLearningAdapter {
     this.stopExpiryWatcher()
   }
 
-  /** Clear all learning data */
+  /** Clear all learning data for this user */
   async clear(): Promise<void> {
-    await prisma.learningMessage.deleteMany({})
-    await prisma.learningSession.deleteMany({})
+    if (!this.userId) return
+    const sessions = await prisma.learningSession.findMany({ where: { userId: this.userId }, select: { id: true } })
+    const sessionIds = sessions.map(s => s.id)
+    if (sessionIds.length > 0) {
+      await prisma.learningMessage.deleteMany({ where: { sessionId: { in: sessionIds } } })
+    }
+    await prisma.learningSession.deleteMany({ where: { userId: this.userId } })
   }
 
   /**
@@ -72,12 +81,12 @@ export class PrismaLearningAdapter {
    */
   async appendTrajectory(entry: TrajectoryEntry): Promise<void> {
     let session = await prisma.learningSession.findFirst({
-      where: { id: entry.session_id },
+      where: { id: entry.session_id, userId: this.userId },
     })
 
     if (!session) {
       session = await prisma.learningSession.findFirst({
-        where: { status: 'active' },
+        where: { userId: this.userId, status: 'active' },
         orderBy: { updatedAt: 'desc' },
       })
     }
@@ -86,12 +95,13 @@ export class PrismaLearningAdapter {
       await prisma.learningMessage.create({
         data: {
           sessionId: session.id,
-          role: 'trajectory',
+          role: 'system' as string,
           content: JSON.stringify({
             phase: entry.phase,
             user_message: entry.user_message,
             assistant_message: entry.assistant_message,
             timestamp: entry.timestamp,
+            _type: 'trajectory',
           }),
         },
       })
@@ -103,8 +113,9 @@ export class PrismaLearningAdapter {
    */
   async touchSession(sessionId: string): Promise<void> {
     try {
-      await prisma.learningSession.update({
-        where: { id: sessionId },
+      if (!this.userId) return
+      await prisma.learningSession.updateMany({
+        where: { id: sessionId, userId: this.userId },
         data: { updatedAt: new Date() },
       })
     } catch {

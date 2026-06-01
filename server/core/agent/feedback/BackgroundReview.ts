@@ -1,7 +1,6 @@
 /**
  * BackgroundReview — 后台记忆/技能审查
  *
- * 对标 Hermes: run_agent.py:2761-2894
  *
  * 每 N 轮 fork 一个独立 agent 实例审查对话：
  * - Memory review: 提取用户偏好、期望、行为模式
@@ -66,7 +65,6 @@ export class BackgroundReview {
 
   /**
    * 每轮结束时调用，达到间隔则触发后台 review
-   * 对标 Hermes: _spawn_background_review()
    */
   onTurnEnd(messages: ReviewableMessage[]): void {
     this.turnCount++;

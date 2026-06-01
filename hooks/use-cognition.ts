@@ -50,13 +50,32 @@ export interface CognitionData {
   nextActions: string[]
 }
 
+export interface Observation {
+  id: string
+  text: string
+  category: string
+  createdAt: string
+}
+
 async function fetchCognition(vaultId?: string | null): Promise<CognitionData | null> {
   const params = vaultId ? { query: { vid: vaultId } } : {}
   const res = await client.api.cognition.stats.$get(params)
-  const data = await res.json()
-  if (!data.success) return null
+  const data: any = await res.json()
+  if (!data.success) {
+    throw new Error(data.error || '获取认知数据失败')
+  }
   const { user, dimensions, stats, skills, thinkingPattern, strengths, growthEdges, timeDistribution, knowledgeStructure, nextActions } = data
-  return { user: user ?? { name: '学习者', joinedAt: '' }, dimensions: dimensions ?? {}, stats: stats ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 }, skills: skills ?? [], thinkingPattern: thinkingPattern ?? { text: '', highlights: [], detail: '' }, strengths: strengths ?? [], growthEdges: growthEdges ?? [], timeDistribution: timeDistribution ?? [], knowledgeStructure: knowledgeStructure ?? [], nextActions: nextActions ?? [] }
+  return { user: user ?? { name: '学习者', joinedAt: '' }, dimensions: dimensions ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0 }, stats: stats ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 }, skills: skills ?? [], thinkingPattern: thinkingPattern ?? { text: '', highlights: [], detail: '' }, strengths: strengths ?? [], growthEdges: growthEdges ?? [], timeDistribution: timeDistribution ?? [], knowledgeStructure: knowledgeStructure ?? [], nextActions: nextActions ?? [] }
+}
+
+async function fetchObservations(vaultId?: string | null): Promise<Observation[]> {
+  if (!vaultId) return []
+  const res = await (client.api.cognition as any).observations.$get({ query: { vid: vaultId } })
+  const data: { success: boolean; observations?: Observation[]; error?: string } = await res.json()
+  if (!data.success) {
+    throw new Error(data.error || '获取观察数据失败')
+  }
+  return data.observations ?? []
 }
 
 export function useCognition() {
@@ -68,6 +87,21 @@ export function useCognition() {
   })
   return {
     data: query.data ?? null,
+    loading: query.isLoading,
+    error: (query.error as any)?.error ?? query.error?.message ?? null,
+    refetch: query.refetch,
+  }
+}
+
+export function useObservations() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const query = useQuery({
+    queryKey: ['observations', currentVaultId],
+    queryFn: () => fetchObservations(currentVaultId),
+    enabled: !!currentVaultId,
+  })
+  return {
+    observations: query.data ?? [],
     loading: query.isLoading,
     error: (query.error as any)?.error ?? query.error?.message ?? null,
     refetch: query.refetch,

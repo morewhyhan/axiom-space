@@ -10,6 +10,8 @@ import { BrowserBuiltinMemoryProvider } from '@/server/core/learning/memory/Brow
 import { CapabilityTrackingProvider } from '@/server/core/learning/memory/CapabilityTrackingProvider'
 import { KnowledgeGraphProvider } from '@/server/core/learning/memory/KnowledgeGraphProvider'
 import { Agent } from '@mariozechner/pi-agent-core';
+import { resolveAiConfig } from '@/lib/ai-config';
+import type { LLMProvider } from '@/types/agent';
 import { AgentStateMachine } from '../AgentStateMachine';
 import { getAuditLogger, initAuditLogger, LogCategory } from '../audit/AuditLogger';
 import { CheckpointManager } from '../feedback/CheckpointManager';
@@ -26,9 +28,8 @@ import { PatternExtractorAdapter } from '@/server/core/learning/pattern/PatternE
 // (Learning subsystems imported above — server-side implementations)
 import { GraphIntegrationManager } from '@/server/core/learning/graph/integration';
 import { LearningFacade } from '@/server/core/learning/LearningFacade';
-import { PRESET_MODELS, DEFAULT_MODEL } from '@/types/agent';
 import type { AxiomAgentConfig, ModelConfig } from '@/types/agent';
-import { DEFAULT_AGENT_CONFIG } from '../constants';
+import { getDefaultAgentConfig } from '../constants';
 import { getVaultPath } from '@/lib/platform';
 import type { IMemoryManager, ISessionService, IPromptService, ILearningFacade, IAgentInfrastructure } from './interfaces';
 import { SessionService } from './SessionService';
@@ -44,7 +45,7 @@ export interface AgentServices {
   config: Required<AxiomAgentConfig>;
   /** Unique session identifier */
   sessionId: string;
-  /** Resolved model configuration from PRESET_MODELS */
+  /** Resolved model configuration (from env via resolveAiConfig) */
   modelConfig: ModelConfig;
   /** pi-agent-core Agent (created by AxiomAgent constructor) */
   agent: Agent;
@@ -124,16 +125,21 @@ export function createAgentServices(config: AxiomAgentConfig = {}): AgentService
     }
   }
   const normalizedConfig: Required<AxiomAgentConfig> = {
-    ...DEFAULT_AGENT_CONFIG,
+    ...getDefaultAgentConfig(),
     ...cleanConfig as AxiomAgentConfig,
     // sessionResetPolicy is a complex type; preserve exact merging logic
-    sessionResetPolicy: config.sessionResetPolicy ?? DEFAULT_AGENT_CONFIG.sessionResetPolicy,
+    sessionResetPolicy: config.sessionResetPolicy ?? getDefaultAgentConfig().sessionResetPolicy,
   } as Required<AxiomAgentConfig>;
 
   // ── 2. Session & model identity ─────────────────────────
   const sessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  const modelConfig: ModelConfig = PRESET_MODELS[normalizedConfig.modelId]
-    || PRESET_MODELS[DEFAULT_MODEL];
+  const aiConfig = resolveAiConfig();
+  const modelConfig: ModelConfig = {
+    provider: aiConfig.model.provider as LLMProvider,
+    modelId: aiConfig.model.modelId,
+    baseUrl: aiConfig.model.baseUrl || undefined,
+    apiKey: aiConfig.model.apiKey || undefined,
+  };
   const vaultPath = resolveVaultPath(normalizedConfig);
 
   // ── 3. Audit logger ─────────────────────────────────────
@@ -160,18 +166,15 @@ export function createAgentServices(config: AxiomAgentConfig = {}): AgentService
   credentialPool.seedFromEnv();
 
   // ── 8. Auxiliary client (background tasks) ──────────────
-  const envCfg = typeof window !== 'undefined'
-    ? process.env
-    : undefined;
+  const envCfg = process.env;
   const auxApiKey: string | undefined = envCfg?.VITE_AUX_API_KEY;
   const auxModel: string | undefined = envCfg?.VITE_AUX_MODEL;
-  const aiBaseUrl: string | undefined = envCfg?.VITE_AI_BASE_URL;
   if (auxApiKey || normalizedConfig.apiKey) {
     initAuxiliaryClient(
       { apiKey: auxApiKey, modelId: auxModel },
-      normalizedConfig.compressionModel || DEFAULT_MODEL,
+      normalizedConfig.compressionModel || aiConfig.model.modelId,
       normalizedConfig.apiKey,
-      aiBaseUrl,
+      aiConfig.model.baseUrl,
     );
   }
 

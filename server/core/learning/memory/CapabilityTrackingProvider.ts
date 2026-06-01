@@ -1,19 +1,18 @@
 /**
- * CapabilityTrackingProvider — 能力追踪记忆提供者
+ * CapabilityTrackingProvider — 能力追踪记忆提供者（纯数据库模式）
  *
  * 追踪用户的知识掌握程度、学习进度、薄弱环节。
- * 数据通过 IFileStorage 持久化到 vault 中的 JSON 文件。
- *
- * 替代原版的 localStorage + window.axiom 方案。
+ * 数据存储在 vaultCapability 表中，替代原来的 .axiom/capabilities.json 文件。
  */
 
 import { MemoryProvider, ToolSchema, MemorySearchResult } from './provider'
-import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
+import { prisma } from '@/lib/db'
+import { getCurrentVaultId, getCurrentUserId } from '@/server/core/agent/agent-context'
 
 interface ConceptRecord {
   conceptId: string
   concept: string
-  masteryLevel: number      // 0-100
+  masteryLevel: number
   status: 'known' | 'learning' | 'mastered'
   lastAccessed: number
   accessCount: number
@@ -21,9 +20,18 @@ interface ConceptRecord {
   strongAreas: string[]
 }
 
+async function resolveVaultId(): Promise<string | null> {
+  const ctxVaultId = getCurrentVaultId()
+  if (ctxVaultId) return ctxVaultId
+  const userId = getCurrentUserId()
+  if (!userId) return null
+  const vault = await prisma.vault.findFirst({ where: { userId }, orderBy: { createdAt: 'asc' } })
+  return vault?.id || null
+}
+
 export class CapabilityTrackingProvider extends MemoryProvider {
   private capabilities: Map<string, ConceptRecord> = new Map()
-  private vaultPath: string = ''
+  private vaultId: string = ''
   private _initialized = false
 
   get name(): string {
@@ -35,7 +43,7 @@ export class CapabilityTrackingProvider extends MemoryProvider {
   }
 
   async initialize(sessionId: string, _config?: Record<string, any>): Promise<void> {
-    this.vaultPath = process.env.VAULT_PATH || './vault'
+    this.vaultId = (await resolveVaultId()) || ''
     await this._load()
     this._initialized = true
   }
@@ -62,7 +70,6 @@ export class CapabilityTrackingProvider extends MemoryProvider {
     _assistantContent: string,
     _sessionId?: string
   ): Promise<void> {
-    // 从用户消息中检测概念提及
     const concepts = this._extractConcepts(userContent)
     for (const concept of concepts) {
       const existing = this.capabilities.get(concept)
@@ -114,7 +121,6 @@ export class CapabilityTrackingProvider extends MemoryProvider {
     if (wikiLinks) {
       return wikiLinks.map(w => w.slice(2, -2))
     }
-    // 如果没有 wikilink，尝试提取引号中的概念名
     const quotes = text.match(/「([^」]+)」/g)
     if (quotes) {
       return quotes.map(q => q.slice(1, -1))
@@ -133,24 +139,49 @@ export class CapabilityTrackingProvider extends MemoryProvider {
   }
 
   private async _load(): Promise<void> {
+    if (!this.vaultId) return
     try {
-      const result = await getFileStorage().readFile(`${this.vaultPath}/.axiom/capabilities.json`)
-      if (result.success && result.content) {
-        const data = JSON.parse(result.content)
-        for (const item of data) {
-          this.capabilities.set(item.concept, item)
-        }
+      const records = await prisma.vaultCapability.findMany({ where: { vaultId: this.vaultId } })
+      for (const r of records) {
+        this.capabilities.set(r.concept, {
+          conceptId: r.concept,
+          concept: r.concept,
+          masteryLevel: r.masteryLevel,
+          status: r.status as ConceptRecord['status'],
+          lastAccessed: r.lastAccessed.getTime(),
+          accessCount: r.accessCount,
+          weakAreas: JSON.parse(r.weakAreas || '[]'),
+          strongAreas: JSON.parse(r.strongAreas || '[]'),
+        })
       }
     } catch { /* 首次启动无数据 */ }
   }
 
   private async _save(): Promise<void> {
+    if (!this.vaultId) return
     try {
-      const data = Array.from(this.capabilities.values())
-      await getFileStorage().writeFile(
-        `${this.vaultPath}/.axiom/capabilities.json`,
-        JSON.stringify(data, null, 2)
-      )
+      for (const record of this.capabilities.values()) {
+        await prisma.vaultCapability.upsert({
+          where: { vaultId_concept: { vaultId: this.vaultId, concept: record.concept } },
+          create: {
+            vaultId: this.vaultId,
+            concept: record.concept,
+            masteryLevel: record.masteryLevel,
+            status: record.status,
+            accessCount: record.accessCount,
+            weakAreas: JSON.stringify(record.weakAreas),
+            strongAreas: JSON.stringify(record.strongAreas),
+          },
+          update: {
+            masteryLevel: record.masteryLevel,
+            status: record.status,
+            lastAccessed: new Date(record.lastAccessed),
+            accessCount: record.accessCount,
+            weakAreas: JSON.stringify(record.weakAreas),
+            strongAreas: JSON.stringify(record.strongAreas),
+          },
+        })
+      }
     } catch { /* 静默失败 */ }
   }
 }

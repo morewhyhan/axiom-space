@@ -13,6 +13,8 @@ import type { IterationBudget } from '@/server/core/learning/core/budget';
 import type { ContextCompressor } from '@/server/core/learning/context/compressor';
 import type { MemoryManager } from '@/server/core/learning/memory/manager';
 import type { GraphIntegrationManager } from '@/server/core/learning/graph/integration';
+import type { TrajectoryEntry } from '@/server/core/learning/pattern/PatternDetector';
+import type { LearningPattern } from '@/types/learning';
 import type { AgentStateMachine } from '../AgentStateMachine';
 import type { getAuditLogger } from '../audit/AuditLogger';
 import type { CheckpointManager } from '../feedback/CheckpointManager';
@@ -149,7 +151,7 @@ export interface IPromptService {
   convertToLlm(messages: unknown[]): unknown[];
 
   /** Call LLM for context compression / summarization. */
-  callLLMForSummary(prompt: string): Promise<string>;
+  callLLMForSummary(prompt: string, systemPromptOverride?: string): Promise<string>;
 
   /** Convert agent messages to learning messages. */
   toLearningMessages(messages: unknown[]): unknown[];
@@ -198,6 +200,54 @@ export interface IToolService {
 }
 
 // ────────────────────────────────────────────────────────────
+// ILearningDatabase
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Learning database adapter interface.
+ */
+export interface ILearningDatabase {
+  initialize(): Promise<void>;
+  startExpiryWatcher(callback: (session: any) => Promise<void>): void;
+  stopExpiryWatcher(): void;
+  appendTrajectory(entry: TrajectoryEntry): Promise<void>;
+  touchSession(sessionId: string): Promise<void>;
+  close(): Promise<void>;
+  clear(): Promise<void>;
+}
+
+// ────────────────────────────────────────────────────────────
+// IPatternExtractor
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Pattern extractor interface.
+ */
+export interface IPatternExtractor {
+  inferUserResponse(
+    previousUserMessage: string,
+    currentUserMessage: string,
+    sessionId: string,
+  ): Promise<string[]>;
+  getRelevantPatterns(userMessage: string): Promise<LearningPattern[]>;
+  addTrajectory(entry: TrajectoryEntry): void;
+  exportToJsonl(path: string): Promise<void>;
+}
+
+// ────────────────────────────────────────────────────────────
+// ILearningSkillManager
+// ────────────────────────────────────────────────────────────
+
+/**
+ * Learning skill manager interface.
+ */
+export interface ILearningSkillManager {
+  getSkillLevel(): number;
+  updateSkill(): void;
+  getRecommendedSkills(): unknown[];
+}
+
+// ────────────────────────────────────────────────────────────
 // ILearningFacade
 // ────────────────────────────────────────────────────────────
 
@@ -216,11 +266,11 @@ export interface ILearningFacade {
   /** Memory manager with provider orchestration */
   memory: MemoryManager;
   /** Learning database (session/trajectory persistence) */
-  database: any;
+  database: ILearningDatabase;
   /** Learning pattern extractor */
-  patternExtractor: any;
+  patternExtractor: IPatternExtractor;
   /** Learning skill manager */
-  learningSkillManager: any;
+  learningSkillManager: ILearningSkillManager;
   /** Knowledge graph integration manager */
   graphManager: GraphIntegrationManager;
 }

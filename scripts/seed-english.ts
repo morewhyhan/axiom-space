@@ -1,5 +1,8 @@
 import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
+import { hashPassword } from 'better-auth/crypto'
+import { syncEdgesFromContent } from '../lib/wiki-links'
+
 const prisma = new PrismaClient()
 
 function randomPastDate(daysBack: number): Date { const d = new Date(); d.setDate(d.getDate() - Math.floor(Math.random() * daysBack)); d.setHours(Math.floor(Math.random() * 24), 0, 0, 0); return d; }
@@ -21,6 +24,9 @@ function getTags(subject: string, type: string, extra?: string[]): string[] {
 
 interface CardDef { title: string; content: string; type: 'permanent' | 'fleeting' | 'literature'; tags?: string[] }
 interface SubjectDef { name: string; color: string; cards: CardDef[] }
+interface EdgeDef { sourceTitle: string; targetTitle: string; type: 'related' | 'prerequisite' | 'derived' | 'counter' }
+
+// ─── Card definitions ─────────────────────────────────────────────────────────
 
 const SUBJECTS: SubjectDef[] = [
   {
@@ -42,8 +48,6 @@ const SUBJECTS: SubjectDef[] = [
       { title: '构词法', type: 'permanent', content: '## 构词法\n\n1. 派生法：act → react → reaction\n2. 合成法：class + room = classroom\n3. 转化法：water (n.) → water (v.)\n4. 缩略法：exam = examination', tags: ['vocabulary', 'method'] },
       { title: '介词搭配', type: 'permanent', content: '## 常见介词搭配\n\n动词+介词：depend on, wait for, belong to, suffer from, deal with, agree with\n\n形容词+介词：interested in, good at, afraid of, different from, responsible for\n\n名词+介词：reason for, cause of, advantage of, relationship with', tags: ['vocabulary', 'grammar'] },
       { title: '英语词性分类', type: 'permanent', content: '## 英语词性\n\n1. 名词(n.) — book, student, knowledge\n2. 代词(pron.) — I, you, he, she, it\n3. 动词(v.) — run, study, become\n4. 形容词(adj.) — beautiful, important\n5. 副词(adv.) — quickly, very, always\n6. 介词(prep.) — in, on, at, for\n7. 连词(conj.) — and, but, because\n8. 感叹词(interj.) — oh, wow, alas\n9. 冠词(art.) — a, an, the\n10. 数词(num.) — one, first, hundred', tags: ['grammar', 'basic'] },
-
-      // fleeting
       { title: 'affect vs effect', type: 'fleeting', content: 'affect (v.) 影响 — effect (n.) 效果\n记法：affect = Action(动词), effect = End result(名词)', tags: ['vocabulary', 'mistakes'] },
       { title: 'complement vs compliment', type: 'fleeting', content: 'complement 互补 — compliment 赞美\n记法：compliment 中有 I(我)，被人夸奖', tags: ['vocabulary', 'mistakes'] },
       { title: 'principal vs principle', type: 'fleeting', content: 'principal 主要的/校长 — principle 原则\n记法：principal = pal(朋友，校长是你的朋友)', tags: ['vocabulary', 'mistakes'] },
@@ -74,8 +78,6 @@ const SUBJECTS: SubjectDef[] = [
       { title: '主语从句 It 句型', type: 'fleeting', content: 'It + be + adj + that...\nIt is essential that you practice daily.\nThat 从句作主语时常用 it 代替', tags: ['grammar', 'important'] },
       { title: '双重否定', type: 'fleeting', content: '两个否定等于肯定\nnot impossible = possible\nnot uncommon = common\nIt\'s not uncommon for students to make mistakes.', tags: ['grammar', 'advanced'] },
       { title: '独立主格', type: 'fleeting', content: '名词/代词 + 分词/不定式/介词短语\nThe work done, we went home.\nWeather permitting, we\'ll go out.', tags: ['grammar', 'advanced'] },
-
-      // literature
       { title: '《英语语法新思维》张满胜', type: 'literature', content: '全套三册，从思维角度理解语法，大量真实例句。适合系统学习。⭐⭐⭐⭐⭐', tags: ['grammar', 'book'] },
       { title: '《Word Power Made Easy》', type: 'literature', content: 'Norman Lewis 经典词汇书。通过词源学习，系统讲解词根词缀。⭐⭐⭐⭐⭐', tags: ['vocabulary', 'book'] },
       { title: '《English Grammar in Use》', type: 'literature', content: 'Raymond Murphy 剑桥语法经典。左页讲解右页练习，145个单元。⭐⭐⭐⭐⭐', tags: ['grammar', 'book'] },
@@ -105,8 +107,6 @@ const SUBJECTS: SubjectDef[] = [
       { title: '英汉思维差异与阅读', type: 'permanent', content: '## 英汉思维差异\n\n英语：直线式思维，先结论后论证\n汉语：螺旋式思维，先铺垫后点题\n\n英语段落通常以 topic sentence 开头\n汉语段落常以铺垫开头', tags: ['reading', 'advanced'] },
       { title: '批判性阅读', type: 'permanent', content: '## 批判性阅读\n\n不仅要理解文章说了什么，还要判断：\n- 作者的立场和偏见\n- 论据是否充分\n- 逻辑是否有漏洞\n- 是否有其他可能性\n\n常问：What is the author\'s agenda?', tags: ['reading', 'advanced'] },
       { title: '阅读笔记方法', type: 'permanent', content: '## 阅读笔记\n\nCornell 法：Notes(记录) + Cues(提示) + Summary(总结)\n\n每篇记录：新词10-15个，好句5-10句，主旨1-2句，个人感想', tags: ['reading', 'method'] },
-
-      // fleeting
       { title: '题干信号词速查', type: 'fleeting', content: 'main idea→主旨题, according to→细节题, infer→推断题, means→词义题, attitude→态度题', tags: ['reading', 'exam'] },
       { title: '选项排除速查', type: 'fleeting', content: '绝对化(all/none/never)优先排除，与原文矛盾排除，未提及排除', tags: ['reading', 'method'] },
       { title: '真题三遍法', type: 'fleeting', content: '第一遍模拟考试→第二遍精读分析→第三遍总结复盘', tags: ['reading', 'exam'] },
@@ -143,8 +143,6 @@ const SUBJECTS: SubjectDef[] = [
       { title: '写作开头方式', type: 'permanent', content: '## 开头方式\n\n1. 设问句：Have you ever...?\n2. 数据引述：According to a recent survey...\n3. 名言引用：As the saying goes...\n4. 背景介绍：With the development of...', tags: ['writing', 'method'] },
       { title: '写作结尾方式', type: 'permanent', content: '## 结尾方式\n\n1. 总结式：In conclusion, ...\n2. 建议式：It is high time that ...\n3. 展望式：I am confident that ...\n4. 警示式：If we don\'t ... we will ...', tags: ['writing', 'method'] },
       { title: '英语标点规范', type: 'permanent', content: '## 标点\n\n句号用. 不是。\nOxford comma：I like A, B, and C.\n引号句末标点在引号内。\n所有格用\'s。', tags: ['writing', 'basic'] },
-
-      // fleeting
       { title: '作文加分句型', type: 'fleeting', content: 'Only by doing...can we...（倒装强调）\nSo important is...that...（倒装强调）\nIt is...that matters most.（强调句）', tags: ['writing', 'advanced'] },
       { title: '大作文描写句型', type: 'fleeting', content: 'As is vividly shown in the picture,...\nThe chart clearly illustrates that...\nIt is noticeable that...', tags: ['writing', 'exam'] },
       { title: '大作文分析句型', type: 'fleeting', content: 'The phenomenon can be attributed to...\nSeveral factors contribute to this trend.\nFirst and foremost,... Moreover,...', tags: ['writing', 'exam'] },
@@ -181,8 +179,6 @@ const SUBJECTS: SubjectDef[] = [
       { title: '雅思口语Part 2', type: 'permanent', content: '## 雅思口语Part 2\n\n1分钟准备，1-2分钟独白\n\n结构：Introduction→What/When/Where→Why/How→Feeling→Conclusion\n\n记笔记：关键词，不写完整句子', tags: ['speaking', 'exam'] },
       { title: '雅思口语Part 3', type: 'permanent', content: '## 雅思口语Part 3\n\n抽象问题讨论(与Part 2话题相关)\n\n结构：直接回答 + 解释 + 举例 + 对比\n\n常用：Generally speaking, In most cases, For instance, On the other hand', tags: ['speaking', 'exam'] },
       { title: '英语配音学习法', type: 'permanent', content: '## 配音学习法\n\n选喜欢的电影/剧集片段(30秒-1分钟)\n1. 看字幕听懂大意\n2. 逐句跟读模仿语音语调\n3. 同步配音录下来对比\n4. 重复直到与原声一致\n\n推荐：BBC纪录片、迪士尼动画、TED演讲', tags: ['speaking', 'method'] },
-
-      // fleeting
       { title: '英语歌曲学英语', type: 'fleeting', content: '通过英语歌学发音和语感。推荐：The Beatles, Taylor Swift, Ed Sheeran\n方法：听→看歌词→跟唱→理解含义', tags: ['listening', 'method'] },
       { title: '播客学习法', type: 'fleeting', content: '推荐播客：BBC 6 Minute English, This American Life, TED Talks Daily\n听完→看文本→查词→跟读', tags: ['listening', 'method'] },
       { title: '美剧学英语', type: 'fleeting', content: '老友记(Friends)经典入门，摩登家庭(Modern Family)日常对话\n方法：先看中字→再看英字→最后无字', tags: ['listening', 'method'] },
@@ -202,14 +198,196 @@ const SUBJECTS: SubjectDef[] = [
   },
 ]
 
+// ─── Edge definitions ──────────────────────────────────────────────────────────
+
+const GRAMMAR_EDGES: EdgeDef[] = [
+  // Permanent → Permanent
+  { sourceTitle: '词根词缀记忆法', targetTitle: '构词法', type: 'related' },
+  { sourceTitle: '语法时态体系', targetTitle: '被动语态', type: 'related' },
+  { sourceTitle: '语法时态体系', targetTitle: '虚拟语气', type: 'related' },
+  { sourceTitle: '句子成分与五大句型', targetTitle: '定语从句', type: 'prerequisite' },
+  { sourceTitle: '句子成分与五大句型', targetTitle: '名词性从句', type: 'prerequisite' },
+  { sourceTitle: '句子成分与五大句型', targetTitle: '非谓语动词', type: 'related' },
+  { sourceTitle: '非谓语动词', targetTitle: '不定式 vs 动名词作宾语', type: 'derived' },
+  { sourceTitle: '定语从句', targetTitle: '名词性从句', type: 'related' },
+  { sourceTitle: '连词与从句', targetTitle: '定语从句', type: 'related' },
+  { sourceTitle: '连词与从句', targetTitle: '名词性从句', type: 'related' },
+  { sourceTitle: '主谓一致', targetTitle: '句子成分与五大句型', type: 'related' },
+  { sourceTitle: '被动语态', targetTitle: '语法时态体系', type: 'derived' },
+  { sourceTitle: '虚拟语气', targetTitle: '语法时态体系', type: 'related' },
+  { sourceTitle: '强调句与倒装', targetTitle: '句子成分与五大句型', type: 'related' },
+  { sourceTitle: '英语词性分类', targetTitle: '句子成分与五大句型', type: 'prerequisite' },
+  { sourceTitle: '情态动词', targetTitle: '虚拟语气', type: 'related' },
+  { sourceTitle: '介词搭配', targetTitle: '英语词性分类', type: 'related' },
+  { sourceTitle: '词根词缀记忆法', targetTitle: '否定前缀 un-/in-/dis-', type: 'related' },
+  { sourceTitle: '构词法', targetTitle: '词根词缀记忆法', type: 'related' },
+  // Permanent → Fleeting
+  { sourceTitle: '句子成分与五大句型', targetTitle: 'it 作形式主语', type: 'related' },
+  { sourceTitle: '语法时态体系', targetTitle: '动词时态呼应', type: 'related' },
+  { sourceTitle: '非谓语动词', targetTitle: '感官动词', type: 'related' },
+  { sourceTitle: '定语从句', targetTitle: '翻译中的定语从句', type: 'related' },
+  { sourceTitle: '强调句与倒装', targetTitle: '疑问词+ever', type: 'related' },
+  { sourceTitle: '强调句与倒装', targetTitle: '双重否定', type: 'related' },
+  { sourceTitle: '连词与从句', targetTitle: '省略句', type: 'related' },
+  { sourceTitle: '英语词性分类', targetTitle: '常见不可数名词', type: 'related' },
+  { sourceTitle: '句子成分与五大句型', targetTitle: '主语从句 It 句型', type: 'related' },
+  { sourceTitle: '句子成分与五大句型', targetTitle: '独立主格', type: 'related' },
+  { sourceTitle: '词根词缀记忆法', targetTitle: '否定前缀 un-/in-/dis-', type: 'related' },
+  { sourceTitle: '英语词性分类', targetTitle: 'there be 句型', type: 'related' },
+]
+
+const READING_EDGES: EdgeDef[] = [
+  // Permanent → Permanent
+  { sourceTitle: '考研阅读六大题型', targetTitle: '主旨题解题思路', type: 'derived' },
+  { sourceTitle: '考研阅读六大题型', targetTitle: '细节题定位法', type: 'derived' },
+  { sourceTitle: '考研阅读六大题型', targetTitle: '推断题逻辑', type: 'derived' },
+  { sourceTitle: '考研阅读六大题型', targetTitle: '词义猜测技巧', type: 'derived' },
+  { sourceTitle: '考研阅读六大题型', targetTitle: '态度题解题', type: 'derived' },
+  { sourceTitle: '主旨题解题思路', targetTitle: '段落主题句', type: 'related' },
+  { sourceTitle: '细节题定位法', targetTitle: '快速阅读技巧', type: 'related' },
+  { sourceTitle: '细节题定位法', targetTitle: '同义替换类型', type: 'related' },
+  { sourceTitle: '推断题逻辑', targetTitle: '批判性阅读', type: 'related' },
+  { sourceTitle: '词义猜测技巧', targetTitle: '长难句分析', type: 'related' },
+  { sourceTitle: '长难句分析', targetTitle: '英汉思维差异与阅读', type: 'related' },
+  { sourceTitle: '快速阅读技巧', targetTitle: '阅读速度训练', type: 'related' },
+  { sourceTitle: '逻辑连接词', targetTitle: '考研阅读常见陷阱', type: 'related' },
+  { sourceTitle: '段落主题句', targetTitle: '文章体裁特点', type: 'related' },
+  { sourceTitle: '态度题解题', targetTitle: '批判性阅读', type: 'related' },
+  { sourceTitle: '考研阅读常见陷阱', targetTitle: '考研阅读六大题型', type: 'related' },
+  { sourceTitle: '阅读笔记方法', targetTitle: '精听五步法', type: 'related' },
+  // Permanent → Fleeting (reading tips)
+  { sourceTitle: '考研阅读常见陷阱', targetTitle: '选项排除速查', type: 'related' },
+  { sourceTitle: '考研阅读六大题型', targetTitle: '题干信号词速查', type: 'related' },
+  { sourceTitle: '细节题定位法', targetTitle: 'but 后面的重点', type: 'related' },
+  { sourceTitle: '词义猜测技巧', targetTitle: '猜词必杀技', type: 'related' },
+  { sourceTitle: '长难句分析', targetTitle: '长难句主干提取', type: 'related' },
+  { sourceTitle: '考研阅读六大题型', targetTitle: '考研阅读时间分配', type: 'related' },
+  { sourceTitle: '词义猜测技巧', targetTitle: '构词法猜词应用', type: 'related' },
+  { sourceTitle: '快速阅读技巧', targetTitle: '阅读速度目标', type: 'related' },
+  { sourceTitle: '段落主题句', targetTitle: '例子与观点的区分', type: 'related' },
+  { sourceTitle: '文章体裁特点', targetTitle: '泛指与特指', type: 'related' },
+]
+
+const WRITING_EDGES: EdgeDef[] = [
+  // Permanent → Permanent
+  { sourceTitle: '英语写作结构', targetTitle: '段落展开方法', type: 'prerequisite' },
+  { sourceTitle: '英语写作结构', targetTitle: '句子多样化', type: 'related' },
+  { sourceTitle: '英语写作结构', targetTitle: '考研作文模板', type: 'related' },
+  { sourceTitle: '段落展开方法', targetTitle: '写作连贯性', type: 'related' },
+  { sourceTitle: '句子多样化', targetTitle: '英语修辞手法', type: 'related' },
+  { sourceTitle: '英译汉技巧', targetTitle: '汉译英技巧', type: 'related' },
+  { sourceTitle: '英译汉技巧', targetTitle: '英汉语言差异', type: 'prerequisite' },
+  { sourceTitle: '汉译英技巧', targetTitle: '英汉语言差异', type: 'prerequisite' },
+  { sourceTitle: '常见写作错误', targetTitle: '学术写作风格', type: 'related' },
+  { sourceTitle: '写作开头方式', targetTitle: '写作结尾方式', type: 'related' },
+  { sourceTitle: '英语段落类型', targetTitle: '段落展开方法', type: 'related' },
+  // Permanent → Fleeting
+  { sourceTitle: '考研作文模板', targetTitle: '大作文描写句型', type: 'related' },
+  { sourceTitle: '考研作文模板', targetTitle: '大作文分析句型', type: 'related' },
+  { sourceTitle: '考研作文模板', targetTitle: '大作文结论句型', type: 'related' },
+  { sourceTitle: '考研作文模板', targetTitle: '小作文书信开头', type: 'related' },
+  { sourceTitle: '考研作文模板', targetTitle: '小作文书信结尾', type: 'related' },
+  { sourceTitle: '句子多样化', targetTitle: '作文加分句型', type: 'related' },
+  { sourceTitle: '英译汉技巧', targetTitle: '翻译中的被动处理', type: 'related' },
+  { sourceTitle: '汉译英技巧', targetTitle: '避免中式英语', type: 'related' },
+  { sourceTitle: '英译汉技巧', targetTitle: '翻译长句断句法', type: 'related' },
+  { sourceTitle: '英汉语言差异', targetTitle: '翻译中的定语从句', type: 'related' },
+  { sourceTitle: '英语写作结构', targetTitle: '英文写作连接词', type: 'related' },
+  { sourceTitle: '英语写作结构', targetTitle: '雅思写作Task 2结构', type: 'related' },
+  { sourceTitle: '写作连贯性', targetTitle: '写作中的平行结构', type: 'related' },
+  { sourceTitle: '英语段落类型', targetTitle: '书面语 vs 口语', type: 'related' },
+  { sourceTitle: '常见写作错误', targetTitle: '作文自查清单', type: 'related' },
+]
+
+const SPEAKING_EDGES: EdgeDef[] = [
+  // Permanent → Permanent
+  { sourceTitle: '英语发音基础', targetTitle: '连读与弱读', type: 'prerequisite' },
+  { sourceTitle: '英语发音基础', targetTitle: '英语语调', type: 'prerequisite' },
+  { sourceTitle: '英语发音基础', targetTitle: '英语口音差异', type: 'related' },
+  { sourceTitle: '连读与弱读', targetTitle: '英语语调', type: 'related' },
+  { sourceTitle: '口语常用句型', targetTitle: '英语会话技巧', type: 'related' },
+  { sourceTitle: '精听五步法', targetTitle: '听力预测技巧', type: 'related' },
+  { sourceTitle: '精听五步法', targetTitle: '听力笔记技巧', type: 'related' },
+  { sourceTitle: '英语思维训练', targetTitle: '口语流利度训练', type: 'related' },
+  { sourceTitle: '英语会话技巧', targetTitle: '英语演讲技巧', type: 'related' },
+  { sourceTitle: '雅思口语Part 1', targetTitle: '雅思口语Part 2', type: 'related' },
+  { sourceTitle: '雅思口语Part 2', targetTitle: '雅思口语Part 3', type: 'related' },
+  // Permanent → Fleeting
+  { sourceTitle: '英语发音基础', targetTitle: 'th 发音技巧', type: 'related' },
+  { sourceTitle: '连读与弱读', targetTitle: '听力连读检测', type: 'related' },
+  { sourceTitle: '精听五步法', targetTitle: '播客学习法', type: 'related' },
+  { sourceTitle: '精听五步法', targetTitle: '美剧学英语', type: 'related' },
+  { sourceTitle: '精听五步法', targetTitle: 'TED演讲学习法', type: 'related' },
+  { sourceTitle: '英语思维训练', targetTitle: '英语歌曲学英语', type: 'related' },
+  { sourceTitle: '英语会话技巧', targetTitle: '英语角交流技巧', type: 'related' },
+  { sourceTitle: '英语演讲技巧', targetTitle: '强调语气表达', type: 'related' },
+  { sourceTitle: '听力笔记技巧', targetTitle: '托福听力笔记', type: 'related' },
+  { sourceTitle: '雅思口语Part 1', targetTitle: '英语面试准备', type: 'related' },
+  { sourceTitle: '英语会话技巧', targetTitle: '商务英语口语', type: 'related' },
+  { sourceTitle: '雅思听力题型', targetTitle: '听力预测技巧', type: 'related' },
+  { sourceTitle: '英语口音差异', targetTitle: '英语笑话理解', type: 'related' },
+]
+
+// Cross-cluster edges
+const CROSS_EN_EDGES: EdgeDef[] = [
+  // Grammar → Reading
+  { sourceTitle: '长难句分析', targetTitle: '句子成分与五大句型', type: 'related' },
+  { sourceTitle: '词义猜测技巧', targetTitle: '词根词缀记忆法', type: 'related' },
+  { sourceTitle: '逻辑连接词', targetTitle: '连词与从句', type: 'related' },
+  // Grammar → Writing
+  { sourceTitle: '英语写作结构', targetTitle: '连词与从句', type: 'related' },
+  { sourceTitle: '句子多样化', targetTitle: '强调句与倒装', type: 'related' },
+  { sourceTitle: '考研作文模板', targetTitle: '主谓一致', type: 'related' },
+  // Reading → Writing
+  { sourceTitle: '逻辑连接词', targetTitle: '英文写作连接词', type: 'related' },
+  { sourceTitle: '长难句分析', targetTitle: '翻译长句断句法', type: 'related' },
+  { sourceTitle: '英汉思维差异与阅读', targetTitle: '英汉语言差异', type: 'related' },
+  // Speaking ↔ Listening ↔ Others
+  { sourceTitle: '精听五步法', targetTitle: '英语发音基础', type: 'related' },
+  { sourceTitle: '听力连读检测', targetTitle: '连读与弱读', type: 'related' },
+  { sourceTitle: '英语配音学习法', targetTitle: '英语语调', type: 'related' },
+  { sourceTitle: '口语常用句型', targetTitle: '英语写作结构', type: 'related' },
+  { sourceTitle: '英语思维训练', targetTitle: '英汉语言差异', type: 'related' },
+]
+
+// Build related-titles map from edges
+function buildRelatedMap(): Map<string, string[]> {
+  const map = new Map<string, Set<string>>()
+  const allEdges = [...GRAMMAR_EDGES, ...READING_EDGES, ...WRITING_EDGES, ...SPEAKING_EDGES, ...CROSS_EN_EDGES]
+  for (const e of allEdges) {
+    if (!map.has(e.sourceTitle)) map.set(e.sourceTitle, new Set())
+    map.get(e.sourceTitle)!.add(e.targetTitle)
+  }
+  const result = new Map<string, string[]>()
+  for (const [k, v] of map) result.set(k, Array.from(v))
+  return result
+}
+
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
 async function main() {
-  console.log('=== English Learning Seed ===\n')
+  console.log('=== English Learning Seed (WikiLink) ===\n')
 
   let user = await prisma.user.findUnique({ where: { email: 'morewhy.han@gmail.com' } })
   if (!user) {
     user = await prisma.user.create({ data: { email: 'morewhy.han@gmail.com', name: 'han' } })
   }
   console.log(`[1/5] User: ${user.email}`)
+
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: user.id, providerId: 'credential' },
+  })
+  if (!existingAccount) {
+    await prisma.account.create({
+      data: {
+        userId: user.id,
+        accountId: user.email,
+        providerId: 'credential',
+        password: await hashPassword('demo123456'),
+      },
+    })
+    console.log(`  Account record created (password: demo123456)`)
+  }
 
   const existing = await prisma.vault.findFirst({ where: { userId: user.id, name: '英语学习' } })
   let vault = existing
@@ -220,13 +398,16 @@ async function main() {
     console.log(`[2/5] Using existing vault: 英语学习`)
   }
 
+  // Clean existing data
   await prisma.edge.deleteMany({ where: { vaultId: vault.id } })
   await prisma.card.deleteMany({ where: { vaultId: vault.id } })
   await prisma.cluster.deleteMany({ where: { vaultId: vault.id } })
   console.log('[3/5] Cleaned existing data')
 
-  console.log('[4/5] Creating clusters and cards...')
+  console.log('[4/5] Creating clusters and cards with WikiLink content...')
   const clusterMap = new Map<string, string>()
+  const cardMap = new Map<string, string>() // title → cardId
+  const relatedMap = buildRelatedMap()
   let totalCards = 0
 
   for (const subject of SUBJECTS) {
@@ -241,54 +422,54 @@ async function main() {
     const all = [...perms, ...fleets, ...lits]
 
     for (const card of all) {
-      await prisma.card.create({
+      // Append WikiLinks to existing content if this card has outgoing edges
+      const related = relatedMap.get(card.title)
+      let content = card.content
+      if (related && related.length > 0) {
+        content += '\n\n**See also:** ' + related.map(t => `[[${t}]]`).join(', ')
+      }
+
+      const created = await prisma.card.create({
         data: {
           vaultId: vault.id, clusterId: cluster.id,
           path: makePath(subject.name, card.title),
-          content: card.content, type: card.type, title: card.title,
+          content, type: card.type, title: card.title,
           tags: JSON.stringify(getTags(subject.name, card.type, card.tags)),
           createdAt: randomPastDate(30),
         },
       })
+      cardMap.set(card.title, created.id)
       totalCards++
     }
     console.log(`  ${subject.name}: ${perms.length}P + ${fleets.length}F + ${lits.length}L = ${all.length} cards`)
   }
 
-  console.log('[5/5] Creating edges...')
-  const allCards = await prisma.card.findMany({ where: { vaultId: vault.id } })
-  const byCluster = new Map<string, typeof allCards>()
-  for (const c of allCards) {
-    const cid = c.clusterId || ''
-    if (!byCluster.has(cid)) byCluster.set(cid, [])
-    byCluster.get(cid)!.push(c)
+  console.log('[5/5] Syncing edges from WikiLink content...')
+
+  const allCards = await prisma.card.findMany({
+    where: { vaultId: vault.id },
+    select: { id: true, vaultId: true, content: true, title: true },
+  })
+  const cardsWithLinks = allCards.filter(c => c.content.includes('[['))
+  console.log(`  Cards with [[WikiLink]]: ${cardsWithLinks.length} / ${allCards.length}`)
+
+  const CONCURRENCY = 10
+  let syncedCount = 0
+  for (let i = 0; i < cardsWithLinks.length; i += CONCURRENCY) {
+    const batch = cardsWithLinks.slice(i, i + CONCURRENCY)
+    await Promise.allSettled(
+      batch.map(c => syncEdgesFromContent(prisma, c.id, c.vaultId, c.content))
+    )
+    syncedCount += batch.length
+    process.stdout.write(`  ⠋ Syncing: ${syncedCount}/${cardsWithLinks.length}\r`)
   }
+  console.log(`\n  Edges: ${syncedCount} cards synced`)
 
-  let edgeSuccess = 0
-  const batch: any[] = []
-  for (const [, cards] of byCluster) {
-    for (let p = 0; p < Math.min(cards.length, 15); p++) {
-      for (let f = 15; f < Math.min(cards.length, 50); f += 3) {
-        batch.push(prisma.edge.create({
-          data: { vaultId: vault.id, sourceId: cards[p].id, targetId: cards[f].id, type: 'related', weight: 1.0 },
-        }))
-      }
-    }
-  }
-
-  for (let i = 0; i < batch.length; i += 25) {
-    const chunk = batch.slice(i, i + 25)
-    await prisma.$transaction(chunk)
-    edgeSuccess += chunk.length
-    process.stdout.write(`  ⠋ Edges: ${Math.min(i + 25, batch.length)}/${batch.length}\r`)
-  }
-
-  console.log(`\n  Edges: ${edgeSuccess} created`)
-
+  const dbEdgeCount = await prisma.edge.count({ where: { vaultId: vault.id } })
   console.log(`\n=== Seed Complete ===`)
   console.log(`  Clusters: ${clusterMap.size}`)
   console.log(`  Cards:    ${totalCards}`)
-  console.log(`  Edges:    ${edgeSuccess}`)
+  console.log(`  Edges:    ${dbEdgeCount} (auto-generated from [[WikiLink]])`)
   const dc = await prisma.card.count({ where: { vaultId: vault.id } })
   const de = await prisma.edge.count({ where: { vaultId: vault.id } })
   console.log(`  (DB verify) Cards: ${dc}, Edges: ${de}`)

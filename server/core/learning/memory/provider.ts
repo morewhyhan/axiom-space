@@ -1,6 +1,5 @@
 /**
  * Memory Provider 抽象基类
- * 对标 Hermes agent/memory_provider.py
  */
 
 import { Message, MessageRole, LearningSession } from '@/types/learning';

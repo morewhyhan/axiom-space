@@ -1,6 +1,5 @@
 /**
  * 反馈层模块 — 统一导出
- * 对标 Hermes 反馈机制（隐式 LLM 驱动，无显式校验器/反思器）
  */
 
 export { MemoryFlush } from './MemoryFlush';

@@ -7,6 +7,8 @@ import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { Type } from "@mariozechner/pi-ai";
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath, resolvePath } from "./helpers";
+import { prisma } from '@/lib/db';
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 const axiom = createAxiomCompat(getFileStorage());
 
 const createFleeingCardTool = createTool(
@@ -34,7 +36,7 @@ const createFleeingCardTool = createTool(
       const result = await (axiom as any).createFleeing?.(vaultPath, params, params.content);
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
-        globalThis.dispatchEvent(new CustomEvent('axiom:toast', { detail: { message: `创建灵感卡片: ${params.title}`, type: 'card' } }));
+        console.log(`[Event] axiom:toast — card: 创建灵感卡片: ${params.title}`);
         return {
           content: [{ type: 'text', text: `灵感卡片已创建，路径: ${cardPath}` }],
           details: { id: cardPath, cardPath, content: params.content },
@@ -56,8 +58,16 @@ const createFleeingCardTool = createTool(
 
 const createPermanentCardTool = createTool(
   'create_permanent_card',
-  '创建永久卡片',
-  '创建一个新的永久知识卡片（Permanent Card）。请在 content 中用 [[概念名]] 标注与其他概念的关联，并确保 links.to 包含所有引用概念，实现知识图谱双向连线。',
+  '创建永久卡片（两步法 Step 2）',
+  '创建一个新的永久知识卡片。这是两步知识提取流程的第二步——在 extract_concepts 分析之后调用。'
+  + '【必须遵守】每创建一张卡片后，检查 extract_concepts 返回的 relationships，对每个关系调用 add_graph_edge 建立图谱连线。'
+  + '卡片内容质量四要素：\n'
+  + '1. 定义 — 概念的核心意思（是什么）\n'
+  + '2. 例子 — 至少一个具体实例（比如/例如）\n'
+  + '3. 关联 — 用 [[概念名]] 标注与其他概念的关联\n'
+  + '4. 应用 — 这个知识有什么用（用途/使用场景）\n'
+  + '如果某个要素缺失，请在回复中询问用户补充。'
+  + '请在 content 中用 [[概念名]] 标注与其他概念的关联，并确保 links.to 包含所有引用概念，实现知识图谱双向连线。',
   Type.Object({
     title: Type.String({ description: '卡片标题' }),
     content: Type.String({ description: '卡片内容，请用 [[概念名]] 标注与其他概念的关联，实现双向链接' }),
@@ -80,18 +90,38 @@ const createPermanentCardTool = createTool(
           details: { error: 'No vault open' },
         };
       }
+      // 质量验证：检查 4 要素
+      const qualityChecks: Record<string, boolean> = {
+        hasDefinition: /定义|是|指|means|is a/i.test(params.content),
+        hasExamples: /例如|比如|举例|Example|for example/i.test(params.content),
+        hasRelations: /\[\[.+?\]\]/.test(params.content),
+        hasApplications: /应用|使用|场景|用途|use case/i.test(params.content),
+      };
+      const missingElements = Object.entries(qualityChecks)
+        .filter(([, v]) => !v)
+        .map(([k]) => k.replace('has', '').toLowerCase());
+      const qualityWarnings: string[] = [];
+      if (missingElements.length > 0) {
+        qualityWarnings.push(`⚠️ 内容缺少以下要素: ${missingElements.join(', ')}`);
+      }
+
       const result = await (axiom as any).createPermanent?.(vaultPath, params, params.content);
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
-        globalThis.dispatchEvent(new CustomEvent('axiom:toast', { detail: { message: `创建永久卡片: ${params.title}`, type: 'card' } }));
+        const contentParts = [`永久卡片已创建: ${params.title} (${cardPath})`];
+        if (qualityWarnings.length > 0) {
+          contentParts.push('');
+          contentParts.push(...qualityWarnings);
+        }
+        console.log(`[Event] axiom:toast — card: 创建永久卡片: ${params.title}`);
         return {
-          content: [{ type: 'text', text: `永久卡片已创建: ${params.title} (${cardPath})` }],
-          details: { title: params.title, id: cardPath, cardPath },
+          content: [{ type: 'text', text: contentParts.join('\n') }],
+          details: { title: params.title, id: cardPath, cardPath, quality_checks: qualityChecks },
         };
       }
       return {
         content: [{ type: 'text', text: `创建失败: ${result?.error || '未知错误'}` }],
-        details: { error: result?.error },
+        details: { error: result?.error, quality_checks: qualityChecks },
       };
     } catch (error) {
       return {
@@ -103,7 +133,7 @@ const createPermanentCardTool = createTool(
 );
 
 
-const searchCardsTool = createTool(
+export const searchCardsTool = createTool(
   'search_cards',
   '搜索卡片',
   '在 Vault 中搜索卡片（使用全文搜索索引，支持中英文混合查询）',
@@ -111,6 +141,7 @@ const searchCardsTool = createTool(
     query: Type.String({ description: '搜索关键词' }),
     type: Type.Optional(Type.String({ description: '卡片类型: literature, fleeting, permanent' })),
     limit: Type.Optional(Type.Number({ description: '返回结果数量限制' })),
+    advanced: Type.Optional(Type.Boolean({ description: '启用高级搜索语法支持 links_to:, tags:, created: 前缀' })),
   }),
   async (_id, params) => {
     try {
@@ -123,6 +154,31 @@ const searchCardsTool = createTool(
       }
       const type = params.type || 'all';
       const limit = params.limit || 10;
+      const filters: Record<string, any> = {};
+
+      // 高级搜索语法解析
+      let searchQuery = params.query;
+      if (params.advanced) {
+        const linksToMatch = searchQuery.match(/links_to:"([^"]+)"/);
+        if (linksToMatch) {
+          filters.links_to = linksToMatch[1];
+          searchQuery = searchQuery.replace(linksToMatch[0], '').trim();
+        }
+        const tagsMatch = searchQuery.match(/tags:"([^"]+)"/);
+        if (tagsMatch) {
+          filters.tags = tagsMatch[1];
+          searchQuery = searchQuery.replace(tagsMatch[0], '').trim();
+        }
+        const createdMatch = searchQuery.match(/created:([><])(\d{4}-\d{2}-\d{2})/);
+        if (createdMatch) {
+          filters.created = { operator: createdMatch[1], date: createdMatch[2] };
+          searchQuery = searchQuery.replace(createdMatch[0], '').trim();
+        }
+        // 如果解析后有残留的非空文本，用它作为查询词
+        if (searchQuery) {
+          params.query = searchQuery;
+        }
+      }
 
       // 优先使用 FTS 全文搜索
       try {
@@ -139,7 +195,7 @@ const searchCardsTool = createTool(
             .join('\n');
           return {
             content: [{ type: 'text', text: `找到 ${ftsResults.length} 个结果:\n${summary}` }],
-            details: { query: params.query, results: ftsResults.slice(0, limit), engine: 'fts' },
+            details: { query: params.query, results: ftsResults.slice(0, limit), engine: 'fts', filters: Object.keys(filters).length > 0 ? filters : undefined },
           };
         }
       } catch (ftsErr) {
@@ -181,7 +237,7 @@ const searchCardsTool = createTool(
         .join('\n');
       return {
         content: [{ type: 'text', text: `找到 ${results.length} 个卡片:\n${summary || '(无匹配)'}` }],
-        details: { query: params.query, results: results.slice(0, limit), engine: 'scan' },
+        details: { query: params.query, results: results.slice(0, limit), engine: 'scan', filters: Object.keys(filters).length > 0 ? filters : undefined },
       };
     } catch (error) {
       return {
@@ -209,9 +265,7 @@ const readSkillTool = createTool(
       if (skillContent) {
         if (params.skillName.includes('learning')) {
           try {
-            globalThis.dispatchEvent(new CustomEvent('axiom:start-learning-session', {
-              detail: { skillName: params.skillName },
-            }));
+            console.log(`[Event] axiom:start-learning-session — ${params.skillName}`);
           } catch { /* non-fatal */ }
         }
 
@@ -278,12 +332,7 @@ const deleteSkillTool = createTool(
 
       // Confirmation gate (对标 D-14)
       if (!params.force) {
-        globalThis.dispatchEvent(new CustomEvent('axiom:ask-user', {
-          detail: {
-            question: `确认删除 Skill: ${params.skillName}？`,
-            context: { tool: 'delete_skill', args: params },
-          },
-        }));
+        console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
         return {
           content: [{ type: 'text', text: `请确认是否删除 Skill "${params.skillName}"。确认后我将执行操作。` }],
           details: { awaitingConfirmation: true },
@@ -364,17 +413,34 @@ const deleteCardTool = createTool(
         };
       }
 
+      // 反向链接检查
+      let backlinks: Array<{ title: string | null }> = [];
+      const vaultId = getCurrentVaultId();
+      if (vaultId) {
+        const cardTitle = params.cardPath.split('/').pop()?.replace(/\.md$/, '') || '';
+        try {
+          const refCards = await prisma.card.findMany({
+            where: { vaultId, content: { contains: cardTitle } },
+            select: { title: true },
+          });
+          backlinks = refCards.filter(c => c.title !== cardTitle);
+        } catch (e) {
+          console.debug('[delete_card] backlink query failed:', e);
+        }
+      }
+      const backlinkText = backlinks.length > 0
+        ? `⚠️ 有 ${backlinks.length} 张卡片引用了此卡片，删除将破坏这些链接`
+        : '';
+
       // Confirmation gate (对标 D-14)
       if (!params.force) {
-        globalThis.dispatchEvent(new CustomEvent('axiom:ask-user', {
-          detail: {
-            question: `确认删除卡片: ${params.cardPath}？删除后可通过 .axiom/trash/ 恢复。`,
-            context: { tool: 'delete_card', args: params },
-          },
-        }));
+        const confirmText = backlinkText
+          ? `请确认是否删除卡片 "${params.cardPath}"。\n${backlinkText}\n确认后我将执行操作。`
+          : `请确认是否删除卡片 "${params.cardPath}"。确认后我将执行操作。`;
+        console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
         return {
-          content: [{ type: 'text', text: `请确认是否删除卡片 "${params.cardPath}"。确认后我将执行操作。` }],
-          details: { awaitingConfirmation: true },
+          content: [{ type: 'text', text: confirmText }],
+          details: { awaitingConfirmation: true, backlink_count: backlinks.length, backlinks: backlinks.map(b => b.title) },
         };
       }
 
@@ -454,10 +520,8 @@ const axiom = createAxiomCompat(fileStorage);
       const content = params.definition || `# ${params.title}\n\n${params.definition || ''}`;
       const result = await (axiom as any).createPermanent(
         vaultPath,
-        params.title,
-        'concept',
+        { title: params.title, tags: [params.domain || 'general'] },
         content,
-        { literature: [], fleeing: [] }
       );
 
       if (!result.success) {
@@ -469,7 +533,7 @@ const axiom = createAxiomCompat(fileStorage);
 
       return {
         content: [{ type: 'text', text: `概念 "${params.title}" 已添加到知识图谱。` }],
-        details: { title: params.title, cardTitle: (result as any).title || params.title },
+        details: { title: params.title, cardId: (result as any).id || '', cardPath: (result as any).cardPath || '' },
       };
     } catch (error) {
       return {
@@ -483,8 +547,10 @@ const axiom = createAxiomCompat(fileStorage);
 
 const addGraphEdgeTool = createTool(
   'add_graph_edge',
-  '添加知识图谱关系',
-  '在知识图谱中两个概念节点之间添加关系边。概念可以是灵感卡片或永久卡片。',
+  '添加知识图谱关系（两步法最终步骤）',
+  '在知识图谱中两个概念节点之间添加关系边。概念可以是灵感卡片或永久卡片。'
+  + '【必须遵守】创建多张永久卡片后，必须根据 extract_concepts 返回的 relationships，为每一对相关概念调用此工具建立连线。'
+  + '关系类型：prerequisite(前置依赖) / related(相关) / suggests(推荐学习) / extends(扩展) / contrast(对比)，默认 related。',
   Type.Object({
     source: Type.String({ description: '源概念名称（灵感或永久卡片标题）' }),
     target: Type.String({ description: '目标概念名称（灵感或永久卡片标题）' }),

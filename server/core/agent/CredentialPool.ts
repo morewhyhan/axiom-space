@@ -3,7 +3,6 @@ import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat';
 /**
  * CredentialPool — 凭证池 / API Key 轮换
  *
- * 对标 Hermes: agent/credential_pool.py
  *
  * 线程安全凭证池，支持多种选择策略：
  * - fill_first（默认）：按优先级填满第一个可用凭证
@@ -35,7 +34,7 @@ export interface PooledCredentialData {
   lastUsed?: number;          // 最后使用时间
 }
 
-/** 冷却时间：429/402 触发 1 小时（对标 Hermes） */
+/** 冷却时间：429/402 触发 1 小时 */
 const RATE_LIMIT_COOLDOWN = 60 * 60 * 1000; // 1 hour
 
 export class PooledCredential {
@@ -71,7 +70,6 @@ export class PooledCredential {
 
   /**
    * 获取运行时 API Key
-   * 对标 Hermes: runtime_api_key
    */
   get runtimeApiKey(): string {
     return this.apiKey;
@@ -79,7 +77,6 @@ export class PooledCredential {
 
   /**
    * 获取运行时 Base URL
-   * 对标 Hermes: runtime_base_url
    */
   get runtimeBaseUrl(): string {
     return this.baseUrl;
@@ -140,7 +137,6 @@ export class CredentialPool {
 
   /**
    * 从环境变量和配置加载凭证
-   * 对标 Hermes: _seed_from_env() + _seed_from_singletons()
    */
   seedFromEnv(): void {
     const fileStorage = getFileStorage()
@@ -148,10 +144,10 @@ const axiom = createAxiomCompat(fileStorage);
     if (!axiom) return;
 
     const env = axiom.getEnvConfig?.() || {};
-    const apiKey = env.VITE_AI_API_KEY || '';
-    const provider = env.VITE_AI_PROVIDER || 'zai';
-    const baseUrl = env.VITE_AI_API_BASE || '';
-    const model = env.VITE_AI_MODEL || '';
+    const apiKey = (process.env.AI_API_KEY ?? env.VITE_AI_API_KEY) || '';
+    const provider = env.VITE_AI_PROVIDER || env.AI_PROVIDER || 'deepseek';
+    const baseUrl = env.VITE_AI_API_BASE || env.AI_BASE_URL || '';
+    const model = env.VITE_AI_MODEL || env.AI_MODEL || '';
 
     if (apiKey) {
       this.addEntry({
@@ -169,7 +165,6 @@ const axiom = createAxiomCompat(fileStorage);
 
   /**
    * 选择一个可用凭证
-   * 对标 Hermes: select()
    */
   select(): PooledCredential | null {
     const available = this.getAvailableEntries();
@@ -206,7 +201,6 @@ const axiom = createAxiomCompat(fileStorage);
 
   /**
    * 标记当前凭证耗尽并轮换
-   * 对标 Hermes: mark_exhausted_and_rotate()
    */
   private _lastSelected: PooledCredential | null = null;
 
@@ -225,7 +219,6 @@ const axiom = createAxiomCompat(fileStorage);
 
   /**
    * 重置所有凭证状态
-   * 对标 Hermes: reset_statuses()
    */
   resetStatuses(): void {
     for (const entry of this.entries) {
@@ -237,7 +230,6 @@ const axiom = createAxiomCompat(fileStorage);
 
   /**
    * 获取可用凭证（排除冷却期内的）
-   * 对标 Hermes: _available_entries()
    */
   private getAvailableEntries(): PooledCredential[] {
     const now = Date.now();

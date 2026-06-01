@@ -20,7 +20,7 @@ const bashTool = createTool(
   }),
   async (_id, params) => {
     try {
-      // Shell hook 白名单检查（对标 Hermes shell_hooks.py）
+      // Shell hook 白名单检查
       const allowlist = getShellHookAllowlist();
       if (allowlist.isEnabled()) {
         const check = allowlist.check(params.command);
@@ -330,12 +330,7 @@ const deleteFileTool = createTool(
 
       // Delete confirmation gate (对标 D-14)
       if (!params.force && params.needConfirm !== false) {
-        globalThis.dispatchEvent(new CustomEvent('axiom:ask-user', {
-          detail: {
-            question: `确认删除文件: ${params.filePath}？\n使用 --force 参数可跳过此确认。`,
-            context: { tool: 'delete_file', args: params },
-          },
-        }));
+        console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
         return {
           content: [{ type: 'text', text: `请确认是否删除 ${params.filePath}。确认后我将执行操作。` }],
           details: { awaitingConfirmation: true },

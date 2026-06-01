@@ -6,7 +6,7 @@
 // ========== Vault 路径 ==========
 
 export function getVaultPath(): string | null {
-  return process.env.VAULT_PATH || './vault';
+  return process.env.VAULT_PATH || '';
 }
 
 // ========== 异步延迟 ==========

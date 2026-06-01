@@ -6,6 +6,7 @@ import { useAppStore } from '@/stores/mode-store'
 import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
+import { VideoCard } from '@/components/resources/resource-cards'
 
 interface WikiSuggestion {
   id: string
@@ -20,6 +21,17 @@ export default function ForgeEditor() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+
+  // Video detection: if card content has axiom-video marker, fetch and render video HTML
+  const [videoHtml, setVideoHtml] = useState<string | null>(null)
+  const [videoLoading, setVideoLoading] = useState(false)
+  const [videoTopic, setVideoTopic] = useState<string>('')
+
+  // Undo stack: snapshots of content before each change
+  const [undoStack, setUndoStack] = useState<string[]>([])
+  const undoCountRef = useRef(0)
+  const MAX_UNDO = 50
 
   // Wiki-link autocomplete state
   const [wikiQuery, setWikiQuery] = useState('')
@@ -36,22 +48,61 @@ export default function ForgeEditor() {
   const queryClient = useQueryClient()
   const readContainerRef = useRef<HTMLDivElement>(null)
 
+  // Detect axiom-video marker in card content and fetch video HTML
+  useEffect(() => {
+    setVideoHtml(null)
+    setVideoTopic('')
+
+    if (!cardContent || editorMode !== 'read') return
+
+    const markerMatch = cardContent.match(/<!-- axiom-video:(.+?) -->/)
+    if (!markerMatch) return
+
+    const videoPath = markerMatch[1].trim()
+    setVideoLoading(true)
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await (client as any).api.vault.read.$get({
+          query: { path: videoPath, vid: currentVaultId || undefined },
+        })
+        const data: { success: boolean; content?: string; error?: string } = await res.json()
+        if (cancelled) return
+        if (data.success && data.content) {
+          setVideoHtml(data.content)
+          setVideoTopic(cardTitle || '')
+        }
+      } catch (err) {
+        if (!cancelled) console.warn('[ForgeEditor] failed to fetch video HTML:', err)
+      } finally {
+        if (!cancelled) setVideoLoading(false)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [cardContent, editorMode, currentVaultId, cardTitle])
+
   // Fetch card content when selected node changes
   useEffect(() => {
     if (!selectedNode) {
       setCardContent('')
       setCardTitle(null)
       setDirty(false)
+      setUndoStack([])
+      setLastSavedAt(null)
       return
     }
 
     setCardTitle(selectedNode.title)
+    setLastSavedAt(null)
 
     // Use prefetched content if available (instant, no API call)
     if (prefetchedCard?.id === selectedNode.id) {
       setCardContent(prefetchedCard.content)
       setCardTitle(prefetchedCard.title)
       setDirty(false)
+      setUndoStack([])
       return
     }
 
@@ -65,7 +116,7 @@ export default function ForgeEditor() {
           param: { id: selectedNode.id },
           query: currentVaultId ? { vid: currentVaultId } : undefined,
         })
-        const data = await res.json()
+        const data: { success: boolean; card: { content: string; title: string }; error?: string } = await res.json()
         if (cancelled) return
         if (data.success) {
           setCardContent(data.card.content || '')
@@ -84,6 +135,16 @@ export default function ForgeEditor() {
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
     const pos = e.target.selectionStart
+
+    // Push previous content to undo stack (debounced: every 3rd keystroke or significant change)
+    undoCountRef.current++
+    if (undoCountRef.current % 3 === 0 && val !== cardContent) {
+      setUndoStack(s => {
+        const next = [...s, cardContent]
+        return next.length > MAX_UNDO ? next.slice(-MAX_UNDO) : next
+      })
+    }
+
     setCardContent(val)
     setDirty(true)
 
@@ -167,10 +228,16 @@ export default function ForgeEditor() {
         json: { content: cardContent, title: cardTitle || undefined },
         query: currentVaultId ? { vid: currentVaultId } : undefined,
       })
-      const data = await res.json()
+      const data: { success: boolean; card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }; error?: string } = await res.json()
       if (data.success) {
         setDirty(false)
-        toast.success('已保存')
+        setUndoStack([])
+        const now = new Date()
+        const ts = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        setLastSavedAt(ts)
+        // Auto-clear saved timestamp after 10 seconds
+        setTimeout(() => setLastSavedAt(prev => prev === ts ? null : prev), 10000)
+        toast.success('已保存', { duration: 2000 })
 
         // P1 FIX: Force refetch Galaxy data (not just invalidate) to ensure immediate sync
         await queryClient.refetchQueries({ queryKey: ['galaxy', currentVaultId] })
@@ -202,14 +269,13 @@ export default function ForgeEditor() {
     if (!selectedNode || selectedNode.type !== 'fleeting') return
     setSaving(true)
     try {
+      // Upgrade fleeting card → permanent (PUT route handles type field directly)
       const res = await (client as any).api.vault['card'][':id'].$put({
         param: { id: selectedNode.id },
         json: { content: cardContent, title: cardTitle || undefined, type: 'permanent' },
         query: currentVaultId ? { vid: currentVaultId } : undefined,
       })
-      // Also update the type via write (the API doesn't have a dedicated type-change route,
-      // so we use vault.write to rewrite the card with an updated type flag in folder path).
-      const data = await res.json()
+      const data: { success: boolean; card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }; error?: string } = await res.json()
       if (data.success) {
         toast.success('已升级为永久卡片')
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
@@ -264,6 +330,18 @@ export default function ForgeEditor() {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
         handleSaveRef.current()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        // Only handle undo when the editor textarea is focused
+        if (document.activeElement !== textareaRef.current) return
+        e.preventDefault()
+        setUndoStack(s => {
+          if (s.length === 0) return s
+          const prev = s[s.length - 1]
+          setCardContent(prev)
+          setDirty(true)
+          return s.slice(0, -1)
+        })
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -372,7 +450,7 @@ export default function ForgeEditor() {
                     const res = await (client as any).api.vault['card'][':id'].$delete({
                       param: { id: selectedNode.id },
                     })
-                    const data = await res.json()
+                    const data: { success: boolean; error?: string } = await res.json()
                     if (data.success) {
                       toast.success('卡片已删除')
                       clearSelectedNode()
@@ -468,11 +546,15 @@ export default function ForgeEditor() {
                 )}
               </div>
               <div className="flex-1" />
-              {dirty && (
+              {lastSavedAt ? (
+                <span className="mono text-green-400/70" style={{ fontSize: 'var(--f8)' }}>
+                  已保存 {lastSavedAt}
+                </span>
+              ) : dirty ? (
                 <span className="mono text-amber-400/60" style={{ fontSize: 'var(--f8)' }}>
                   ● 未保存
                 </span>
-              )}
+              ) : null}
               <button
                 className={`mono px-3 py-1 rounded-lg transition-colors ${
                   dirty
@@ -495,7 +577,7 @@ export default function ForgeEditor() {
                   value={cardContent}
                   onChange={handleContentChange}
                   onKeyDown={handleWikiKeyDown}
-                  placeholder="在此编辑 Markdown 内容...（输入 [[ 搜索卡片）"
+                  placeholder="在此编辑 Markdown 内容...（Ctrl+S 保存 · Ctrl+Z 撤销 · [[ 搜索卡片）"
                 />
                 {/* Wiki-link autocomplete dropdown */}
                 {wikiActive && wikiSuggestions.length > 0 && (
@@ -553,6 +635,23 @@ export default function ForgeEditor() {
                         : '<p style="color:var(--text-dim);font-style:italic;">（空内容）</p>',
                     }}
                   />
+
+                  {/* 教学视频播放器 */}
+                  {videoLoading && (
+                    <div className="mt-6 p-6 glass-panel rounded-xl border border-white/10 text-center">
+                      <div className="animate-pulse text-gray-400">加载教学视频...</div>
+                    </div>
+                  )}
+                  {videoHtml && !videoLoading && (
+                    <div className="mt-6">
+                      <VideoCard
+                        title={`${videoTopic || '教学视频'}`}
+                        htmlContent={videoHtml}
+                        duration={90}
+                        topic={videoTopic || ''}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}

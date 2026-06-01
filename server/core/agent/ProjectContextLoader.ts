@@ -2,7 +2,6 @@ import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage';
 import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat';
 /**
  * Project Context Loader — 项目上下文文件加载
- * 对标 Hermes: agent/prompt_builder.py _find_hermes_md / _load_agents_md / _load_claude_md
  *
  * 扫描 vault 目录查找项目约定文件，注入 system prompt：
  * 优先级：.axiom.md > AGENTS.md > CLAUDE.md > .cursorrules
@@ -10,7 +9,7 @@ import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat';
  * 所有内容经过注入扫描，超过 20000 字符截断。
  */
 
-/** 注入检测模式（对标 Hermes _CONTEXT_THREAT_PATTERNS） */
+/** 注入检测模式 */
 
 const CONTEXT_THREAT_PATTERNS = [
   { pattern: /ignore\s+(previous|all|above|prior)\s+instructions/i, type: 'prompt_injection' },
@@ -44,7 +43,6 @@ const MAX_CONTEXT_CHARS = 20000;
 
 /**
  * 扫描内容中的注入威胁
- * 对标 Hermes _scan_context_content()
  */
 function scanContextContent(content: string, filename: string): string {
   const findings: string[] = [];
@@ -72,7 +70,6 @@ function scanContextContent(content: string, filename: string): string {
 
 /**
  * 去除 YAML frontmatter
- * 对标 Hermes _strip_yaml_frontmatter()
  */
 function stripYamlFrontmatter(content: string): string {
   if (content.startsWith('---')) {
@@ -109,7 +106,6 @@ export interface ProjectContextResult {
 
 /**
  * 从 vault 目录加载项目上下文
- * 对标 Hermes prompt_builder: _find_hermes_md / _load_agents_md / _load_claude_md
  *
  * 搜索优先级：.axiom.md > AGENTS.md > CLAUDE.md > .cursorrules
  * 仅返回第一个匹配，不叠加。

@@ -5,6 +5,7 @@
  * This replaces the browser-based AgentServices.ts with a server-safe version
  * that reads API keys from process.env and uses server-side storage.
  */
+import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage';
 import { AgentStateMachine } from '@/server/core/agent/AgentStateMachine';
 import { getAuditLogger, LogCategory } from '@/server/core/agent/audit/AuditLogger';
 import { LLMUsageTracker } from '@/server/core/agent/LLMUsageTracker';
@@ -21,8 +22,6 @@ import { SteerMechanism } from '@/server/core/agent/feedback/SteerMechanism';
 import { EmptyResponseHandler } from '@/server/core/agent/feedback/EmptyResponseHandler';
 import type { AxiomAgentConfig, ModelConfig } from '@/types/agent';
 // import { LearningFacade } ... temporarily disabled
-import { LocalFSAdapter } from '@/server/infra/storage/LocalFSAdapter';
-import type { IFileStorage } from '@/server/infra/storage/IFileStorage';
 import type { IAgentInfrastructure } from '@/server/core/agent/pipeline/interfaces';
 
 export interface AgentServicesFactoryConfig {
@@ -48,14 +47,13 @@ export function createServerAgentServices(cfg: AgentServicesFactoryConfig = {}) 
   const compressor = new (ContextCompressor as any)();
   const memoryManager = new (MemoryManager as any)();
 
-  // File storage — Agent 通过此接口读写文件
-  const vaultPath = cfg.vaultPath || process.env.VAULT_PATH || './vault'
-  const fileStorage: IFileStorage = new LocalFSAdapter(vaultPath || "./vault")
+  // File storage — 纯数据库模式，通过 DbAdapter 存取
+  const fileStorage = getFileStorage(cfg.userId)
 
   // Learning facade — wired to Prisma for persistence
-  const database = new PrismaLearningAdapter({ dataPath: cfg.vaultPath });
+  const database = new PrismaLearningAdapter({ dataPath: cfg.vaultPath, userId: cfg.userId });
   const patternExtractor = new PatternExtractorAdapter({
-    trajectoryPath: `${cfg.vaultPath || './vault'}/trajectories`,
+    trajectoryPath: `${cfg.vaultPath || ''}/trajectories`,
   });
   const graphManager = new GraphIntegrationManager(database);
   const learningFacade = new LearningFacade(

@@ -1,42 +1,43 @@
 /**
  * Cognition API — 认知画像数据
  * 从用户的真实 card/edge/cluster/tag 数据中计算认知维度分数
- * 使用 ProfileManager 缓存已计算的画像数据
+ * 缓存存在 vault.profileCache 字段中（数据库持久化）
  */
 import { Hono } from 'hono'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
-import { loadUserProfile, saveUserProfile, mergeProfileUpdate } from '@/server/core/learning/memory/profile-manager'
-import { getVaultPath } from '@/lib/platform'
 
 const app = new Hono<{ Variables: { userId: string } }>()
-
-app.use('/*', requireAuth)
-
-app.get('/stats', async (c) => {
+  .use('/*', requireAuth)
+  .get('/stats', async (c) => {
   const userId = c.get('userId') as string
   const vault = await resolveVault(c, userId)
   if (!vault) return c.json({ success: true, user: { name: '学习者', joinedAt: new Date().toISOString() }, dimensions: {}, stats: {}, skills: [], thinkingPattern: '', strengths: [], growthEdges: [], timeDistribution: [], knowledgeStructure: [], nextActions: [] })
 
   const vid = vault.id
-  const vaultPath = getVaultPath() || `./vaults/${vid}`
 
-  // ── Try loading cached profile first ──
+  // ── Try loading cached profile from vault.profileCache ──
   try {
-    const cachedProfile = await loadUserProfile(vaultPath)
-    if (cachedProfile?.cognitionStats) {
-      const age = Date.now() - (cachedProfile.updatedAt || 0)
-      if (age < 300_000) { // fresh within 5 minutes
-        return c.json({
-          success: true,
-          cached: true,
-          ...cachedProfile.cognitionStats,
-        })
+    const vaultWithCache = await prisma.vault.findUnique({
+      where: { id: vid },
+      select: { profileCache: true },
+    })
+    if (vaultWithCache?.profileCache) {
+      const cachedProfile = JSON.parse(vaultWithCache.profileCache)
+      if (cachedProfile?.cognitionStats) {
+        const age = Date.now() - (cachedProfile.updatedAt || 0)
+        if (age < 300_000) { // fresh within 5 minutes
+          return c.json({
+            success: true,
+            cached: true,
+            ...cachedProfile.cognitionStats,
+          })
+        }
       }
     }
   } catch {
-    // Profile not found or corrupt — fall through to recompute
+    // Cache corrupt — fall through to recompute
   }
 
   // Fetch all data in parallel
@@ -88,7 +89,7 @@ app.get('/stats', async (c) => {
   // Application: tags usage + practical type edges
   const uniqueTags = new Set<string>()
   for (const c of cardsWithTags) {
-    if (c.tags) { try { JSON.parse(c.tags).forEach((t: string) => uniqueTags.add(t)) } catch {} }
+    if (c.tags) { try { JSON.parse(c.tags).forEach((t: string) => uniqueTags.add(t)) } catch (err) { console.warn('[Cognition] Failed to parse tags:', err); } }
   }
   const practicalEdges = edges.filter(e => e.type === 'prerequisite' || e.type === 'derived').length
   const application = Math.min(1, (uniqueTags.size / Math.max(n, 1)) * 0.5 + Math.min(practicalEdges / Math.max(e, 1), 1) * 0.5)
@@ -113,7 +114,7 @@ app.get('/stats', async (c) => {
   // ── Skills from tags ──
   const tagCounts = new Map<string, number>()
   for (const c of cardsWithTags) {
-    if (c.tags) { try { JSON.parse(c.tags).forEach((t: string) => tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1)) } catch {} }
+    if (c.tags) { try { JSON.parse(c.tags).forEach((t: string) => tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1)) } catch (err) { console.warn('[Cognition] Failed to parse tags:', err); } }
   }
   const topTags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
   const skills = topTags.map(([tag, count], i) => ({
@@ -205,15 +206,21 @@ app.get('/stats', async (c) => {
     nextActions,
   }
 
-  // ── Persist computed stats via ProfileManager ──
-  saveUserProfile(vaultPath, mergeProfileUpdate(
-    { updatedAt: Date.now() },
-    { cognitionStats: responseBody },
-  )).catch((err: any) =>
-    console.warn('[Cognition] Failed to save profile cache:', err)
-  )
+  // ── Persist computed stats to vault.profileCache ──
+  try {
+    await prisma.vault.update({
+      where: { id: vid },
+      data: {
+        profileCache: JSON.stringify({
+          updatedAt: Date.now(),
+          cognitionStats: responseBody,
+        }),
+      },
+    })
+  } catch (err: any) {
+    console.warn('[Cognition] Failed to save profile cache:', err?.message)
+  }
 
-  c.header('Cache-Control', 'private, max-age=120')
   return c.json(responseBody)
 })
 
@@ -231,5 +238,62 @@ function computeStreak(dates: Date[]): number {
   }
   return streak
 }
+
+// ── AI Observations ──
+// Stored in vaultMemory table with category='observation'
+app
+  .get('/observations', async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: true, observations: [] })
+
+    const memories = await prisma.vaultMemory.findMany({
+      where: { vaultId: vault.id, category: 'observation' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, key: true, value: true, createdAt: true },
+    })
+
+    return c.json({
+      success: true,
+      observations: memories.map(m => ({
+        id: m.id,
+        text: m.value,
+        category: m.key,
+        createdAt: m.createdAt.toISOString(),
+      })),
+    })
+  })
+  .post('/observations', async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'Vault not found' })
+
+    const { text, category } = await c.req.json()
+    if (!text || typeof text !== 'string') {
+      return c.json({ success: false, error: 'Text is required' })
+    }
+
+    const cat = category || 'general'
+    const key = `${cat}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+    const memory = await prisma.vaultMemory.create({
+      data: {
+        vaultId: vault.id,
+        key,
+        value: text,
+        category: 'observation',
+      },
+    })
+
+    return c.json({
+      success: true,
+      observation: {
+        id: memory.id,
+        text: memory.value,
+        category: memory.key,
+        createdAt: memory.createdAt.toISOString(),
+      },
+    })
+  })
 
 export default app

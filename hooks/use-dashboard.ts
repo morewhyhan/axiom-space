@@ -2,32 +2,30 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
-import { useState, useEffect } from 'react'
+import { useAppStore } from '@/stores/mode-store'
 import type { DashboardStats } from '@/types/dashboard'
 
-const typedClient = client as any
-
 export function useDashboardStats() {
-  const [stats, setStats] = useState<DashboardStats | null>(null)
-  const [loading, setLoading] = useState(true)
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await typedClient.api.dashboard.$get()
-        const data = await res.json()
-        if (!cancelled && data.success) {
-          setStats(data.stats as DashboardStats)
-        }
-      } catch (err) {
-        console.warn('[useDashboardStats] failed to fetch:', err)
-      } finally {
-        if (!cancelled) setLoading(false)
+  const query = useQuery({
+    queryKey: ['dashboard-stats', currentVaultId],
+    queryFn: async () => {
+      const params = currentVaultId ? { query: { vid: currentVaultId } } : {}
+      const res = await client.api.dashboard.$get(params)
+      const data = await res.json() as any
+      if (!data.success) {
+        return { stats: null, growth: [], recentActivity: [] }
       }
-    })()
-    return () => { cancelled = true }
-  }, [])
+      return { stats: data.stats as DashboardStats, growth: data.growth ?? [], recentActivity: data.recentActivity ?? [] }
+    },
+    enabled: !!currentVaultId,
+  })
 
-  return { stats, loading }
+  return {
+    stats: query.data?.stats ?? null,
+    growth: query.data?.growth ?? [],
+    recentActivity: query.data?.recentActivity ?? [],
+    loading: query.isLoading,
+  }
 }

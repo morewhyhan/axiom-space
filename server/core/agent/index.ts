@@ -15,7 +15,7 @@ export type {
   ThinkingLevel,
   ToolExecutionMode,
 } from '@/types/agent';
-export { PRESET_MODELS, DEFAULT_MODEL, DEFAULT_COMPRESSION_MODEL } from '@/types/agent';
+export { resolveAiConfig } from '@/lib/ai-config';
 
 // 工具系统
 export { toolRegistry, createTool, Type } from './tools';

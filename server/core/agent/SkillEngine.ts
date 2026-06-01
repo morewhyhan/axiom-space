@@ -1,7 +1,6 @@
 /**
  * SkillEngine — 多技能执行引擎
  *
- * 对标 Hermes: agent/skill_utils.py + tools/skills_tool.py
  * 支持同时激活多个技能，每个技能独立管理阶段状态。
  */
 

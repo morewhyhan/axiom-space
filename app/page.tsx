@@ -5,6 +5,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import type { PanelId, PanelLayout } from '@/stores/mode-store'
+import { useAgentStore } from '@/stores/agent-store'
 import ResizablePanel from '@/components/layout/ResizablePanel'
 import { useAuthSession } from '@/hooks/use-auth'
 import { useGalaxyData } from '@/hooks/use-galaxy'
@@ -12,6 +13,7 @@ import { useLearningPaths, useLearningProfile, useMemorySearch } from '@/hooks/u
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import type { GalaxyNode, GalaxyEdge, GalaxyCluster } from '@/types/galaxy'
 import { client } from '@/lib/api-client'
+import { toast } from 'sonner'
 
 const GalaxyCanvas = dynamic(() => import('@/components/three/galaxy-canvas'), { ssr: false })
 const DashboardLeft = dynamic(() => import('@/components/dashboard/dashboard-left'))
@@ -24,7 +26,8 @@ const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
 const CognitiveRadar = dynamic(() => import('@/components/cognition/cognitive-radar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
-const ObservationsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
+const ProfileBar = dynamic(() => import('@/components/cognition/profile-bar'))
+const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
 const LearnControls = dynamic(() => import('@/components/learn/learn-controls'))
 const LearnList = dynamic(() => import('@/components/learn/learn-list'))
 const PanelBar = dynamic(() => import('@/components/layout/panel-bar'))
@@ -79,6 +82,29 @@ export default function Home() {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const setVaults = useAppStore((s) => s.setVaults)
   const setCurrentVaultId = useAppStore((s) => s.setCurrentVaultId)
+
+  // ── Onboarding ──
+  const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding)
+  const setHasCompletedOnboarding = useAppStore((s) => s.setHasCompletedOnboarding)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+
+  // Show onboarding after app loads for first-time users
+  useEffect(() => {
+    if (showApp && !hasCompletedOnboarding && vaults.length > 0) {
+      const t = setTimeout(() => setShowOnboarding(true), 800)
+      return () => clearTimeout(t)
+    }
+  }, [showApp, hasCompletedOnboarding, vaults.length])
+
+  const handleCompleteOnboarding = () => {
+    setShowOnboarding(false)
+    setHasCompletedOnboarding(true)
+  }
+
+  // Auto-open onboarding modal
+  useEffect(() => {
+    if (showOnboarding) openModal('onboarding')
+  }, [showOnboarding, openModal])
 
   useEffect(() => {
     if (!isLoggedIn) return
@@ -167,11 +193,18 @@ export default function Home() {
       agentStore._setMessages([])
       agentStore._setError(null)
 
+      const vaultName = vaults.find(v => v.id === currentVaultId)?.name || '知识库'
+      toast(`已切换到「${vaultName}」`, {
+        description: 'Agent 会话已重置，数据正在加载...',
+        duration: 3000,
+        style: { fontSize: '11px', background: 'rgba(34,211,238,0.15)', border: '1px solid rgba(34,211,238,0.3)' },
+      })
+
       setLoadError(false)
       setShowLoading(true)
     }
     prevVaultId.current = currentVaultId
-  }, [currentVaultId, showApp])
+  }, [currentVaultId, showApp, vaults])
 
   // Prefetch card content when a node is selected
   const selectedNode = useAppStore((s) => s.selectedNode)
@@ -182,8 +215,8 @@ export default function Home() {
     let cancelled = false
     ;(client as any).api.vault.card[':id']
       .$get({ param: { id: selectedNode.id }, query: currentVaultId ? { vid: currentVaultId } : undefined })
-      .then((res: any) => res.json())
-      .then((data: any) => {
+      .then((res: any) => res.json() as Promise<{ success: boolean; card: { content: string; title: string } }>)
+      .then((data: { success: boolean; card: { content: string; title: string } }) => {
         if (cancelled) return
         if (data.success) {
           setPrefetchedCard({
@@ -221,7 +254,7 @@ export default function Home() {
       if (titleResults.length < 5) {
         try {
           const contentRes = await (client as any).api.vault.search.$get({ query: { q } })
-          const contentData = await contentRes.json() as any
+          const contentData: { success: boolean; results?: Array<{ path: string; title: string; content: string }> } = await contentRes.json()
           // Content search returns { path, title, content } — use title for dedup
           // since the two APIs use different ID formats (UUID vs file path).
           const knownTitles = new Set(titleResults.map((r: any) => r.title))
@@ -365,6 +398,7 @@ export default function Home() {
         import('@/components/galaxy/galaxy-filter'),
         import('@/components/cognition/cognitive-radar'),
         import('@/components/cognition/learning-profile'),
+        import('@/components/cognition/profile-bar'),
         import('@/components/cognition/observations-panel'),
         import('@/components/learn/learn-controls'),
         import('@/components/learn/learn-list'),
@@ -423,9 +457,10 @@ export default function Home() {
             <main className={`main-grid${mode !== 'dashboard' ? ' no-bottom-pad' : ''}${mode === 'cognition' ? ' cognition-mode' : ''}`}>
               {mode === 'cognition' ? (
                 <>
+                  <ProfileBar />
                   <CognitiveRadar />
                   <LearningProfile />
-                  <ObservationsPanel />
+                  <InsightsPanel />
                 </>
               ) : (
               <>
@@ -478,6 +513,7 @@ export default function Home() {
                 {mode === 'learn' && <LearnList />}
               </div>
               </>)}
+
               {mode === 'dashboard' && <BottomBar />}
               {mode === 'learn' && learningData && (
                 <div className="absolute bottom-0 left-[var(--pad-x)] right-[calc(var(--panel-xl)+var(--pad-x)+12px+var(--panel-sm))] border-t border-white/5 py-3 pointer-events-auto flex justify-between items-center opacity-30">
@@ -749,13 +785,76 @@ export default function Home() {
                   </div>
                   <div className="p-5 space-y-2">
                     {[
-                      ['⌘K', '搜索节点'], ['⌘N', '新建节点'], ['⌘1/2/3/4', 'Dashboard/Forge/Galaxy/Cognition'], ['/', '命令面板'], ['Esc', '关闭面板'],
+                      ['⌘K', '搜索节点'], ['⌘N', '新建节点'], ['⌘1/2/3/4/5', '切换模式（仪表板/AI对话/星系/认知/学习）'], ['/', '命令面板'], ['Esc', '关闭面板'], ['Ctrl+S', '保存卡片（编辑器中）'], ['Ctrl+Z', '撤销编辑（编辑器中）'],
                     ].map(([key, desc]) => (
                       <div key={key as string} className="flex justify-between items-center py-2 border-b border-white/5">
                         <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>{key as string}</span>
                         <span className="text-white/35" style={{ fontSize: 'var(--f10)' }}>{desc as string}</span>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Onboarding ── */}
+              {modal === 'onboarding' && (
+                <div className="modal-panel" style={{ maxWidth: '520px' }}>
+                  <div className="modal-header">
+                    <span className="mono text-purple-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>Welcome_to_AXIOM</span>
+                    <button className="modal-close" onClick={() => { closeModal(); handleCompleteOnboarding() }}>✕</button>
+                  </div>
+                  <div className="p-6 space-y-5">
+                    <div>
+                      <h2 className="serif text-xl text-white/80 mb-2">欢迎来到 AXIOM 认知操作系统</h2>
+                      <p className="text-white/40 leading-relaxed" style={{ fontSize: 'var(--f10)' }}>
+                        AXIOM 将你的知识可视化为星系图谱，让 AI 帮助你整理、连接、深化认知。
+                      </p>
+                    </div>
+                    <div className="hud-line"></div>
+                    <div>
+                      <span className="mono opacity-30 uppercase tracking-wider block mb-3" style={{ fontSize: 'var(--f8)' }}>5 个模式</span>
+                      <div className="space-y-2.5">
+                        {[
+                          { key: '1', name: '仪表板', sub: 'Dashboard', desc: '查看知识统计、最近活动和系统状态概览', color: 'text-white/60', dot: 'bg-white/40' },
+                          { key: '2', name: 'AI 对话', sub: 'Forge', desc: '与 AI Agent 对话，创建和编辑知识卡片 — 推荐从这里开始', color: 'text-pink-400', dot: 'bg-pink-400', recommend: true },
+                          { key: '3', name: '星系图', sub: 'Galaxy', desc: '3D 可视化浏览你的知识网络，发现隐藏关联', color: 'text-cyan-400', dot: 'bg-cyan-400' },
+                          { key: '4', name: '认知分析', sub: 'Cognition', desc: '查看 AI 生成的认知雷达和学习画像', color: 'text-purple-400', dot: 'bg-purple-400' },
+                          { key: '5', name: '学习路径', sub: 'Learn', desc: '按步骤系统化学习，追踪学习进度', color: 'text-amber-400', dot: 'bg-amber-400' },
+                        ].map(m => (
+                          <div key={m.key} className={`flex items-start gap-3 p-3 rounded-lg ${m.recommend ? 'bg-pink-500/5 border border-pink-500/15' : 'bg-white/[0.02] border border-white/5'}`}>
+                            <span className={`w-5 h-5 rounded-full ${m.dot} flex items-center justify-center shrink-0 mt-0.5`}>
+                              <span className="mono text-[9px] text-black/60 font-bold">{m.key}</span>
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`font-medium ${m.color}`} style={{ fontSize: 'var(--f10)' }}>{m.name}</span>
+                                <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>{m.sub}</span>
+                                {m.recommend && <span className="mono text-[8px] px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400 border border-pink-500/20">推荐</span>}
+                              </div>
+                              <p className="text-white/35 mt-0.5" style={{ fontSize: 'var(--f9)' }}>{m.desc}</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="hud-line"></div>
+                    <div>
+                      <span className="mono opacity-30 uppercase tracking-wider block mb-2" style={{ fontSize: 'var(--f8)' }}>快捷键</span>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                        {[['⌘K', '搜索'], ['⌘N', '新建卡片'], ['⌘1-5', '切换模式'], ['/', '命令面板']].map(([k, d]) => (
+                          <div key={k as string} className="flex gap-2">
+                            <span className="mono text-white/50 shrink-0" style={{ fontSize: 'var(--f9)' }}>{k as string}</span>
+                            <span className="text-white/30" style={{ fontSize: 'var(--f9)' }}>{d as string}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      className="axiom-btn primary w-full text-center"
+                      onClick={() => { closeModal(); handleCompleteOnboarding() }}
+                    >
+                      开始使用 AXIOM
+                    </button>
                   </div>
                 </div>
               )}

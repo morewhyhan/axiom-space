@@ -1,4 +1,4 @@
-const getVaultPath = () => (process.env as any).VAULT_PATH || "./vault";
+const getVaultPath = () => process.env.VAULT_PATH || "";
 /**
  * AXIOM Agent 服务
  * 基于 @mariozechner/pi-agent-core 的 Agent 类实现完整集成
@@ -9,10 +9,12 @@ const getVaultPath = () => (process.env as any).VAULT_PATH || "./vault";
 import { Interruptible } from "@/server/core/learning/core/interrupt";
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { getModel, completeSimple } from '@mariozechner/pi-ai';
-import { Agent } from '@mariozechner/pi-agent-core';
-import { PRESET_MODELS, DEFAULT_MODEL } from '@/types/agent';
-import type { AxiomAgentConfig, AgentRunResult, StreamCallbacks, ModelConfig } from '@/types/agent';
+import type { KnownProvider, Model, Message, AssistantMessage, Tool } from '@mariozechner/pi-ai';
+import { Agent, type AgentMessage } from '@mariozechner/pi-agent-core';
+import { resolveAiConfig } from '@/lib/ai-config';
+import type { AxiomAgentConfig, AgentRunResult, StreamCallbacks, ModelConfig, LLMProvider } from '@/types/agent';
 import { toolRegistry, type ToolMiddleware } from './tools';
+import { registerBuiltinTools } from './builtin-tools';
 import { getSkillRegistry, initSkillSystem } from './skills/SkillRegistry';
 import { BackgroundAnalyzer } from './BackgroundAnalyzer';
 import { getSubagentManager, SubagentMode, SubagentRole, AGENT_ROLES } from './subagent/SubagentSystem';
@@ -33,6 +35,8 @@ import type { MemoryManager } from '../learning/memory/manager';
 
 
 import { GraphIntegrationManager } from '../learning/graph/integration';
+import { KnowledgeGraphProvider } from '../learning/memory/KnowledgeGraphProvider';
+import { BrowserBuiltinMemoryProvider } from '../learning/memory/BrowserBuiltinMemoryProvider';
 import { FileSafetyGuardrail } from './guardrails/FileSafetyGuardrail';
 import { OutputSchemaGuardrail } from './guardrails/OutputSchemaGuardrail';
 import { FactualCheckGuardrail } from './guardrails/FactualCheckGuardrail';
@@ -41,10 +45,15 @@ import { SessionService } from './pipeline/SessionService';
 import { MemoryService } from './pipeline/MemoryService';
 import { PromptService } from './pipeline/PromptService';
 import { AgentPipeline } from './pipeline/Pipeline';
-import type { IMemoryManager } from './pipeline/interfaces';
+import type { IMemoryManager, ILearningSkillManager } from './pipeline/interfaces';
 import { AgentErrorClassifier } from './errors';
 
-const _vp = () => process.env["VAULT_PATH"] || "./vault";
+declare global {
+  // Global agent reference for builtin tools that access the running agent instance
+  var __axiomAgent: AxiomAgent | undefined;
+}
+
+const _vp = () => process.env["VAULT_PATH"] || "";
 
 export class AxiomAgent extends Interruptible {
   private services: AgentServices;
@@ -81,10 +90,10 @@ export class AxiomAgent extends Interruptible {
     this.services = services;
 
     // Global expose Agent instance for builtin tools
-    (globalThis as any).__axiomAgent = this;
+    globalThis.__axiomAgent = this;
 
     // ── Create composed services (before Agent) ──────────────
-    const vaultPath = services.config.vaultPath || process.env.VAULT_PATH || './vault';
+    const vaultPath = services.config.vaultPath || process.env.VAULT_PATH || '';
     this.services.promptService = new PromptService(
       services,
       () => this._getModel(),
@@ -112,16 +121,16 @@ export class AxiomAgent extends Interruptible {
     this.services.agent = new Agent({
       initialState: {
         systemPrompt: this.services.config.systemPrompt,
-        model: this._getModel(),
+        model: this._getModel() ?? undefined,
         thinkingLevel: this.services.config.thinkingLevel,
         tools: toolRegistry.getAll(),
         messages: [],
       },
-      convertToLlm: (messages) => this.services.promptService.convertToLlm(messages) as any,
+      convertToLlm: (messages) => this.services.promptService.convertToLlm(messages) as Message[],
       toolExecution: this.services.config.toolExecution,
       getApiKey: () => this._getApiKey(),
       transformContext: async (messages, signal?) => {
-        return this.services.promptService.transformContext(messages) as any;
+        return this.services.promptService.transformContext(messages) as Promise<Message[]>;
       },
       beforeToolCall: async (ctx, signal) => {
         return this._onBeforeToolCall(ctx);
@@ -145,56 +154,63 @@ export class AxiomAgent extends Interruptible {
       this.services.agent.state.tools = toolRegistry.getAll();
     }
 
+    // Load persisted session
+    if (this.services.config.sessionPersistence) {
+      const loaded = this.services.sessionService.loadSession() as { messages: any[]; modelConfig: ModelConfig } | null;
+      if (loaded) {
+        this.services.sessionId = this.services.sessionService.getSessionId();
+        this.services.agent.state.messages = loaded.messages as AgentMessage[];
+        this.services.modelConfig = loaded.modelConfig;
+        try {
+          this.services.agent.state.model = this._getModel()!;
+        } catch (err) {
+          console.warn('[Agent] Failed to restore model from session:', err);
+        }
+      }
+    }
+  }
+
+  /**
+   * Initialize async subsystems after construction.
+   * Callers MUST await this before using the agent.
+   */
+  async init(): Promise<void> {
     // Initialize Skill system
     if (this.services.config.enableSkills !== false) {
       const skills = this._skillRegistry.getAllSkills();
       if (skills.length === 0) {
-        console.log('[Agent] No skills loaded yet, initializing...');
-        this._initSkills().catch(err => {
+        try {
+          await this._initSkills();
+        } catch (err) {
           console.warn('[Agent] Failed to initialize skills:', err);
-        });
+        }
       } else {
-        console.log(`[Agent] Skills already loaded (${skills.length} skills), skipping initialization`);
         this._updateSystemPromptWithSkills();
         const skillsSection = this._skillRegistry.buildSkillsSection();
         if (skillsSection) {
           this.services.agent.state.systemPrompt = this.services.config.systemPrompt + skillsSection;
-          console.log('[Agent] System prompt updated with skills menu');
         }
       }
     }
 
     // Load specific skill (if specified)
     if (this.services.config.skillName) {
-      this.loadSkill(this.services.config.skillName).catch(err => {
+      try {
+        await this.loadSkill(this.services.config.skillName);
+      } catch (err) {
         console.warn('[Agent] Failed to load initial skill:', err);
-      });
-    }
-
-    // Initialize MCP
-    this._initMCP().catch(err => {
-      console.debug('[Agent] MCP init skipped:', (err as Error).message);
-    });
-
-    // Load persisted session
-    if (this.services.config.sessionPersistence) {
-      const loaded = this.services.sessionService.loadSession() as { messages: any[]; modelConfig: ModelConfig } | null;
-      if (loaded) {
-        this.services.sessionId = this.services.sessionService.getSessionId();
-        this.services.agent.state.messages = loaded.messages as any;
-        this.services.modelConfig = loaded.modelConfig;
-        try {
-          this.services.agent.state.model = this._getModel();
-        } catch (err) {
-          console.warn('[Agent] Failed to restore model from session:', err);
-        }
       }
     }
 
-    // ── Async database initialization (fire-and-forget) ─────
-    this._initializeDatabaseAsync().catch(err => {
-      console.warn('[Agent] Database init failed:', err);
-    });
+    // Initialize MCP
+    try {
+      await this._initMCP();
+    } catch (err) {
+      console.debug('[Agent] MCP init skipped:', (err as Error).message);
+    }
+
+    // ── Async database initialization ─────
+    await this._initializeDatabaseAsync();
   }
 
   /**
@@ -202,14 +218,14 @@ export class AxiomAgent extends Interruptible {
    * Extracted from a .then() chain to avoid nested promise anti-pattern.
    */
   private async _initializeDatabaseAsync(): Promise<void> {
-    await (this.services.learning as any).database?.initialize?.();
-    (this.services.learning as any).database?.startExpiryWatcher?.(async (session: any) => {
+    await this.services.learning.database.initialize();
+    this.services.learning.database.startExpiryWatcher(async (session: any) => {
         await this.services.memoryService.onSessionEnd(session.messages);
 
         try {
           const summary = await this.services.sessionService.generateSessionSummary(session.messages);
           if (summary) {
-            const vaultPath: string = _vp() || "./vault" || '';
+            const vaultPath: string = _vp() || '';
             if (_vp()) {
               const sessionDir = `${_vp()}/.axiom/resources/会话摘要`;
               const summaryPath = `${sessionDir}/document.md`;
@@ -228,18 +244,17 @@ export class AxiomAgent extends Interruptible {
     // Initialize knowledge graph from vault permanent cards
     try {
       if (_vp()) {
-        const vaultData = await (this.services.memoryService as any).loadVaultData(_vp()) as { permanent?: any[]; literature?: any[]; fleeing?: any[] } | null;
+        const vaultData = await this.services.memoryService.loadVaultData(_vp()) as { permanent?: any[]; literature?: any[]; fleeing?: any[] } | null;
         if (vaultData) {
-          const graph = await (this.services.learning as any).graphManager.initializeGraph(vaultData);
-          console.log('[Agent] Knowledge graph initialized with', vaultData.permanent?.length || 0, 'permanent cards');
+          const graph = await this.services.learning.graphManager.initializeGraph(vaultData);
 
           // Share graph instance with null
           if (this.services.config.enableMemory) {
             const graphProvider = this.services.memoryService.getProvider('knowledge-graph');
-            (graphProvider as any)?.setGraph(graph);
+            (graphProvider as KnowledgeGraphProvider | undefined)?.setGraph(vaultData);
 
-            const capProvider = this.services.memoryService.getProvider('capability-tracking');
-            await (capProvider as any)?.loadFromVaultData(vaultData);
+            // Capability provider loads data from DB via its own initialize path
+            // No explicit loadFromVaultData call needed
           }
         }
       }
@@ -252,7 +267,6 @@ export class AxiomAgent extends Interruptible {
       if (_vp()) {
         const { rebuildIndex } = await import('./SessionSearch');
         await rebuildIndex(_vp()).catch(() => {});
-        console.log('[Agent] Session search index rebuilt at session start');
       }
     } catch (err) {
       console.warn('[Agent] Session search index rebuild failed (non-fatal):', err);
@@ -273,13 +287,8 @@ export class AxiomAgent extends Interruptible {
       }
     }
 
-    // 回退到 IPC
-    try {
-      const env = process.env || {};
-      return env.VITE_AI_API_KEY || '';
-    } catch {
-      return '';
-    }
+    // 回退到 env 配置
+    return resolveAiConfig().model.apiKey
   }
 
   /**
@@ -290,25 +299,24 @@ export class AxiomAgent extends Interruptible {
     if (this._lastSelectedCredential?.apiKey) {
       return this._lastSelectedCredential.apiKey;
     }
-    try {
-      const env = process.env || {};
-      return env.VITE_AI_API_KEY || '';
-    } catch {
-      return '';
-    }
-  }
-
-  private _getModelConfig(modelId: string): ModelConfig {
-    return PRESET_MODELS[modelId] || PRESET_MODELS[DEFAULT_MODEL];
+    return resolveAiConfig().model.apiKey
   }
 
   private _getModel() {
     const { provider, modelId, baseUrl, apiKey } = this.services.modelConfig;
+    // Use configured maxTokens, fallback to env var, then to 8192
+    const configuredMaxTokens = this.services.config.maxTokens ||
+      parseInt(process.env.AI_MAX_TOKENS || '8192', 10);
 
     const standardProviders = ['openai', 'anthropic', 'google', 'cerebras', 'zai'];
 
     if (standardProviders.includes(provider)) {
-      return getModel(provider as any, modelId as any);
+      // provider is LLMProvider (subset of KnownProvider); cast is safe because
+      // getModel validates the provider-modelId combo at runtime
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const model = getModel(provider as KnownProvider, modelId as never);
+      // Override maxTokens with our configured value to control generation length and cost
+      return { ...model, maxTokens: configuredMaxTokens };
     }
 
     const key = apiKey || this.services.config.apiKey || this._getApiKey();
@@ -325,13 +333,21 @@ export class AxiomAgent extends Interruptible {
       provider: 'openai',
       api: 'openai-completions',
       baseUrl: baseUrl,
+      maxTokens: configuredMaxTokens,  // Override with configured value
+      // Do NOT set Authorization header here — pi-ai/OpenAI SDK handles it via apiKey.
+      // Setting both causes header conflicts that lead to 403 errors on some relays.
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`,
+      },
+      // DeepSeek V4 Flash streams all visible text through reasoning_content,
+      // leaving content=null. This compat flag tells pi-ai to treat thinking
+      // blocks as regular text output.
+      compat: {
+        requiresThinkingAsText: true,
       },
     };
 
-    return customModel as any;
+    return customModel as Model<any>;
   }
 
   /**
@@ -395,8 +411,8 @@ export class AxiomAgent extends Interruptible {
           role: 'system',
           content: `Using skill: ${skillName}\n\n${content}`,
           timestamp: Date.now(),
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any);
-        console.log(`[Skill] Injected into messages: ${skillName}`);
       }
     } catch (err) {
       console.warn(`[Skill] Failed to inject ${skillName}:`, err);
@@ -415,7 +431,7 @@ export class AxiomAgent extends Interruptible {
     const toolName = ctx.toolCall.name;
     const args = ctx.args as Record<string, any>;
 
-    // PluginHookSystem: first-block-wins（对标 Hermes pre_tool_call hook）
+    // PluginHookSystem: first-block-wins
     const blockMessage = pluginHooks.getPreToolCallBlock(toolName, args);
     if (blockMessage) {
       console.warn(`[Guardrail] ${toolName} blocked by plugin hook: ${blockMessage}`);
@@ -425,7 +441,7 @@ export class AxiomAgent extends Interruptible {
       return { block: true, reason: blockMessage };
     }
 
-    // 写入前快照（对标 Hermes checkpoint_manager）
+    // 写入前快照
     if (['write', 'edit', 'create_fleeing_card', 'create_permanent_card'].includes(toolName)) {
       if (_vp()) {
         const targetPath = args.path || args.filePath || '';
@@ -439,7 +455,7 @@ export class AxiomAgent extends Interruptible {
   }
 
   /**
-   * 6 种独立重试计数器（对标 Hermes run_agent.py 多处）
+   * 6 种独立重试计数器
    */
   private _retryCounters: Record<string, number> = {
     invalidTool: 0,      // 无效工具名（max 3）
@@ -454,7 +470,7 @@ export class AxiomAgent extends Interruptible {
   /**
    * 工具调用后处理：
    * - 执行 afterCall 中间件链
-   * - 6 种独立重试计数器（对标 Hermes）
+   * - 6 种独立重试计数器
    */
   private async _onAfterToolCall(
     ctx: import('@mariozechner/pi-agent-core').AfterToolCallContext
@@ -481,7 +497,7 @@ export class AxiomAgent extends Interruptible {
       }
     }
 
-    // Tool Result Budget: 截断超大工具结果（对标 Hermes BudgetConfig）
+    // Tool Result Budget: 截断超大工具结果
     if (currentResult && typeof currentResult === 'object') {
       const { defaultToolBudget } = await import('./ToolResultBudget');
       const cr = currentResult as { content: unknown };
@@ -502,7 +518,7 @@ export class AxiomAgent extends Interruptible {
       }
     }
 
-    // 6 种独立重试计数器（对标 Hermes run_agent.py）
+    // 6 种独立重试计数器
     if (ctx.isError) {
       const maxRetries = this.services.config.maxRetries;
       const retryDelay = this.services.config.retryDelay;
@@ -510,7 +526,7 @@ export class AxiomAgent extends Interruptible {
       const attempt = (this._retryCounterPerTool.get(toolCallId) ?? 0) + 1;
       this._retryCounterPerTool.set(toolCallId, attempt);
 
-      // 分类计数（对标 Hermes 6 种重试计数器）
+      // 分类计数
       let matchedCounter: string | null = null;
       const firstContent = currentResult?.content?.[0];
       const errorText = typeof currentResult?.content === 'string'
@@ -536,7 +552,7 @@ export class AxiomAgent extends Interruptible {
         matchedCounter = 'emptyContent';
       }
 
-      // 阈值分支：达到上限则停止该类重试（对标 Hermes 计数器决策）
+      // 阈值分支：达到上限则停止该类重试
       const counterLimits: Record<string, number> = {
         invalidTool: 3, invalidJson: 3, emptyContent: 3,
         incompleteScratchpad: 2, codexIncomplete: 3, thinkingPrefill: 2,
@@ -602,7 +618,6 @@ export class AxiomAgent extends Interruptible {
 
   /**
    * 初始化 MCP 客户端，从 .axiom/mcp.json 读取服务配置
-   * 对标 Hermes mcp_tool.py
    */
   private async _initMCP(): Promise<void> {
     try {
@@ -625,7 +640,7 @@ export class AxiomAgent extends Interruptible {
 
   /**
    * 初始化 PluginHookSystem
-   * 将现有 guardrail 注册为 flat hooks，对标 Hermes plugins.py
+   * 将现有 guardrail 注册为 flat hooks
    */
   private _initHooks(): void {
     if (this._hooksInitialized) return;
@@ -669,7 +684,7 @@ export class AxiomAgent extends Interruptible {
     pluginHooks.register('post_api_request', ({ model, tokens, promptTokens, completionTokens }: { model: string; tokens?: number; promptTokens?: number; completionTokens?: number }) => {
       this.services.infra.audit.info(LogCategory.LLM, 'api_request_complete', { model, tokens });
       this._apiCallCount++;
-      // 成本追踪（对标 Hermes hermes_state.py estimated_cost_usd）
+      // 成本追踪
       this.services.infra.usageTracker.record({
         timestamp: Date.now(),
         model: model || this.services.config.modelId,
@@ -687,9 +702,15 @@ export class AxiomAgent extends Interruptible {
   switchModel(modelId: string): void {
     const oldModel = this.services.config.modelId;
     this.services.config.modelId = modelId;
-    this.services.modelConfig = this._getModelConfig(modelId);
-    this.services.agent.state.model = this._getModel();
-    console.log(`[Agent] Model: ${oldModel} → ${modelId}`);
+    // 从 env 重读配置，但用新 modelId
+    const aiConfig = resolveAiConfig();
+    this.services.modelConfig = {
+      provider: aiConfig.model.provider as import('@/types/agent').LLMProvider,
+      modelId,
+      baseUrl: aiConfig.model.baseUrl || undefined,
+      apiKey: aiConfig.model.apiKey || undefined,
+    };
+    this.services.agent.state.model = this._getModel()!;
   }
 
   updateState(key: string, value: any): void {
@@ -697,6 +718,7 @@ export class AxiomAgent extends Interruptible {
       role: 'custom',
       content: JSON.stringify({ [key]: value }),
       timestamp: Date.now(),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
   }
 
@@ -737,6 +759,9 @@ export class AxiomAgent extends Interruptible {
       this._unsubscribeFn = null;
     }
 
+    // Abort previous prompt to unstuck the agent state
+    try { this.services.agent.abort() } catch {}
+
     // Check interrupt
     this.checkInterrupt?.();
 
@@ -770,7 +795,6 @@ export class AxiomAgent extends Interruptible {
 
   /**
    * Steer：非中断注入用户指导
-   * 对标 Hermes: steer() — 追加到 pending queue
    */
   steer(text: string): boolean {
     return this.services.infra.steerMechanism.steer(text);
@@ -817,7 +841,6 @@ export class AxiomAgent extends Interruptible {
 
   /**
    * 并行工具执行工具方法
-   * 对标 Hermes: _should_parallelize_tool_batch() + _execute_tool_calls_concurrent()
    * 用于自定义工具执行场景判断是否可并行
    */
   static checkParallelSafety(toolCalls: ParallelToolCall[]): boolean {
@@ -836,7 +859,6 @@ export class AxiomAgent extends Interruptible {
 
   /**
    * 创建 BackgroundReview 的 agent 工厂
-   * 对标 Hermes: fork 独立 agent（max 8 迭代，静默模式）
    *
    * 使用 MemoryManager 的真实工具定义，让 review agent 能执行 memory 操作
    */
@@ -856,7 +878,7 @@ export class AxiomAgent extends Interruptible {
                 .map(m => `${m.role}: ${m.content.slice(0, 500)}`)
                 .join('\n');
 
-              // 对标 Hermes: max 8 迭代的 review agent
+              // max 8 迭代的 review agent
               const MAX_REVIEW_ITERS = 8;
               const allExecutedCalls: Array<{ name: string; result: any }> = [];
               let lastText = '';
@@ -868,8 +890,8 @@ export class AxiomAgent extends Interruptible {
                 if (stopped) break;
 
                 const response = await completeSimple(model, {
-                  messages: currentMessages as any,
-                  tools: memorySchemas.length > 0 ? (memorySchemas as any) : undefined,
+                  messages: currentMessages as Message[],
+                  tools: memorySchemas.length > 0 ? (memorySchemas as Tool[]) : undefined,
                 }, {
                   apiKey,
                   maxTokens: 4096,
@@ -881,8 +903,9 @@ export class AxiomAgent extends Interruptible {
                   .map((b: any) => b.text)
                   .join('');
 
-                // 提取 tool calls
-                const toolCalls = (response as any).tool_calls || [];
+                // 提取 tool calls — AssistantMessage embeds tools in content[],
+                // but some providers also return legacy tool_calls at top level
+                const toolCalls = (response as AssistantMessage & { tool_calls?: Array<{ function?: { name?: string; arguments?: string } }> }).tool_calls || [];
                 if (toolCalls.length === 0) break; // 没有工具调用则结束
 
                 // 执行 tool calls
@@ -891,7 +914,7 @@ export class AxiomAgent extends Interruptible {
                   const toolName = tc.function?.name;
                   if (!toolName) continue;
                   try {
-                    const args = JSON.parse(tc.function.arguments || '{}');
+                    const args = JSON.parse(tc.function?.arguments || '{}');
                     const result = await this.services.memoryService.handleToolCall(toolName, args);
                     allExecutedCalls.push({ name: toolName, result });
                     toolResults.push(`${toolName}: ${typeof result === 'string' ? result.slice(0, 200) : 'ok'}`);
@@ -950,39 +973,26 @@ export class AxiomAgent extends Interruptible {
 
     // 1. 清空数据库（会话、轨迹、模式）
     try {
-      await (this.services.learning as any).database?.clear?.();
-      (this.services.learning as any).graphManager = new GraphIntegrationManager((this.services.learning as any).database);
+      await this.services.learning.database.clear();
+      this.services.learning.graphManager = new GraphIntegrationManager(this.services.learning.database);
     } catch (err) {
       console.debug('[Agent] Database clear failed:', err);
     }
 
     // 2. 清空内存中的记忆
     const builtinProvider = this.services.memoryService.getProvider('builtin');
-    (builtinProvider as any)?.reset();
+    (builtinProvider as BrowserBuiltinMemoryProvider | undefined)?.reset();
 
-    // 3. 删除磁盘上的记忆和持久化文件
-    if (_vp()) {
+    // 3. 清除数据库中的记忆和能力数据
+    const { prisma } = await import('@/lib/db');
+    const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
+    const vaultId = getCurrentVaultId();
+    if (vaultId) {
       try {
-        const memoriesDir = `${_vp()}/.axiom/memories`;
-        const _list = await getFileStorage(this.services.config.userId).listDir(memoriesDir);
-        if (_list.success && _list.entries) {
-          for (const entry of _list.entries) {
-            try {
-              getFileStorage(this.services.config.userId).deleteFile(`${memoriesDir}/${entry.name}`);
-            } catch { /* skip individual failures */ }
-          }
-        }
+        await prisma.vaultMemory.deleteMany({ where: { vaultId } });
+        await prisma.vaultCapability.deleteMany({ where: { vaultId } });
       } catch (err) {
-        console.debug('[Agent] Memory file cleanup failed:', err);
-      }
-
-      try {
-        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/knowledge-graph.json`);
-        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/capability-tracking.json`);
-        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/memories/MEMORY.md`);
-        getFileStorage(this.services.config.userId).deleteFile(`${_vp()}/.axiom/memories/USER.md`);
-      } catch (err) {
-        console.debug('[Agent] Graph/capability file cleanup failed:', err);
+        console.debug('[Agent] Memory/capability DB cleanup failed:', err);
       }
     }
 
@@ -1000,14 +1010,14 @@ export class AxiomAgent extends Interruptible {
       maxTokens: this.services.config.maxTokens,
       toolExecution: this.services.config.toolExecution,
     });
-    console.log('[Agent] All memory cleared');
   }
 
   updateConfig(config: Partial<AxiomAgentConfig>): void {
     this.services.config = { ...this.services.config, ...config };
     if (config.modelId) {
-      this.services.modelConfig = this._getModelConfig(config.modelId);
-      this.services.agent.state.model = this._getModel();
+      const resolved = resolveAiConfig()
+      this.services.modelConfig = { ...resolved.model, modelId: config.modelId } as ModelConfig
+      this.services.agent.state.model = this._getModel()!;
     }
     if (config.systemPrompt) {
       this.services.agent.state.systemPrompt = config.systemPrompt;
@@ -1025,7 +1035,7 @@ export class AxiomAgent extends Interruptible {
   newSession(): void {
     this.services.sessionId = this.services.sessionService.generateSessionId();
     this.services.agent.state.messages = [];
-    (this.services.learning as any).budget?.reset?.();
+    this.services.learning.budget.reset();
     this.resetInterrupt?.();
     this._turnCount = 0;
     this._lastUserMessage = '';
@@ -1154,19 +1164,17 @@ export class AxiomAgent extends Interruptible {
       this._unsubscribeFn = null;
     }
 
-    // 导出轨迹为 JSONL（对标 Hermes: trajectory.py save_trajectory）
+    // 导出轨迹为 JSONL
     try {
-      const vaultPath = (process.env as any).VAULT_PATH || "./vault"
-        || process.env["VAULT_PATH"] || "./vault" || '';
       if (_vp()) {
-        await (this.services.learning as any).patternExtractor?.exportToJsonl?.(_vp());
+        await this.services.learning.patternExtractor.exportToJsonl(_vp());
       }
     } catch (e) {
       console.debug('[Agent] JSONL export skipped (non-fatal):', e);
     }
 
-    (this.services.learning as any).database?.stopExpiryWatcher?.();
-    await (this.services.learning as any).database?.close?.();
+    this.services.learning.database.stopExpiryWatcher();
+    await this.services.learning.database.close();
     await this.services.memoryService.shutdownAll();
   }
 
@@ -1174,7 +1182,7 @@ export class AxiomAgent extends Interruptible {
    * 获取预算状态
    */
   getBudgetStatus(): { remaining: number; used: number; total: number } {
-    const budget = (this.services.learning as any).budget;
+    const budget = this.services.learning.budget;
     if (!budget) return { remaining: 0, used: 0, total: 0 };
     const total = budget.remaining + budget.used;
     return { remaining: budget.remaining, used: budget.used, total };
@@ -1190,18 +1198,17 @@ export class AxiomAgent extends Interruptible {
   /**
    * 获取学习技能管理器
    */
-  getLearningSkillManager(): null {
-    return (this.services.learning as any)?.learningSkillManager ?? null;
+  getLearningSkillManager(): ILearningSkillManager | null {
+    return this.services.learning.learningSkillManager ?? null;
   }
 
   /**
    * 刷新知识图谱（新卡片创建后调用）
    */
   async refreshGraph(): Promise<void> {
-    const vaultPath: string = _vp() || "./vault";
-    const vaultData = await (this.services.memoryService as any).loadVaultData(_vp());
+    const vaultData = await this.services.memoryService.loadVaultData(_vp()) as { permanent?: any[]; literature?: any[]; fleeing?: any[] } | null;
     if (vaultData) {
-      await (this.services.learning as any).graphManager.initializeGraph(vaultData);
+      await this.services.learning.graphManager.initializeGraph(vaultData);
     }
   }
 
@@ -1230,7 +1237,12 @@ export class AxiomAgent extends Interruptible {
 
 // ========== 工厂函数 ==========
 
-export function createAgent(config: AxiomAgentConfig = {}): AxiomAgent {
+export async function createAgent(config: AxiomAgentConfig = {}): Promise<AxiomAgent> {
+  // 注册内置工具（file, card, memory, resource, session, agent tools）
+  registerBuiltinTools();
+
   const services = createAgentServices(config);
-  return new AxiomAgent(services);
+  const agent = new AxiomAgent(services);
+  await agent.init();
+  return agent;
 }

@@ -12,6 +12,7 @@ import type {
 import { getOracles, Oracle, OracleProfile, getOracle } from './oracle';
 import { detectApiMode, getApiEndpoint, type ApiMode } from './api-mode';
 import { DEFAULT_MODEL, DEFAULT_COMPRESSION_MODEL } from '@/types/agent';
+import { resolveAiConfig } from '@/lib/ai-config';
 
 /**
  * 模型配置接口
@@ -89,9 +90,10 @@ export class AIManager {
     this.models = new Map();
     this._initializeModels();
 
-    // 设置默认模型
-    this.currentModelId = DEFAULT_MODEL;
-    this.currentProvider = 'zhipu';
+    // 从统一配置入口读取当前模型和 provider
+    const aiConfig = resolveAiConfig();
+    this.currentModelId = aiConfig.model.modelId;
+    this.currentProvider = aiConfig.model.provider;
 
     // 初始化全局上下文（per-user isolation）
     this.globalContexts = new Map();
@@ -249,39 +251,33 @@ export class AIManager {
    */
   private _loadEnvironmentConfig(): void {
     try {
-      const env = process.env as Record<string, string | undefined>;
-      const envBaseUrl = env.VITE_AI_API_BASE || '';
+      // 从统一配置入口读取（与 resolveAiConfig 使用相同的 env 变量）
+      const aiConfig = resolveAiConfig();
+      const modelId = aiConfig.model.modelId;
+      const envBaseUrl = aiConfig.model.baseUrl;
 
-      // 检查是否有指定的模型
-      if (env.VITE_AI_MODEL) {
-        const modelId = env.VITE_AI_MODEL.split('/').pop() || env.VITE_AI_MODEL;
-        if (this.models.has(modelId)) {
-          this.currentModelId = modelId;
-          // Apply env base URL override to existing model config
-          if (envBaseUrl) {
-            const model = this.models.get(modelId)!;
-            model.baseUrl = envBaseUrl;
-          }
-        } else {
-          // Unknown model — register dynamically with env-provided settings
-          const provider = (env.VITE_AI_PROVIDER || 'openai').toLowerCase();
-          this.models.set(modelId, {
-            id: modelId,
-            name: modelId,
-            provider: provider as ModelConfig['provider'],
-            modelId: modelId,
-            baseUrl: envBaseUrl || 'https://api.openai.com',
-            maxTokens: 65536,
-            contextLength: 65536,
-          });
-          this.currentModelId = modelId;
+      if (modelId && this.models.has(modelId)) {
+        this.currentModelId = modelId;
+        if (envBaseUrl) {
+          const model = this.models.get(modelId)!;
+          model.baseUrl = envBaseUrl;
         }
+      } else if (modelId && !this.models.has(modelId)) {
+        // 动态注册 env 中指定的模型
+        const provider = aiConfig.model.provider;
+        this.models.set(modelId, {
+          id: modelId,
+          name: modelId,
+          provider: provider as ModelConfig['provider'],
+          modelId: modelId,
+          baseUrl: envBaseUrl || 'https://api.openai.com',
+          maxTokens: 65536,
+          contextLength: 65536,
+        });
+        this.currentModelId = modelId;
       }
 
-      // 检查是否有指定的提供者
-      if (env.VITE_AI_PROVIDER) {
-        this.currentProvider = env.VITE_AI_PROVIDER.toLowerCase();
-      }
+      this.currentProvider = aiConfig.model.provider;
 
       console.log('[AIManager] Config loaded — modelId:', this.currentModelId, 'provider:', this.currentProvider);
     } catch (error) {
@@ -571,12 +567,7 @@ Please consider this global context in your responses.
    * 获取 API Key
    */
   private _getApiKey(): string {
-    try {
-      const env = process.env as Record<string, string | undefined>;
-      return env.VITE_AI_API_KEY || '';
-    } catch {
-      return '';
-    }
+    return resolveAiConfig().model.apiKey;
   }
 
   /**

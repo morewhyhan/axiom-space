@@ -1,7 +1,6 @@
 /**
  * SubagentHeartbeat — 子代理心跳/过期检测
  *
- * 对标 Hermes: tools/delegate_tool.py:718-771
  *
  * 30 秒心跳间隔，定期 touch 父代理 activity。
  * 5 个周期无迭代进展 → 标记过期。
@@ -29,7 +28,6 @@ export class SubagentHeartbeat {
 
   /**
    * 启动心跳守护线程
-   * 对标 Hermes: _heartbeat_loop()
    *
    * @param child 子代理实例
    * @param parent 父代理实例
@@ -47,7 +45,7 @@ export class SubagentHeartbeat {
     this.intervalId = setInterval(() => {
       if (!this.intervalId) return;
 
-      // touch 父代理 activity（对标 Hermes: touch parent activity）
+      // touch 父代理 activity
       parent.touchActivity();
 
       // 过期检测：检查子代理迭代进展

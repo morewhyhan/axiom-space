@@ -1,15 +1,14 @@
 /**
- * KnowledgeGraphProvider — 知识图谱记忆提供者
+ * KnowledgeGraphProvider — 知识图谱记忆提供者（纯内存 + DB 重建）
  *
  * 将 GraphIntegrationManager 整合为 MemoryProvider，
  * 提供概念结构、依赖关系、学习路径等信息。
  *
- * 替代原版依赖 window.axiom 的方案，使用 IFileStorage 持久化。
+ * 图谱数据从 edge 表重建，不再持久化到文件。
  */
 
 import { MemoryProvider, ToolSchema, MemorySearchResult } from './provider'
 import { GraphQueryEngine } from './GraphQueryEngine'
-import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 
 interface ConceptNode {
   id: string
@@ -31,7 +30,6 @@ interface KnowledgeGraph {
 
 export class KnowledgeGraphProvider extends MemoryProvider {
   private graph: KnowledgeGraph = { nodes: [], edges: [] }
-  private vaultPath: string = ''
   private queryEngine = new GraphQueryEngine()
 
   get name(): string {
@@ -43,8 +41,7 @@ export class KnowledgeGraphProvider extends MemoryProvider {
   }
 
   async initialize(_sessionId: string, _config?: Record<string, any>): Promise<void> {
-    this.vaultPath = process.env.VAULT_PATH || './vault'
-    await this._load()
+    // 图谱数据通过 setGraph() 从 DB 重建，无需加载文件
   }
 
   getToolSchemas(): ToolSchema[] {
@@ -102,7 +99,7 @@ export class KnowledgeGraphProvider extends MemoryProvider {
   }
 
   async onSessionEnd(_messages: any[]): Promise<void> {
-    await this._save()
+    // 纯内存，无需持久化
   }
 
   setGraph(vaultData: { permanent?: any[]; literature?: any[]; fleeing?: any[] }): void {
@@ -114,7 +111,6 @@ export class KnowledgeGraphProvider extends MemoryProvider {
       status: 'mastered',
     }))
 
-    // 从卡片内容中提取双向链接作为边
     const edges: ConceptEdge[] = []
     const linkRegex = /\[\[([^\]]+)\]\]/g
     for (const card of permanent) {
@@ -131,11 +127,8 @@ export class KnowledgeGraphProvider extends MemoryProvider {
 
     this.graph = { nodes, edges }
 
-    // 通知 UI 更新（通过 globalThis 事件）
     if (typeof globalThis !== 'undefined') {
-      globalThis.dispatchEvent?.(new CustomEvent('knowledge-graph-update', {
-        detail: { nodes, edges },
-      }))
+      console.log(`[Event] knowledge-graph-update — ${nodes.length} nodes, ${edges.length} edges`);
     }
   }
 
@@ -171,23 +164,5 @@ export class KnowledgeGraphProvider extends MemoryProvider {
       contrast: '对比',
     }
     return labels[r] || r
-  }
-
-  private async _load(): Promise<void> {
-    try {
-      const result = await getFileStorage().readFile(`${this.vaultPath}/.axiom/knowledge-graph.json`)
-      if (result.success && result.content) {
-        this.graph = JSON.parse(result.content)
-      }
-    } catch { /* 首次启动无数据 */ }
-  }
-
-  private async _save(): Promise<void> {
-    try {
-      await getFileStorage().writeFile(
-        `${this.vaultPath}/.axiom/knowledge-graph.json`,
-        JSON.stringify(this.graph, null, 2)
-      )
-    } catch { /* 静默失败 */ }
   }
 }

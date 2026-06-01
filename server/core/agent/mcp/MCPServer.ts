@@ -1,7 +1,6 @@
 /**
  * MCP 服务端
  *
- * 对标 Hermes: mcp_serve.py
  *
  * 将 AXIOM 的能力暴露为 MCP 协议工具：
  * - conversations_list: 列出对话
@@ -16,6 +15,7 @@
 import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { getVaultPath } from '@/lib/platform';
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 
 // In-memory cache replacing localStorage (browser API unavailable in Node.js)
 const _sessionsCache = new Map<string, string>();
@@ -37,7 +37,6 @@ export interface MCPServerTool {
 
 /**
  * MCP 服务端工具定义
- * 对标 Hermes: mcp_serve.py create_mcp_server() 中的 @mcp.tool() 注册
  */
 export function createMCPServerTools(): MCPServerTool[] {
   return [
@@ -123,7 +122,7 @@ const axiom = createAxiomCompat(fileStorage);
         },
       },
       handler: async (args) => {
-        // 对标 Hermes: event_bridge — 从 AuditLogger 内存缓冲区提取事件
+        // event_bridge — 从 AuditLogger 内存缓冲区提取事件
         const afterCursor = args.afterCursor || 0;
         const limit = args.limit || 20;
 
@@ -162,7 +161,7 @@ const axiom = createAxiomCompat(fileStorage);
         required: ['target', 'message'],
       },
       handler: async (args) => {
-        // 对标 Hermes: messages_send 委托给 send_message_tool
+        // messages_send 委托给 send_message_tool
         // 将消息注入到指定会话的消息队列
         const { target, message } = args;
         if (!target || !message) {
@@ -205,7 +204,7 @@ const axiom = createAxiomCompat(fileStorage);
 const axiom = createAxiomCompat(fileStorage);
         if (!axiom) return { error: 'axiom API not available' };
 
-        const vaultPath = getVaultPath();
+        const vaultPath = getVaultPath() || getCurrentVaultId() || '';
         if (!vaultPath) return { error: 'No vault open' };
 
         const results: any[] = [];
@@ -232,7 +231,6 @@ const axiom = createAxiomCompat(fileStorage);
 
 /**
  * 创建并返回 MCP 服务端实例
- * 对标 Hermes: create_mcp_server(event_bridge)
  */
 export function createMCPServer(): MCPServerTool[] {
   return createMCPServerTools();

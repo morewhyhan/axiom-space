@@ -41,7 +41,8 @@ const memorySearchTool = createTool(
           : r.source === 'capability-tracking' ? '能力追踪'
           : r.source === 'knowledge-graph' ? '知识图谱'
           : r.source;
-        lines.push(`[${sourceLabel}] 相关度: ${(r.finalScore * 100).toFixed(0)}%`);
+        const timestampStr = r.timestamp ? ` (${new Date(r.timestamp).toLocaleString('zh-CN')})` : '';
+        lines.push(`[${sourceLabel}]${timestampStr} 相关度: ${(r.finalScore * 100).toFixed(0)}%`);
         lines.push(`  ${r.content.slice(0, 200)}`);
         lines.push('');
       }
@@ -55,8 +56,9 @@ const memorySearchTool = createTool(
             source: r.source,
             sourceType: r.sourceType,
             finalScore: r.finalScore,
+            timestamp: r.timestamp,
             snippet: r.content.slice(0, 100),
-          })) as Array<{ source: string; sourceType: string; finalScore: number; snippet: string }>,
+          })) as Array<{ source: string; sourceType: string; finalScore: number; timestamp: number; snippet: string }>,
         },
       };
     } catch (error) {
@@ -155,9 +157,7 @@ const writeMemoryTool = createTool(
 
       const isProfileUpdate = params.target === 'user' && params.content.length > 20;
       if (isProfileUpdate) {
-        globalThis.dispatchEvent(new CustomEvent('axiom:toast', {
-          detail: { message: `已更新用户画像`, type: 'profile' },
-        }));
+        console.log('[Event] axiom:toast — profile: 已更新用户画像');
       }
 
       return {

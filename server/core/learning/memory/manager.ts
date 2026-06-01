@@ -1,6 +1,5 @@
 /**
  * Memory Manager - 记忆管理器
- * 对标 Hermes agent/memory_manager.py
  *
  * Orchestrates multiple memory providers. The builtin provider (name='builtin')
  * is always first. Additional providers are registered freely — AXIOM uses
@@ -17,7 +16,6 @@ import { Message } from '@/types/learning';
 
 /**
  * Memory Manager
- * 对标 Hermes 的 MemoryManager 类
  */
 export class MemoryManager {
   private _providers: MemoryProvider[] = [];
@@ -302,7 +300,6 @@ export class MemoryManager {
 
   /**
    * 批量初始化所有 Provider
-   * 对标 Hermes initialize_all — 注入 hermes_home 等上下文
    */
   async initializeAll(sessionId: string, config?: Record<string, any>): Promise<void> {
     for (const provider of this._providers) {
@@ -319,7 +316,6 @@ export class MemoryManager {
 
   /**
    * 压缩前通知 — 让 provider 补充压缩上下文
-   * 对标 Hermes on_pre_compress
    */
   async onPreCompress(messages: Message[]): Promise<string> {
     const parts: string[] = [];
@@ -341,7 +337,6 @@ export class MemoryManager {
 
   /**
    * 写入通知 — builtin 写入时通知外部 provider 镜像
-   * 对标 Hermes on_memory_write
    */
   async onMemoryWrite(action: string, target: string, content: string): Promise<void> {
     for (const provider of this._providers) {
@@ -358,7 +353,6 @@ export class MemoryManager {
 
   /**
    * 委托通知 — 子 agent 返回结果时通知 provider
-   * 对标 Hermes on_delegation
    */
   async onDelegation(task: string, result: string, context?: Record<string, any>): Promise<void> {
     for (const provider of this._providers) {

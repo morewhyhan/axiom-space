@@ -15,28 +15,24 @@ export {
 export {
   MemoryManager,
 } from './memory/manager';
-// export { LearningDatabase } from './storage/browser-db';  // deleted — use null as any
-// export { PatternExtractor } from './pattern';               // deleted — use null as any
-// export { LearningSkillManager } from './skills';             // deleted — use null as any
 export {
   GraphIntegrationManager,
 } from './graph/integration';
 
 import { MemoryManager } from './memory/manager';
-// import { LearningDatabase } ... deleted
 import { ContextCompressor } from './context/compressor';
 import { IterationBudget } from './core/budget';
-// removed
-// import { LearningSkillManager } ... deleted
 import { GraphIntegrationManager } from './graph/integration';
+import type { ILearningDatabase, IPatternExtractor, ILearningSkillManager } from '@/server/core/agent/pipeline/interfaces';
+
 export class LearningFacade {
   constructor(
     public memory: MemoryManager,
-    public database: any,
+    public database: ILearningDatabase,
     public compressor: ContextCompressor,
     public budget: IterationBudget,
-    public patternExtractor: any,
-    public learningSkillManager: any,
+    public patternExtractor: IPatternExtractor,
+    public learningSkillManager: ILearningSkillManager,
     public graphManager: GraphIntegrationManager,
   ) {}
 }

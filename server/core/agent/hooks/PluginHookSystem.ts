@@ -1,7 +1,6 @@
 /**
  * PluginHookSystem — 扁平插件钩子系统
  *
- * 对标 Hermes: hermes_cli/plugins.py
  *
  * 13 个 hook 点，平铺注册，注册顺序执行，独立 try/except（故障隔离）。
  * pre_tool_call 使用 first-block-wins 策略。
@@ -46,7 +45,6 @@ export class PluginHookSystem {
 
   /**
    * 注册钩子回调，按注册顺序执行
-   * 对标 Hermes: plugins.py register_hook()
    */
   register(hookName: HookName, callback: HookCallback): void {
     if (!VALID_HOOKS.has(hookName)) {
@@ -70,7 +68,6 @@ export class PluginHookSystem {
 
   /**
    * 触发钩子，每个 callback 独立 try/catch（故障隔离）
-   * 对标 Hermes: invoke_hook()
    */
   invoke(hookName: HookName, ...args: any[]): any[] {
     const callbacks = this.hooks.get(hookName) ?? [];
@@ -88,7 +85,6 @@ export class PluginHookSystem {
 
   /**
    * pre_tool_call 专用：first-block-wins
-   * 对标 Hermes: get_pre_tool_call_block_message()
    *
    * 遍历所有 pre_tool_call 回调，第一个返回 block 的获胜。
    * 如果所有回调都返回 allow/void，则放行。
@@ -105,7 +101,6 @@ export class PluginHookSystem {
 
   /**
    * transform_tool_result：可修改工具返回值
-   * 对标 Hermes: transform_tool_result hook
    * 最后一个有效字符串结果获胜
    */
   transformToolResult(toolName: string, result: string): string {

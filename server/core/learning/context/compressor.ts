@@ -1,7 +1,6 @@
 /**
  * ContextCompressor - 自动上下文压缩器
  *
- * 完全对标 Hermes agent/context_compressor.py
  *
  * Algorithm:
  *   1. Prune old tool results (cheap, no LLM call)
@@ -161,7 +160,6 @@ export interface CompressResult {
 
 /**
  * 上下文压缩器
- * 对标 Hermes 的 ContextCompressor 类
  */
 export class ContextCompressor {
   private model: string;

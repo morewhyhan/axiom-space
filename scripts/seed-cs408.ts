@@ -1,5 +1,7 @@
 import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
+import { hashPassword } from 'better-auth/crypto'
+import { syncEdgesFromContent } from '../lib/wiki-links'
 
 const prisma = new PrismaClient()
 
@@ -8,9 +10,7 @@ const prisma = new PrismaClient()
 function randomPastDate(daysBack: number): Date { const d = new Date(); d.setDate(d.getDate() - Math.floor(Math.random() * daysBack)); d.setHours(Math.floor(Math.random() * 24), 0, 0, 0); return d; }
 
 function slugify(text: string): string {
-  return text
-    .replace(/[《》()（）,，：、\s]+/g, '')
-    .trim()
+  return text.replace(/[《》()（）,，：、\s]+/g, '').trim()
 }
 
 function makePath(clusterName: string, cardTitle: string): string {
@@ -404,7 +404,7 @@ const withinCOEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
   { sourceTitle: '输入输出系统', targetTitle: 'DMA', type: 'related' },
   { sourceTitle: '中断系统', targetTitle: 'DMA', type: 'related' },
   { sourceTitle: '总线系统', targetTitle: '中断系统', type: 'related' },
-  { sourceTitle: '运算方法与ALU', targetTitle: '数据表示', type: 'prerequisite' },
+  { sourceTitle: '运算方法与ALU', targetTitle: '数据表示', type: 'prerequisite' }, // reverse direction for "derived"
   { sourceTitle: '浮点运算', targetTitle: '数据表示', type: 'related' },
   { sourceTitle: 'CPU流水线', targetTitle: '控制单元', type: 'related' },
   { sourceTitle: '指令流水线冒险', targetTitle: 'CPU流水线', type: 'derived' },
@@ -548,7 +548,6 @@ const withinCNEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
 
 // Cross-cluster edges
 const crossEdges: EdgeDef[] = [
-  // OS ↔ CO
   { sourceSubject: '操作系统', sourceTitle: '进程调度', targetSubject: '计算机组成原理', targetTitle: 'CPU流水线', type: 'related' },
   { sourceSubject: '操作系统', sourceTitle: '内存管理', targetSubject: '计算机组成原理', targetTitle: '虚拟存储器', type: 'related' },
   { sourceSubject: '操作系统', sourceTitle: '虚拟内存', targetSubject: '计算机组成原理', targetTitle: 'Cache', type: 'related' },
@@ -559,7 +558,6 @@ const crossEdges: EdgeDef[] = [
   { sourceSubject: '操作系统', sourceTitle: '页面置换算法', targetSubject: '数据结构', targetTitle: '队列', type: 'related' },
   { sourceSubject: '操作系统', sourceTitle: '死锁', targetSubject: '数据结构', targetTitle: '图', type: 'related' },
   { sourceSubject: '操作系统', sourceTitle: '进程调度', targetSubject: '数据结构', targetTitle: '排序算法', type: 'related' },
-  // CN ↔ others
   { sourceSubject: '计算机网络', sourceTitle: 'TCP可靠传输', targetSubject: '数据结构', targetTitle: '队列', type: 'related' },
   { sourceSubject: '计算机网络', sourceTitle: '路由算法', targetSubject: '数据结构', targetTitle: '最短路径', type: 'related' },
   { sourceSubject: '计算机网络', sourceTitle: '路由算法', targetSubject: '数据结构', targetTitle: '图', type: 'related' },
@@ -568,37 +566,408 @@ const crossEdges: EdgeDef[] = [
   { sourceSubject: '计算机网络', sourceTitle: '拥塞控制', targetSubject: '操作系统', targetTitle: '进程调度', type: 'related' },
   { sourceSubject: '计算机网络', sourceTitle: 'TCP/IP协议栈', targetSubject: '操作系统', targetTitle: '进程通信', type: 'related' },
   { sourceSubject: '计算机网络', sourceTitle: '传输层', targetSubject: '操作系统', targetTitle: '进程通信', type: 'related' },
-  // CO ↔ others
   { sourceSubject: '计算机组成原理', sourceTitle: 'Cache', targetSubject: '数据结构', targetTitle: '哈希表', type: 'related' },
   { sourceSubject: '计算机组成原理', sourceTitle: '数据表示', targetSubject: '数据结构', targetTitle: '栈', type: 'related' },
 ]
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Helper: Build related-titles map from edge definitions ─────────────────
 
-async function main() {
-  console.log('=== CS408 Knowledge Graph Seed ===')
-  console.log()
+function buildRelatedTitlesMap(): Map<string, { prerequisite: string[]; related: string[]; derived: string[] }> {
+  const map = new Map<string, { prerequisite: string[]; related: string[]; derived: string[] }>()
 
-  // ── Step 1: Create demo user ──────────────────────────────────────────────
-  console.log('[1/5] Creating demo user...')
+  function ensure(title: string) {
+    if (!map.has(title)) map.set(title, { prerequisite: [], related: [], derived: [] })
+    return map.get(title)!
+  }
+
+  function add(sourceTitle: string, targetTitle: string, type: string) {
+    ensure(sourceTitle)
+    const entry = map.get(sourceTitle)!
+    if (type === 'prerequisite') entry.prerequisite.push(targetTitle)
+    else if (type === 'derived') entry.derived.push(targetTitle)
+    else entry.related.push(targetTitle)
+
+    // 反向链接：如果 A prerequisite B，则 B derived_from A
+    // related 是对称的，直接反转
+    const reverseType = type === 'prerequisite' ? 'derived' : type === 'derived' ? 'prerequisite' : 'related'
+    ensure(targetTitle)
+    const revEntry = map.get(targetTitle)!
+    if (reverseType === 'prerequisite') revEntry.prerequisite.push(sourceTitle)
+    else if (reverseType === 'derived') revEntry.derived.push(sourceTitle)
+    else revEntry.related.push(sourceTitle)
+  }
+
+  // Within-subject edges (subject info not needed — all titles are unique)
+  for (const e of withinDSEdges) add(e.sourceTitle, e.targetTitle, e.type)
+  for (const e of withinCOEdges) add(e.sourceTitle, e.targetTitle, e.type)
+  for (const e of withinOSEdges) add(e.sourceTitle, e.targetTitle, e.type)
+  for (const e of withinCNEdges) add(e.sourceTitle, e.targetTitle, e.type)
+  // Cross-subject edges
+  for (const e of crossEdges) add(e.sourceTitle, e.targetTitle, e.type)
+
+  return map
+}
+
+function buildContent(title: string, related: { prerequisite: string[]; related: string[]; derived: string[] }): string {
+  const lines: string[] = [`## ${title}`]
+
+  if (related.prerequisite.length > 0) {
+    lines.push('', '**Prerequisites:** ' + related.prerequisite.map(t => `[[${t}]]`).join(', '))
+  }
+  if (related.related.length > 0) {
+    lines.push('', '**Related:** ' + related.related.map(t => `[[${t}]]`).join(', '))
+  }
+  if (related.derived.length > 0) {
+    lines.push('', '**Derived from / leads to:** ' + related.derived.map(t => `[[${t}]]`).join(', '))
+  }
+
+  lines.push('', '---', '_CS408 Knowledge Graph — auto-generated seed content_')
+  return lines.join('\n')
+}
+
+/** Auto-discover WikiLinks for cards that have no manual EdgeDef entries.
+ *  Scans all card titles in the same vault and links to any card whose title
+ *  appears as a substring of this card's title. This catches cases like
+ *  "二叉树的遍历顺序" → [[二叉树]] and "栈与递归的关系" → [[栈]].
+ *  Subject-scoped to avoid cross-subject false positives from short names.
+ *  Falls back to anchor titles (permanent cards of the subject) so every
+ *  card has at least some connections for galaxy visual density. */
+
+/**
+ * Manually curated fleeting → permanent card associations.
+ * Every fleeting card below is explicitly linked to 1-3 permanent cards
+ * that represent the core concepts it discusses. No automatic matching.
+ */
+const fleetingToPermanent: Record<string, string[]> = {
+  // ═══ 数据结构 ═══
+  '快速排序最坏情况':     ['排序算法'],
+  '哈希冲突解决':         ['哈希表'],
+  'KMP算法思想':          ['查找算法'],
+  '动态规划vs贪心算法':   ['图'],
+  '稀疏矩阵存储':         ['线性表'],
+  '广义表结构':           ['线性表'],
+  '外部排序与多路归并':   ['排序算法'],
+  '二分查找决策树':       ['查找算法', '二叉树'],
+  '散列函数设计':         ['哈希表'],
+  '字符串匹配算法':       ['查找算法'],
+  '大数据TopK问题':       ['堆', '排序算法'],
+  '排序算法稳定性对比':   ['排序算法'],
+  '时间复杂度的渐进分析': ['排序算法', '查找算法'],
+  '递归算法的计算模型':   ['栈'],
+  '最小生成树算法对比':   ['图'],
+  '链表的插入删除操作':   ['线性表'],
+  '双向链表与循环链表':   ['线性表'],
+  '二叉树与森林转换':     ['二叉树', '树'],
+  'Huffman编码':          ['二叉树'],
+  'AVL树旋转操作':        ['平衡二叉树'],
+  '红黑树性质':           ['平衡二叉树'],
+  '拓扑排序实现':         ['图'],
+  'Dijkstra算法原理':     ['最短路径', '图'],
+  'Floyd算法原理':        ['最短路径', '图'],
+  '归并排序过程':         ['排序算法'],
+  '基数排序思想':         ['排序算法'],
+
+  // Remaining 数据结构 fleeting cards
+  'B树与B+树区别':       ['B树'],
+  'Prim算法与Kruskal算法对比': ['图'],
+  '二叉树的遍历顺序':     ['二叉树', '树'],
+  '图的深度优先与广度优先': ['图'],
+  '图的邻接矩阵vs邻接表': ['图'],
+  '循环队列实现':         ['队列'],
+  '栈与递归的关系':       ['栈'],
+  '栈的应用场景':         ['栈'],
+  '队列的应用场景':       ['队列'],
+
+  // ═══ 计算机组成原理 ═══
+  '原码反码补码转换':     ['数据表示'],
+  'IEEE754浮点标准':      ['浮点运算', '数据表示'],
+  'Cache映射方式':        ['Cache'],
+  '流水线冲突类型':       ['指令流水线冒险', 'CPU流水线'],
+  '中断处理流程':         ['中断系统'],
+  'DMA与程序中断对比':    ['DMA', '中断系统'],
+  '总线仲裁方式':         ['总线系统'],
+  'RAID等级区别':         ['输入输出系统'],
+  '汉明码检错':           ['数据表示'],
+  '页式虚拟存储器地址转换': ['虚拟存储器'],
+  '微程序控制与硬布线控制': ['控制单元'],
+  '指令周期与机器周期':   ['控制单元', 'CPU流水线'],
+  '数据寻址方式':         ['指令系统'],
+  'CISC与RISC对比':      ['指令系统'],
+  'MIPS指令格式':        ['指令系统'],
+  '乘法运算的硬件实现':   ['运算方法与ALU'],
+  'Booth算法':            ['运算方法与ALU'],
+  '浮点加减运算步骤':     ['浮点运算'],
+  '存储器的扩展技术':     ['存储器层次'],
+  'Cache写策略':          ['Cache'],
+  '多体交叉存储器':       ['存储器层次'],
+  '流水线性能指标':       ['CPU流水线'],
+  '数据冒险与转发技术':   ['指令流水线冒险'],
+  '控制冒险与分支预测':   ['指令流水线冒险'],
+  '异常与中断的区别':     ['中断系统'],
+  '中断优先级与屏蔽':     ['中断系统'],
+  '通道控制方式':         ['输入输出系统'],
+  'IO接口的功能与结构':   ['输入输出系统'],
+  '总线标准与接口':       ['总线系统'],
+  'USB协议概述':          ['总线系统', '输入输出系统'],
+  'PCIe总线':             ['总线系统'],
+  '磁盘存储器结构':       ['输入输出系统'],
+  '固态硬盘SSD技术':      ['输入输出系统'],
+  '计算机性能评价指标':   ['CPU流水线'],
+  'Amdahl定律':           ['CPU流水线'],
+
+  // ═══ 操作系统 ═══
+  'PCB与TCB区别':         ['进程与线程'],
+  '调度算法比较':         ['进程调度'],
+  '生产者消费者问题':     ['同步与互斥', '信号量机制'],
+  '读者写者问题':         ['同步与互斥'],
+  '哲学家就餐问题':       ['同步与互斥', '信号量机制'],
+  '死锁必要条件':         ['死锁'],
+  '银行家算法':           ['死锁'],
+  '段页式存储':           ['分页与分段', '内存管理'],
+  'LRU与LFU区别':        ['页面置换算法'],
+  '磁盘调度算法比较':     ['磁盘调度'],
+  '用户态与核心态切换':   ['进程与线程'],
+  '系统调用实现':         ['进程与线程'],
+  '进程状态转换':         ['进程与线程'],
+  '线程的实现模型':       ['进程与线程'],
+  '协程与线程对比':       ['进程与线程'],
+  '互斥锁与自旋锁':       ['同步与互斥'],
+  '读写锁实现':           ['同步与互斥'],
+  '条件变量与信号量':     ['信号量机制', '同步与互斥'],
+  '死锁检测与恢复':       ['死锁'],
+  '内存分配算法对比':     ['内存管理'],
+  '快表TLB原理':          ['分页与分段', '虚拟内存'],
+  '多级页表':             ['分页与分段', '内存管理'],
+  '缺页中断处理':         ['虚拟内存', '页面置换算法'],
+  '页面分配策略':         ['页面置换算法', '内存管理'],
+  '文件分配方式对比':     ['文件系统'],
+  '目录结构实现':         ['文件系统'],
+  '空闲空间管理':         ['文件系统'],
+  '磁盘调度FCFS与SCAN':  ['磁盘调度'],
+  'SPOOLing系统':         ['设备管理', 'IO管理'],
+  '缓冲技术':             ['IO管理', '设备管理'],
+  '设备驱动程序接口':     ['设备管理'],
+  '共享文件与链接':       ['文件系统'],
+  '文件保护机制':         ['文件系统'],
+  '日志文件系统':         ['文件系统'],
+  '实时操作系统特点':     ['进程调度'],
+
+  // ═══ 计算机网络 ═══
+  '三次握手四次挥手':     ['传输层', 'TCP可靠传输'],
+  'TCP与UDP区别':        ['传输层'],
+  '滑动窗口机制':         ['TCP可靠传输'],
+  '拥塞控制算法':         ['拥塞控制'],
+  'ARP协议工作流程':      ['网络层', 'IP协议'],
+  'DHCP原理':             ['应用层', '网络层'],
+  '子网划分':             ['网络层', 'IP协议'],
+  'CIDR表示法':           ['网络层', 'IP协议'],
+  'NAT转换':              ['网络层', 'IP协议'],
+  '路由选择协议对比':     ['路由算法', '网络层'],
+  '信道复用技术':         ['物理层'],
+  '编码与调制':           ['物理层'],
+  '传输介质分类':         ['物理层'],
+  'CSMA/CD协议':          ['数据链路层', '局域网技术'],
+  '以太网帧结构':         ['数据链路层'],
+  '交换机与集线器区别':   ['数据链路层', '局域网技术'],
+  'VLAN技术':             ['数据链路层', '局域网技术'],
+  '生成树协议':           ['数据链路层', '局域网技术'],
+  'IP数据报格式':         ['IP协议', '网络层'],
+  '分片与重组':           ['IP协议', '网络层'],
+  'IPv6协议':             ['IP协议', '网络层'],
+  'ICMP协议应用':         ['IP协议', '网络层'],
+  '隧道技术':             ['网络层'],
+  '端口号分配':           ['传输层'],
+  '流量控制与拥塞控制区别': ['拥塞控制', 'TCP可靠传输'],
+  '超时重传与快速重传':   ['TCP可靠传输'],
+  '选择性确认SACK':       ['TCP可靠传输'],
+  '连接管理状态转换':     ['传输层', 'TCP可靠传输'],
+  'WebSocket协议':        ['应用层', 'HTTP协议'],
+  '电子邮件协议':         ['应用层'],
+  'FTP协议工作原理':      ['应用层'],
+  '域名解析过程':         ['DNS系统', '应用层'],
+  'CDN技术原理':          ['应用层', 'DNS系统'],
+  'VPN技术':              ['网络安全', '网络层'],
+  '网络安全攻击类型':     ['网络安全'],
+
+  // ═══ 数据结构 — 文献卡片 → 核心概念 ═══
+  '严蔚敏《数据结构》':     ['线性表', '栈', '树', '图', '排序算法'],
+  '邓俊辉《数据结构与算法》': ['线性表', '二叉树', '查找算法', '排序算法', '哈希表'],
+  '《算法导论》':           ['排序算法', '图', '哈希表', '堆', '树'],
+  '《大话数据结构》':       ['线性表', '栈', '队列', '树', '图'],
+  '王道408数据结构篇':      ['线性表', '栈', '树', '图', '排序算法'],
+  '天勤数据结构高分笔记':   ['线性表', '二叉树', '排序算法', '栈', '队列'],
+  'LeetCode HOT100':        ['线性表', '树', '哈希表', '堆', '图'],
+  '《数据结构与算法分析》': ['树', '排序算法', '哈希表', '堆', '二叉树'],
+
+  // ═══ 计算机组成原理 — 文献卡片 → 核心概念 ═══
+  '唐朔飞《计算机组成原理》':       ['冯诺依曼结构', 'CPU流水线', '存储器层次', 'Cache', '指令系统'],
+  '袁春风《计算机组成与设计》':     ['冯诺依曼结构', 'CPU流水线', '数据表示', '控制单元', '总线系统'],
+  'Patterson《计算机组成与设计》':   ['冯诺依曼结构', 'CPU流水线', '存储器层次', 'Cache', '指令系统'],
+  '王道408计组篇':                  ['冯诺依曼结构', '数据表示', 'CPU流水线', 'Cache', '中断系统'],
+  '天勤计组高分笔记':               ['冯诺依曼结构', '数据表示', 'CPU流水线', '存储器层次', '输入输出系统'],
+  'Stallings《计算机组成与体系结构》': ['冯诺依曼结构', 'CPU流水线', 'Cache', '指令系统', '总线系统'],
+  '《数字设计和计算机体系结构》':    ['冯诺依曼结构', '数据表示', '控制单元', 'CPU流水线', '指令系统'],
+  '《计算机体系结构量化方法》':      ['CPU流水线', 'Cache', '虚拟存储器', '指令流水线冒险', '存储器层次'],
+
+  // ═══ 操作系统 — 文献卡片 → 核心概念 ═══
+  '汤子瀛《计算机操作系统》':   ['进程与线程', '内存管理', '文件系统', '死锁', '同步与互斥'],
+  '王道408操作系统篇':          ['进程与线程', '内存管理', '文件系统', '死锁', '进程调度'],
+  '天勤操作系统高分笔记':       ['进程与线程', '内存管理', '进程调度', '同步与互斥', '信号量机制'],
+  '《现代操作系统》':           ['进程与线程', '内存管理', '文件系统', '死锁', '虚拟内存'],
+  '《深入理解Linux内核》':      ['进程与线程', '进程调度', '内存管理', '文件系统', '设备管理'],
+  '《操作系统概念》':           ['进程与线程', '内存管理', '文件系统', '死锁', '同步与互斥'],
+  '《Linux内核设计与实现》':    ['进程与线程', '进程调度', '虚拟内存', '进程通信', '文件系统'],
+  '《操作系统真象还原》':       ['进程与线程', '内存管理', '文件系统', '分页与分段', '设备管理'],
+
+  // ═══ 计算机网络 — 文献卡片 → 核心概念 ═══
+  '谢希仁《计算机网络》':                ['TCP/IP协议栈', '传输层', '网络层', '应用层', '数据链路层'],
+  '王道408计网篇':                       ['TCP/IP协议栈', '传输层', '网络层', '数据链路层', '应用层'],
+  '天勤计网高分笔记':                    ['TCP/IP协议栈', '传输层', '网络层', '物理层', '应用层'],
+  'Kurose《计算机网络自顶向下》':         ['应用层', '传输层', '网络层', '数据链路层', 'TCP可靠传输'],
+  '《TCP/IP详解》':                      ['TCP/IP协议栈', '传输层', 'TCP可靠传输', 'IP协议', '拥塞控制'],
+  '计算机网络(Andrew Tanenbaum)':        ['物理层', '数据链路层', '网络层', '传输层', '网络安全'],
+  '《图解HTTP》':                        ['应用层', 'HTTP协议', '传输层', 'DNS系统', '网络安全'],
+  '《网络是怎样连接的》':                ['DNS系统', 'HTTP协议', 'IP协议', '传输层', 'TCP可靠传输'],
+
+}
+function linkContent(title: string): string {
+  const targets = fleetingToPermanent[title]
+  if (!targets || targets.length === 0) {
+    return '## ' + title + '\n\n---\n_CS408 Knowledge Graph — auto-generated seed content_\n'
+  }
+  return '## ' + title + '\n\n**Related:** ' + [...new Set(targets)].map(t => '[[' + t + ']]').join(', ') + '\n\n---\n_CS408 Knowledge Graph — auto-generated seed content_\n'
+}
+
+// ─── Auto-generate fleeting↔fleeting edges ───────────────────────────────────
+// Two fleeting cards that share a common permanent card target should be
+// linked to each other, creating a dense web instead of a star topology.
+function buildFleetingToFleeting(): Record<string, string[]> {
+  // Invert: for each permanent card, list all fleeting cards that reference it
+  const permToFleeting = new Map<string, string[]>()
+  for (const [fleeting, targets] of Object.entries(fleetingToPermanent)) {
+    for (const perm of targets) {
+      if (!permToFleeting.has(perm)) permToFleeting.set(perm, [])
+      permToFleeting.get(perm)!.push(fleeting)
+    }
+  }
+
+  // For each pair of fleeting cards sharing a permanent card, add mutual link
+  const result: Record<string, string[]> = {}
+  for (const [, fleetingList] of permToFleeting) {
+    if (fleetingList.length < 2) continue
+    for (let i = 0; i < fleetingList.length; i++) {
+      for (let j = i + 1; j < fleetingList.length; j++) {
+        const a = fleetingList[i]
+        const b = fleetingList[j]
+        if (!result[a]) result[a] = []
+        if (!result[b]) result[b] = []
+        if (!result[a].includes(b)) result[a].push(b)
+        if (!result[b].includes(a)) result[b].push(a)
+      }
+    }
+  }
+
+  // Hand-picked cross-cutting connections not covered by shared permanent card
+  const manualConnections: [string, string][] = [
+    // 数据结构 — 算法分析相关
+    ['动态规划vs贪心算法', '时间复杂度的渐进分析'],
+    ['动态规划vs贪心算法', '递归算法的计算模型'],
+    ['稀疏矩阵存储', '广义表结构'],
+    ['外部排序与多路归并', '大数据TopK问题'],
+    ['基数排序思想', '外部排序与多路归并'],
+
+    // 计算机组成原理 — 性能与并行
+    ['流水线性能指标', '计算机性能评价指标'],
+    ['Amdahl定律', '计算机性能评价指标'],
+    ['多体交叉存储器', '存储器的扩展技术'],
+    ['磁盘存储器结构', '固态硬盘SSD技术'],
+    ['RAID等级区别', '磁盘存储器结构'],
+
+    // 操作系统 — 内存与并发
+    ['条件变量与信号量', '互斥锁与自旋锁'],
+    ['用户态与核心态切换', '系统调用实现'],
+    ['缺页中断处理', '页面分配策略'],
+    ['文件分配方式对比', '空闲空间管理'],
+    ['日志文件系统', '文件保护机制'],
+    ['SPOOLing系统', '缓冲技术'],
+
+    // 计算机网络 — 协议与安全
+    ['隧道技术', 'VPN技术'],
+    ['网络安全攻击类型', 'VPN技术'],
+    ['WebSocket协议', 'TCP与UDP区别'],
+    ['电子邮件协议', 'FTP协议工作原理'],
+    ['NAT转换', '隧道技术'],
+    ['CDN技术原理', '域名解析过程'],
+    ['CSMA/CD协议', '以太网帧结构'],
+
+    // 跨域 — 数据结构在OS/网络中的应用
+    ['页式虚拟存储器地址转换', '快表TLB原理'],
+    ['多级页表', '页式虚拟存储器地址转换'],
+    ['拥塞控制算法', '流量控制与拥塞控制区别'],
+  ]
+
+  for (const [a, b] of manualConnections) {
+    if (!result[a]) result[a] = []
+    if (!result[b]) result[b] = []
+    if (!result[a].includes(b)) result[a].push(b)
+    if (!result[b].includes(a)) result[b].push(a)
+  }
+
+  return result
+}
+
+const fleetingToFleeting = buildFleetingToFleeting()
+
+// Update linkContent to include fleeting↔fleeting links
+function linkContentV2(title: string): string {
+  const permLinks = fleetingToPermanent[title] || []
+  const fleetingLinks = fleetingToFleeting[title] || []
+  const lines: string[] = ['## ' + title]
+  if (permLinks.length > 0) {
+    lines.push('', '**Core Concepts:** ' + [...new Set(permLinks)].map(t => '[[' + t + ']]').join(', '))
+  }
+  if (fleetingLinks.length > 0) {
+    lines.push('', '**Related Ideas:** ' + [...new Set(fleetingLinks)].map(t => '[[' + t + ']]').join(', '))
+  }
+  lines.push('', '---', '_CS408 Knowledge Graph — auto-generated seed content_')
+  return lines.join('\n')
+}
+// ─── End fleeting↔fleeting auto-linking ─────────────────────────────────────
+main()
+  .catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+  .finally(async () => {
+    await prisma.$disconnect()
+  })
+
+async function seedUser(email: string, name: string) {
+  console.log(`\n━━━ Seeding: ${email} ━━━\n`)
 
   const user = await prisma.user.upsert({
-    where: { email: 'demo@axiom.com' },
+    where: { email },
     update: {},
-    create: {
-      email: 'demo@axiom.com',
-      name: 'Demo User',
-      emailVerified: true,
-    },
+    create: { email, name, emailVerified: true },
   })
   console.log(`  User: "${user.name}" <${user.email}> (id: ${user.id})`)
 
-  // ── Step 2: Create vault ──────────────────────────────────────────────────
-  console.log('[2/5] Creating vault...')
-
-  let vault = await prisma.vault.findFirst({
-    where: { userId: user.id },
+  const existingAccount = await prisma.account.findFirst({
+    where: { userId: user.id, providerId: 'credential' },
   })
+  if (!existingAccount) {
+    await prisma.account.create({
+      data: {
+        userId: user.id,
+        accountId: user.email,
+        providerId: 'credential',
+        password: await hashPassword('demo123456'),
+      },
+    })
+    console.log('  Account record created (password: demo123456)')
+  }
+
+  let vault = await prisma.vault.findFirst({ where: { userId: user.id } })
   if (vault) {
     vault = await prisma.vault.update({
       where: { id: vault.id },
@@ -606,19 +975,13 @@ async function main() {
     })
   } else {
     vault = await prisma.vault.create({
-      data: {
-        userId: user.id,
-        name: 'CS408 Knowledge Graph',
-      },
+      data: { userId: user.id, name: 'CS408 Knowledge Graph' },
     })
   }
-  console.log(`  Vault: "${vault.name}" (id: ${vault.id})`)
-
-  // ── Step 3: Create clusters ───────────────────────────────────────────────
-  console.log('[3/5] Creating clusters...')
+  console.log('  Vault: "' + vault.name + '" (id: ' + vault.id + ')')
 
   const subjects: SubjectDef[] = [subjectDS, subjectCO, subjectOS, subjectCN]
-  const clusterMap = new Map<string, string>() // subjectName → clusterId
+  const clusterMap = new Map<string, string>()
 
   for (const subject of subjects) {
     let cluster = await prisma.cluster.findFirst({
@@ -626,202 +989,79 @@ async function main() {
     })
     if (!cluster) {
       cluster = await prisma.cluster.create({
-        data: {
-          vaultId: vault.id,
-          name: subject.name,
-          color: subject.color,
-        },
+        data: { vaultId: vault.id, name: subject.name, color: subject.color },
       })
-      console.log(`  + Created cluster: "${subject.name}" (${subject.color})`)
+      console.log('  + Created cluster: "' + subject.name + '" (' + subject.color + ')')
     } else {
-      console.log(`  ✓ Found cluster: "${subject.name}"`)
+      console.log('  ✓ Found cluster: "' + subject.name + '"')
     }
     clusterMap.set(subject.name, cluster.id)
   }
 
-  // ── Step 4: Create cards ──────────────────────────────────────────────────
-  console.log('[4/5] Creating cards...')
-
-  // We build a path→id map as we create, for edge lookup later
-  const cardMap = new Map<string, string>() // `{subjectName}/{cardTitle}` → cardId
-  const pathSet = new Set<string>() // used to detect collisions across subjects
-
+  const relatedMap = buildRelatedTitlesMap()
+  const pathSet = new Set<string>()
   let totalCardCount = 0
 
   for (const subject of subjects) {
     const clusterId = clusterMap.get(subject.name)!
     const allCardDefs: { title: string; type: 'permanent' | 'fleeting' | 'literature'; tags: string[] }[] = [
-      ...subject.permanent.map((c) => ({
-        title: c.title,
-        type: 'permanent' as const,
-        tags: getTags(subject.name, 'permanent', c.tags),
-      })),
-      ...subject.fleeting.map((c) => ({
-        title: c.title,
-        type: 'fleeting' as const,
-        tags: getTags(subject.name, 'fleeting', c.tags),
-      })),
-      ...subject.literature.map((c) => ({
-        title: c.title,
-        type: 'literature' as const,
-        tags: getTags(subject.name, 'literature', c.tags),
-      })),
+      ...subject.permanent.map((c) => ({ title: c.title, type: 'permanent' as const, tags: getTags(subject.name, 'permanent', c.tags) })),
+      ...subject.fleeting.map((c) => ({ title: c.title, type: 'fleeting' as const, tags: getTags(subject.name, 'fleeting', c.tags) })),
+      ...subject.literature.map((c) => ({ title: c.title, type: 'literature' as const, tags: getTags(subject.name, 'literature', c.tags) })),
     ]
 
-    // Check for path collisions
     for (const card of allCardDefs) {
       const path = makePath(subject.name, card.title)
       if (pathSet.has(path)) {
-        console.warn(`  ⚠ Duplicate path detected: "${path}" — skipping`)
+        console.warn('  ⚠ Duplicate path: "' + path + '" — skipping')
         continue
       }
       pathSet.add(path)
-    }
 
-    // Build upsert operations (without .then() — keep them as PrismaPromise)
-    const upsertOps = allCardDefs.map((card) => {
-      const path = makePath(subject.name, card.title)
-      return prisma.card.upsert({
+      const related = relatedMap.get(card.title)
+      const content = related
+        ? buildContent(card.title, related)
+        : linkContentV2(card.title)
+
+      await prisma.card.upsert({
         where: { vaultId_path: { vaultId: vault.id, path } },
-        update: {
-          title: card.title,
-          type: card.type,
-          tags: JSON.stringify(card.tags),
-          createdAt: randomPastDate(30),
-          clusterId,
-        },
-        create: {
-          vaultId: vault.id,
-          clusterId,
-          path,
-          title: card.title,
-          content: '',
-          type: card.type,
-          tags: JSON.stringify(card.tags),
-          createdAt: randomPastDate(30),
-        },
+        update: { title: card.title, type: card.type, tags: JSON.stringify(card.tags), createdAt: randomPastDate(30), clusterId, content },
+        create: { vaultId: vault.id, clusterId, path, title: card.title, content, type: card.type, tags: JSON.stringify(card.tags), createdAt: randomPastDate(30) },
       })
-    })
-
-    // Execute in a single transaction for performance
-    const createdCards = await prisma.$transaction(upsertOps)
-
-    // Build card lookup map from results
-    for (const c of createdCards) {
-      const key = `${subject.name}/${c.title!}`
-      cardMap.set(key, c.id)
     }
-
     totalCardCount += allCardDefs.length
-    console.log(`  ${subject.name}: ${allCardDefs.length} cards (${subject.permanent.length}P + ${subject.fleeting.length}F + ${subject.literature.length}L)`)
+    console.log('  ' + subject.name + ': ' + allCardDefs.length + ' cards')
   }
 
-  // ── Step 5: Create edges ──────────────────────────────────────────────────
-  console.log('[5/5] Creating edges...')
+  await prisma.edge.deleteMany({ where: { vaultId: vault.id } })
 
-  // Delete existing edges for this vault to maintain idempotency
-  const deleted = await prisma.edge.deleteMany({ where: { vaultId: vault.id } })
-  if (deleted.count > 0) {
-    console.log(`  Removed ${deleted.count} existing edges`)
+  const allCards = await prisma.card.findMany({
+    where: { vaultId: vault.id },
+    select: { id: true, vaultId: true, content: true, title: true },
+  })
+  const cardsWithLinks = allCards.filter(c => c.content.includes('[['))
+  console.log('  Cards with [[WikiLink]]: ' + cardsWithLinks.length + ' / ' + allCards.length)
+
+  const CONCURRENCY = 10
+  let syncedCount = 0
+  for (let i = 0; i < cardsWithLinks.length; i += CONCURRENCY) {
+    const batch = cardsWithLinks.slice(i, i + CONCURRENCY)
+    await Promise.allSettled(batch.map(c => syncEdgesFromContent(prisma, c.id, c.vaultId, c.content)))
+    syncedCount += batch.length
+    process.stdout.write('  \rSyncing: ' + syncedCount + '/' + cardsWithLinks.length + '   ')
   }
+  console.log('\r  Syncing: ' + syncedCount + '/' + cardsWithLinks.length + ' done')
 
-  // Build all edge definitions
-  const allEdgeDefs: EdgeDef[] = [
-    // Within 数据结构
-    ...withinDSEdges.map((e) => ({
-      ...e,
-      sourceSubject: '数据结构',
-      targetSubject: '数据结构',
-    })),
-    // Within 计算机组成原理
-    ...withinCOEdges.map((e) => ({
-      ...e,
-      sourceSubject: '计算机组成原理',
-      targetSubject: '计算机组成原理',
-    })),
-    // Within 操作系统
-    ...withinOSEdges.map((e) => ({
-      ...e,
-      sourceSubject: '操作系统',
-      targetSubject: '操作系统',
-    })),
-    // Within 计算机网络
-    ...withinCNEdges.map((e) => ({
-      ...e,
-      sourceSubject: '计算机网络',
-      targetSubject: '计算机网络',
-    })),
-    // Cross-cluster
-    ...crossEdges,
-  ]
+  await prisma.vault.update({ where: { id: vault.id }, data: { profileCache: null } })
 
-  let edgeSuccessCount = 0
-  let edgeFailCount = 0
-  const edgeBatch: ReturnType<typeof prisma.edge.create>[] = []
-
-  for (const edgeDef of allEdgeDefs) {
-    const sourceKey = `${edgeDef.sourceSubject}/${edgeDef.sourceTitle}`
-    const targetKey = `${edgeDef.targetSubject}/${edgeDef.targetTitle}`
-
-    const sourceId = cardMap.get(sourceKey)
-    const targetId = cardMap.get(targetKey)
-
-    if (!sourceId) {
-      console.warn(`  ⚠ Source card not found: "${sourceKey}" — skipping edge`)
-      edgeFailCount++
-      continue
-    }
-    if (!targetId) {
-      console.warn(`  ⚠ Target card not found: "${targetKey}" — skipping edge`)
-      edgeFailCount++
-      continue
-    }
-
-    edgeBatch.push(
-      prisma.edge.create({
-        data: {
-          vaultId: vault.id,
-          sourceId,
-          targetId,
-          type: edgeDef.type,
-          weight: 1.0,
-        },
-      })
-    )
-  }
-
-  // Create edges in batches to avoid overwhelming the DB
-  const BATCH_SIZE = 25
-  for (let i = 0; i < edgeBatch.length; i += BATCH_SIZE) {
-    const batch = edgeBatch.slice(i, i + BATCH_SIZE)
-    await prisma.$transaction(batch)
-    edgeSuccessCount += batch.length
-    process.stdout.write(`  ⠋ Edges: ${Math.min(i + BATCH_SIZE, edgeBatch.length)}/${edgeBatch.length} created\r`)
-  }
-  console.log(`  Edges: ${edgeSuccessCount} created (${edgeFailCount} skipped due to missing cards)`)
-
-  // ── Summary ───────────────────────────────────────────────────────────────
-  console.log()
-  console.log('=== Seed Complete ===')
-  console.log(`  Clusters: ${clusterMap.size}`)
-  console.log(`  Cards:    ${totalCardCount}`)
-  console.log(`  Edges:    ${edgeSuccessCount}`)
-  console.log()
-
-  // Verify counts
-  const dbCardCount = await prisma.card.count({ where: { vaultId: vault.id } })
   const dbEdgeCount = await prisma.edge.count({ where: { vaultId: vault.id } })
-  console.log('  (Verified from database)')
-  console.log(`  Cards:    ${dbCardCount}`)
-  console.log(`  Edges:    ${dbEdgeCount}`)
-  console.log()
+  console.log('  Edges: ' + dbEdgeCount + ' (auto-generated from [[WikiLink]])')
 }
 
-main()
-  .catch((err) => {
-    console.error('Seed failed:', err)
-    process.exit(1)
-  })
-  .finally(async () => {
-    await prisma.$disconnect()
-  })
+async function main() {
+  console.log('=== CS408 Knowledge Graph Seed (WikiLink) ===')
+  await seedUser('morewhy.han@gmail.com', 'More Why')
+  await seedUser('demo@axiom.space', 'Demo User')
+  console.log()
+  console.log('=== Seed Complete ===')
+}

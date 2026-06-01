@@ -1,6 +1,5 @@
 /**
  * Session Search — 跨会话搜索
- * 对标 Hermes: tools/session_search_tool.py + hermes_state.py FTS5
  *
  * 使用内存索引避免每次搜索加载全部 session 文件。
  * 索引在 session 保存/加载时构建，存储在 localStorage。

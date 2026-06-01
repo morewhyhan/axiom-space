@@ -1,6 +1,5 @@
 /**
  * Tool Result Budget — 工具结果预算控制
- * 对标 Hermes: tools/budget_config.py
  *
  * 3 层预算系统：
  * Layer 1: 固定阈值 — 特定工具永不截断（如 read）

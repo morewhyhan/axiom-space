@@ -1,6 +1,5 @@
 /**
  * OutputSchemaGuardrail — 输出 schema 校验中间件
- * 对标 Hermes: agent/guardrails/output_schema.py
  *
  * 校验 AI 工具调用的返回值结构是否符合预期。
  * 所有 AXIOM 内置工具统一返回 { content: [{ type: 'text', text: string }], details: any }

@@ -1,21 +1,19 @@
 /**
  * FileSafetyGuardrail — 文件操作安全中间件
  *
- * 对标 Hermes: agent/file_safety.py
  *
  * 拦截写操作（write, mkdir, edit, create_fleeing_card, create_permanent_card），
  * 校验路径合法性、内容大小、危险模式。
- * 支持 denylist + 可选 sandbox root（对标 Hermes get_safe_write_root()）。
+ * 支持 denylist + 可选 sandbox root。
  */
 
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import type { ToolMiddleware } from '../tools';
 import { getVaultPath } from '@/lib/platform';
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const fs = require('fs');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const path = require('path');
+import path from 'node:path';
+import { realpath } from 'node:fs/promises';
 
 const WRITE_TOOLS = new Set(['write', 'mkdir', 'edit', 'create_fleeing_card', 'create_permanent_card', 'delete_file', 'delete_card', 'rename_file']);
 
@@ -45,7 +43,6 @@ const DANGEROUS_CONTENT_PATTERNS = [
 
 /**
  * 获取写入安全根目录
- * 对标 Hermes: file_safety.py get_safe_write_root()
  *
  * 如果设置了 sandbox root，agent 只能在该目录内写入。
  */
@@ -63,11 +60,11 @@ function getWriteSafeRoot(): string | null {
  * 使用 fs.realpathSync() 检测符号链接绕过
  * 对标 D-15: 增强路径遍历防护
  */
-export function validateVaultPath(targetPath: string, vaultPath: string): { valid: boolean; resolved?: string; error?: string } {
+export async function validateVaultPath(targetPath: string, vaultPath: string): Promise<{ valid: boolean; resolved?: string; error?: string }> {
   try {
     // 解析符号链接 — 防止 symlink 逃逸
-    const realVault = fs.realpathSync(vaultPath);
-    const realTarget = fs.realpathSync(targetPath);
+    const realVault = await realpath(vaultPath);
+    const realTarget = await realpath(targetPath);
 
     if (!realTarget.startsWith(realVault + '/') && realTarget !== realVault) {
       return { valid: false, error: `路径超出 Vault 范围: ${targetPath}` };
@@ -116,19 +113,21 @@ export class FileSafetyGuardrail implements ToolMiddleware {
       }
 
       // Sandbox root 校验：路径必须在 safe root 内
-      // 对标 Hermes: if safe_root and not resolved.startswith(safe_root): return True
+      // if safe_root and not resolved.startswith(safe_root): return True
       if (this.safeRoot && !filePath.startsWith(this.safeRoot)) {
         console.warn(`[FileSafety] Blocked path outside sandbox: ${filePath}`);
         return { proceed: false, reason: `路径超出沙箱范围: ${filePath}（允许范围: ${this.safeRoot}）` };
       }
 
       // Vault-scoped write zone check (对标 D-12)
-      const vaultPath = typeof localStorage !== 'undefined' ? getVaultPath() : null;
+      const vaultPath = getVaultPath() || getCurrentVaultId() || '';
       if (vaultPath && filePath) {
         if (filePath.startsWith('/') || filePath.match(/^[A-Za-z]:\\/)) {
-          // Absolute path — must be within vault
-          const vResult = validateVaultPath(filePath, vaultPath);
-          if (!vResult.valid) {
+          // Absolute path — must be within vault (sync check using path.resolve,
+          // avoids event-loop blocking fs.realpathSync since ToolMiddleware.beforeCall is sync)
+          const resolved = path.resolve(filePath);
+          const vaultResolved = path.resolve(vaultPath);
+          if (!resolved.startsWith(vaultResolved + '/') && resolved !== vaultResolved) {
             console.warn(`[FileSafety] Blocked path outside vault: ${filePath}`);
             return {
               proceed: false,

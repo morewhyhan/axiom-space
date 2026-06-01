@@ -16,7 +16,7 @@ export async function getUserId(c: any): Promise<string | null> {
   return null
 }
 
-export async function resolveVault(c: any, userId: string): Promise<{ id: string } | null> {
+export async function resolveVault(c: any, userId: string): Promise<{ id: string; profileCache?: string | null; name?: string; createdAt?: Date; updatedAt?: Date } | null> {
   const vid = c.req.query('vid')
   if (vid) {
     const vault = await prisma.vault.findUnique({ where: { id: vid } })

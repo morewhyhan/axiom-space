@@ -1,7 +1,6 @@
 /**
  * API 模式自动检测
  *
- * 对标 Hermes: run_agent.py:842-873
  *
  * 从 provider 名称和 base URL 自动检测 API 模式：
  * - chat_completions：OpenAI-compatible
@@ -18,7 +17,6 @@ export type ApiMode =
 
 /**
  * 从 provider 和 baseUrl 自动检测 API 模式
- * 对标 Hermes: run_agent.py:842-873
  */
 export function detectApiMode(provider: string, baseUrl: string): ApiMode {
   const lowerProvider = provider.toLowerCase();

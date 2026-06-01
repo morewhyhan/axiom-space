@@ -6,7 +6,11 @@ import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAuthSession } from '@/hooks/use-auth'
 
 export default function Header() {
-  const { mode, setMode, oracle, setOracle, openModal } = useAppStore()
+  const mode = useAppStore((s) => s.mode)
+  const setMode = useAppStore((s) => s.setMode)
+  const oracle = useAppStore((s) => s.oracle)
+  const setOracle = useAppStore((s) => s.setOracle)
+  const openModal = useAppStore((s) => s.openModal)
   const { data: session } = useAuthSession()
   const vaults = useAppStore((s) => s.vaults)
   const currentVaultId = useAppStore((s) => s.currentVaultId)
@@ -20,7 +24,7 @@ export default function Header() {
   const { recentActivity, stats } = useDashboardStats()
 
   // Build notifications from real activity data
-  const notifications = recentActivity.slice(0, 4).map((a: any, i: number) => {
+  const notifications = (recentActivity ?? []).slice(0, 4).map((a: any, i: number) => {
     const typeMap: Record<string, { dot: string; label: string; detail: string }> = {
       permanent: { dot: 'purple', label: '知识固化', detail: `「${a.title}」→ Permanent` },
       fleeting: { dot: 'cyan', label: '灵感捕获', detail: `「${a.title}」已创建` },
@@ -52,28 +56,28 @@ export default function Header() {
   }, [])
 
   return (
-    <header className="flex justify-between items-center pointer-events-auto" style={{ padding: `var(--header-py) var(--header-px)` }}>
+    <header className="flex justify-between items-center pointer-events-auto flex-shrink-0" style={{ padding: `var(--header-py) var(--header-px)` }}>
       <div className="flex items-center" style={{ gap: 'var(--header-gap)' }}>
         <div className="flex flex-col">
           <h1 className="serif font-bold glow-text-purple uppercase leading-none" style={{ fontSize: 'var(--t-title)', letterSpacing: '0.5em' }}>Axiom</h1>
           <span className="mono opacity-40 mt-1 ml-1" style={{ fontSize: 'var(--f8)', letterSpacing: '0.4em' }}>COGNITIVE OPERATING SYSTEM</span>
         </div>
         <div className="w-[1px] bg-white/10" style={{ height: 'var(--divider-h)' }}></div>
-        <nav className="flex gap-3" id="mode-nav">
-          <button className={`mode-btn ${mode === 'dashboard' ? 'active' : ''}`} onClick={() => setMode('dashboard' as Mode)}>
-            <span className="block opacity-50 mb-0.5" style={{ fontSize: 'var(--f8)' }}>COCKPIT</span>DASHBOARD
+        <nav className="flex gap-4" id="mode-nav">
+          <button className={`mode-btn ${mode === 'dashboard' ? 'active' : ''}`} onClick={() => setMode('dashboard' as Mode)} title="仪表板 — 查看知识统计、最近活动和系统状态">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>仪表板</span>DASHBOARD
           </button>
-          <button className={`mode-btn forge-mode ${mode === 'forge' ? 'active' : ''}`} onClick={() => setMode('forge' as Mode)}>
-            <span className="block opacity-50 mb-0.5" style={{ fontSize: 'var(--f8)' }}>PRODUCTION</span>FORGE
+          <button className={`mode-btn forge-mode ${mode === 'forge' ? 'active' : ''}`} onClick={() => setMode('forge' as Mode)} title="AI 对话 — 与 Agent 对话，创建和编辑知识卡片">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>AI 对话</span>FORGE
           </button>
-          <button className={`mode-btn ${mode === 'galaxy' ? 'active' : ''}`} onClick={() => setMode('galaxy' as Mode)}>
-            <span className="block opacity-50 mb-0.5" style={{ fontSize: 'var(--f8)' }}>EXPLORE</span>GALAXY
+          <button className={`mode-btn ${mode === 'galaxy' ? 'active' : ''}`} onClick={() => setMode('galaxy' as Mode)} title="星系图 — 3D 可视化浏览知识网络">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>可视化</span>GALAXY
           </button>
-          <button className={`mode-btn cognition-mode ${mode === 'cognition' ? 'active' : ''}`} onClick={() => setMode('cognition' as Mode)}>
-            <span className="block opacity-50 mb-0.5" style={{ fontSize: 'var(--f8)' }}>PORTRAIT</span>COGNITION
+          <button className={`mode-btn cognition-mode ${mode === 'cognition' ? 'active' : ''}`} onClick={() => setMode('cognition' as Mode)} title="认知分析 — 查看学习画像和认知雷达">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>认知</span>COGNITION
           </button>
-          <button className={`mode-btn learn-mode ${mode === 'learn' ? 'active' : ''}`} onClick={() => setMode('learn' as Mode)}>
-            <span className="block opacity-50 mb-0.5" style={{ fontSize: 'var(--f8)' }}>PATH</span>LEARN
+          <button className={`mode-btn learn-mode ${mode === 'learn' ? 'active' : ''}`} onClick={() => setMode('learn' as Mode)} title="学习路径 — 按步骤系统化学习">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>学习</span>LEARN
           </button>
           {vaults.length > 0 && (
             <>
@@ -95,16 +99,18 @@ export default function Header() {
             </>
           )}
         </nav>
-        <div className="w-[1px] bg-white/10" style={{ height: 'var(--divider-h)' }}></div>
-        <select value={oracle} onChange={e => setOracle(e.target.value)} className="bg-transparent border border-white/20 rounded px-2 py-1 outline-none text-purple-400 mono cursor-pointer" style={{ fontSize: 'var(--f10)' }}>
-          <option>Oracle</option><option>Forge</option><option>Guide</option><option>Assess</option>
-        </select>
       </div>
       <div className="flex items-center gap-5 mono text-xs">
         <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 cursor-pointer" onClick={() => openModal('search')}>
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>⌘K</span>
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>搜索节点...</span>
         </div>
+        <button
+          className="w-6 h-6 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-colors"
+          style={{ fontSize: 'var(--f9)' }}
+          onClick={() => openModal('shortcuts')}
+          title="快捷键帮助"
+        >?</button>
         <div className="notif-bell relative" ref={notifRef}>
           <div onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
@@ -127,6 +133,21 @@ export default function Header() {
         </div>
         <button className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center hover:border-white/30 transition-colors" onClick={() => openModal('profile')}>
           <span className="serif" style={{ fontSize: 'var(--f10)' }}>{(session?.user?.name ?? 'A').charAt(0).toUpperCase()}</span>
+        </button>
+        <button
+          className="mono text-white/30 hover:text-white/60 transition-colors px-2"
+          style={{ fontSize: 'var(--f9)' }}
+          onClick={() => {
+            const vid = useAppStore.getState().currentVaultId
+            if (!vid) return
+            const a = document.createElement('a')
+            a.href = `/api/vault/export?vid=${vid}`
+            a.download = 'vault-export.zip'
+            a.click()
+          }}
+          title="导出知识库"
+        >
+          ⬇ EXPORT
         </button>
         <div id="clock" className="opacity-50" style={{ fontSize: 'var(--f10)' }}>{time}</div>
       </div>

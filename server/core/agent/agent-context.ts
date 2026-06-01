@@ -16,28 +16,35 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export interface AgentContext {
-  /** Owner of this agent run. Required for DB-backed storage. */
   userId: string
-  /** Active vault. When omitted, DbAdapter falls back to the user's first vault. */
   vaultId?: string
 }
 
 const storage = new AsyncLocalStorage<AgentContext>()
 
-/** Run `fn` with the supplied context bound to the async chain. */
+// Module-level fallback: pi-agent-core doesn't preserve AsyncLocalStorage
+// across tool execution boundaries, so we keep a sync fallback.
+let _fallbackVaultId: string | undefined
+let _fallbackUserId: string | undefined
+
 export function runWithAgentContext<T>(ctx: AgentContext, fn: () => T): T {
-  return storage.run(ctx, fn)
+  _fallbackUserId = ctx.userId
+  _fallbackVaultId = ctx.vaultId
+  try {
+    return storage.run(ctx, fn)
+  } finally {
+    // Don't clear on exit — keep as fallback for async tool calls
+  }
 }
 
-/** Read the current context (undefined if called outside an agent run). */
 export function getAgentContext(): AgentContext | undefined {
   return storage.getStore()
 }
 
 export function getCurrentUserId(): string | undefined {
-  return storage.getStore()?.userId
+  return storage.getStore()?.userId || _fallbackUserId
 }
 
 export function getCurrentVaultId(): string | undefined {
-  return storage.getStore()?.vaultId
+  return storage.getStore()?.vaultId || _fallbackVaultId
 }

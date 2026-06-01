@@ -199,12 +199,12 @@ export class MessageTransformer {
    * Call LLM for context compression / summarization.
    * Prefers the AuxiliaryClient (cheaper model) with fallback to main model.
    */
-  async callLLMForSummary(prompt: string): Promise<string> {
+  async callLLMForSummary(prompt: string, systemPromptOverride?: string): Promise<string> {
     const aux = getAuxiliaryClient();
+    const effectiveSystemPrompt = systemPromptOverride || 'You are a context compression assistant. Summarize concisely.';
     if (aux) {
       const result = await aux.call({
-        systemPrompt:
-          'You are a context compression assistant. Summarize concisely.',
+        systemPrompt: effectiveSystemPrompt,
         userMessage: prompt,
         maxTokens: 4000,
         temperature: 0,
@@ -220,8 +220,7 @@ export class MessageTransformer {
     const response = await completeSimple(
       model,
       {
-        systemPrompt:
-          'You are a context compression assistant. Summarize concisely.',
+        systemPrompt: effectiveSystemPrompt,
         messages: [
           { role: 'user', content: prompt, timestamp: Date.now() },
         ],

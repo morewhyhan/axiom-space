@@ -39,4 +39,19 @@ lerna-debug.log*
 # claude worktrees
 .claude/
 
+# project planning / reference
+.planning/
+对标工程/
+
+# build artifacts
+tsconfig.tsbuildinfo
+playwright-report/
+test-results/
+
+# generated
+/generated/prisma
+playwright-report/
+test-results/
+
+# generated
 /generated/prisma

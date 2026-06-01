@@ -3,9 +3,10 @@
  * 管理多源 Skill 加载、菜单注入、选择逻辑
  */
 
-import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
-import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { getVaultPath } from '@/lib/platform';
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import fs from 'node:fs/promises'
+import path from 'node:path'
 
 /**
  * Skill 定义（轻量级，只包含元信息）
@@ -96,14 +97,45 @@ export class SkillRegistry {
 
   constructor(limits?: Partial<SkillLimitsConfig>) {
     this.limits = { ...DEFAULT_LIMITS, ...limits };
-    this.loadVaultPath();
   }
 
   private loadVaultPath(): void {
     try {
-      this.vaultPath = getVaultPath();
+      this.vaultPath = getVaultPath() || getCurrentVaultId() || '';
     } catch (e) {
       console.warn('[SkillRegistry] Failed to load vault path:', e);
+    }
+  }
+
+  /**
+   * 从文件系统直接读取技能文件
+   */
+  private async _readFsFile(filePath: string): Promise<{ success: boolean; content?: string }> {
+    try {
+      const resolved = path.isAbsolute(filePath) ? filePath : path.resolve(filePath);
+      const content = await fs.readFile(resolved, 'utf-8');
+      return { success: true, content };
+    } catch (e: any) {
+      return { success: false, error: e.message } as any;
+    }
+  }
+
+  /**
+   * 列出文件系统目录（不走 DbAdapter，因为技能插件是磁盘文件）
+   */
+  private async _listFsDir(dirPath: string): Promise<{ success: boolean; entries?: Array<{ name: string; isDirectory: boolean }> }> {
+    try {
+      const resolved = path.isAbsolute(dirPath) ? dirPath : path.resolve(dirPath);
+      const names = await fs.readdir(resolved);
+      const entries: Array<{ name: string; isDirectory: boolean }> = [];
+      for (const name of names) {
+        const fullPath = path.join(resolved, name);
+        const stat = await fs.stat(fullPath);
+        entries.push({ name, isDirectory: stat.isDirectory() });
+      }
+      return { success: true, entries };
+    } catch {
+      return { success: false };
     }
   }
 
@@ -113,6 +145,7 @@ export class SkillRegistry {
    */
   async loadAllSkills(): Promise<void> {
     this.skills.clear();
+    this.loadVaultPath();
 
     // 按优先级顺序加载
     const sources: SkillSource[] = [
@@ -140,7 +173,7 @@ export class SkillRegistry {
 
     for (const path of paths) {
       try {
-        // 优先使用技能索引快速加载（对标 Hermes skill_index.yaml）
+        // 优先使用技能索引快速加载
         const skills = await this.loadFromIndex(path, source)
           || await this.discoverSkillsInPath(path, source);
         for (const skill of skills) {
@@ -159,10 +192,10 @@ export class SkillRegistry {
     console.log(`[SkillRegistry] Loaded ${loaded} skills from ${SkillSource[source]}`);
   }
 
-  /** 从 skills/index.yaml 快速加载技能元数据（对标 Hermes skill_index.yaml） */
+  /** 从 skills/index.yaml 快速加载技能元数据 */
   private async loadFromIndex(basePath: string, source: SkillSource): Promise<SkillEntry[] | null> {
     try {
-      const indexResult = await getFileStorage().readFile(`${basePath}/index.yaml`);
+      const indexResult = await this._readFsFile(`${basePath}/index.yaml`);
       if (!indexResult?.success || !indexResult.content) return null;
 
       // 简单 YAML 解析（skills 块下的 key-value）
@@ -224,17 +257,13 @@ export class SkillRegistry {
    * 获取指定来源的路径列表
    */
   private async ensureEnvInfo(): Promise<{ homeDir: string; cwd: string }> {
-    // 缓存环境信息
     if (this._envInfo) return this._envInfo;
     try {
-      const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-      const homeDir = (process.env as any).HOME || "" || '';
+      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
       const cwd = process.cwd() || '';
       this._envInfo = { homeDir, cwd };
       return this._envInfo;
-    } catch {}
-    // fallback
+    } catch (err) { console.warn('[SkillRegistry] Failed to read env info:', err); }
     this._envInfo = { homeDir: '', cwd: '' };
     return this._envInfo;
   }
@@ -247,7 +276,16 @@ const axiom = createAxiomCompat(fileStorage);
 
     switch (source) {
       case SkillSource.OpenClawExtra:
-        // 插件目录（暂未实现）
+        // 插件目录 — 从 ~/.axiom/plugins/skills 和项目根目录的 .axiom/plugins 加载
+        if (homeDir) {
+          paths.push(`${homeDir}/.axiom/plugins/skills`);
+        }
+        if (cwd) {
+          paths.push(`${cwd}/.axiom/plugins/skills`);
+        }
+        if (vaultPath) {
+          paths.push(`${vaultPath}/.axiom/plugins/skills`);
+        }
         break;
       case SkillSource.OpenClawBundled:
         // 仓库内置 skills/（项目根目录）
@@ -293,10 +331,10 @@ const axiom = createAxiomCompat(fileStorage);
     const skills: SkillEntry[] = [];
 
     try {
-      // 尝试读取目录
-      const result = await getFileStorage().listDir(basePath);
+      // 使用 fs 直接读取目录（插件技能是磁盘文件，不是 vault 数据）
+      const result = await this._listFsDir(basePath);
       if (!result?.success) {
-        console.debug(`[SkillRegistry] ls failed for ${basePath}:`, result?.error || 'no result');
+        console.debug(`[SkillRegistry] ls failed for ${basePath}`);
         return skills;
       }
       console.debug(`[SkillRegistry] ls ${basePath}: found ${result.entries?.length || 0} entries`);
@@ -306,7 +344,7 @@ const axiom = createAxiomCompat(fileStorage);
         if (entry.isDirectory) {
           // 检查子目录是否有 SKILL.md
           const skillPath = `${basePath}/${entry.name}/SKILL.md`;
-          const _readResult = await getFileStorage().readFile(skillPath);
+          const _readResult = await this._readFsFile(skillPath);
           if (_readResult?.success) {
             const skill = await this.parseSkillEntry(skillPath, (_readResult.content || ""), source);
             if (skill) {
@@ -316,7 +354,7 @@ const axiom = createAxiomCompat(fileStorage);
         } else if (entry.name === 'SKILL.md') {
           // 根目录的 SKILL.md
           const skillPath = `${basePath}/SKILL.md`;
-          const _readResult = await getFileStorage().readFile(skillPath);
+          const _readResult = await this._readFsFile(skillPath);
           if (_readResult?.success) {
             const skill = await this.parseSkillEntry(skillPath, (_readResult.content || ""), source);
             if (skill) {
@@ -460,7 +498,7 @@ const axiom = createAxiomCompat(fileStorage);
     }
 
     try {
-      const result = await getFileStorage().readFile(skill.location);
+      const result = await this._readFsFile(skill.location);
       if (result?.success) {
         const content: SkillContent = {
           name: skill.name,
@@ -474,26 +512,6 @@ const axiom = createAxiomCompat(fileStorage);
       }
     } catch (error) {
       console.error(`[SkillRegistry] Failed to load skill content: ${skillName}`, error);
-    }
-
-    // Fallback: 尝试从主进程 SkillManager 加载
-    try {
-      const axiom = createAxiomCompat(getFileStorage());
-      const result = await axiom.skillLoad?.(skillName);
-      if (result) {
-        const content: SkillContent = {
-          name: skillName,
-          description: skill?.description || '',
-          content: result.content ?? '',
-          location: skill?.location || `main-process:${skillName}`,
-          loadedAt: Date.now(),
-        };
-        this.loadedContent.set(skillName, content);
-        console.log(`[SkillRegistry] Loaded "${skillName}" from main-process SkillManager`);
-        return content;
-      }
-    } catch (err) {
-      console.debug(`[SkillRegistry] Main-process skill load also failed for "${skillName}"`, err);
     }
 
     return null;
@@ -540,15 +558,9 @@ const axiom = createAxiomCompat(fileStorage);
     }
 
     try {
-      // Delete the skill file
-      const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-      if (axiom?.deleteFile) {
-        const result = await axiom.deleteFile(skill.location);
-        if (!result.success) {
-          return { success: false, error: `删除 Skill 文件失败: ${result.error}` };
-        }
-      }
+      // Delete the skill file directly
+      const resolved = path.isAbsolute(skill.location) ? skill.location : path.resolve(skill.location);
+      await fs.unlink(resolved);
       this.skills.delete(skillName);
       return { success: true };
     } catch (error) {
@@ -575,12 +587,9 @@ const axiom = createAxiomCompat(fileStorage);
     }
 
     try {
-      // Write updated content to file
-      const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-      if (axiom?.writeFile) {
-        await axiom.writeFile(skill.location, content);
-      }
+      // Write updated content to file directly
+      const resolved = path.isAbsolute(skill.location) ? skill.location : path.resolve(skill.location);
+      await fs.writeFile(resolved, content, 'utf-8');
       // Update in-memory entry
       this.skills.set(skillName, { ...skill, description });
       return { success: true };
@@ -662,6 +671,10 @@ export function getSkillRegistry(): SkillRegistry {
 }
 
 export async function initSkillSystem(): Promise<void> {
-  const registry = getSkillRegistry();
-  await registry.loadAllSkills();
+  try {
+    const registry = getSkillRegistry();
+    await registry.loadAllSkills();
+  } catch (error) {
+    console.error('[SkillRegistry] Failed to initialize skill system:', error);
+  }
 }

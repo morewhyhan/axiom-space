@@ -1,6 +1,5 @@
 /**
  * Token 估算工具
- * 对标 Hermes agent/model_metadata.py
  */
 
 /**
@@ -13,7 +12,6 @@ export function estimateTokens(text: string): number {
   // 字符 per token 粗略估计
   const CHARS_PER_TOKEN = 4;
 
-  // 对标 Hermes 的估算逻辑
   // 中文：每个字符约 1.5 tokens
   // 英文：每个单词约 1.3 tokens
   // 代码：每个字符约 0.3 tokens

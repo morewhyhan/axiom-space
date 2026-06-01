@@ -157,7 +157,7 @@ const wikilinkExtension = {
         .replace(/"/g, '&quot;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      return `<a href="#" class="md-link" data-title="${escapedTitle}" onclick="event.preventDefault(); if(window.handleWikiLinkClick) window.handleWikiLinkClick(event, '${escapedTitle}')">${escapedTitle}</a>`;
+      return `<a href="#" class="md-link" data-title="${escapedTitle}">${escapedTitle}</a>`;
   },
 };
 

@@ -1,7 +1,6 @@
 /**
  * IterationBudget - 线程安全的迭代计数器
  *
- * 完全对标 Hermes run_agent.py 中的 IterationBudget 类
  *
  * Each agent (parent or subagent) gets its own IterationBudget.
  * The parent's budget is capped at max_iterations (default 90).
@@ -37,7 +36,6 @@ export class IterationBudget {
    *
    * @returns true 如果允许继续，false 如果已达上限
    *
-   * 对标 Hermes:
    * ```python
    * def consume(self) -> bool:
    *     with self._lock:
@@ -58,7 +56,6 @@ export class IterationBudget {
   /**
    * 退回一次迭代（用于 execute_code 等场景）
    *
-   * 对标 Hermes:
    * ```python
    * def refund(self) -> None:
    *     with self._lock:
@@ -82,7 +79,6 @@ export class IterationBudget {
   /**
    * 获取剩余迭代次数
    *
-   * 对标 Hermes:
    * ```python
    * @property
    * def remaining(self) -> int:
@@ -118,7 +114,6 @@ export class IterationBudget {
   /**
    * 消耗 Grace Call（预算耗尽后的额外机会）
    *
-   * 对标 Hermes:
    * ```python
    * def consume_grace(self) -> bool:
    *     if self._grace_used:
@@ -159,7 +154,6 @@ export class IterationBudget {
 
 /**
  * 子 Agent 预算配置
- * 对标 Hermes 的 delegation.max_iterations
  */
 export interface SubagentBudgetConfig {
   maxIterations: number;  // 默认 50
@@ -167,7 +161,6 @@ export interface SubagentBudgetConfig {
 
 /**
  * 默认预算配置
- * 对标 Hermes 配置
  */
 export const DEFAULT_BUDGET_CONFIG = {
   // 主 Agent 预算

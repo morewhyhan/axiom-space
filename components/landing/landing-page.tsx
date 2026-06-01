@@ -54,19 +54,19 @@ export default function LandingPage({
         <div className="landing-hero-content">
           {!isLoggedIn ? (
             <>
-              <h1 className="landing-title">AXIOM</h1>
-              <p className="landing-subtitle">Cognitive Operating System</p>
-              <p className="landing-desc">
+              <h1 className="landing-title select-none">AXIOM</h1>
+              <p className="landing-subtitle select-none">Cognitive Operating System</p>
+              <p className="landing-desc select-none opacity-40">
                 AI 驱动的知识构建系统 —— 将你的思想可视化为星系图谱，<br />
                 让 AI 帮助你整理、连接、深化认知。
               </p>
-              <div className="landing-cta">
-                <button className="landing-btn landing-btn-primary" onClick={() => setShowAuth('login')}>登录</button>
+              <div className="landing-cta scale-110 mt-4 transition-all">
+                <button className="landing-btn landing-btn-primary hover:shadow-[0_0_20px_rgba(168,85,247,0.3)]" onClick={() => setShowAuth('login')}>登录</button>
                 <button className="landing-btn landing-btn-secondary" onClick={() => setShowAuth('register')}>注册</button>
               </div>
             </>
           ) : vaults.length === 0 ? (
-            <CreateVault onCreated={handleSelectVault} />
+            <CreateVault onCreated={handleSelectVault} onSkip={onEnterApp} />
           ) : (
             <>
               <h2 className="landing-section-title">选择知识库</h2>
@@ -92,7 +92,7 @@ export default function LandingPage({
   )
 }
 
-function CreateVault({ onCreated }: { onCreated: (id: string) => void }) {
+function CreateVault({ onCreated, onSkip }: { onCreated: (id: string) => void; onSkip?: () => void }) {
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
@@ -102,14 +102,14 @@ function CreateVault({ onCreated }: { onCreated: (id: string) => void }) {
     setError('')
     setCreating(true)
     try {
-      // TODO: add vault.create to ApiClient interface for full type safety
-      const res = await (client as any).api.vaults.$post({ json: { name: name.trim() } })
-      const data = await res.json()
+      const res = await client.api.vaults.$post({ json: { name: name.trim() } })
+      const data: any = await res.json()
       if (data.success && data.vault?.id) {
         useAppStore.getState().setCurrentVaultId(data.vault.id)
         useAppStore.getState().setVaults([{ id: data.vault.id, name: data.vault.name, cardCount: 0 }])
         useAppStore.getState().setLastVaultId(data.vault.id)
         onCreated(data.vault.id)
+        return
       } else {
         setError(data.error || '创建失败，请重试')
       }
@@ -130,6 +130,11 @@ function CreateVault({ onCreated }: { onCreated: (id: string) => void }) {
         </button>
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
       </div>
+      {onSkip && (
+        <button className="landing-btn landing-btn-ghost" style={{ marginTop: 12, fontSize: '12px' }} data-action="skip-onboarding" onClick={onSkip}>
+          跳过，直接进入
+        </button>
+      )}
     </div>
   )
 }
@@ -154,6 +159,11 @@ function AuthModal({ mode, onClose }: { mode: 'login' | 'register'; onClose: () 
   const signUp = useSignUp()
   const isSubmitting = signIn.isPending || signUp.isPending
 
+  // 登录/注册成功后自动关闭弹窗
+  useEffect(() => {
+    if (signIn.isSuccess || signUp.isSuccess) onClose()
+  }, [signIn.isSuccess, signUp.isSuccess, onClose])
+
   const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setPasswordError('')
@@ -172,7 +182,28 @@ function AuthModal({ mode, onClose }: { mode: 'login' | 'register'; onClose: () 
   }
 
   return (
-    <div className="landing-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="landing-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={tab === 'login' ? '登录' : '注册'}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') { onClose(); return }
+        if (e.key !== 'Tab') return
+        const focusable = (e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        )
+        if (focusable.length === 0) return
+        const first = focusable[0]
+        const last = focusable[focusable.length - 1]
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault()
+          last.focus()
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault()
+          first.focus()
+        }
+      }}
+    >
       <div className="landing-modal">
         <button className="landing-modal-close" onClick={onClose}>✕</button>
         <div className="landing-modal-tabs">

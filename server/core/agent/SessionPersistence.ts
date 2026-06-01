@@ -1,12 +1,11 @@
-import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage';
-import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat';
 /**
- * SessionPersistence — L2 会话持久化
+ * SessionPersistence — Agent 会话持久化（纯数据库模式）
  *
- * 将 AgentSession 序列化到 .axiom/sessions/{id}.json，
- * 页面加载时扫描恢复会话列表。
+ * 将 AgentSession 存储到 agentSession 表，替代原来的 .axiom/sessions/{id}.json 文件。
  */
 
+import { prisma } from '@/lib/db'
+import { getCurrentVaultId, getCurrentUserId } from '@/server/core/agent/agent-context'
 
 export interface PersistedSession {
   id: string;
@@ -25,128 +24,129 @@ export interface PersistedSession {
   metadata?: Record<string, any>;
 }
 
-const SESSIONS_DIR_NAME = 'sessions';
+/** 从 AsyncLocalStorage 或用户的第一个 vault 解析 vaultId */
+async function resolveVaultId(): Promise<string | null> {
+  const ctxVaultId = getCurrentVaultId()
+  if (ctxVaultId) return ctxVaultId
+
+  // fallback: 取当前用户的第一个 vault
+  const userId = getCurrentUserId()
+  if (!userId) return null
+  const vault = await prisma.vault.findFirst({ where: { userId }, orderBy: { createdAt: 'asc' } })
+  return vault?.id || null
+}
 
 /**
- * 保存会话到文件系统
+ * 保存会话到数据库
  */
 export async function saveSessionToFile(
-  vaultPath: string,
+  _vaultPath: string,
   session: PersistedSession
 ): Promise<boolean> {
-  const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-  if (!axiom) return false;
-
-  const sessionsDir = `${vaultPath}/.axiom/${SESSIONS_DIR_NAME}`;
-
   try {
-    await axiom.ensureDirectory!(sessionsDir);
-    const filePath = `${sessionsDir}/${session.id}.json`;
-    await axiom.writeFile(filePath, JSON.stringify(session, null, 2));
-    console.log(`[SessionPersistence] Saved: ${session.id}`);
-    return true;
+    const vaultId = await resolveVaultId()
+    if (!vaultId) return false
+
+    await prisma.agentSession.upsert({
+      where: { id: session.id },
+      create: {
+        id: session.id,
+        vaultId,
+        name: session.name,
+        messages: JSON.stringify({
+          config: session.config,
+          messages: session.messages,
+          metadata: session.metadata,
+        }),
+      },
+      update: {
+        name: session.name,
+        messages: JSON.stringify({
+          config: session.config,
+          messages: session.messages,
+          metadata: session.metadata,
+        }),
+      },
+    })
+    return true
   } catch (err) {
-    console.warn('[SessionPersistence] Save failed:', err);
-    return false;
+    console.warn('[SessionPersistence] Save failed:', err)
+    return false
   }
 }
 
 /**
- * 从文件系统加载会话
+ * 从数据库加载会话
  */
 export async function loadSessionFromFile(
-  vaultPath: string,
+  _vaultPath: string,
   sessionId: string
 ): Promise<PersistedSession | null> {
-  const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-  if (!axiom) return null;
-
-  const filePath = `${vaultPath}/.axiom/${SESSIONS_DIR_NAME}/${sessionId}.json`;
-
   try {
-    const result = await axiom.readFile(filePath);
-    if (result?.success && result.content) {
-      return JSON.parse(result.content);
+    const vaultId = await resolveVaultId()
+    if (!vaultId) return null
+
+    const record = await prisma.agentSession.findUnique({ where: { id: sessionId } })
+    if (!record) return null
+    // Verify the session belongs to the resolved vault (cross-vault guard)
+    if (record.vaultId !== vaultId) return null
+
+    const data = JSON.parse(record.messages)
+    return {
+      id: record.id,
+      name: record.name,
+      config: data.config || {},
+      messages: data.messages || [],
+      createdAt: record.createdAt.getTime(),
+      updatedAt: record.updatedAt.getTime(),
+      metadata: data.metadata,
     }
   } catch (err) {
-    console.debug('[SessionPersistence] Load failed:', err);
+    console.debug('[SessionPersistence] Load failed:', err)
+    return null
   }
-
-  return null;
 }
 
 /**
- * 列出所有已持久化的会话
+ * 列出 vault 下所有持久化的会话
  */
 export async function listPersistedSessions(
-  vaultPath: string
+  _vaultPath: string
 ): Promise<Array<{ id: string; name: string; updatedAt: number }>> {
-  const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-  if (!axiom) return [];
-
-  const sessionsDir = `${vaultPath}/.axiom/${SESSIONS_DIR_NAME}`;
-  const sessions: Array<{ id: string; name: string; updatedAt: number }> = [];
-
   try {
-    const result = await axiom.ls(sessionsDir);
-    const entries = result?.entries || [];
+    const vaultId = await resolveVaultId()
+    if (!vaultId) return []
 
-    for (const entry of entries) {
-      if (entry.isFile && entry.name.endsWith('.json')) {
-        try {
-          const session = await loadSessionFromFile(vaultPath, entry.name.replace('.json', ''));
-          if (session) {
-            sessions.push({
-              id: session.id,
-              name: session.name,
-              updatedAt: session.updatedAt,
-            });
-          }
-        } catch {
-          continue;
-        }
-      }
-    }
+    const records = await prisma.agentSession.findMany({
+      where: { vaultId },
+      select: { id: true, name: true, updatedAt: true },
+      orderBy: { updatedAt: 'desc' },
+    })
 
-    // 按更新时间降序排列
-    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    return records.map(r => ({
+      id: r.id,
+      name: r.name,
+      updatedAt: r.updatedAt.getTime(),
+    }))
   } catch {
-    // 目录不存在
+    return []
   }
-
-  return sessions;
 }
 
 /**
  * 删除持久化的会话
  */
 export async function deletePersistedSession(
-  vaultPath: string,
+  _vaultPath: string,
   sessionId: string
 ): Promise<boolean> {
-  const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-  if (!axiom) return false;
-
-  const filePath = `${vaultPath}/.axiom/${SESSIONS_DIR_NAME}/${sessionId}.json`;
-
   try {
-    if (typeof axiom.deleteFile !== 'function') {
-      console.warn('[SessionPersistence] deleteFile API not available');
-      return false;
-    }
-    const result = await axiom.deleteFile(filePath);
-    if (result?.success) {
-      console.log('[SessionPersistence] Deleted:', sessionId);
-      return true;
-    }
-    console.warn('[SessionPersistence] Delete failed:', result?.error || 'unknown error');
-    return false;
+    const vaultId = await resolveVaultId()
+    if (!vaultId) return false
+    await prisma.agentSession.deleteMany({ where: { id: sessionId, vaultId } })
+    return true
   } catch (err) {
-    console.warn('[SessionPersistence] Delete failed:', err);
-    return false;
+    console.warn('[SessionPersistence] Delete failed:', err)
+    return false
   }
 }

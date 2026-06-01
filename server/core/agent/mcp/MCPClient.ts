@@ -1,7 +1,6 @@
 /**
  * MCP 客户端适配层
  *
- * 对标 Hermes: tools/mcp_tool.py
  *
  * 管理 MCP 服务器连接（stdio/http），工具自动发现与注册，
  * 采样处理器，断线重连（指数退避），工具名前缀 mcp_{server}_{tool}。
@@ -39,7 +38,7 @@ export interface MCPToolDefinition {
   };
 }
 
-// ===== 采样处理器（对标 Hermes SamplingHandler） =====
+// ===== 采样处理器 =====
 
 export interface SamplingConfig {
   maxRpm: number;            // 每分钟最大请求数
@@ -71,7 +70,6 @@ export class MCPServerTask {
 
   /**
    * 启动 MCP 服务器连接
-   * 对标 Hermes: MCPServerTask.start(config)
    */
   async start(config: MCPServerConfig): Promise<void> {
     if (config.enabled === false) return;
@@ -104,7 +102,6 @@ export class MCPServerTask {
 
   /**
    * 关闭 MCP 服务器连接
-   * 对标 Hermes: MCPServerTask.shutdown()
    */
   async shutdown(): Promise<void> {
     this.deregisterAllTools();
@@ -114,7 +111,6 @@ export class MCPServerTask {
 
   /**
    * 发现工具
-   * 对标 Hermes: _discover_tools() — 调用 session.list_tools()
    */
   private async discoverTools(): Promise<void> {
     const fileStorage = getFileStorage()
@@ -137,7 +133,6 @@ const axiom = createAxiomCompat(fileStorage);
 
   /**
    * 注册服务器工具到全局 toolRegistry
-   * 对标 Hermes: _register_server_tools() — 工具名前缀 mcp_{server}_{tool}
    */
   private registerServerTools(): void {
     this.deregisterAllTools();
@@ -174,7 +169,6 @@ const axiom = createAxiomCompat(fileStorage);
 
   /**
    * 执行 MCP 工具调用
-   * 对标 Hermes: MCPServerTask._call_tool()
    */
   private async executeToolCall(toolName: string, args: Record<string, unknown>): Promise<{ error: boolean; content: { type: 'text'; text: string }[] }> {
     // 检查熔断器

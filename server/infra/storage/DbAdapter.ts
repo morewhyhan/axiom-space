@@ -10,10 +10,24 @@
 
 import type { IFileStorage, ReadResult, WriteResult, ListResult, DeleteResult, SearchResult, FileEntry } from './IFileStorage'
 import { prisma } from '@/lib/db'
-import { getCurrentVaultId } from '@/server/core/agent/agent-context'
+import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context'
+import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
 
 export class DbAdapter implements IFileStorage {
-  constructor(private userId: string) {}
+  private resolvedUserId: string
+
+  constructor(userId?: string) {
+    // 如果没传 userId，从 AsyncLocalStorage 上下文自动获取
+    this.resolvedUserId = userId || getCurrentUserId() || ''
+  }
+
+  private get userId(): string {
+    // 如果构造时没拿到 userId，运行时再试一次
+    if (!this.resolvedUserId) {
+      this.resolvedUserId = getCurrentUserId() || ''
+    }
+    return this.resolvedUserId
+  }
 
   /**
    * Reject path-traversal and absolute paths before they ever reach Prisma.
@@ -80,14 +94,14 @@ export class DbAdapter implements IFileStorage {
     return vault.id
   }
 
-  async readFile(filePath: string): Promise<ReadResult> {
+  async readFile(filePath: string, vaultId?: string): Promise<ReadResult> {
     try {
       this.assertSafePath(filePath)
-      const vaultId = await this.getVaultId()
-      if (!vaultId) return { success: false, error: 'Vault not found' }
+      const resolvedVaultId = await this.getVaultId(vaultId)
+      if (!resolvedVaultId) return { success: false, error: 'Vault not found' }
 
       const card = await prisma.card.findUnique({
-        where: { vaultId_path: { vaultId, path: filePath } },
+        where: { vaultId_path: { vaultId: resolvedVaultId, path: filePath } },
       })
       if (!card) return { success: false, error: `File not found: ${filePath}` }
 
@@ -111,10 +125,34 @@ export class DbAdapter implements IFileStorage {
       // 从路径提取 title
       const title = filePath.replace(/\.md$/, '').split('/').pop() || 'untitled'
 
-      await prisma.card.upsert({
-        where: { vaultId_path: { vaultId, path: filePath } },
-        create: { vaultId, path: filePath, content, type, title },
-        update: { content, type, title, updatedAt: new Date() },
+      const card = await prisma.$transaction(async (tx) => {
+        const upserted = await tx.card.upsert({
+          where: { vaultId_path: { vaultId, path: filePath } },
+          create: { vaultId, path: filePath, content, type, title },
+          update: { content, type, title, updatedAt: new Date() },
+        })
+
+        // Sync [[WikiLink]] edges atomically with the card write
+        const titles = parseWikiLinks(content)
+        const resolved = await Promise.all(
+          titles.map((t) => resolveWikiLinkTitle(prisma, vaultId, t)),
+        )
+        const targets = resolved.filter(Boolean) as { id: string }[]
+
+        await tx.edge.deleteMany({ where: { sourceId: upserted.id, type: 'wikilink' } })
+        if (targets.length > 0) {
+          await tx.edge.createMany({
+            data: targets.map((target) => ({
+              vaultId,
+              sourceId: upserted.id,
+              targetId: target.id,
+              type: 'wikilink' as const,
+              weight: 1.0,
+            })),
+          })
+        }
+
+        return upserted
       })
 
       return { success: true }
@@ -129,9 +167,18 @@ export class DbAdapter implements IFileStorage {
       const vaultId = await this.getVaultId()
       if (!vaultId) return { success: false, error: 'Vault not found' }
 
-      await prisma.card.deleteMany({
+      // Find cards matching path so we can clean up their edges
+      const cards = await prisma.card.findMany({
         where: { vaultId, path: filePath },
+        select: { id: true },
       })
+      if (cards.length > 0) {
+        const cardIds = cards.map(c => c.id)
+        await prisma.$transaction([
+          prisma.edge.deleteMany({ where: { OR: [{ sourceId: { in: cardIds } }, { targetId: { in: cardIds } }] } }),
+          prisma.card.deleteMany({ where: { vaultId, path: filePath } }),
+        ])
+      }
       return { success: true }
     } catch (err: any) {
       return { success: false, error: err.message }
@@ -190,8 +237,8 @@ export class DbAdapter implements IFileStorage {
     }
   }
 
+  /** DB 模式下目录是虚拟的，无需创建 */
   async ensureDir(_dirPath: string): Promise<WriteResult> {
-    // 数据库无目录概念，自动存在
     return { success: true }
   }
 

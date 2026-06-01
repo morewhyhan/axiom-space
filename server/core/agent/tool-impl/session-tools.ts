@@ -289,7 +289,7 @@ const feynmanTestTool = createTool(
 
 你可以根据概念所属领域自由添加扩展维度（如数学概念的 mathematical_rigor, 编程概念的 code_accuracy 等）。
 
-以JSON格式返回（严格JSON，不要其他文字）：
+以JSON格式返回（严格JSON，不要 \`\`\`json 包裹，不要任何其他文字）：
 {
   "scores": {
     "definition": 4,
@@ -303,11 +303,13 @@ const feynmanTestTool = createTool(
   "feedback": "你对{概念}的定义理解得很好...但可以多谈谈它与其他概念的关系。"
 }
 
-注意：pass = true 仅当所有固定维度（definition, association, examples）都 >= 3。`;
+注意：pass = true 仅当所有固定维度（definition, association, examples）都 >= 3。
+
+内部推理即可，不要输出思考过程。直接返回 JSON 结果。`;
 
       const evaluationResult = await aiManager.callAPI(
         evaluationSystemPrompt,
-        [{ role: 'user', content: `概念: ${params.concept}\n\n用户的解释:\n${params.userResponse}` }],
+        [{ role: 'user', content: `概念: ${params.concept}\n\n用户的解释:\n${params.userResponse}\n\n## ⚠️ 强制输出语言：中文\n所有内容必须用中文输出。专有名词保留原文。` }],
       );
 
       // Parse JSON response from LLM

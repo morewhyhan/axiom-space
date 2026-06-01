@@ -1,6 +1,5 @@
 /**
  * Anthropic Prompt Caching — Anthropic 提示缓存
- * 对标 Hermes: agent/prompt_caching.py
  *
  * system_and_3 策略：最多 4 个 cache_control 断点
  *   1. System prompt（跨所有 turn 稳定）
@@ -50,7 +49,6 @@ function applyCacheMarker(msg: any, marker: { type: string; ttl?: string }): voi
 
 /**
  * 对消息列表应用 system_and_3 缓存策略
- * 对标 Hermes apply_anthropic_cache_control()
  *
  * @param messages API 消息列表
  * @param modelId 模型 ID（用于检测是否 Anthropic）

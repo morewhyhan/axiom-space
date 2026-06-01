@@ -17,10 +17,12 @@ import type {
 import { SubagentStatus } from '@/server/core/agent/subagent/SubagentTypes';
 import { AGENT_ROLES } from '@/server/core/agent/subagent/SubagentTypes';
 import type { ModelConfig } from '@/types/agent';
+import { resolveAiConfig } from '@/lib/ai-config';
 import { toolRegistry } from '../tools';
 import { SubagentHeartbeat } from '@/server/core/agent/subagent/SubagentHeartbeat';
 import type { MemoryManager } from '../../learning/memory/manager';
 import { getVaultPath } from '@/lib/platform';
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 
 export class SubagentLifecycle {
   private currentDepth = 0;
@@ -115,7 +117,7 @@ export class SubagentLifecycle {
       const agent = await this.createAgent(record.config);
       record.agentRef = agent; // 存储引用，供 kill() 调用 abort
 
-      // 启动心跳检测（对标 Hermes delegate_tool.py:718-771）
+      // 启动心跳检测
       const heartbeat = new SubagentHeartbeat();
       this.heartbeats.set(subagentId, heartbeat);
       if (this.parentAgent) {
@@ -211,9 +213,10 @@ export class SubagentLifecycle {
   // ── Create Agent ───────────────────────────────────────────
 
   private async createAgent(config: SubagentConfig): Promise<Agent> {
+    // Use configured model, or fall back to the unified AI config
     const modelConfig = config.model || {
-      provider: 'zai',
-      modelId: 'glm-4.7-flash',
+      provider: resolveAiConfig().model.provider as any,
+      modelId: resolveAiConfig().model.modelId,
     };
 
     const model = this.getModel(modelConfig);
@@ -276,7 +279,7 @@ export class SubagentLifecycle {
         if (block) {
           memoryContext = '\n\n' + block;
         }
-      } catch {}
+      } catch (err) { console.warn('[SubagentLifecycle] Failed to load parent memory context:', err); }
     }
 
     if (config.skillContent) {
@@ -329,10 +332,8 @@ export class SubagentLifecycle {
     }
 
     const apiKey = this.getApiKey(config);
-    const baseUrl =
-      config.baseUrl ||
-      process.env?.VITE_AI_API_BASE ||
-      '';
+    const aiConfig = resolveAiConfig();
+    const baseUrl = config.baseUrl || aiConfig.model.baseUrl || '';
 
     const baseModel = getModel('openai', 'gpt-4o-mini');
     if (!baseModel) {
@@ -359,8 +360,7 @@ export class SubagentLifecycle {
     }
 
     try {
-      const env = process.env || {};
-      return env.VITE_AI_API_KEY || '';
+      return resolveAiConfig().model.apiKey;
     } catch {
       return '';
     }
@@ -386,7 +386,7 @@ export class SubagentLifecycle {
     if (record.agentRef) {
       try {
         record.agentRef.abort();
-      } catch {}
+      } catch (err) { console.warn('[SubagentLifecycle] Failed to abort agent:', err); }
       record.agentRef = undefined;
     }
 
@@ -502,7 +502,7 @@ export class SubagentLifecycle {
 
       const profileUpdate = JSON.parse(jsonMatch[0]);
 
-      const vaultPath = getVaultPath() || '';
+      const vaultPath = getVaultPath() || getCurrentVaultId() || '';
       if (!vaultPath) return;
 
       let loadUserProfile: any, saveUserProfile: any, createDefaultProfile: any, mergeProfileUpdate: any;
@@ -579,9 +579,7 @@ export class SubagentLifecycle {
 
       const merged = mergeProfileUpdate(current, updates);
       await saveUserProfile(vaultPath, merged);
-      globalThis.dispatchEvent(
-        new CustomEvent('axiom:profile-updated'),
-      );
+      console.log('[Event] axiom:profile-updated');
       console.log(
         '[SubagentSystem] Profile Agent output applied to user profile',
       );

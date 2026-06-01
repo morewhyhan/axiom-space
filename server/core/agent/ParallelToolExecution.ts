@@ -1,7 +1,6 @@
 /**
  * ParallelToolExecution — 并行工具执行 + 路径冲突检测
  *
- * 对标 Hermes: run_agent.py:248-340, 7560
  *
  * 三类工具：
  * - NEVER_PARALLEL：交互式工具（如 ask_user），必须串行
@@ -21,7 +20,6 @@ export interface ParallelToolCall {
 
 /**
  * 禁止并行的交互式工具
- * 对标 Hermes: _NEVER_PARALLEL
  */
 const NEVER_PARALLEL = new Set([
   'ask_user',
@@ -31,7 +29,6 @@ const NEVER_PARALLEL = new Set([
 
 /**
  * 只读安全工具，可并行执行
- * 对标 Hermes: _PARALLEL_SAFE
  */
 const PARALLEL_SAFE = new Set([
   'read', 'grep', 'find', 'ls', 'search_cards',
@@ -42,7 +39,6 @@ const PARALLEL_SAFE = new Set([
 
 /**
  * 涉及文件路径的工具，需检查路径冲突
- * 对标 Hermes: _PATH_SCOPED
  */
 const PATH_SCOPED = new Set([
   'read', 'write', 'edit',
@@ -71,7 +67,6 @@ function tryParseArgs(argsStr: string): Record<string, any> {
 
 /**
  * 判断工具批次是否可以并行执行
- * 对标 Hermes: _should_parallelize_tool_batch()
  *
  * 规则：
  * 1. 单个调用 → 串行
@@ -106,7 +101,6 @@ export function shouldParallelize(toolCalls: ParallelToolCall[]): boolean {
 
 /**
  * 并行执行工具批次
- * 对标 Hermes: _execute_tool_calls_concurrent() — ThreadPoolExecutor
  *
  * 使用 Promise.allSettled 确保一个失败不影响其他。
  */

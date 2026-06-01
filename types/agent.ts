@@ -17,6 +17,10 @@ export type {
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 export type ToolExecutionMode = "sequential" | "parallel";
 
+/** Default model ID constants */
+export const DEFAULT_MODEL = 'glm-4-flash';
+export const DEFAULT_COMPRESSION_MODEL = 'glm-4-plus';
+
 import type {
   UserMessage as PiUserMessage,
   AssistantMessage as PiAssistantMessage,
@@ -43,6 +47,7 @@ export type AgentMessage = Message | {
 import type { GeneratedCard, CardGenerationOptions, LearningPathAnalysis } from './common';
 export type { GeneratedCard, CardGenerationOptions, LearningPathAnalysis };
 
+/** Provider 标识，用于 `_getModel()` 中的路由分发 */
 export type LLMProvider =
   | 'openai'
   | 'anthropic'
@@ -63,64 +68,7 @@ export interface ModelConfig {
   apiKey?: string;
 }
 
-export const ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4';
-
-export { DEFAULT_MODEL, DEFAULT_COMPRESSION_MODEL } from './common';
-
-export const PRESET_MODELS: Record<string, ModelConfig> = {
-  'glm-4-flash': {
-    provider: 'zhipu',
-    modelId: 'glm-4-flash',
-    baseUrl: ZHIPU_BASE_URL,
-  },
-  'glm-4-plus': {
-    provider: 'zhipu',
-    modelId: 'glm-4-plus',
-    baseUrl: ZHIPU_BASE_URL,
-  },
-  'gpt-4o': {
-    provider: 'openai',
-    modelId: 'gpt-4o',
-  },
-  'gpt-4o-mini': {
-    provider: 'openai',
-    modelId: 'gpt-4o-mini',
-  },
-  'claude-3-sonnet': {
-    provider: 'anthropic',
-    modelId: 'claude-3-5-sonnet-20241022',
-  },
-  'claude-3-haiku': {
-    provider: 'anthropic',
-    modelId: 'claude-3-5-haiku-20241022',
-  },
-  'gemini-pro': {
-    provider: 'google',
-    modelId: 'gemini-1.5-pro',
-  },
-  'gemini-flash': {
-    provider: 'google',
-    modelId: 'gemini-1.5-flash',
-  },
-  'llama-3.1-8b': {
-    provider: 'cerebras',
-    modelId: 'llama3.1-8b',
-  },
-  'llama-3.1-70b': {
-    provider: 'cerebras',
-    modelId: 'llama3.1-70b',
-  },
-  'deepseek-chat': {
-    provider: 'deepseek',
-    modelId: 'deepseek-chat',
-    baseUrl: 'https://api.deepseek.com/v1',
-  },
-  'deepseek-reasoner': {
-    provider: 'deepseek',
-    modelId: 'deepseek-reasoner',
-    baseUrl: 'https://api.deepseek.com/v1',
-  },
-};
+/** @deprecated 模型配置改由环境变量驱动，详见 lib/ai-config.ts */
 
 export interface SessionState {
   id: string;

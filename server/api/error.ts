@@ -13,6 +13,13 @@ export class ApiError extends HTTPException {
 }
 
 export function handleError(err: Error, c: Context): Response {
+  if (err instanceof ApiError) {
+    return c.json(
+      { code: err.code ?? 500, message: err.message },
+      err.code ?? 500,
+    )
+  }
+
   if (err instanceof z.ZodError) {
     const firstError = err.issues[0]
 
@@ -29,7 +36,7 @@ export function handleError(err: Error, c: Context): Response {
   return c.json(
     {
       code: 500,
-      message: '出了点问题, 请稍后再试。',
+      message: 'Something went wrong. Please try again later.',
     },
     { status: 500 },
   )

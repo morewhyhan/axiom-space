@@ -1,40 +1,89 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
-import { getSiteUrl } from '@/lib/site-url'
+/**
+ * use-agent — session & chat hook
+ *
+ * Thin wrapper around the Zustand agent-store.  Reading state goes through the
+ * store so hook + sidebar always see the same data.  SSE streaming stays here
+ * because Hono RPC doesn't expose the raw Response body for streaming.
+ */
 
-interface AgentMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
+import { useCallback, useRef, useEffect } from 'react'
+import { useAgentStore } from '@/stores/agent-store'
+import { useAppStore } from '@/stores/mode-store'
+import { getSiteUrl } from '@/lib/site-url'
+import type { AgentMessage, SessionSummary } from '@/stores/agent-store'
+
+// Re-export for callers that import the types from this file
+export type { AgentMessage, SessionSummary }
+
+// Module-level guard: prevent double auto-init when ChatSessionList and
+// ForgeChat both mount in the same render cycle.
+let didAutoInit = false
 
 export function useAgent() {
-  const [messages, setMessages] = useState<AgentMessage[]>([])
-  const [streaming, setStreaming] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const abortRef = useRef<AbortController | null>(null)
+  /* ── Read state from the shared store ── */
+  const messages = useAgentStore((s) => s.messages)
+  const sessions = useAgentStore((s) => s.sessions)
+  const sessionId = useAgentStore((s) => s.sessionId)
+  const loading = useAgentStore((s) => s.loading)
+  const streaming = useAgentStore((s) => s.streaming)
+  const error = useAgentStore((s) => s.error)
 
+  /* ── Load on mount (only once across all hook instances) ── */
+  useEffect(() => {
+    if (didAutoInit) return
+    didAutoInit = true
+    let cancelled = false
+    ;(async () => {
+      try {
+        const sessionsList = await useAgentStore.getState().loadSessions()
+        const store = useAgentStore.getState()
+        if (!cancelled && sessionsList.length > 0) {
+          const active = sessionsList.find((s: SessionSummary) => s.status === 'active')
+          const target = active ?? sessionsList[0]
+          if (target) {
+            await store.switchSession(target.id)
+          }
+        }
+      } catch {
+        // non-critical
+      } finally {
+        if (!cancelled) useAgentStore.getState()._setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
+  /* ── sendMessage — SSE streaming, kept in the hook ── */
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim()) return
 
-    setStreaming(true)
-    setError(null)
+    const store = useAgentStore.getState()
+    if (store.streaming) return // prevent concurrent streams
 
-    // Add user message immediately
-    setMessages(prev => [...prev, { role: 'user', content: text }])
+    store._setStreaming(true)
+    store._setError(null)
+    store._appendMessage({ role: 'user', content: text })
 
-    // Abort any previous request
-    abortRef.current?.abort()
+    // Abort any previous stream (defensive)
+    store._abortStream()
+
     const controller = new AbortController()
-    abortRef.current = controller
+    store._setAbortController(controller)
+
+    const currentSessionId = store.sessionId
 
     try {
-      // 使用原生 fetch 因为 SSE 流式响应需要直接读取 ReadableStream，
-      // ky 的 JSON 解析会破坏 SSE 事件流
       const response = await fetch(`${getSiteUrl()}/api/agent/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({
+          message: text,
+          vaultId: useAppStore.getState().currentVaultId,
+          oracleId: useAppStore.getState().oracle,
+          sessionId: currentSessionId ?? undefined,
+        }),
         credentials: 'include',
         signal: controller.signal,
       })
@@ -44,7 +93,6 @@ export function useAgent() {
         throw new Error(err.error || `HTTP ${response.status}`)
       }
 
-      // Read SSE stream
       const reader = response.body?.getReader()
       if (!reader) throw new Error('No response body')
 
@@ -52,78 +100,73 @@ export function useAgent() {
       let assistantContent = ''
       let buffer = ''
 
-      // Add placeholder assistant message
-      setMessages(prev => [...prev, { role: 'assistant', content: '' }])
+      store._appendMessage({ role: 'assistant', content: '' })
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
 
-        buffer += decoder.decode(value, { stream: true })
+        // Guard: if session changed mid-stream, abort and discard
+        if (useAgentStore.getState().sessionId !== currentSessionId) {
+          reader.cancel()
+          return
+        }
 
-        // Parse SSE events
+        buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
-
         for (const line of lines) {
           if (line.startsWith('data:')) {
             try {
               const payload = JSON.parse(line.slice(5).trim())
               if (payload.text) {
                 assistantContent += payload.text
-                setMessages(prev => {
-                  const updated = [...prev]
-                  updated[updated.length - 1] = {
-                    role: 'assistant',
-                    content: assistantContent,
-                  }
-                  return updated
-                })
+                // Check again before writing to store
+                if (useAgentStore.getState().sessionId === currentSessionId) {
+                  useAgentStore.getState()._updateLastMessage(assistantContent)
+                }
               }
-              if (payload.error) {
-                setError(payload.error)
-              }
+              if (payload.error) useAgentStore.getState()._setError(payload.error)
             } catch {
-              // Skip unparseable lines
+              // skip non-JSON data lines
             }
           }
         }
       }
 
-      // If no content was streamed, try non-streaming fallback
-      if (!assistantContent) {
-        setMessages(prev => {
-          const updated = [...prev]
-          updated[updated.length - 1] = {
-            role: 'assistant',
-            content: '收到，但未能生成回复。请重试。',
-          }
-          return updated
-        })
+      // Only write final content if still on same session
+      if (useAgentStore.getState().sessionId === currentSessionId) {
+        if (!assistantContent) {
+          useAgentStore.getState()._updateLastMessage('收到，但未能生成回复。请重试。')
+        }
       }
+
+      useAgentStore.getState().loadSessions()
     } catch (err: any) {
       if (err?.name === 'AbortError') return
       const errorMsg = err?.message || '网络连接异常，请稍后重试。'
-      setError(errorMsg)
-      setMessages(prev => [...prev, { role: 'assistant', content: errorMsg }])
+      useAgentStore.getState()._setError(errorMsg)
+      useAgentStore.getState()._appendMessage({ role: 'assistant', content: errorMsg })
     } finally {
-      setStreaming(false)
+      useAgentStore.getState()._setStreaming(false)
+      useAgentStore.getState()._setAbortController(null)
     }
   }, [])
 
-  const clearMessages = useCallback(async () => {
-    // Clear on server too
-    try {
-      await fetch(`${getSiteUrl()}/api/agent/sessions`, {
-        method: 'DELETE',
-        credentials: 'include',
-      })
-    } catch (e) {
-      console.warn('clearMessages failed:', e)
-    }
-    setMessages([])
-    setError(null)
+  /* ── Delegate to store actions ── */
+  const loadSessions = useCallback(() => useAgentStore.getState().loadSessions(), [])
+  const switchSession = useCallback((id: string) => {
+    // Abort any in-progress stream before switching
+    useAgentStore.getState()._abortStream()
+    useAgentStore.getState().switchSession(id)
   }, [])
+  const createSession = useCallback(() => useAgentStore.getState().createSession(), [])
+  const deleteSession = useCallback((id: string) => useAgentStore.getState().deleteSession(id), [])
+  const clearMessages = useCallback(() => useAgentStore.getState().clearMessages(), [])
 
-  return { messages, streaming, error, sendMessage, clearMessages }
+  return {
+    messages, loading, streaming, error,
+    sessions, sessionId,
+    sendMessage, clearMessages, switchSession, createSession, deleteSession, loadSessions,
+  }
 }

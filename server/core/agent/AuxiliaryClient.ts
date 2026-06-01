@@ -1,6 +1,5 @@
 /**
  * Auxiliary LLM Client — 辅助 LLM 客户端
- * 对标 Hermes: agent/auxiliary_client.py
  *
  * 为后台任务（上下文压缩、记忆摘要、后台 review）提供独立的 LLM 调用能力。
  * 支持配置不同的模型（如用更便宜/更快的模型做摘要）。

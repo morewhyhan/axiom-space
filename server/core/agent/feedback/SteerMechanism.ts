@@ -1,7 +1,6 @@
 /**
  * SteerMechanism — 非中断注入
  *
- * 对标 Hermes: run_agent.py:3624-3728
  *
  * 将用户指导追加到工具结果中，不修改角色交替，不插入新消息。
  */
@@ -17,7 +16,6 @@ export class SteerMechanism {
 
   /**
    * 非中断注入：追加文本到 pending queue
-   * 对标 Hermes: steer() — 追加到 _pending_steer
    *
    * @returns true 如果成功追加
    */
@@ -46,7 +44,6 @@ export class SteerMechanism {
 
   /**
    * 在工具结果中注入 steer 文本
-   * 对标 Hermes: _apply_pending_steer_to_tool_results()
    *
    * 不修改角色交替，不插入新消息。
    * 找到最后一个 tool 消息，追加 steer 文本。

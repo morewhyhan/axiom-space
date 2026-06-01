@@ -44,14 +44,11 @@ export interface SearchResult {
 }
 
 export interface IFileStorage {
-  /** 读取文件内容（返回纯文本） */
-  readFile(path: string): Promise<ReadResult>
+  /** 读取文件内容（返回纯文本）。可传入 vaultId 指定目标 Vault */
+  readFile(path: string, vaultId?: string): Promise<ReadResult>
 
   /** 写入文件内容（覆盖） */
   writeFile(path: string, content: string, cardType?: string): Promise<WriteResult>
-
-  /** 追加内容到文件 */
-  appendFile?(path: string, content: string): Promise<WriteResult>
 
   /** 删除文件 */
   deleteFile(path: string): Promise<DeleteResult>
@@ -59,7 +56,7 @@ export interface IFileStorage {
   /** 列出目录下的文件和文件夹 */
   listDir(path: string): Promise<ListResult>
 
-  /** 确保目录存在 */
+  /** 确保目录存在（递归创建） */
   ensureDir(path: string): Promise<WriteResult>
 
   /** 重命名/移动文件 */

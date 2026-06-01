@@ -11,9 +11,9 @@ import { getFileStorage } from "@/server/infra/storage/GlobalFileStorage";
 import { aiManager } from "@/server/core/ai";
 import { getSkillRegistry } from "./skills/SkillRegistry";
 import { getSubagentManager } from "./subagent/SubagentSystem";
-import { createAgent } from "./agent";
+import { createAgent, AxiomAgent } from "./agent";
 import type { AxiomAgentConfig, StreamCallbacks } from "@/types/agent";
-import { DEFAULT_MODEL } from "@/types/agent";
+import { resolveAiConfig } from "@/lib/ai-config";
 import {
   listPersistedSessions,
   loadSessionFromFile,
@@ -110,7 +110,7 @@ function getToolDisplay(toolName: string, args: any): string {
 // ── ChatOrchestrator ─────────────────────────────────────────────────
 
 export class ChatOrchestrator {
-  private agentRef: ReturnType<typeof createAgent> | null = null;
+  private agentRef: AxiomAgent | null = null;
   private currentCharacterId: string;
   private vaultPath: string;
   private callbacks: ChatOrchestratorCallbacks;
@@ -149,7 +149,7 @@ export class ChatOrchestrator {
     try {
       // Initialize built-in tools explicitly (no longer relying on side-effect import)
       registerBuiltinTools();
-      const vaultPath = this.vaultPath || (process.env as any).VAULT_PATH || "./vault";
+      const vaultPath = this.vaultPath || (process.env as any).VAULT_PATH || "";
       const vault = currentVaultId
         ? vaults.find((v: any) => v.id === currentVaultId)
         : null;
@@ -172,7 +172,6 @@ export class ChatOrchestrator {
       const skillRegistry = getSkillRegistry();
       await skillRegistry.loadAllSkills();
       this.callbacks.setSkillsLoaded(true);
-      console.log("[ChatOrchestrator] Skills and AI Manager initialized successfully");
 
       await null; // loadOraclesFromConfig was removed in migration
     } catch (err) {
@@ -185,7 +184,7 @@ export class ChatOrchestrator {
 
   async restoreHistory(characterId: string): Promise<ChatMessage[] | null> {
     if (this._historyRestored) return null;
-    const vaultPath = this.vaultPath || (process.env as any).VAULT_PATH || "./vault";
+    const vaultPath = this.vaultPath || (process.env as any).VAULT_PATH || "";
     if (!vaultPath || !characterId) return null;
 
     try {
@@ -202,13 +201,6 @@ export class ChatOrchestrator {
                 : undefined,
             timestamp: Date.now() - (savedSession.messages.length - i) * 1000,
           }),
-        );
-        console.log(
-          "[ChatOrchestrator] Restored session for",
-          characterId,
-          ":",
-          loadedMessages.length,
-          "messages",
         );
         this._historyRestored = true;
         return loadedMessages;
@@ -274,13 +266,11 @@ export class ChatOrchestrator {
       const oracle = getOracle_ai?.(characterId);
       const systemPrompt = await this.getCharacterSystemPrompt(characterId, skillsLoaded);
 
+      const aiConfig = resolveAiConfig();
       const config: AxiomAgentConfig = {
         systemPrompt,
-        modelId:
-          _cache.get("axiom-model-id") ||
-          process.env.VITE_AI_MODEL?.split("/")?.pop() ||
-          DEFAULT_MODEL,
-        apiKey: env.VITE_AI_API_KEY,
+        modelId: _cache.get("axiom-model-id") || aiConfig.model.modelId,
+        apiKey: aiConfig.model.apiKey,
         toolExecution: "parallel",
         thinkingLevel: "off",
         enableSkills: true,
@@ -288,7 +278,7 @@ export class ChatOrchestrator {
       };
 
       console.log("[ChatOrchestrator] Creating agent, character:", characterId, oracle?.name);
-      this.agentRef = createAgent(config);
+      this.agentRef = (await createAgent(config)) as AxiomAgent;
       getSubagentManager().setParentAgent(this.agentRef as any);
       getSubagentManager().setParentMemory(this.agentRef.getMemoryManager());
     }
@@ -297,7 +287,6 @@ export class ChatOrchestrator {
     let currentThought = "";
 
     const callbacks: StreamCallbacks = {
-      onStart: () => console.log("[Agent] 开始运行"),
       onTextDelta: (text: string) => {
         agentMsgContent += text;
         setCurrentAgentMessage(agentMsgContent);
@@ -307,7 +296,6 @@ export class ChatOrchestrator {
         setCurrentThinkingMessage(currentThought);
       },
       onToolStart: (toolName: string, args: any) => {
-        console.log("[Agent] Tool start:", toolName, args);
         addChatMessage({
           sender: "tool_step",
           text: getToolDisplay(toolName, args),
@@ -317,7 +305,6 @@ export class ChatOrchestrator {
         });
       },
       onToolEnd: async (toolName: string, result: any) => {
-        console.log("[Agent] Tool end:", toolName, result);
         const resultText =
           result?.content?.[0]?.text ||
           (result?.details ? JSON.stringify(result.details).substring(0, 150) : "") ||
@@ -365,7 +352,6 @@ export class ChatOrchestrator {
         }
       },
       onEnd: (_result) => {
-        console.log("[Agent] 运行结束");
       },
       onError: (error: Error) => {
         console.error("[Agent] 错误:", error);
@@ -441,7 +427,7 @@ export class ChatOrchestrator {
     for (const [filename, message] of Object.entries(AXIOM_FILE_MESSAGES)) {
       if (filePath.includes(filename)) {
         this.callbacks.addChatMessage({ sender: "system", text: message });
-        globalThis.dispatchEvent(new CustomEvent("axiom:profile-updated"));
+        console.log('[Event] axiom:profile-updated');
         break;
       }
     }
@@ -488,7 +474,7 @@ export class ChatOrchestrator {
 
     this.switchLock = true;
     try {
-      const vaultPath = this.vaultPath || (process.env as any).VAULT_PATH || "./vault";
+      const vaultPath = this.vaultPath || (process.env as any).VAULT_PATH || "";
 
       // 1. Save current conversation
       if (vaultPath && currentMessages.length > 0) {
@@ -513,7 +499,6 @@ export class ChatOrchestrator {
           updatedAt: Date.now(),
         };
         await saveSessionToFile(vaultPath, sessionData);
-        console.log("[ChatOrchestrator] Saved session for agent:", prevId);
       }
 
       // 2. Dispose old agent
@@ -557,7 +542,7 @@ export class ChatOrchestrator {
   // ── Session management ─────────────────────────────────────────
 
   async refreshSessionList(): Promise<void> {
-    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "./vault" || "";
+    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "";
     if (!vaultPath) return;
     try {
       const sessions = await listPersistedSessions(vaultPath);
@@ -568,7 +553,7 @@ export class ChatOrchestrator {
   }
 
   async loadSession(sessionId: string, characterId: string): Promise<ChatMessage[]> {
-    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "./vault" || "";
+    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "";
     if (!vaultPath) return [];
     try {
       const session = await loadSessionFromFile(vaultPath, sessionId);
@@ -592,7 +577,7 @@ export class ChatOrchestrator {
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "./vault" || "";
+    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "";
     if (!vaultPath) return;
     try {
       const deleted = await deletePersistedSession(vaultPath, sessionId);
@@ -624,7 +609,7 @@ export class ChatOrchestrator {
   }
 
   async searchHistory(query: string): Promise<SessionSearchResult[]> {
-    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "./vault" || "";
+    const vaultPath = axiomCompat.getCurrentVaultPath?.() || process.env.VAULT_PATH || "";
     if (!vaultPath || !query.trim()) return [];
     try {
       return await searchSessions(vaultPath, query);
@@ -636,7 +621,7 @@ export class ChatOrchestrator {
   // ── Card generation & suggestions ─────────────────────────────
 
   async generateCardFromChat(messages: ChatMessage[]): Promise<void> {
-    const vaultPath = this.vaultPath || process.env.VAULT_PATH || "./vault";
+    const vaultPath = this.vaultPath || process.env.VAULT_PATH || "";
     if (!vaultPath) return;
 
     const msgs = messages.slice(-10);
@@ -648,12 +633,20 @@ export class ChatOrchestrator {
     if (!context.trim()) return;
 
     try {
-      const axiom = (window as any).axiom;
-      const title = `对话笔记 ${new Date().toLocaleDateString()}`;
-      await axiom?.writeFile?.(
-        `${vaultPath}/permanent/${title}.md`,
-        `# ${title}\n\n> 来源：对话生成\n\n${context}`,
-      );
+      const { prisma } = await import('@/lib/db')
+      const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const vid = getCurrentVaultId()
+      if (!vid) return
+      const title = `对话笔记 ${new Date().toLocaleDateString()}`
+      await prisma.card.create({
+        data: {
+          vaultId: vid,
+          path: `permanent/${title}.md`,
+          title,
+          content: `# ${title}\n\n> 来源：对话生成\n\n${context}`,
+          type: 'permanent',
+        },
+      })
     } catch (err) {
       console.warn("[ChatOrchestrator] generateCardFromChat failed:", err);
     }

@@ -1,7 +1,6 @@
 /**
  * MemoryFlush — 压缩前记忆保存
  *
- * 对标 Hermes: run_agent.py:7121-7310
  *
  * 压缩前给 LLM 一次机会保存重要信息。
  * 仅开放 memory tool，做一次 API 调用让 LLM 自己决定保存什么。
@@ -48,7 +47,6 @@ export class MemoryFlush {
 
   /**
    * 压缩前给 LLM 一次机会保存重要信息
-   * 对标 Hermes: flush_memories()
    *
    * @param messages 当前对话消息列表（会被修改后恢复）
    */

@@ -1,7 +1,6 @@
 /**
  * EmptyResponseHandler — 空回复处理
  *
- * 对标 Hermes: run_agent.py:11240-11399
  *
  * 4 层策略：
  * 1. Housekeeping 工具后空回复 → 复用上一轮内容
@@ -25,7 +24,6 @@ export interface EmptyResponseMessage {
 
 /**
  * Housekeeping 工具：执行后不需要输出内容
- * 对标 Hermes: _HOUSEKEEPING_TOOLS
  */
 const HOUSEKEEPING_TOOLS = new Set([
   'memory', 'capability_check', 'knowledge_graph',
@@ -66,7 +64,6 @@ export class EmptyResponseHandler {
 
   /**
    * 判断工具调用是否全部是 housekeeping
-   * 对标 Hermes: housekeeping 静音机制
    */
   isAllHousekeeping(toolCalls: ToolCall[]): boolean {
     return toolCalls.length > 0 && toolCalls.every(tc => HOUSEKEEPING_TOOLS.has(tc.function.name));
@@ -74,7 +71,6 @@ export class EmptyResponseHandler {
 
   /**
    * 处理空回复
-   * 对标 Hermes: 4 层策略
    *
    * @returns 动作类型 + 可选的注入消息
    */

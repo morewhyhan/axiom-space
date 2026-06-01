@@ -65,8 +65,8 @@ export class PromptService implements IPromptService {
 
   // ── LLM Summary ─────────────────────────────────────────────
 
-  async callLLMForSummary(prompt: string): Promise<string> {
-    return this.messageTransformer.callLLMForSummary(prompt);
+  async callLLMForSummary(prompt: string, systemPromptOverride?: string): Promise<string> {
+    return this.messageTransformer.callLLMForSummary(prompt, systemPromptOverride);
   }
 
   // ── Message Conversion ──────────────────────────────────────

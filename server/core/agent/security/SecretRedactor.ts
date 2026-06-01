@@ -1,7 +1,6 @@
 /**
  * SecretRedactor — 密钥脱敏
  *
- * 对标 Hermes: agent/redact.py（340 行，36 种模式）
  *
  * 覆盖：API key 前缀（24 种）、环境变量赋值、Authorization header、
  * JWT token、数据库连接字符串、URL query 参数、私钥块、
@@ -88,7 +87,6 @@ function partialRedact(match: string): string {
 
 /**
  * 脱敏文本中的所有密钥
- * 对标 Hermes: redact.secrets()
  *
  * 注意：每次调用会重置正则的 lastIndex（因为使用了 g flag）
  */
@@ -162,7 +160,6 @@ export function redactSecrets(text: string): string {
 
 /**
  * 日志自动脱敏 Formatter
- * 对标 Hermes: RedactingFormatter
  *
  * 用法：在 AuditLogger 或 console 输出前调用 format()
  */

@@ -9,12 +9,41 @@ const axiom = createAxiomCompat(getFileStorage());
 
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath } from "./helpers";
+import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { prisma } from '@/lib/db';
+
+/** Persist a resource generation record to DB (fire-and-forget, scoped by userId+vaultId) */
+function persistResourceToDb(userId: string, topic: string, types: string[], detail: Record<string, any>): void {
+  const vaultId = getCurrentVaultId() || 'novault'
+  const sessionId = `resource-${userId}-${vaultId}`
+  prisma.learningSession.upsert({
+    where: { id: sessionId },
+    create: {
+      id: sessionId,
+      userId,
+      domain: '__resource__',
+      concept: '资源生成记录',
+      status: 'active',
+      phase: 'generation',
+    },
+    update: { updatedAt: new Date() },
+  }).then((session) => {
+    prisma.learningMessage.create({
+      data: {
+        sessionId: session.id,
+        role: 'system',
+        content: `[资源生成] ${topic} — ${types.join(', ')}`,
+        metadata: JSON.stringify({ topic, types, ...detail }),
+      },
+    }).catch(() => {});
+  }).catch(() => {});
+}
 
 const pushResourceTool = createTool(
   'push_resource',
-  '推送学习资源',
-  '为当前学习主题生成全套学习资源（文档、思维导图、练习题、代码实操、视频脚本、PPT、拓展阅读）。'
-  + '在用户要求出题、生成资源、生成文档/导图/题目等时直接调用。'
+  '推送学习资源到文献盒',
+  '为当前学习主题生成全套学习资源（文档、思维导图、练习题、教学视频）并保存到文献盒。'
+  + '【关键时机】当用户说"整理成学习资料"、"保存到文献盒"、"记录下来"、"生成资料"、"生成文档"、"创建学习资源"等类似请求时，必须直接调用此工具。'
   + '用户水平自动从画像推断，无需询问用户。自动跳过已有资源。',
   Type.Object({
     topic: Type.String({ description: '学习主题（必填）。从对话上下文或用户消息中提取。' }),
@@ -32,15 +61,13 @@ const pushResourceTool = createTool(
         };
       }
 
-      // Determine user level: params.level > user profile > localStorage > default
+      // Determine user level: params.level > DB profile > default
       let userLevel = params.level || process.env.AXIOM_USER_LEVEL || '';
       if (!userLevel) {
         try {
-          const readResult = await getFileStorage().readFile(`${vaultPath}/.axiom/user-profile.json`);
-          if (readResult?.success && readResult.content) {
-            const profile = JSON.parse(readResult.content);
-            userLevel = profile?.identity?.level || profile?.level || 'intermediate';
-          }
+          const { loadUserProfile } = await import('@/server/core/learning/memory/profile-manager');
+          const profile = await loadUserProfile(vaultPath);
+          userLevel = profile?.identity?.level || profile?.level || 'intermediate';
         } catch { userLevel = 'intermediate'; }
       }
       if (!userLevel) userLevel = 'intermediate';
@@ -96,10 +123,17 @@ const pushResourceTool = createTool(
           const fileName = RESOURCE_FILE_MAP[type];
           const result = await getFileStorage().readFile(`${resourceDir}/${fileName}`);
           if (result?.success && result.content) {
-            sections.push(result.content);
+            if (type === 'video') {
+              // Embed a reference marker instead of the full HTML.
+              // The forge-editor will detect this and load the video HTML via API.
+              const videoRef = `resources/${sanitizedDir}/${fileName}`;
+              sections.push(`> 📺 **教学视频已生成** — 在 READ 模式下自动播放\n\n<!-- axiom-video:${videoRef} -->`);
+            } else {
+              sections.push(result.content);
+            }
             generatedCount++;
           }
-        } catch {}
+        } catch (err) { console.warn('[ResourceTools] Failed to read generated resource:', err); }
       }
 
       if (sections.length === 0) {
@@ -125,14 +159,38 @@ ${sections.join('\n\n---\n\n')}
 `;
       await getFileStorage().writeFile(`${litDir}/${litFileName}`, fullContent);
 
-      globalThis.dispatchEvent(new CustomEvent('axiom:toast', {
-        detail: { message: `生成学习资料: ${params.topic}`, type: 'card' },
-      }));
+      // Also create a DB Card record for the literature so it appears in galaxy/knowledge graph
+      try {
+        const { prisma: litDb } = await import('@/lib/db');
+        const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
+        const litVid = getCurrentVaultId();
+        if (litVid) {
+          await litDb.card.upsert({
+            where: { vaultId_path: { vaultId: litVid, path: `literature/${litFileName}` } },
+            create: {
+              vaultId: litVid,
+              path: `literature/${litFileName}`,
+              title: params.topic,
+              content: fullContent.slice(0, 10000),
+              type: 'literature',
+              tags: JSON.stringify(['ai-generated', params.topic]),
+            },
+            update: {
+              content: fullContent.slice(0, 10000),
+              updatedAt: new Date(),
+            },
+          });
+        }
+      } catch (dbErr) {
+        console.warn('[push_resource] Failed to create DB literature card:', dbErr);
+      }
+
+      console.log(`[Event] axiom:toast — card: 生成学习资料: ${params.topic}`);
 
       return {
         content: [{
           type: 'text',
-          text: `学习资料已放入文献盒。「${params.topic}」包含文档、导图、练习题，点开即可阅读。`,
+          text: `学习资料已放入文献盒。「${params.topic}」包含文档、导图、练习题、教学视频，点开即可阅读。`,
         }],
         details: { topic: params.topic, userLevel, types_generated: generatedCount },
       };
@@ -180,10 +238,13 @@ const extractCardsTool = createTool(
 文献内容：
 ${params.literatureContent.slice(0, 8000)}
 
-仅返回概念名称列表，每行一个。`;
+仅返回概念名称列表，每行一个。
+
+## ⚠️ 强制输出语言：中文
+所有内容必须用中文输出。专有名词保留原文。`;
 
         const candidateResult = await aiManager.callAPI(
-          '你是一个精确的概念识别专家。只输出概念名称列表。',
+          '你是一个精确的概念识别专家。只输出概念名称列表。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
           [{ role: 'user', content: candidatePrompt }],
         );
 
@@ -201,12 +262,7 @@ ${params.literatureContent.slice(0, 8000)}
 
         const conceptList = candidates.map((c, i) => `${i + 1}. ${c}`).join('\n');
 
-        globalThis.dispatchEvent(new CustomEvent('axiom:ask-user', {
-          detail: {
-            question: `从文献《${params.literatureTitle}》中识别到以下候选概念（${candidates.length}个），是否提取？\n\n${conceptList}\n\n确认后我将开始提取。`,
-            context: { tool: 'extract_cards', args: params, candidates },
-          },
-        }));
+        console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
 
         return {
           content: [{ type: 'text', text: `从《${params.literatureTitle}》中识别到 ${candidates.length} 个候选概念。请确认是否提取。` }],
@@ -230,7 +286,7 @@ ${params.literatureContent.slice(0, 8000)}
 - examples: 至少一个具体例子（来自文献或现实生活）
 - tags: 标签数组（用于分类）
 
-以JSON数组格式返回（严格JSON，不要其他文字）：
+以JSON数组格式返回（严格JSON，不要 \`\`\`json 包裹，不要任何其他文字）：
 [
   {
     "title": "概念名称",
@@ -248,10 +304,13 @@ ${params.literatureContent.slice(0, 8000)}
 
 文献标题：${params.literatureTitle}
 文献内容：
-${params.literatureContent.slice(0, 8000)}`;
+${params.literatureContent.slice(0, 8000)}
+
+## ⚠️ 强制输出语言：中文
+所有内容必须用中文输出。专有名词保留原文。`;
 
       const llmResult = await aiManager.callAPI(
-        '你是一个精确的概念提取专家。严格按照JSON格式返回。',
+        '你是一个精确的概念提取专家。严格按照JSON格式返回。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
         [{ role: 'user', content: extractionPrompt }],
       );
 
@@ -297,8 +356,19 @@ ${params.literatureContent.slice(0, 8000)}`;
         };
       }
 
-      // Step 3: Create fleeing cards for each concept
-      const createdCards: Array<{ title: string; cardPath?: string }> = [];
+      // Step 3: Create DB card records for each concept
+      const createdCards: Array<{ title: string; id?: string }> = [];
+      const { prisma: pdb } = await import('@/lib/db');
+      const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
+      const vid = getCurrentVaultId();
+
+      if (!vid) {
+        return {
+          content: [{ type: 'text', text: '错误: 未找到当前 Vault' }],
+          details: { error: 'No vault id in context' },
+        };
+      }
+
       for (const concept of concepts) {
         const cardContent = `# ${concept.title}
 
@@ -314,44 +384,46 @@ ${(concept.examples || []).map(e => `- ${e}`).join('\n')}
 > 来源：[[${params.literatureTitle}]]`;
 
         try {
-          const result = await axiom.createFleeing?.(
-            vaultPath,
-            cardContent,
-            params.literatureTitle,
-          );
-          createdCards.push({ title: concept.title, cardPath: (result as any)?.cardPath || (result as any)?.id });
+          const safeTitle = concept.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100);
+          const card = await pdb.card.create({
+            data: {
+              vaultId: vid,
+              path: `fleeting/${safeTitle}.md`,
+              title: concept.title,
+              content: cardContent,
+              type: 'fleeting',
+              tags: JSON.stringify(concept.tags || []),
+            },
+          });
+          createdCards.push({ title: concept.title, id: card.id });
         } catch (cardError) {
           console.warn(`[extract_cards] Failed to create card for "${concept.title}":`, cardError);
           createdCards.push({ title: concept.title });
         }
       }
 
-      // Step 4: Update literature frontmatter linked_fleeing (T-04-02-04: read existing, merge, write)
+      // Step 4: Link extracted cards to source literature via edges
       try {
-        const litResult = await axiom.loadLiterature?.(vaultPath);
-        if (litResult?.success && litResult.data) {
-          const litItem = litResult.data.find((item: any) =>
-            item.title === params.literatureTitle || item.cardPath?.includes(params.literatureTitle)
-          );
-          if (litItem) {
-            const existingLinks: string[] = litItem.linked_fleeing || [];
-            const newLinks = createdCards
-              .filter(c => c.cardPath)
-              .map(c => c.title);
-            const mergedLinks = [...new Set([...existingLinks, ...newLinks])];
-
-            await (axiom as any).updateLiterature?.(
-              vaultPath,
-              params.literatureTitle,
-              { linked_fleeing: mergedLinks },
-              litItem.content || '',
-            );
-          } else {
-            console.warn('[extract_cards] Literature item not found for linked_fleeing update');
+        const sourceCard = await pdb.card.findFirst({
+          where: { vaultId: vid, title: params.literatureTitle, type: 'literature' },
+          select: { id: true },
+        });
+        if (sourceCard) {
+          for (const c of createdCards) {
+            if (!c.id) continue;
+            await pdb.edge.create({
+              data: {
+                vaultId: vid,
+                sourceId: sourceCard.id,
+                targetId: c.id,
+                type: 'derived',
+                weight: 1,
+              },
+            }).catch(() => {});
           }
         }
       } catch (updateError) {
-        console.warn('[extract_cards] Failed to update literature linked_fleeing:', updateError);
+        console.warn('[extract_cards] Failed to link cards to literature:', updateError);
       }
 
       const conceptNames = concepts.map(c => c.title).join('、');
@@ -390,8 +462,11 @@ const generatePptTool = createTool(
       let slidesText = params.slides || '';
       if (!slidesText) {
         const { aiManager } = await import('../../ai/AIManager');
-        const prompt = `生成一份关于"${params.topic}"的PPT内容。每页用 --- 分隔。每页格式：# 标题\\n- 要点1\\n- 要点2...。至少8页，包括封面和总结页。不要用emoji。`;
-        slidesText = await aiManager.callAPI(prompt, [{ role: 'user', content: `主题: ${params.topic}` }]);
+        const prompt = `生成一份关于"${params.topic}"的PPT内容。每页用 --- 分隔。每页格式：# 标题\\n- 要点1\\n- 要点2...。至少8页，包括封面和总结页。不要用emoji。内部推理即可，不要输出思考过程。直接返回 JSON 结果。`;
+        slidesText = await aiManager.callAPI(prompt, [{ role: 'user', content: `主题: ${params.topic}
+
+## ⚠️ 强制输出语言：中文
+所有内容必须用中文输出。专有名词保留原文。` }]);
         if (!slidesText || slidesText.trim().length < 50) {
           return { content: [{ type: 'text', text: 'PPT 内容生成失败，请重试。' }], details: {} };
         }
@@ -412,9 +487,7 @@ const generatePptTool = createTool(
         return { content: [{ type: 'text', text: `PPT 生成失败: ${result?.error || '未知错误'}` }], details: {} };
       }
 
-      globalThis.dispatchEvent(new CustomEvent('axiom:toast', {
-        detail: { message: `生成 PPT: ${params.topic} (${result.slides}页)`, type: 'card' },
-      }));
+      console.log(`[Event] axiom:toast — card: 生成 PPT: ${params.topic} (${result.slides}页)`);
 
       return {
         content: [{ type: 'text', text: `PPT 已生成！"${params.topic}" ${result.slides} 页，文献盒中可查看。刷新文献列表即可看到。` }],

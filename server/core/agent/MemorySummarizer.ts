@@ -1,7 +1,6 @@
 /**
  * MemorySummarizer — 记忆摘要
  *
- * 对标 Hermes: 压缩前 memory flush 机制中的记忆摘要能力
  *
  * 当记忆内容过长时，自动摘要以保持关键信息。
  * 使用 LLM 生成摘要，保留用户偏好、行为模式和关键事实。
@@ -40,7 +39,6 @@ export class MemorySummarizer {
 
   /**
    * 摘要记忆条目
-   * 对标 Hermes: memory flush 中 LLM 决定保存什么
    */
   async summarize(entries: SummarizableEntry[]): Promise<SummarizedMemory> {
     const combinedContent = entries.map(e => `[${e.category || 'general'}] ${e.content}`).join('\n\n');

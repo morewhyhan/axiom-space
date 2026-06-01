@@ -11,7 +11,7 @@
 
 import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
-import { DEFAULT_MODEL } from '@/types/agent';
+import { resolveAiConfig } from '@/lib/ai-config';
 
 export interface WebSearchModel {
   id: string;
@@ -33,9 +33,8 @@ const axiom = createAxiomCompat(fileStorage);
       if (key) return key;
     } catch { /* ignore */ }
   }
-  // fallback: 环境配置中可能包含 key（开发模式）
-  const env = axiom?.getEnvConfig?.() || {};
-  return env.VITE_AI_API_KEY || '';
+  // fallback: 统一从 env 配置读取
+  return resolveAiConfig().model.apiKey;
 }
 
 /**
@@ -43,11 +42,11 @@ const axiom = createAxiomCompat(fileStorage);
  * 修复 Bug B: api 字段使用 'openai-completions'
  */
 export function createWebSearchModel(env?: Record<string, string>): WebSearchModel {
-  const e = env || process.env || {};
+  const aiConfig = resolveAiConfig();
   return {
-    id: e.VITE_AI_MODEL || DEFAULT_MODEL,
-    provider: e.VITE_AI_PROVIDER || 'zai',
-    baseUrl: e.VITE_AI_API_BASE || 'https://open.bigmodel.cn/api/paas/v4',
+    id: aiConfig.model.modelId,
+    provider: aiConfig.model.provider,
+    baseUrl: aiConfig.model.baseUrl || 'https://open.bigmodel.cn/api/paas/v4',
     api: 'openai-completions',
   };
 }

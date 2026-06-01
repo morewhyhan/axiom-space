@@ -132,8 +132,17 @@ export function filterToolsByIntent(
     return null; // 不限制
   }
 
-  // 始终包含核心自主工具
-  const allowed = new Set([...intentRoute.tools, 'memory_search', 'search_history', 'assess_understanding', 'ask_user']);
+  // 始终包含核心工具 — Agent 必须能在任何意图下访问知识库
+  const allowed = new Set([
+    ...intentRoute.tools,
+    // Core: knowledge graph & vault access (always available)
+    'memory_search', 'search_history', 'search_cards', 'refresh_vault',
+    'assess_understanding', 'ask_user', 'feynman_test',
+    // Core: card creation (Agent must be able to create cards anytime)
+    'create_fleeing_card', 'create_permanent_card',
+    // Core: resource generation
+    'push_resource', 'extract_cards',
+  ]);
 
   return allTools.filter(t => allowed.has(t));
 }

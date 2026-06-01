@@ -2,7 +2,6 @@
  * Knowledge Graph Integration
  * 知识图谱与学习系统集成
  *
- * 对标 Hermes 的知识图谱系统，实现：
  * - 概念状态追踪（锁定→学习中→已完成）
  * - 学习进度自动同步
  * - 智能路径推荐
@@ -468,12 +467,7 @@ export class GraphIntegrationManager {
    * 触发图谱更新事件
    */
   private _emitGraphUpdate(): void {
-    const event = new CustomEvent('knowledge-graph-update', {
-      detail: {
-        graph: this.currentGraph,
-      },
-    });
-    globalThis.dispatchEvent(event);
+    console.log('[Event] knowledge-graph-update — graph updated');
   }
 }
 

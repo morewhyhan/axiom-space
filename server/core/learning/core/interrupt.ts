@@ -1,6 +1,5 @@
 /**
  * Interruptible - 中断传播基类
- * 对标 Hermes 的中断传播机制
  *
  * 提供：
  * - 中断标记与检查
@@ -21,7 +20,6 @@ export class InterruptError extends Error {
 /**
  * 可中断基类
  *
- * 对标 Hermes:
  * ```python
  * class Interruptible:
  *     _interrupted: bool = False

@@ -4,6 +4,8 @@ import {
   RESOURCE_FILE_MAP,
   type ResourceType,
 } from './ResourceGenerationState';
+import { HyperFramesHTMLBuilder } from '../ai/hyperframes/generator';
+import type { HyperFramesConfig } from '../ai/hyperframes/generator';
 
 export interface OrchestratorDeps {
   callLLM: (systemPrompt: string, userMessage: string) => Promise<string>;
@@ -86,6 +88,69 @@ mindmap
     "explanation": "区分这两个概念的要点是..."
   }
 ]`,
+  video: `你是 AXIOM 教学视频脚本生成专家。请根据以下学习主题，生成一个教学动画视频的场景配置。
+
+要求：
+1. 生成 4-6 个场景，每个场景有明确的 id、duration（秒）、backgroundColor
+2. 每个场景包含 2-5 个元素（element），类型为 text/code/shape
+3. 场景设计要体现教学节奏：开场(intro) → 核心讲解(content) x1-3 → 示例演示(example) → 总结(conclusion)
+4. 元素位置 (x, y) 合理布局，文字内容简洁有力
+5. 为关键元素添加动画（fadeIn/slideIn/bounce/scale），duration 0.5-1.5s
+6. 根据用户水平调整：入门→多生活类比+慢节奏(每场景8-12s)，中级→原理推导+正常节奏(5-8s)，进阶→深层机制+快节奏(3-5s)
+7. 总时长控制在 30-90 秒
+
+以严格 JSON 格式返回（不要 JSON 包裹，不要任何其他文字）：
+{
+  "scenes": [
+    {
+      "id": "intro",
+      "duration": 6,
+      "backgroundColor": "#f0f4f8",
+      "elements": [
+        {
+          "type": "text",
+          "x": 100,
+          "y": 100,
+          "content": "学习主题名称",
+          "fontSize": 48,
+          "color": "#1a1a1a",
+          "fontWeight": "bold",
+          "animation": { "type": "fadeIn", "duration": 1 }
+        },
+        {
+          "type": "shape",
+          "x": 50,
+          "y": 200,
+          "width": 200,
+          "height": 4,
+          "shape": "rect",
+          "fillColor": "#0066cc",
+          "animation": { "type": "slideIn", "duration": 1, "delay": 0.3 }
+        }
+      ]
+    },
+    {
+      "id": "content-1",
+      "duration": 10,
+      "backgroundColor": "#ffffff",
+      "elements": [
+        {
+          "type": "text",
+          "x": 80,
+          "y": 40,
+          "content": "核心概念一",
+          "fontSize": 32,
+          "color": "#0066cc",
+          "fontWeight": "bold",
+          "animation": { "type": "fadeIn", "duration": 0.8 }
+        }
+      ]
+    }
+  ],
+  "width": 1920,
+  "height": 1080,
+  "fps": 30
+}`,
 };
 
 // ── Quality validation ───────────────────────────────────────────
@@ -130,6 +195,23 @@ function validateResource(type: ResourceType, content: string): string | null {
       }
       break;
     }
+    case 'video': {
+      if (len < 200) return `Too short (${len} chars, min 200)`;
+      try {
+        const config = JSON.parse(text);
+        if (!config.scenes || !Array.isArray(config.scenes)) return 'Missing scenes array';
+        if (config.scenes.length < 3) return `Need at least 3 scenes, got ${config.scenes.length}`;
+        for (let i = 0; i < config.scenes.length; i++) {
+          const s = config.scenes[i];
+          if (!s.id || typeof s.duration !== 'number') return `Scene ${i + 1}: missing id or duration`;
+          if (!s.elements || !Array.isArray(s.elements) || s.elements.length === 0) return `Scene ${i + 1}: missing elements`;
+        }
+        if (!config.width || !config.height || !config.fps) return 'Missing width/height/fps';
+      } catch {
+        return 'Video config is not valid JSON';
+      }
+      break;
+    }
   }
   return null; // valid
 }
@@ -171,14 +253,21 @@ export class ResourceGenerationOrchestrator {
         }
 
         const prompt = RESOURCE_PROMPTS[type];
-        const content = await this.deps.callLLM(prompt, context);
-        const cleaned = this.cleanOutput(type, content);
+        let content = await this.deps.callLLM(prompt, context);
+        let cleaned = this.cleanOutput(type, content);
 
         const validationError = validateResource(type, cleaned);
         if (validationError) {
           this.state.failGenerating(type, validationError);
           results.push({ type, status: 'failed', error: validationError });
           continue;
+        }
+
+        // For video: convert JSON config to self-contained HTML animation
+        if (type === 'video') {
+          const config = JSON.parse(cleaned) as HyperFramesConfig;
+          const htmlBuilder = new HyperFramesHTMLBuilder();
+          cleaned = htmlBuilder.buildHTML(config);
         }
 
         await this.deps.saveResource(type, literatureTitle, cleaned);
@@ -217,6 +306,11 @@ export class ResourceGenerationOrchestrator {
     if (type === 'quiz') {
       const jsonMatch = text.match(/(\[[\s\S]*\])/);
       if (jsonMatch) text = jsonMatch[1].trim();
+    }
+    if (type === 'video') {
+      // Extract JSON config from LLM output
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) text = jsonMatch[0].trim();
     }
     return text.trim();
   }

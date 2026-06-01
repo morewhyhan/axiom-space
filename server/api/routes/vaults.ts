@@ -9,11 +9,9 @@ import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 
 const app = new Hono<{ Variables: { userId: string } }>()
-
-app.use('/*', requireAuth)
-
-// GET /api/vaults — 列出当前用户所有 vault
-app.get('/', async (c) => {
+  .use('/*', requireAuth)
+  // GET /api/vaults — 列出当前用户所有 vault
+  .get('/', async (c) => {
   const userId = c.get('userId') as string
 
   const vaults = await prisma.vault.findMany({
@@ -34,7 +32,7 @@ app.get('/', async (c) => {
 })
 
 // POST /api/vaults — 创建新 vault
-app.post('/', zValidator('json', z.object({
+.post('/', zValidator('json', z.object({
   name: z.string().min(1).max(100).optional().default('My Vault'),
 })), async (c) => {
   const userId = c.get('userId') as string

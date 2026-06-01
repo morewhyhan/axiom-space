@@ -2,45 +2,36 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
-import { useState, useEffect } from 'react'
-import type { GalaxyNode, GalaxyEdge, GalaxyCluster, GalaxyData } from '@/types/galaxy'
-
-const typedClient = client as any
+import { useAppStore } from '@/stores/mode-store'
+import type { GalaxyData } from '@/types/galaxy'
 
 export function useGalaxyData() {
-  const [data, setData] = useState<GalaxyData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const [nodesRes, edgesRes, clustersRes] = await Promise.all([
-          typedClient.api.galaxy.nodes.$get(),
-          typedClient.api.galaxy.edges.$get(),
-          typedClient.api.galaxy.clusters.$get(),
-        ])
-        const [nodesData, edgesData, clustersData] = await Promise.all([
-          nodesRes.json(),
-          edgesRes.json(),
-          clustersRes.json(),
-        ])
+  const query = useQuery({
+    queryKey: ['galaxy', currentVaultId],
+    queryFn: async () => {
+      const params = currentVaultId ? { query: { vid: currentVaultId } } : {}
 
-        if (!cancelled) {
-          setData({
-            nodes: (nodesData as any).nodes ?? [],
-            edges: (edgesData as any).edges ?? [],
-            clusters: (clustersData as any).clusters ?? [],
-          })
-        }
-      } catch (err) {
-        console.warn('[useGalaxyData] failed to fetch:', err)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [])
+      const [nodesRes, edgesRes, clustersRes] = await Promise.all([
+        client.api.galaxy.nodes.$get(params),
+        client.api.galaxy.edges.$get(params),
+        client.api.galaxy.clusters.$get(params),
+      ])
+      const [nodesData, edgesData, clustersData] = await Promise.all([
+        nodesRes.json(),
+        edgesRes.json(),
+        clustersRes.json(),
+      ])
 
-  return { data, loading }
+      return {
+        nodes: (nodesData as any).nodes ?? [],
+        edges: (edgesData as any).edges ?? [],
+        clusters: (clustersData as any).clusters ?? [],
+      } as GalaxyData
+    },
+    enabled: !!currentVaultId,
+  })
+
+  return { data: query.data ?? null, loading: query.isLoading }
 }
