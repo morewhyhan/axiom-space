@@ -1056,6 +1056,33 @@ async function seedUser(email: string, name: string) {
 
   const dbEdgeCount = await prisma.edge.count({ where: { vaultId: vault.id } })
   console.log('  Edges: ' + dbEdgeCount + ' (auto-generated from [[WikiLink]])')
+
+  // ── Seed AI observations ──
+  const obsCount = await prisma.vaultMemory.count({ where: { vaultId: vault.id, category: 'observation' } })
+  if (obsCount === 0) {
+    const observations = [
+      '用户在数据结构方面进展较快，排序算法的理解和表达能力突出',
+      '在递归问题上经常犹豫，建议加强函数调用栈的练习',
+      '用户偏好通过代码示例理解概念，抽象定义后配合具体例子效果更好',
+      '最近学习强度有所下降，上周平均每天 2.5 小时，本周降至 1.2 小时',
+      '用户的关联能力很强，经常自发地把新概念和已有知识类比',
+      '在计算机网络 OSI 模型的理解上还不够系统化，建议从物理层开始逐层深入',
+      '用户对编译原理表现出浓厚兴趣，可以推荐相关学习路径',
+      '代码书写规范，注释清晰，表达能力强，但项目实战经验不足',
+    ]
+    for (const text of observations) {
+      await prisma.vaultMemory.create({
+        data: {
+          vaultId: vault.id,
+          key: `seed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          value: JSON.stringify({ text, category: 'general' }),
+          category: 'observation',
+          createdAt: randomPastDate(14),
+        },
+      })
+    }
+    console.log('  Observations: ' + observations.length + ' seeded')
+  }
 }
 
 async function main() {

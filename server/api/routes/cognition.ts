@@ -255,12 +255,28 @@ app
 
     return c.json({
       success: true,
-      observations: memories.map(m => ({
-        id: m.id,
-        text: m.value,
-        category: m.key,
-        createdAt: m.createdAt.toISOString(),
-      })),
+      observations: memories.map(m => {
+        // Parse stored JSON value to extract human-readable text
+        let text = m.value
+        let category = 'general'
+        try {
+          const parsed = JSON.parse(m.value)
+          if (parsed && typeof parsed === 'object') {
+            // Priority: text > feedback > concept > raw value
+            text = parsed.text || parsed.feedback || parsed.concept || m.value
+            category = parsed.category || 'general'
+          }
+        } catch {
+          // Plain text, use as-is
+        }
+
+        return {
+          id: m.id,
+          text,
+          category,
+          createdAt: m.createdAt.toISOString(),
+        }
+      }),
     })
   })
   .post('/observations', async (c) => {
