@@ -36,10 +36,17 @@ Skill 必须是完整的可迁移能力，不是随机关键词：
 ## 3. 学习卡片
 用户清晰表达概念理解→创建卡片。用自己的话+例子+关联才升级为 permanent。
 
-## 4. 规则
+## 4. 观察记录 — 自由记录关于用户的学习发现
+从本轮对话中提取有价值的观察，用自然语言写一条简短的文字记录。
+可以是学习习惯、知识盲区、理解方式、进展、困难、兴趣方向等。
+无新发现则返回空数组 observations: []。
+例: "用户对链表操作已非常熟练，能自主分析时间复杂度"
+例: "在谈到图论时用户表现出困惑，可能是缺少实际应用体验"
+
+## 5. 规则
 - 本轮无新信息→返回 {}
-- 有信息→返回 JSON: {"profile": {"learningGoals": [...], "domainProgress": {...}, "challengeAreas": [...], "interactionPatterns": [...]}, "skills": [...], "cards": [...]}
-- profile 只包含上述 4 个字段，不写其他 key
+- 有信息→返回 JSON: {"profile": {...}, "skills": [...], "cards": [...], "observations": ["观察1", "观察2"]}
+- observations 是自由文本数组，每条约 20-60 字
 - 输出纯JSON，不要其他文字`;
 
 // ── Types ──
@@ -52,7 +59,7 @@ interface CardUpdate {
   type: 'fleeting' | 'permanent'; title: string; content: string; status?: string;
 }
 interface AnalysisResult {
-  profile?: ProfileUpdate; skills?: SkillUpdate[]; cards?: CardUpdate[];
+  profile?: ProfileUpdate; skills?: SkillUpdate[]; cards?: CardUpdate[]; observations?: string[];
 }
 
 // ── BackgroundAnalyzer ──
@@ -90,7 +97,6 @@ export class BackgroundAnalyzer {
 
       if (result.profile && Object.keys(result.profile).length > 0) {
         await this.applyProfileUpdate(result.profile);
-        this.notify('profile', `更新画像: ${Object.keys(result.profile).join(', ')}`);
       }
 
       if (result.skills && result.skills.length > 0) {
@@ -100,8 +106,6 @@ export class BackgroundAnalyzer {
           if (!skill.description || skill.description.length < 30) continue;
           if (!skill.name || !skill.category) continue;
           await this.applySkillUpdate(skill);
-          this.notify('skill', `提取技能: ${skill.name}`);
-          await this.writeObservation(`检测到技能: ${skill.name} — ${skill.description.slice(0, 100)}`, 'skill');
         }
       }
 
@@ -109,13 +113,16 @@ export class BackgroundAnalyzer {
         for (const card of result.cards) {
           if (!card.title || !card.content) continue;
           await this.applyCardUpdate(card);
-          this.notify('card', `创建卡片: ${card.title}`);
-          await this.writeObservation(`从对话中提取概念卡片: ${card.title}`, 'card');
         }
       }
 
-      if (result.profile && Object.keys(result.profile).length > 0) {
-        await this.writeObservation(`更新用户画像: ${Object.keys(result.profile).join(', ')}`, 'profile');
+      // ── Write free-form observations from LLM ──
+      if (result.observations && result.observations.length > 0) {
+        for (const obsText of result.observations) {
+          if (typeof obsText === 'string' && obsText.trim().length > 0) {
+            await this.writeObservation(obsText.trim());
+          }
+        }
       }
 
       return result;
@@ -191,20 +198,10 @@ export class BackgroundAnalyzer {
           type: card.type,
         },
       })
-
-      // Also write as observation
-      await prisma.vaultMemory.create({
-        data: {
-          vaultId: vid,
-          key: `bg_${Date.now()}`,
-          value: JSON.stringify({ type: 'card', cardType: card.type, title: card.title, content: card.content }),
-          category: 'observation',
-        },
-      }).catch(() => {})
     } catch (err) { console.debug('[BackgroundAnalyzer] Card creation failed:', err); }
   }
 
-  private async writeObservation(text: string, category = 'insight') {
+  private async writeObservation(text: string) {
     try {
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
       const vid = getCurrentVaultId()
@@ -213,7 +210,7 @@ export class BackgroundAnalyzer {
         data: {
           vaultId: vid,
           key: `obs_${Date.now()}`,
-          value: JSON.stringify({ text, category }),
+          value: JSON.stringify({ text }),
           category: 'observation',
         },
       })
