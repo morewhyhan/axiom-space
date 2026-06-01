@@ -5,6 +5,7 @@ import { useLearningPaths, useExecuteStep, useUpdateStepProgress } from '@/hooks
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { toast } from 'sonner'
+import PathAdjustmentHistoryPanel from './path-adjustment-history-panel'
 
 export default function LearnList() {
   const { data, loading, refetch } = useLearningPaths()
@@ -16,6 +17,9 @@ export default function LearnList() {
   const setSelectedPathId = useAppStore(s => s.setSelectedPathId)
   const setSelectedNode = useAppStore(s => s.setSelectedNode)
   const setMode = useAppStore(s => s.setMode)
+
+  // View toggle: 'steps' | 'history'
+  const [viewMode, setViewMode] = useState<'steps' | 'history'>('steps')
 
   // Track evaluation results per step
   const [evalResults, setEvalResults] = useState<Record<string, { passed: boolean; feedback: string }>>({})
@@ -205,11 +209,36 @@ export default function LearnList() {
               {totalDone}/{steps.length}
             </span>
           </div>
+
+          {/* ── View Toggle ── */}
+          <div className="mt-3 flex gap-1 bg-black/30 rounded-lg p-1">
+            <button
+              className={`flex-1 py-1.5 rounded-md text-center mono transition-all text-[9px] ${
+                viewMode === 'steps'
+                  ? 'bg-purple-500/20 text-purple-400'
+                  : 'text-white/25 hover:text-white/45'
+              }`}
+              onClick={() => setViewMode('steps')}
+            >
+              学习步骤
+            </button>
+            <button
+              className={`flex-1 py-1.5 rounded-md text-center mono transition-all text-[9px] ${
+                viewMode === 'history'
+                  ? 'bg-cyan-500/20 text-cyan-400'
+                  : 'text-white/25 hover:text-white/45'
+              }`}
+              onClick={() => setViewMode('history')}
+            >
+              调整历史
+            </button>
+          </div>
         </div>
 
-        {/* ── Steps ── */}
-        <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 px-4 py-4 space-y-5">
-          {chapterList.map(([chapter, chapterSteps]) => {
+        {/* ── Content: Steps or History ── */}
+        {viewMode === 'steps' ? (
+          <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 px-4 py-4 space-y-5">
+            {chapterList.map(([chapter, chapterSteps]) => {
             const chDone = chapterSteps.filter(
               s => s.status === 'completed' || s.status === 'mastered',
             ).length
@@ -362,12 +391,17 @@ export default function LearnList() {
             )
           })}
         </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 px-4 py-4">
+            <PathAdjustmentHistoryPanel />
+          </div>
+        )}
 
         {/* ── Footer ── */}
         <div className="px-6 py-3 bg-black/20 border-t border-white/5 flex items-center justify-between opacity-25">
-          <span className="mono text-[7px]">{chapterList.length} 个概念组</span>
+          <span className="mono text-[7px]">{viewMode === 'steps' ? `${chapterList.length} 个概念组` : 'AI 动态调整'}</span>
           <span className="mono text-[7px]">
-            {totalDone}/{steps.length} 已掌握
+            {viewMode === 'steps' ? `${totalDone}/${steps.length} 已掌握` : '基于真实评估'}
           </span>
         </div>
       </div>
