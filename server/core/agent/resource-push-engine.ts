@@ -5,6 +5,7 @@
  */
 
 import { nanoid } from 'nanoid';
+import { emitNotification } from './notification-bus';
 
 /**
  * 推送触发器定义
@@ -41,7 +42,9 @@ export interface PushTrigger {
 export interface PushNotification {
   id: string;
   userId: string;
+  vaultId: string;
   triggerId: string;
+  triggerType: PushTrigger['type'];
   title: string;
   reason: string; // 推送原因（展示给用户）
   resources: Array<{
@@ -84,12 +87,63 @@ export class ResourcePushEngine {
 
   /**
    * 启动定时推送检查
+   * 从 DB 读取 vault 数据，检测触发条件，推送通知到 DB + 通知总线
    */
   startPeriodicPushes(intervalMs: number = 6 * 3600 * 1000): void {
     const timer = setInterval(async () => {
       console.log('[ResourcePushEngine] 执行定时推送检查');
-      // 这里会在真实实现中连接到数据库获取所有活跃用户
-      // 并为每个用户检测触发条件
+      try {
+        const { prisma } = await import('@/lib/db');
+
+        // 读取所有活跃 vault 及其画像缓存
+        const vaults = await prisma.vault.findMany({
+          select: { id: true, userId: true, profileCache: true },
+        });
+
+        for (const vault of vaults) {
+          if (!vault.userId) continue;
+          const userId = vault.userId;
+
+          // 读取用户的学习路径进度
+          const activePath = await prisma.learningPath.findFirst({
+            where: { userId, vaultId: vault.id, status: 'active' },
+            select: { doneSteps: true, totalSteps: true },
+          });
+
+          // 读取最近的推送记录（用于 scheduled 检测）
+          const lastPush = await prisma.pushRecord.findFirst({
+            where: { userId },
+            orderBy: { sentAt: 'desc' },
+            select: { sentAt: true },
+          });
+          const lastPushTime = lastPush?.sentAt?.getTime();
+
+          // 构建用户状态对象传递给 detectTriggers
+          const profile = vault.profileCache ? JSON.parse(vault.profileCache) : null;
+          const userState: {
+            profile?: any;
+            learningPath?: any;
+            lastActivityTime?: number;
+            lastPushTime?: number;
+            recentAssessments?: Array<{ score: number; maxScore: number; toolName: string }>;
+          } = {
+            profile,
+            learningPath: activePath ? { currentProgress: {} } : undefined,
+            lastActivityTime: lastPushTime,
+            lastPushTime,
+          };
+
+          // 检测触发条件
+          const triggers = await this.detectTriggers(userId, userState);
+
+          for (const trigger of triggers) {
+            const notification = await this.createPushNotification(userId, trigger, vault.id);
+            await this.pushNotification(notification);
+          }
+        }
+      } catch (err) {
+        console.error('[ResourcePushEngine] 定时推送检查失败:', err);
+      }
     }, intervalMs);
 
     this.pushIntervals.set('main', timer);
@@ -113,6 +167,7 @@ export class ResourcePushEngine {
     profile?: any;
     learningPath?: any;
     lastActivityTime?: number;
+    lastPushTime?: number;
     recentAssessments?: Array<{ score: number; maxScore: number; toolName: string }>;
   }): Promise<PushTrigger[]> {
     const triggers: PushTrigger[] = [];
@@ -210,7 +265,7 @@ export class ResourcePushEngine {
     }
 
     // 检查 5：周期性报告（每周推送）
-    if (this.shouldSendWeeklyReport(userId)) {
+    if (this.shouldSendWeeklyReport(userId, userState.lastPushTime)) {
       triggers.push({
         triggerId: nanoid(),
         type: 'weekly_report',
@@ -233,6 +288,7 @@ export class ResourcePushEngine {
   async createPushNotification(
     userId: string,
     trigger: PushTrigger,
+    vaultId: string,
     generatedResources?: Array<{
       id: string;
       type: string;
@@ -244,7 +300,9 @@ export class ResourcePushEngine {
     const notification: PushNotification = {
       id: nanoid(),
       userId,
+      vaultId,
       triggerId: trigger.triggerId,
+      triggerType: trigger.type,
       title: this.getTriggerTitle(trigger.type),
       reason: trigger.resourceRecommendation.reason,
       resources: generatedResources || [],
@@ -258,33 +316,46 @@ export class ResourcePushEngine {
   }
 
   /**
-   * 推送通知给用户
+   * 推送通知给用户 — 写入 DB + 通知总线
    */
   async pushNotification(notification: PushNotification): Promise<void> {
-    // 更新历史记录
-    let history = this.histories.get(notification.userId);
-    if (!history) {
-      history = {
+    const { prisma } = await import('@/lib/db');
+
+    // PushTrigger.type -> PushRecord.trigger 映射
+    const triggerMap: Record<PushTrigger['type'], string> = {
+      assessment_failed: 'assessment_pass',
+      assessment_excellent: 'assessment_pass',
+      path_progressed: 'stage_completion',
+      learning_stalled: 'scheduled',
+      weekly_report: 'scheduled',
+      profile_updated: 'low_dimension',
+    };
+
+    // 写入 PushRecord 表
+    await prisma.pushRecord.create({
+      data: {
         userId: notification.userId,
-        notifications: [],
-        stats: {
-          totalPushed: 0,
-          viewedRate: 0,
-          completedRate: 0
-        }
-      };
+        resources: JSON.stringify(notification.resources),
+        trigger: triggerMap[notification.triggerType] || 'scheduled',
+        reason: notification.reason,
+        sentAt: new Date(notification.createdAt),
+        expiresAt: new Date(notification.expiresAt),
+      },
+    }).catch((err: any) => {
+      console.error(`[ResourcePushEngine] PushRecord 写入失败:`, err?.message);
+    });
+
+    // 推送通知到前端
+    try {
+      await emitNotification(notification.vaultId, {
+        type: 'toast',
+        message: notification.title,
+      });
+    } catch {
+      // 通知推送是 best-effort，失败不影响主流程
     }
 
-    history.notifications.push(notification);
-    history.stats.totalPushed++;
-    history.stats.lastPushTime = Date.now();
-
-    this.histories.set(notification.userId, history);
-
-    // 这里会实现真实的推送逻辑
-    // - WebSocket 推送
-    // - 数据库保存
-    // - 邮件通知（如配置）
+    // 保留原有调试日志
     console.log(`[ResourcePushEngine] 推送通知给用户 ${notification.userId}: ${notification.title}`);
   }
 
@@ -363,11 +434,11 @@ export class ResourcePushEngine {
   /**
    * 辅助方法：判断是否应发送周报
    */
-  private shouldSendWeeklyReport(userId: string): boolean {
-    const history = this.histories.get(userId);
-    if (!history || !history.stats.lastPushTime) return true;
+  private shouldSendWeeklyReport(userId: string, lastPushTime?: number): boolean {
+    const time = lastPushTime ?? this.histories.get(userId)?.stats?.lastPushTime;
+    if (!time) return true;
 
-    const daysSinceLastWeekly = (Date.now() - history.stats.lastPushTime) / (24 * 3600 * 1000);
+    const daysSinceLastWeekly = (Date.now() - time) / (24 * 3600 * 1000);
     return daysSinceLastWeekly >= 7;
   }
 
