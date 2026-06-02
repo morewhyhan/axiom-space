@@ -21,7 +21,6 @@ import { CheckpointManager } from '@/server/core/agent/feedback/CheckpointManage
 import { SteerMechanism } from '@/server/core/agent/feedback/SteerMechanism';
 import { EmptyResponseHandler } from '@/server/core/agent/feedback/EmptyResponseHandler';
 import type { AxiomAgentConfig, ModelConfig } from '@/types/agent';
-// import { LearningFacade } ... temporarily disabled
 import type { IAgentInfrastructure } from '@/server/core/agent/pipeline/interfaces';
 
 export interface AgentServicesFactoryConfig {
