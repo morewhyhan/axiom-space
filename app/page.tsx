@@ -24,9 +24,8 @@ const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-list'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
-const CognitiveRadar = dynamic(() => import('@/components/cognition/cognitive-radar'))
+const CognitionSidebar = dynamic(() => import('@/components/cognition/cognition-sidebar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
-const ProfileBar = dynamic(() => import('@/components/cognition/profile-bar'))
 const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
 const LearnControls = dynamic(() => import('@/components/learn/learn-controls'))
 const LearnList = dynamic(() => import('@/components/learn/learn-list'))
@@ -363,6 +362,7 @@ export default function Home() {
         // Refresh and wait for galaxy data to be fetched
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
         // Wait for data + one render frame, then focus camera on the new node
         queryClient.refetchQueries({ queryKey: ['galaxy', currentVaultId] }).then(() => {
           requestAnimationFrame(() => {
@@ -396,7 +396,6 @@ export default function Home() {
         import('@/components/forge/forge-editor'),
         import('@/components/galaxy/galaxy-controls'),
         import('@/components/galaxy/galaxy-filter'),
-        import('@/components/cognition/cognitive-radar'),
         import('@/components/cognition/learning-profile'),
         import('@/components/cognition/profile-bar'),
         import('@/components/cognition/observations-panel'),
@@ -450,15 +449,12 @@ export default function Home() {
             if (resetFn) resetFn()
           }}>⊙ RESET VIEW</button>
 
-          <div id="toast-container"></div>
-
           {!immersive && <div className="relative z-10 flex flex-col h-screen pointer-events-none">
             <Header />
             <main className={`main-grid${mode !== 'dashboard' ? ' no-bottom-pad' : ''}${mode === 'cognition' ? ' cognition-mode' : ''}`}>
               {mode === 'cognition' ? (
                 <>
-                  <ProfileBar />
-                  <CognitiveRadar />
+                  <CognitionSidebar />
                   <LearningProfile />
                   <InsightsPanel />
                 </>

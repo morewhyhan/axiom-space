@@ -389,29 +389,6 @@ body {
     gap: 8px;
     pointer-events: none;
 }
-.toast {
-    pointer-events: all;
-    background: rgba(15,15,22,0.9);
-    backdrop-filter: blur(16px);
-    border: 1px solid var(--glass-border);
-    border-radius: 12px;
-    padding: 12px 16px;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    min-width: 280px;
-    max-width: 360px;
-    animation: slideInRight 0.3s ease;
-    transition: all 0.3s ease;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-}
-.toast.removing { opacity: 0; transform: translateX(40px); }
-.toast-icon { font-size: 14px; flex-shrink: 0; margin-top: 1px; }
-.toast-body { flex: 1; }
-.toast-msg { font-size: var(--t-label); color: rgba(255,255,255,0.8); margin-top: 2px; }
-.toast-type { font-family: 'JetBrains Mono', monospace; font-size: var(--f7); letter-spacing: 0.15em; opacity: 0.4; text-transform: uppercase; }
-.toast-close { color: rgba(255,255,255,0.3); cursor: pointer; font-size: 12px; flex-shrink: 0; transition: color 0.2s; }
-.toast-close:hover { color: white; }
 
 .notif-bell { position: relative; cursor: pointer; color: rgba(255,255,255,0.35); transition: color 0.2s; }
 .notif-bell:hover { color: rgba(255,255,255,0.7); }
