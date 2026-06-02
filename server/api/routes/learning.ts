@@ -7,6 +7,8 @@ import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
 import { aiManager } from '@/server/core/ai/AIManager'
+import { pathAdjustmentEngine } from '@/server/core/learning/path-adjustment-engine'
+import type { LearningPath } from '@/server/core/learning/path-adjustment-engine'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
 
@@ -265,6 +267,25 @@ const app = new Hono<{ Variables: { userId: string } }>()
     })
     const existingTitles = existingCards.map(c => c.title).filter(Boolean)
 
+    // Read user capabilities for personalization
+    const capabilities = await prisma.vaultCapability.findMany({
+      where: { vaultId: vid },
+      select: { concept: true, masteryLevel: true, status: true, weakAreas: true, strongAreas: true },
+      take: 50,
+    }).catch(() => [])
+
+    const masteredConcepts = capabilities.filter(c => c.masteryLevel >= 80).map(c => c.concept)
+    const learningConcepts = capabilities.filter(c => c.masteryLevel >= 30 && c.masteryLevel < 80).map(c => c.concept)
+    const weakConcepts = capabilities.filter(c => c.masteryLevel < 30).map(c => c.concept)
+
+    const capabilityContext = capabilities.length > 0 ? `
+## 用户能力档案
+- 已掌握概念 (${masteredConcepts.length}): ${masteredConcepts.join(', ') || '无'}
+- 学习中的概念 (${learningConcepts.length}): ${learningConcepts.join(', ') || '无'}
+- 薄弱概念 (${weakConcepts.length}): ${weakConcepts.join(', ') || '无'}
+- 注意: 优先加强薄弱概念，跳过已掌握概念，适当深化学习中的概念
+` : ''
+
     // ── Batch mode: generate many concept cards with relationships ──
     if (mode === 'batch') {
       try {
@@ -288,13 +309,16 @@ Rules:
 - Each concept links to at least 1-2 other concepts in the list
 - Links represent prerequisite, related, or derived relationships
 - Tags should be relevant keywords (1-3 per concept)
-- Content should be Markdown with a clear definition`
+- Content should be Markdown with a clear definition
+- If User Capability Profile shows mastered concepts, avoid generating them again
+- If weak concepts exist, generate more detailed steps for those areas
+- Adjust difficulty based on the user's current mastery levels`
 
         const batchUserMessage = `Topic: ${topic}
 Level: ${level}
 ${material ? `Reference Material: ${material.slice(0, 3000)}` : ''}
 Existing Knowledge: ${existingTitles.join(', ') || '(none)'}
-
+${capabilityContext}
 Generate ${batchSize} interconnected concept cards for "${topic}".`
 
         const rawResponse = await aiManager.callAPI(batchSystemPrompt, [
@@ -392,6 +416,14 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
           include: { steps: { orderBy: { order: 'asc' } } },
         })
 
+        // Sync engine state (non-fatal)
+        try {
+          const concepts = path.steps?.map((s: any) => s.concept || s.title).filter(Boolean) || []
+          if (concepts.length > 0) {
+            pathAdjustmentEngine.createInitialPath(userId, topic, concepts)
+          }
+        } catch { /* non-fatal */ }
+
         return c.json({
           success: true,
           path: {
@@ -456,13 +488,16 @@ Rules:
 - Each step title should be concise (max 40 chars)
 - estimatedMinutes should be 10-45 per step
 - difficulty should match the user's requested level
-- If the user already knows some concepts (listed in existing knowledge), skip or adjust them`
+- If the user already knows some concepts (listed in existing knowledge), skip or adjust them
+- If User Capability Profile shows mastered concepts, avoid generating them again
+- If weak concepts exist, generate more detailed steps for those areas
+- Adjust difficulty based on the user's current mastery levels`
 
       const userMessage = `Topic: ${topic}
 Level: ${level}
 ${material ? `Reference Material: ${material.slice(0, 3000)}` : ''}
 Existing Knowledge: ${existingTitles.join(', ') || '(none)'}
-
+${capabilityContext}
 Generate a learning path for "${topic}" at ${level} level.`
 
       const rawResponse = await aiManager.callAPI(systemPrompt, [
@@ -584,6 +619,14 @@ Generate a learning path for "${topic}" at ${level} level.`
         include: { steps: { orderBy: { order: 'asc' } } },
       })
 
+      // Sync engine state (non-fatal)
+      try {
+        const concepts = path.steps?.map((s: any) => s.concept || s.title).filter(Boolean) || []
+        if (concepts.length > 0) {
+          pathAdjustmentEngine.createInitialPath(userId, topic, concepts)
+        }
+      } catch { /* non-fatal */ }
+
       return c.json({
         success: true,
         path: {
@@ -670,6 +713,14 @@ Generate a learning path for "${topic}" at ${level} level.`
           },
           include: { steps: { orderBy: { order: 'asc' } } },
         })
+
+        // Sync engine state (non-fatal)
+        try {
+          const concepts = path.steps?.map((s: any) => s.concept || s.title).filter(Boolean) || []
+          if (concepts.length > 0) {
+            pathAdjustmentEngine.createInitialPath(userId, topic, concepts)
+          }
+        } catch { /* non-fatal */ }
 
         return c.json({
           success: true,
@@ -902,12 +953,80 @@ ${conversationText}
       data: { status: finalStatus, mastery: Math.min(100, Math.max(0, finalMastery)) },
     })
 
+    // ── Path adjustment: write adjustment history record ──
+    if (evaluation) {
+      const scorePercentage = evaluation.mastery
+      let adjustmentType: string
+      let adjustmentData: any
+
+      if (scorePercentage < 60) {
+        adjustmentType = 'add_review'
+        adjustmentData = {
+          type: 'add_review',
+          concept: step.title,
+          description: `掌握度 ${scorePercentage}%，建议复习"${step.title}"相关概念`,
+          reason: `评估分数低于60%，需要加强复习`,
+        }
+      } else if (scorePercentage >= 95) {
+        adjustmentType = 'skip_ahead'
+        adjustmentData = {
+          type: 'skip_ahead',
+          concept: step.title,
+          description: `掌握度 ${scorePercentage}%，可以跳过后续相关步骤`,
+          reason: `评估分数达到95%以上，可以加速学习`,
+        }
+      } else {
+        adjustmentType = 'adjust_difficulty'
+        adjustmentData = {
+          type: 'adjust_difficulty',
+          concept: step.title,
+          description: `掌握度 ${scorePercentage}%，继续正常学习进度`,
+          reason: `评估分数在60-95%之间，保持当前节奏`,
+        }
+      }
+
+      await prisma.pathAdjustmentHistory.create({
+        data: {
+          pathId,
+          adjustment: JSON.stringify(adjustmentData),
+          trigger: 'assessment',
+          appliedAt: new Date(),
+          feedback: JSON.stringify({
+            assessmentRef: {
+              toolName: 'code_challenge',
+              score: evaluation.mastery,
+              maxScore: 100,
+            },
+            userFeedback: evaluation.feedback,
+          }),
+        },
+      }).catch((err: any) => {
+        console.warn('[Learning] Failed to create adjustment record:', err?.message)
+      })
+    }
+
     // Fetch all steps for progress recalculation + unlocking
     const allSteps = await prisma.learningPathStep.findMany({
       where: { pathId },
       select: { id: true, order: true, status: true, prerequisites: true },
       orderBy: { order: 'asc' },
     })
+
+      // Sync with PathAdjustmentEngine (non-fatal)
+      try {
+        if (allSteps && evaluation) {
+          const enginePath = buildEnginePath(pathId, userId, { ...path, steps: allSteps })
+          await pathAdjustmentEngine.applyAssessmentFeedback(enginePath, {
+            toolName: 'code_challenge',
+            score: finalMastery,
+            maxScore: 100,
+          }).catch((err: any) => {
+            console.warn('[Learning] Engine applyAssessmentFeedback failed (non-fatal):', err?.message)
+          })
+        }
+      } catch (engineErr: any) {
+        console.warn('[Learning] Failed to sync engine state (non-fatal):', engineErr?.message)
+      }
 
     // If completed or mastered, unlock next steps that depend on this one
     if (finalStatus === 'completed' || finalStatus === 'mastered') {
@@ -1024,10 +1143,12 @@ ${conversationText}
       const cacheStr = vault.profileCache
       if (cacheStr) {
         const profile = JSON.parse(cacheStr)
-        return c.json({ success: true, profile })
+        if (profile._ns === 'learning' && profile.dimensions) {
+          return c.json({ success: true, profile })
+        }
       }
     } catch (e) {
-      // profileCache 无效，返回初始值
+      // profileCache 无效或命名空间不匹配，返回初始值
     }
 
     // 如果缓存不存在，返回初始画像
@@ -1069,12 +1190,15 @@ ${conversationText}
       const { EducationProfileAnalyzer } = await import('@/server/core/learning/education-profile')
       const analyzer = new EducationProfileAnalyzer()
 
-      // 读取当前画像
+      // 读取当前画像（仅限 learning 命名空间）
       let currentProfile = null
       try {
-        currentProfile = vault.profileCache ? JSON.parse(vault.profileCache) : null
+        const parsed = vault.profileCache ? JSON.parse(vault.profileCache) : null
+        if (parsed?._ns === 'learning' && parsed?.dimensions) {
+          currentProfile = parsed
+        }
       } catch (e) {
-        // 缓存损坏，重新创建
+        // 缓存损坏或命名空间不匹配，重新创建
       }
 
       // 分析会话数据
@@ -1092,7 +1216,11 @@ ${conversationText}
       await prisma.vault.update({
         where: { id: vault.id },
         data: {
-          profileCache: JSON.stringify(mergedProfile),
+          profileCache: JSON.stringify({
+            _ns: 'learning',
+            ...mergedProfile,
+            updatedAt: new Date().toISOString(),
+          }),
           updatedAt: new Date(),
         },
       })
@@ -1101,6 +1229,51 @@ ${conversationText}
     } catch (error) {
       console.error('Failed to update profile:', error)
       return c.json({ success: false, error: 'PROFILE_UPDATE_FAILED' }, 500)
+    }
+  })
+
+  // GET /api/learning/path/:pathId/progress — 引擎计算的路径进度
+  .get('/path/:pathId/progress', async (c) => {
+    const userId = c.get('userId') as string
+    const pathId = c.req.param('pathId')
+
+    try {
+      const path = await prisma.learningPath.findUnique({
+        where: { id: pathId },
+        include: { steps: { orderBy: { order: 'asc' } } },
+      })
+
+      if (!path || path.userId !== userId) {
+        return c.json({ success: false, error: 'PATH_NOT_FOUND' }, 404)
+      }
+
+      const enginePath = buildEnginePath(pathId, userId, path)
+      const progress = pathAdjustmentEngine.getProgress(enginePath)
+
+      return c.json({
+        success: true,
+        progress: {
+          percentage: progress.percentage,
+          currentStage: progress.currentStage ? {
+            id: progress.currentStage.id,
+            concept: progress.currentStage.concept,
+            description: progress.currentStage.description,
+            difficulty: progress.currentStage.difficulty,
+            status: progress.currentStage.status,
+          } : null,
+          nextStage: progress.nextStage ? {
+            id: progress.nextStage.id,
+            concept: progress.nextStage.concept,
+            description: progress.nextStage.description,
+            difficulty: progress.nextStage.difficulty,
+            status: progress.nextStage.status,
+          } : null,
+          completionEstimate: progress.completionEstimate,
+        },
+      })
+    } catch (error) {
+      console.error('[Learning] Failed to get engine progress:', error)
+      return c.json({ success: false, error: 'PROGRESS_FETCH_FAILED' }, 500)
     }
   })
 
@@ -1130,13 +1303,46 @@ ${conversationText}
       }
 
       // ✅ 真正从数据库读取调整历史
-      const adjustmentHistory = path.adjustmentHistory.map(adj => ({
-        adjustmentId: adj.id,
-        appliedAt: adj.appliedAt.getTime(),
-        triggeredBy: adj.trigger,
-        adjustment: adj.adjustment ? JSON.parse(adj.adjustment) : null,
-        feedback: adj.feedback ? JSON.parse(adj.feedback) : null,
-      }))
+      const adjustmentHistory = path.adjustmentHistory.map(adj => {
+        let parsedAdjustment: any = null
+        let parsedFeedback: any = null
+        try { parsedAdjustment = adj.adjustment ? JSON.parse(adj.adjustment) : null } catch {}
+        try { parsedFeedback = adj.feedback ? JSON.parse(adj.feedback) : null } catch {}
+
+        return {
+          id: adj.id,           // frontend expects 'id'
+          adjustmentId: adj.id, // keep for compatibility
+          appliedAt: adj.appliedAt.getTime(),
+          trigger: adj.trigger,           // frontend expects 'trigger' not 'triggeredBy'
+          triggeredBy: adj.trigger,       // keep for compatibility
+          adjustment: parsedAdjustment,
+          assessmentRef: parsedFeedback?.assessmentRef || null,
+          feedback: parsedFeedback?.userFeedback || null,
+        }
+      })
+
+      // Merge engine in-memory adjustments (non-fatal)
+      try {
+        const enginePath = buildEnginePath(path.id, userId, path)
+        const engineHistory = pathAdjustmentEngine.getAdjustmentHistory(enginePath)
+        if (engineHistory.length > 0) {
+          const dbIds = new Set(adjustmentHistory.map((a: any) => a.adjustmentId || a.id))
+          for (const ea of engineHistory) {
+            if (!dbIds.has(ea.adjustmentId)) {
+              adjustmentHistory.push({
+                id: ea.adjustmentId,
+                adjustmentId: ea.adjustmentId,
+                appliedAt: ea.appliedAt,
+                triggeredBy: ea.triggeredBy,
+                adjustment: ea.adjustment,
+                assessmentRef: ea.assessmentRef || null,
+                feedback: ea.userFeedback || null,
+                _fromEngine: true,
+              } as any)
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
 
       // 计算进度信息
       const completedSteps = path.steps.filter(s => s.status === 'completed').length
@@ -1156,6 +1362,57 @@ ${conversationText}
     } catch (error) {
       console.error('Failed to get path adjustments:', error)
       return c.json({ success: false, error: 'FETCH_FAILED' }, 500)
+    }
+  })
+
+  // POST /api/learning/path/:pathId/adjustment/:adjustmentId/accept — 接受路径调整
+  .post('/path/:pathId/adjustment/:adjustmentId/accept', async (c) => {
+    const userId = c.get('userId') as string
+    const pathId = c.req.param('pathId')
+    const adjustmentId = c.req.param('adjustmentId')
+
+    try {
+      const body = await c.req.json().catch(() => ({}))
+      const feedback = (body.feedback as string) || undefined
+
+      const path = await prisma.learningPath.findUnique({
+        where: { id: pathId },
+        include: { steps: { orderBy: { order: 'asc' } } },
+      })
+
+      if (!path || path.userId !== userId) {
+        return c.json({ success: false, error: 'PATH_NOT_FOUND' }, 404)
+      }
+
+      const enginePath = buildEnginePath(pathId, userId, path)
+      const accepted = pathAdjustmentEngine.acceptAdjustment(enginePath, adjustmentId, feedback)
+
+      if (!accepted) {
+        return c.json({ success: false, error: 'ADJUSTMENT_NOT_FOUND' }, 404)
+      }
+
+      // Update the Prisma adjustment record with acceptance metadata
+      const adjustmentRecord = await prisma.pathAdjustmentHistory.findFirst({
+        where: { pathId, id: adjustmentId },
+      })
+      if (adjustmentRecord) {
+        const existingFeedback = adjustmentRecord.feedback ? JSON.parse(adjustmentRecord.feedback) : {}
+        await prisma.pathAdjustmentHistory.update({
+          where: { id: adjustmentId },
+          data: {
+            feedback: JSON.stringify({
+              ...existingFeedback,
+              acceptedAt: Date.now(),
+              userFeedback: feedback || null,
+            }),
+          },
+        }).catch(() => { /* non-fatal */ })
+      }
+
+      return c.json({ success: true })
+    } catch (error) {
+      console.error('[Learning] Failed to accept adjustment:', error)
+      return c.json({ success: false, error: 'ACCEPT_FAILED' }, 500)
     }
   })
 
@@ -1245,6 +1502,34 @@ ${conversationText}
     } catch (error) {
       console.error('Failed to record push feedback:', error)
       return c.json({ success: false, error: 'FEEDBACK_FAILED' }, 500)
+    }
+  })
+
+  // PATCH /api/learning/push-resources/:pushId/read — 标记推送为已读
+  .patch('/push-resources/:pushId/read', async (c) => {
+    const userId = c.get('userId') as string
+    const pushId = c.req.param('pushId')
+
+    if (!pushId) return c.json({ success: false, error: 'PUSH_ID_REQUIRED' }, 400)
+
+    try {
+      const record = await prisma.pushRecord.findUnique({ where: { id: pushId } })
+      if (!record || record.userId !== userId) {
+        return c.json({ success: false, error: 'NOT_FOUND' }, 404)
+      }
+
+      await prisma.pushRecord.update({
+        where: { id: pushId },
+        data: {
+          viewedAt: new Date(),
+          engagedCount: { increment: 1 },
+        },
+      })
+
+      return c.json({ success: true })
+    } catch (error) {
+      console.error('[Learning] Failed to mark push as read:', error)
+      return c.json({ success: false, error: 'UPDATE_FAILED' }, 500)
     }
   })
 
@@ -1458,7 +1743,64 @@ ${document}`
     })
   })
 
+  // POST /api/learning/reset-engines — 重置学习引擎缓存（vault 切换时调用）
+  .post('/reset-engines', async (c) => {
+    const userId = c.get('userId') as string
+    try {
+      const { pushEngine } = await import('@/server/core/agent/resource-push-engine')
+      pushEngine.clearCache(userId)
+      pathAdjustmentEngine.reset()
+      return c.json({ success: true })
+    } catch (error) {
+      console.error('[reset-engines] 重置失败:', error)
+      return c.json({ success: false, error: 'RESET_FAILED' }, 500)
+    }
+  })
+
 export default app
+
+/** Build an engine-compatible LearningPath from Prisma records */
+function buildEnginePath(pathId: string, userId: string, path: any): LearningPath {
+  const steps: any[] = path.steps || []
+  return {
+    id: pathId,
+    userId,
+    topic: path.topic || '',
+    createdAt: path.createdAt?.getTime() ?? Date.now(),
+    updatedAt: Date.now(),
+    originalPlan: {
+      concepts: steps.map((s: any) => s.concept || s.title).filter(Boolean),
+      stages: steps.map((s: any) => ({
+        id: s.id,
+        concept: s.concept || s.title || '',
+        description: s.title || '',
+        difficulty: 'intermediate' as const,
+        estimatedDays: 1,
+        resources: [],
+        status: (s.status === 'completed' || s.status === 'mastered' ? 'completed' :
+                 s.status === 'available' || s.status === 'learning' ? 'in_progress' :
+                 s.status === 'skipped' ? 'skipped' : 'pending') as any,
+        startedAt: undefined,
+        completedAt: undefined,
+      })),
+      estimatedDuration: path.totalSteps || steps.length,
+    },
+    currentProgress: {
+      completedConcepts: steps.filter((s: any) => s.status === 'completed' || s.status === 'mastered').map((s: any) => s.title),
+      currentStageId: steps.find((s: any) => s.status === 'learning' || s.status === 'available')?.id || steps[0]?.id || '',
+      skippedConcepts: [],
+      reviewConcepts: [],
+      totalTimeSpent: 0,
+    },
+    dynamicAdjustments: [],
+    stats: {
+      totalStages: steps.length,
+      completedStages: steps.filter((s: any) => s.status === 'completed' || s.status === 'mastered').length,
+      skippedStages: steps.filter((s: any) => s.status === 'skipped').length,
+      adjustmentCount: 0,
+    },
+  }
+}
 
 /** Safe JSON array parse for prerequisites column */
 function safeParseJsonArray(raw: string | null | undefined): string[] {
