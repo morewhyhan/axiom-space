@@ -16,7 +16,16 @@ export default function Providers({ children }: { children: React.ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem>
           {children}
-          <Toaster richColors position="top-center" />
+          <Toaster
+            richColors
+            position="top-center"
+            toastOptions={{
+              style: {
+                fontSize: '12px',
+                fontFamily: 'system-ui, sans-serif',
+              },
+            }}
+          />
         </ThemeProvider>
       </QueryClientProvider>
     </ErrorBoundary>

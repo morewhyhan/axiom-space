@@ -1861,3 +1861,18 @@ body {
   animation: shimmer 2s infinite;
 }
 
+/* Sonner toast overrides for better readability on dark theme */
+[data-sonner-toast] {
+  --normal-bg: rgba(15, 15, 22, 0.95) !important;
+  --normal-border: rgba(255, 255, 255, 0.1) !important;
+  --normal-text: rgba(255, 255, 255, 0.9) !important;
+}
+[data-sonner-toast] [data-title] {
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+[data-sonner-toast] [data-description] {
+  font-size: 11px !important;
+  opacity: 0.7 !important;
+}
+
