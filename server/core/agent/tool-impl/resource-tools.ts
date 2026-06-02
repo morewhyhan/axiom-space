@@ -11,6 +11,7 @@ import { createTool, toolRegistry } from "../tools";
 import { getVaultPath } from "./helpers";
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { prisma } from '@/lib/db';
+import { emitNotification } from '../notification-bus';
 
 /** Persist a resource generation record to DB (fire-and-forget, scoped by userId+vaultId) */
 function persistResourceToDb(userId: string, topic: string, types: string[], detail: Record<string, any>): void {
@@ -186,6 +187,10 @@ ${sections.join('\n\n---\n\n')}
       }
 
       console.log(`[Event] axiom:toast — card: 生成学习资料: ${params.topic}`);
+      const srcVaultId = getCurrentVaultId();
+      if (srcVaultId) {
+        emitNotification(srcVaultId, { type: 'toast', message: `card: 生成学习资料: ${params.topic}` });
+      }
 
       return {
         content: [{
@@ -488,6 +493,10 @@ const generatePptTool = createTool(
       }
 
       console.log(`[Event] axiom:toast — card: 生成 PPT: ${params.topic} (${result.slides}页)`);
+      const pptVaultId = getCurrentVaultId();
+      if (pptVaultId) {
+        emitNotification(pptVaultId, { type: 'toast', message: `card: 生成 PPT: ${params.topic}` });
+      }
 
       return {
         content: [{ type: 'text', text: `PPT 已生成！"${params.topic}" ${result.slides} 页，文献盒中可查看。刷新文献列表即可看到。` }],

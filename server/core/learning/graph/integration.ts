@@ -9,7 +9,8 @@
  */
 
 import { LearningSession, LearningPhase, UserResponse } from "@/types/learning";
-// removed
+import { emitNotification } from '../../agent/notification-bus';
+import { getCurrentVaultId } from '../../agent/agent-context';
 
 // ============= 概念状态定义 =============
 
@@ -466,8 +467,14 @@ export class GraphIntegrationManager {
   /**
    * 触发图谱更新事件
    */
-  private _emitGraphUpdate(): void {
+  private async _emitGraphUpdate(): Promise<void> {
     console.log('[Event] knowledge-graph-update — graph updated');
+    const gVaultId = getCurrentVaultId();
+    if (gVaultId) {
+      try {
+        await emitNotification(gVaultId, { type: 'graph', message: '知识图谱已更新' });
+      } catch { /* non-fatal */ }
+    }
   }
 }
 

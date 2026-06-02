@@ -7,6 +7,8 @@
 
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { prisma } from '@/lib/db'
+import { emitNotification } from './notification-bus'
+import { getCurrentVaultId } from './agent-context'
 
 const ANALYSIS_PROMPT = `你是后台分析 Agent。分析对话记录，只提取有价值的信息。
 
@@ -144,6 +146,10 @@ export class BackgroundAnalyzer {
       const merged = mergeProfileUpdate(existing, updates);
       await saveUserProfile(this.vaultPath, merged);
       console.log('[Event] axiom:profile-updated');
+      const baVaultId = getCurrentVaultId();
+      if (baVaultId) {
+        emitNotification(baVaultId, { type: 'profile', message: '学习画像已更新' });
+      }
     } catch (err) { console.debug('[BackgroundAnalyzer] Profile update failed:', err); }
   }
 
@@ -229,7 +235,11 @@ export class BackgroundAnalyzer {
   private notify(type: 'profile' | 'skill' | 'card', message: string) {
     try {
       console.log(`[Event] axiom:toast — ${type}: ${message}`);
-    } catch { /* toast not available */ }
+      const nVaultId = getCurrentVaultId();
+      if (nVaultId) {
+        emitNotification(nVaultId, { type: 'toast', message: `${type}: ${message}` });
+      }
+    } catch { /* non-fatal */ }
   }
 
   reset() { this.lastAnalyzedIndex = 0; }

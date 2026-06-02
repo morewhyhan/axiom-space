@@ -22,6 +22,8 @@ import {
   type PersistedSession,
 } from "./SessionPersistence";
 import { searchSessions, type SessionSearchResult } from "./SessionSearch";
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { emitNotification } from './notification-bus';
 
 import { registerBuiltinTools } from "./builtin-tools";
 
@@ -428,6 +430,10 @@ export class ChatOrchestrator {
       if (filePath.includes(filename)) {
         this.callbacks.addChatMessage({ sender: "system", text: message });
         console.log('[Event] axiom:profile-updated');
+        const coVaultId = getCurrentVaultId();
+        if (coVaultId) {
+          emitNotification(coVaultId, { type: 'profile', message: '用户画像已更新' });
+        }
         break;
       }
     }
