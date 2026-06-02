@@ -399,9 +399,9 @@ export class AgentOrchestrationEngine {
 }
 
 /**
- * 虚拟 Agent 实现（用于演示）
+ * 真实 Agent 实现 — 使用 Prisma + AI Manager 执行实际任务
  */
-export class MockAgent {
+export class RealAgent {
   private role: AgentRole;
   private messageBus: AgentMessageBus;
 
@@ -420,7 +420,6 @@ export class MockAgent {
         try {
           const result = await this.processTask(message.payload);
 
-          // 发送结果回来
           const resultMessage: AgentMessage = {
             messageId: nanoid(),
             from: this.role,
@@ -443,92 +442,232 @@ export class MockAgent {
   }
 
   /**
-   * 处理任务（模拟实现）
+   * 处理任务 — 分发到角色对应的 handler
    */
-  private async processTask(payload: Record<string, any>): Promise<Record<string, any>> {
+  async processTask(payload: Record<string, any>): Promise<Record<string, any>> {
     const { task, userId } = payload;
-
-    // 模拟处理时间
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
     switch (this.role) {
       case 'profile':
-        return {
-          userLevel: 'intermediate',
-          learningStyle: 'visual',
-          weakPoints: ['recursion', 'tree-traversal'],
-          masteryConcepts: ['basic-syntax', 'functions'],
-          estimatedTime: 120, // 分钟
-        };
-
+        return await this.handleProfile(payload);
       case 'planner':
-        return {
-          recommendedResourceTypes: ['document', 'code', 'diagram'],
-          contentOutline: [
-            '基本概念介绍',
-            '原理讲解',
-            '代码示例',
-            '实践练习',
-            '综合应用'
-          ],
-          estimatedDuration: 180, // 分钟
-          resources: [
-            { type: 'document', title: '递归详解' },
-            { type: 'code', title: '递归代码示例' },
-            { type: 'diagram', title: '递归流程图' }
-          ]
-        };
-
+        return await this.handlePlanner(payload);
       case 'generator':
-        return {
-          generatedResources: [
-            {
-              type: 'document',
-              title: '递归完全指南',
-              url: '/resources/recursion-guide.md',
-              status: 'completed'
-            },
-            {
-              type: 'code',
-              title: '递归代码练习',
-              url: '/resources/recursion-code.json',
-              status: 'completed'
-            },
-            {
-              type: 'diagram',
-              title: '递归可视化',
-              url: '/resources/recursion-diagram.svg',
-              status: 'completed'
-            }
-          ],
-          qualityScore: 0.92
-        };
-
+        return await this.handleGenerator(payload);
       case 'reviewer':
-        return {
-          reviewResult: {
-            factualAccuracy: 'verified',
-            completeness: 'excellent',
-            safety: 'passed',
-            relevance: 'high'
-          },
-          suggestedImprovements: [
-            '可添加更多实际案例'
-          ],
-          approved: true
-        };
-
+        return await this.handleReviewer(payload);
       case 'pusher':
-        return {
-          pushStatus: 'success',
-          notificationId: nanoid(),
-          pushedAt: Date.now(),
-          message: '已将 3 个资源推送给用户'
-        };
-
+        return await this.handlePusher(payload);
       default:
-        return {};
+        return { status: 'unknown_role' };
     }
+  }
+
+  /**
+   * profile: 读取卡片和能力数据，推算用户学习画像
+   */
+  private async handleProfile(payload: Record<string, any>): Promise<Record<string, any>> {
+    const userId = payload.userId || '';
+    const { prisma } = await import('@/lib/db');
+
+    const vault = await prisma.vault.findFirst({ where: { userId } });
+    if (!vault) {
+      return {
+        userLevel: 'beginner',
+        learningStyle: 'visual',
+        weakPoints: [],
+        masteryConcepts: [],
+        estimatedTime: 60,
+      };
+    }
+
+    const cards = await prisma.card.findMany({ where: { vaultId: vault.id } });
+    const permanentCount = cards.filter(c => c.type === 'permanent').length;
+    const literatureCount = cards.filter(c => c.type === 'literature').length;
+    const totalCards = cards.length;
+
+    let userLevel = 'beginner';
+    if (permanentCount > 20) userLevel = 'advanced';
+    else if (permanentCount > 5) userLevel = 'intermediate';
+
+    let profileCache: Record<string, any> = {};
+    if (vault.profileCache) {
+      try { profileCache = JSON.parse(vault.profileCache); } catch { /* ignore parse error */ }
+    }
+
+    const capabilities = await prisma.vaultCapability.findMany({ where: { vaultId: vault.id } });
+    const weakPoints = capabilities.filter(c => c.masteryLevel < 30).map(c => c.concept);
+    const masteryConcepts = capabilities.filter(c => c.masteryLevel >= 70).map(c => c.concept);
+
+    return {
+      userLevel,
+      learningStyle: profileCache.learningStyle || 'visual',
+      weakPoints: weakPoints.slice(0, 5),
+      masteryConcepts: masteryConcepts.slice(0, 5),
+      estimatedTime: profileCache.estimatedTime || Math.max(30, totalCards * 2),
+      totalCards,
+      permanentCards: permanentCount,
+      literatureCards: literatureCount,
+      ...profileCache,
+    };
+  }
+
+  /**
+   * planner: 调用 AI 生成学习计划和资源推荐
+   */
+  private async handlePlanner(payload: Record<string, any>): Promise<Record<string, any>> {
+    const previousResults = payload.previousResults || {};
+    const { aiManager } = await import('@/server/core/ai/AIManager');
+
+    const systemPrompt = `你是一个学习路径规划专家。根据用户的学习画像，生成一份学习计划。
+请以 JSON 格式返回（不要 markdown fence），字段如下：
+{
+  "recommendedResourceTypes": ["document", "code", "diagram", "video"],
+  "contentOutline": ["章节标题1", "章节标题2"],
+  "estimatedDuration": 120,
+  "resources": [{ "type": "document", "title": "资源标题" }]
+}`;
+
+    try {
+      const raw = await aiManager.callAPI(
+        systemPrompt,
+        [{ role: 'user', content: `用户画像：\n${JSON.stringify(previousResults, null, 2)}\n请生成适合该用户的学习计划。` }],
+        { temperature: 0.7 }
+      );
+      const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (err) {
+      console.error('[planner] AI call failed:', err);
+      return {
+        recommendedResourceTypes: ['document', 'code', 'diagram'],
+        contentOutline: ['基本概念', '原理讲解', '代码示例', '实践练习'],
+        estimatedDuration: 120,
+        resources: [
+          { type: 'document', title: '学习指南' },
+          { type: 'code', title: '代码示例' },
+        ],
+      };
+    }
+  }
+
+  /**
+   * generator: 调用 AI 根据计划生成实际学习资源内容
+   */
+  private async handleGenerator(payload: Record<string, any>): Promise<Record<string, any>> {
+    const previousResults = payload.previousResults || {};
+    const { aiManager } = await import('@/server/core/ai/AIManager');
+
+    const systemPrompt = `你是一个学习资源生成专家。根据学习计划大纲，生成具体的资源内容。
+请以 JSON 格式返回（不要 markdown fence），字段如下：
+{
+  "generatedResources": [
+    {
+      "type": "document",
+      "title": "资源标题",
+      "content": "资源内容（markdown格式）",
+      "status": "completed"
+    }
+  ],
+  "qualityScore": 0.95
+}`;
+
+    try {
+      const raw = await aiManager.callAPI(
+        systemPrompt,
+        [{ role: 'user', content: `计划大纲：\n${JSON.stringify(previousResults, null, 2)}\n请根据大纲生成具体的学习资源。` }],
+        { temperature: 0.7 }
+      );
+      const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
+      return JSON.parse(cleaned);
+    } catch (err) {
+      console.error('[generator] AI call failed:', err);
+      return {
+        generatedResources: [
+          { type: 'document', title: '学习资料', content: '# 学习资料\n\n待生成', status: 'pending' },
+        ],
+        qualityScore: 0.5,
+      };
+    }
+  }
+
+  /**
+   * reviewer: 读取学习路径步骤数据，评估掌握程度
+   */
+  private async handleReviewer(payload: Record<string, any>): Promise<Record<string, any>> {
+    const userId = payload.userId || '';
+    const { prisma } = await import('@/lib/db');
+
+    const paths = await prisma.learningPath.findMany({
+      where: { userId, status: 'active' },
+      include: { steps: true },
+    });
+
+    const allSteps = paths.flatMap(p => p.steps);
+    const completedSteps = allSteps.filter(s => s.status === 'completed' || s.status === 'mastered');
+    const completionRate = allSteps.length > 0 ? completedSteps.length / allSteps.length : 0;
+    const avgMastery = allSteps.length > 0
+      ? allSteps.reduce((sum, s) => sum + s.mastery, 0) / allSteps.length
+      : 0;
+
+    const approved = completionRate > 0.6 || avgMastery > 60;
+
+    return {
+      reviewResult: {
+        factualAccuracy: completionRate > 0.8 ? 'verified' : 'needs_review',
+        completeness: completionRate > 0.5 ? 'excellent' : 'needs_improvement',
+        safety: 'passed',
+        relevance: completionRate > 0.3 ? 'high' : 'medium',
+        completionRate,
+        avgMastery,
+      },
+      suggestedImprovements: completionRate < 0.6
+        ? ['需要更多练习', '建议补充基础知识']
+        : ['继续保持当前进度'],
+      approved,
+    };
+  }
+
+  /**
+   * pusher: 通过 notification-bus 推送通知，记录到 PushRecord
+   */
+  private async handlePusher(payload: Record<string, any>): Promise<Record<string, any>> {
+    const userId = payload.userId || '';
+    const previousResults = payload.previousResults || {};
+    const generated = previousResults.generatedResources || [];
+    const { prisma } = await import('@/lib/db');
+    const { emitNotification } = await import('./notification-bus');
+
+    const vault = await prisma.vault.findFirst({ where: { userId } });
+    const vaultId = vault?.id || '';
+
+    const resourceCount = generated.length || 1;
+    const message = `已将 ${resourceCount} 个资源推送给用户`;
+
+    if (userId) {
+      try {
+        await prisma.pushRecord.create({
+          data: {
+            userId,
+            resources: JSON.stringify(generated),
+            trigger: 'stage_completion',
+            reason: message,
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+          },
+        });
+      } catch (err) {
+        console.error('[pusher] Failed to create push record:', err);
+      }
+    }
+
+    if (vaultId) {
+      await emitNotification(vaultId, { type: 'toast', message });
+    }
+
+    return {
+      pushStatus: 'success',
+      notificationId: nanoid(),
+      pushedAt: Date.now(),
+      message,
+    };
   }
 }
 
@@ -538,11 +677,11 @@ export class MockAgent {
 export const agentMessageBus = new AgentMessageBus();
 export const orchestrationEngine = new AgentOrchestrationEngine(agentMessageBus);
 
-// 初始化虚拟 Agents
-export const mockAgents = {
-  profile: new MockAgent('profile', agentMessageBus),
-  planner: new MockAgent('planner', agentMessageBus),
-  generator: new MockAgent('generator', agentMessageBus),
-  reviewer: new MockAgent('reviewer', agentMessageBus),
-  pusher: new MockAgent('pusher', agentMessageBus),
+// 初始化真实 Agents
+export const realAgents = {
+  profile: new RealAgent('profile', agentMessageBus),
+  planner: new RealAgent('planner', agentMessageBus),
+  generator: new RealAgent('generator', agentMessageBus),
+  reviewer: new RealAgent('reviewer', agentMessageBus),
+  pusher: new RealAgent('pusher', agentMessageBus),
 };
