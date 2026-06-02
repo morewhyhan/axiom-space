@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react'
 import { useCognition } from '@/hooks/use-cognition'
-import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAppStore } from '@/stores/mode-store'
 import type { Mode } from '@/stores/mode-store'
 
@@ -17,7 +16,6 @@ const DIM_LABELS: Record<string, string> = {
 export default function LearningProfile() {
   const openModal = useAppStore((s) => s.openModal)
   const { data, loading } = useCognition()
-  const { stats } = useDashboardStats()
   const [timeDistCollapsed, setTimeDistCollapsed] = useState(true)
 
   const dimensions = data?.dimensions ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0 }
