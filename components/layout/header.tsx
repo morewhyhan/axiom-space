@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useAppStore, Mode } from '@/stores/mode-store'
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAuthSession } from '@/hooks/use-auth'
+import { useNotifications } from '@/hooks/use-notifications'
 
 export default function Header() {
   const mode = useAppStore((s) => s.mode)
@@ -22,6 +23,7 @@ export default function Header() {
   const vaultRef = useRef<HTMLDivElement>(null)
 
   const { recentActivity, stats } = useDashboardStats()
+  const { notifications: realNotifs, unreadCount, dismissAll } = useNotifications()
 
   // Build notifications from real activity data
   const notifications = (recentActivity ?? []).slice(0, 4).map((a: any, i: number) => {
@@ -37,7 +39,7 @@ export default function Header() {
     }
   })
 
-  const notifCount = stats?.cardsToday ?? 0
+  const notifCount = unreadCount
 
   useEffect(() => {
     const tick = () => setTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
@@ -48,12 +50,15 @@ export default function Header() {
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false)
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        if (notifOpen) dismissAll()
+        setNotifOpen(false)
+      }
       if (vaultRef.current && !vaultRef.current.contains(e.target as Node)) setVaultOpen(false)
     }
     document.addEventListener('mousedown', handleClick)
     return () => document.removeEventListener('mousedown', handleClick)
-  }, [])
+  }, [notifOpen, dismissAll])
 
   return (
     <header className="flex justify-between items-center pointer-events-auto flex-shrink-0" style={{ padding: `var(--header-py) var(--header-px)` }}>
@@ -121,10 +126,19 @@ export default function Header() {
               <span className="mono opacity-40 uppercase" style={{ fontSize: 'var(--f8)' }}>Recent Activity</span>
               <button className="mono text-purple-400/60 hover:text-purple-400" style={{ fontSize: 'var(--f7)' }} onClick={() => {
                 setNotifOpen(false)
+                dismissAll()
                 useAppStore.getState().setMode('dashboard')
               }}>VIEW ALL</button>
             </div>
-            {notifications.length > 0 ? notifications.map((n: any, i: number) => (
+            {realNotifs.length > 0 ? realNotifs.map((n, i) => {
+              const dotMap: Record<string, string> = { toast: 'cyan', profile: 'purple', card: 'pink', skill: 'purple', graph: 'cyan' }
+              const dot = dotMap[n.type] || 'purple'
+              const label = n.type.charAt(0).toUpperCase() + n.type.slice(1)
+              const time = new Date(n.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+              return (
+                <div key={n.id} className="notif-item"><span className={`notif-dot ${dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.message} · {time}</div></div></div>
+              )
+            }) : notifications.length > 0 ? notifications.map((n: any, i: number) => (
               <div key={i} className="notif-item"><span className={`notif-dot ${n.dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{n.label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.detail} · {n.time}</div></div></div>
             )) : (
               <div className="notif-item"><span className="notif-dot purple"></span><div><div className="text-white/40" style={{ fontSize: 'var(--f10)' }}>暂无新活动</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>创建知识卡片后，活动将在此显示</div></div></div>
