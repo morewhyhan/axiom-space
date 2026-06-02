@@ -11,6 +11,7 @@ import vaultMgmtRoutes from './routes/vaults';
 import dashboardRoutes from './routes/dashboard';
 import galaxyRoutes from './routes/galaxy';
 import cognitionRoutes from './routes/cognition';
+import eventRoutes from './routes/events';
 
 const app = new Hono().basePath('/api')
 
@@ -29,6 +30,7 @@ const appWithRoutes = app
   .route('/dashboard', dashboardRoutes)
   .route('/galaxy', galaxyRoutes)
   .route('/cognition', cognitionRoutes)
+  .route('/events', eventRoutes)
   // Better Auth handler (keep existing)
   .all('/auth/*', async (c) => {
     const { auth } = await import('@/lib/auth')
