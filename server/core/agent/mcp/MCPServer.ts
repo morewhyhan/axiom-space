@@ -51,10 +51,6 @@ export function createMCPServerTools(): MCPServerTool[] {
         },
       },
       handler: async (args) => {
-        const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-        if (!axiom) return { error: 'axiom API not available' };
-
         // 从 SessionPersistence 获取会话列表
         const sessions = JSON.parse(_sessionsCache.get('axiom-agent-sessions') || '{}');
         const activeSession = _sessionsCache.get('axiom-agent-active-session');
@@ -201,9 +197,7 @@ const axiom = createAxiomCompat(fileStorage);
       },
       handler: async (args) => {
         const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-        if (!axiom) return { error: 'axiom API not available' };
-
+        const axiom = createAxiomCompat(fileStorage);
         const vaultPath = getVaultPath() || getCurrentVaultId() || '';
         if (!vaultPath) return { error: 'No vault open' };
 

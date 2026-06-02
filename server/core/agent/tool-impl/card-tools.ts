@@ -9,6 +9,7 @@ import { createTool, toolRegistry } from "../tools";
 import { getVaultPath, resolvePath } from "./helpers";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { emitNotification } from '../notification-bus';
 const axiom = createAxiomCompat(getFileStorage());
 
 const createFleeingCardTool = createTool(
@@ -37,6 +38,10 @@ const createFleeingCardTool = createTool(
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
         console.log(`[Event] axiom:toast — card: 创建灵感卡片: ${params.title}`);
+        const cardVaultId = getCurrentVaultId();
+        if (cardVaultId) {
+          emitNotification(cardVaultId, { type: 'toast', message: `card: 创建灵感卡片: ${params.title}` });
+        }
         return {
           content: [{ type: 'text', text: `灵感卡片已创建，路径: ${cardPath}` }],
           details: { id: cardPath, cardPath, content: params.content },
@@ -114,6 +119,10 @@ const createPermanentCardTool = createTool(
           contentParts.push(...qualityWarnings);
         }
         console.log(`[Event] axiom:toast — card: 创建永久卡片: ${params.title}`);
+        const permVaultId = getCurrentVaultId();
+        if (permVaultId) {
+          emitNotification(permVaultId, { type: 'toast', message: `card: 创建永久卡片: ${params.title}` });
+        }
         return {
           content: [{ type: 'text', text: contentParts.join('\n') }],
           details: { title: params.title, id: cardPath, cardPath, quality_checks: qualityChecks },
@@ -444,44 +453,67 @@ const deleteCardTool = createTool(
         };
       }
 
-      // Soft-delete via (axiom as any).softDelete (对标 D-10, D-13)
+      // Soft-delete via file storage + prisma (对标 D-10, D-13)
       const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-      if (!axiom) {
-        return {
-          content: [{ type: 'text', text: '错误: 系统 API 不可用' }],
-          details: { error: 'axiom API not available' },
-        };
-      }
       const resolvedPath = params.cardPath.startsWith('/')
         ? params.cardPath
         : `${vaultPath}/${params.cardPath}`;
 
-      if ((axiom as any).softDelete) {
-        const result = await (axiom as any).softDelete(vaultPath, params.cardPath);
-        if (!result.success) {
-          return {
-            content: [{ type: 'text', text: `删除卡片失败: ${(result as any).error || '未知错误'}` }],
-            details: { error: (result as any).error },
-          };
+      // Try to soft-delete: move to .axiom/trash/ then remove DB record
+      let softDeleted = false;
+      const trashPath = `${vaultPath}/.axiom/trash/${params.cardPath.split('/').pop() || 'deleted'}`;
+      try {
+        const renameResult = await fileStorage.rename(resolvedPath, trashPath);
+        if (renameResult?.success) {
+          softDeleted = true;
         }
+      } catch (e) {
+        console.debug('[delete_card] File rename failed, falling back to direct delete:', e);
+      }
+
+      // Also remove from DB
+      const vId = getCurrentVaultId();
+      if (vId) {
+        try {
+          // Match by path
+          const dbCard = await prisma.card.findFirst({
+            where: { vaultId: vId, path: params.cardPath },
+          });
+          if (dbCard) {
+            // Delete edges first
+            await prisma.edge.deleteMany({
+              where: {
+                OR: [
+                  { sourceId: dbCard.id },
+                  { targetId: dbCard.id },
+                ],
+              },
+            });
+            await prisma.card.delete({ where: { id: dbCard.id } });
+          }
+        } catch (dbErr) {
+          console.debug('[delete_card] DB delete failed:', dbErr);
+        }
+      }
+
+      if (softDeleted) {
         return {
           content: [{ type: 'text', text: `卡片已移动到回收站: ${params.cardPath}\n可通过 .axiom/trash/ 恢复。` }],
-          details: { cardPath: params.cardPath, trashPath: result.trashPath },
+          details: { cardPath: params.cardPath, trashPath },
         };
       }
 
-      // Fallback: use deleteCard API
-      if (!(axiom as any).deleteCard) {
+      // Fallback: force delete from file storage
+      const delResult = await fileStorage.deleteFile(resolvedPath);
+      if (!delResult?.success) {
         return {
-          content: [{ type: 'text', text: '错误: 删除操作不可用' }],
-          details: { error: 'deleteCard API not available' },
+          content: [{ type: 'text', text: `删除失败: ${delResult?.error || '未知错误'}` }],
+          details: { error: delResult?.error },
         };
       }
-      const result = await (axiom as any).deleteCard(vaultPath, params.cardPath);
       return {
-        content: [{ type: 'text', text: result.success ? `卡片已删除: ${params.cardPath}` : `删除失败: ${(result as any).error}` }],
-        details: { cardPath: params.cardPath, success: result.success },
+        content: [{ type: 'text', text: `卡片已删除: ${params.cardPath}` }],
+        details: { cardPath: params.cardPath, success: true },
       };
     } catch (error) {
       return {

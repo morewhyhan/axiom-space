@@ -226,11 +226,45 @@ export function createAgentServices(config: AxiomAgentConfig = {}): AgentService
   });
 
   const learningSkillManager = {
-    // Stub: LearningSkillManager — tracks skill progression
-    // Full implementation deferred; non-fatal for agent operation
-    getSkillLevel: () => 0,
-    updateSkill: () => {},
-    getRecommendedSkills: () => [],
+    /** Track skill progression via prisma vaultSkill table */
+    getSkillLevel: (): number => {
+      // Stub: returns 0 as a synchronous getter; real implementation
+      // would query prisma and return average confidence
+      return 0;
+    },
+    updateSkill: (): void => {
+      // Fire-and-forget: upsert a vaultSkill entry
+      (async () => {
+        try {
+          const { prisma } = await import('@/lib/db');
+          const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
+          const vaultId = getCurrentVaultId();
+          if (vaultId) {
+            await prisma.vaultSkill.upsert({
+              where: { vaultId_name: { vaultId, name: '__learning_skill_manager' } },
+              create: {
+                vaultId,
+                name: '__learning_skill_manager',
+                description: 'Skill progression tracking via LearningFacade',
+                category: 'system',
+                tags: JSON.stringify(['auto']),
+                confidence: 0.5,
+                source: 'system',
+              },
+              update: {
+                demonstratedAt: new Date(),
+              },
+            });
+          }
+        } catch (dbErr) {
+          console.debug('[LearningSkillManager] updateSkill failed:', dbErr);
+        }
+      })();
+    },
+    getRecommendedSkills: (): unknown[] => {
+      // Returns empty as a synchronous getter; real impl queries prisma
+      return [];
+    },
   };
 
   const graphManager = new GraphIntegrationManager(database);

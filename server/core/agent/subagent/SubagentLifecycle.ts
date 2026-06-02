@@ -23,6 +23,7 @@ import { SubagentHeartbeat } from '@/server/core/agent/subagent/SubagentHeartbea
 import type { MemoryManager } from '../../learning/memory/manager';
 import { getVaultPath } from '@/lib/platform';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { emitNotification } from '../notification-bus';
 
 export class SubagentLifecycle {
   private currentDepth = 0;
@@ -506,6 +507,7 @@ export class SubagentLifecycle {
       if (!vaultPath) return;
 
       let loadUserProfile: any, saveUserProfile: any, createDefaultProfile: any, mergeProfileUpdate: any;
+      let usePrismaFallback = false;
       try {
         // @ts-ignore — module may not exist; try/catch handles it
         const mod = await import('@/server/core/learning/memory/profile-manager');
@@ -514,8 +516,36 @@ export class SubagentLifecycle {
         createDefaultProfile = mod.createDefaultProfile;
         mergeProfileUpdate = mod.mergeProfileUpdate;
       } catch {
-        // profile-manager module not available
-        console.warn('[SubagentSystem] profile-manager not available, skipping profile update');
+        // profile-manager module not available — fall back to prisma vaultMemory
+        console.warn('[SubagentSystem] profile-manager not available, using prisma fallback');
+        usePrismaFallback = true;
+      }
+
+      if (usePrismaFallback) {
+        try {
+          const { prisma } = await import('@/lib/db');
+          // Store profile update as vaultMemory entry
+          await prisma.vaultMemory.upsert({
+            where: { vaultId_key: { vaultId: vaultPath, key: 'profile_cache' } },
+            create: {
+              vaultId: vaultPath,
+              key: 'profile_cache',
+              value: JSON.stringify(profileUpdate),
+              category: 'preference',
+            },
+            update: {
+              value: JSON.stringify(profileUpdate),
+            },
+          });
+          console.log('[Event] axiom:profile-updated');
+          const fallbackVaultId = getCurrentVaultId();
+          if (fallbackVaultId) {
+            emitNotification(fallbackVaultId, { type: 'profile', message: '用户画像已更新 (prisma fallback)' });
+          }
+          console.log('[SubagentSystem] Profile Agent output applied to user profile (prisma fallback)');
+        } catch (dbErr) {
+          console.warn('[SubagentSystem] prisma profile fallback also failed:', dbErr);
+        }
         return;
       }
 
@@ -580,6 +610,10 @@ export class SubagentLifecycle {
       const merged = mergeProfileUpdate(current, updates);
       await saveUserProfile(vaultPath, merged);
       console.log('[Event] axiom:profile-updated');
+      const subVaultId = getCurrentVaultId();
+      if (subVaultId) {
+        emitNotification(subVaultId, { type: 'profile', message: '用户画像已更新 (profile agent)' });
+      }
       console.log(
         '[SubagentSystem] Profile Agent output applied to user profile',
       );

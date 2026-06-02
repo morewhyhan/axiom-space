@@ -113,9 +113,10 @@ export class MCPServerTask {
    * 发现工具
    */
   private async discoverTools(): Promise<void> {
-    const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-    if (!axiom) throw new Error('axiom API not available');
+    // MCP 目前是未来功能预留，在 Electron 环境下通过 IPC 调用
+    if (!process.env.ELECTRON_RUNTIME) {
+      throw new Error('MCP server requires Electron runtime — not available in current environment');
+    }
 
     // 通过 IPC 调用 MCP 工具发现
     // 在 Electron 主进程中实际连接 MCP 服务器
@@ -179,10 +180,8 @@ const axiom = createAxiomCompat(fileStorage);
       };
     }
 
-    const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-    if (!axiom) {
-      return { error: true, content: [{ type: 'text' as const, text: 'axiom API not available' }] };
+    if (!process.env.ELECTRON_RUNTIME) {
+      return { error: true, content: [{ type: 'text' as const, text: 'MCP requires Electron runtime — not available' }] };
     }
 
     try {

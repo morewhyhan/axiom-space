@@ -5,7 +5,9 @@
 import { Type } from "@mariozechner/pi-ai";
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath } from "./helpers";
+import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 import type { MemorySearchResult } from "@/server/core/learning/memory/provider";
+import { emitNotification } from '../notification-bus';
 
 const memorySearchTool = createTool(
   'memory_search',
@@ -16,34 +18,84 @@ const memorySearchTool = createTool(
     limit: Type.Optional(Type.Number({ description: '返回结果数量，默认 5，最多 20' })),
   }),
   async (_id, params) => {
-    const agent = (globalThis as any).__axiomAgent;
-    if (!agent || !agent.getMemory()) {
-      return {
-        content: [{ type: 'text', text: '记忆系统不可用。请确保 Agent 已初始化并启用记忆。' }],
-        details: { error: 'MemoryManager not available' },
-      };
-    }
-
     try {
+      const { prisma } = await import('@/lib/db');
+      const vaultId = getCurrentVaultId();
       const limit = Math.min(params.limit || 5, 20);
-      const results = await agent.getMemory().search(params.query, limit);
 
-      if (results.length === 0) {
+      // 优先使用 agent memory if available
+      const agent = (globalThis as any).__axiomAgent;
+      if (agent && agent.getMemory()) {
+        try {
+          const results = await agent.getMemory().search(params.query, limit);
+
+          if (results.length === 0) {
+            return {
+              content: [{ type: 'text', text: `未找到与 "${params.query}" 相关的记忆。` }],
+              details: { query: params.query, count: 0 },
+            };
+          }
+
+          const lines: string[] = [`记忆搜索结果 (${results.length}条):`, ''];
+          for (const r of results) {
+            const sourceLabel = r.source === 'builtin' ? '画像/笔记'
+              : r.source === 'capability-tracking' ? '能力追踪'
+              : r.source === 'knowledge-graph' ? '知识图谱'
+              : r.source;
+            const timestampStr = r.timestamp ? ` (${new Date(r.timestamp).toLocaleString('zh-CN')})` : '';
+            lines.push(`[${sourceLabel}]${timestampStr} 相关度: ${(r.finalScore * 100).toFixed(0)}%`);
+            lines.push(`  ${r.content.slice(0, 200)}`);
+            lines.push('');
+          }
+
+          return {
+            content: [{ type: 'text', text: lines.join('\n').trim() }],
+            details: {
+              query: params.query,
+              count: results.length,
+              results: results.map((r: MemorySearchResult) => ({
+                source: r.source,
+                sourceType: r.sourceType,
+                finalScore: r.finalScore,
+                timestamp: r.timestamp,
+                snippet: r.content.slice(0, 100),
+              })) as Array<{ source: string; sourceType: string; finalScore: number; timestamp: number; snippet: string }>,
+            },
+          };
+        } catch (agentErr) {
+          console.debug('[memory_search] Agent memory search failed, falling back to DB:', agentErr);
+        }
+      }
+
+      // Fallback: search via prisma vaultMemory
+      if (!vaultId) {
+        return {
+          content: [{ type: 'text', text: '记忆系统不可用。请确保已打开 Vault。' }],
+          details: { error: 'No vault open' },
+        };
+      }
+
+      const memories = await prisma.vaultMemory.findMany({
+        where: {
+          vaultId,
+          value: { contains: params.query },
+        },
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (memories.length === 0) {
         return {
           content: [{ type: 'text', text: `未找到与 "${params.query}" 相关的记忆。` }],
           details: { query: params.query, count: 0 },
         };
       }
 
-      const lines: string[] = [`记忆搜索结果 (${results.length}条):`, ''];
-      for (const r of results) {
-        const sourceLabel = r.source === 'builtin' ? '画像/笔记'
-          : r.source === 'capability-tracking' ? '能力追踪'
-          : r.source === 'knowledge-graph' ? '知识图谱'
-          : r.source;
-        const timestampStr = r.timestamp ? ` (${new Date(r.timestamp).toLocaleString('zh-CN')})` : '';
-        lines.push(`[${sourceLabel}]${timestampStr} 相关度: ${(r.finalScore * 100).toFixed(0)}%`);
-        lines.push(`  ${r.content.slice(0, 200)}`);
+      const lines: string[] = [`记忆搜索结果 (${memories.length}条):`, ''];
+      for (const m of memories) {
+        const timestampStr = ` (${new Date(m.createdAt).toLocaleString('zh-CN')})`;
+        lines.push(`[${m.category}]${timestampStr}`);
+        lines.push(`  ${m.value.slice(0, 200)}`);
         lines.push('');
       }
 
@@ -51,14 +103,13 @@ const memorySearchTool = createTool(
         content: [{ type: 'text', text: lines.join('\n').trim() }],
         details: {
           query: params.query,
-          count: results.length,
-          results: results.map((r: MemorySearchResult) => ({
-            source: r.source,
-            sourceType: r.sourceType,
-            finalScore: r.finalScore,
-            timestamp: r.timestamp,
-            snippet: r.content.slice(0, 100),
-          })) as Array<{ source: string; sourceType: string; finalScore: number; timestamp: number; snippet: string }>,
+          count: memories.length,
+          results: memories.map((m: { category: string; value: string; createdAt: Date }) => ({
+            source: 'vaultMemory',
+            sourceType: m.category,
+            snippet: m.value.slice(0, 100),
+            timestamp: m.createdAt.getTime(),
+          })),
         },
       };
     } catch (error) {
@@ -142,26 +193,60 @@ const writeMemoryTool = createTool(
   async (_id, params) => {
     try {
       const agent = (globalThis as any).__axiomAgent;
-      if (!agent || !agent.getMemory()) {
+      if (agent && agent.getMemory()) {
+        try {
+          const result = await agent.getMemory().handleToolCall('memory', {
+            action: 'add',
+            target: params.target,
+            content: params.content,
+          });
+
+          const isProfileUpdate = params.target === 'user' && params.content.length > 20;
+          if (isProfileUpdate) {
+            console.log('[Event] axiom:toast — profile: 已更新用户画像');
+            const vaultId = getCurrentVaultId();
+            if (vaultId) {
+              emitNotification(vaultId, { type: 'toast', message: 'profile: 已更新用户画像' });
+            }
+          }
+
+          return {
+            content: [{ type: 'text', text: String(result) }],
+            details: { target: params.target, contentLength: params.content.length },
+          };
+        } catch (agentErr) {
+          console.debug('[write_memory] Agent memory failed, falling back to DB:', agentErr);
+        }
+      }
+
+      // Fallback: write to prisma vaultMemory
+      const vaultId = getCurrentVaultId();
+      if (!vaultId) {
         return {
           content: [{ type: 'text', text: '记忆系统不可用。' }],
-          details: { error: 'MemoryManager not available' },
+          details: { error: 'No vault open' },
         };
       }
 
-      const result = await agent.getMemory().handleToolCall('memory', {
-        action: 'add',
-        target: params.target,
-        content: params.content,
+      const { prisma } = await import('@/lib/db');
+      const key = params.target === 'user' ? `user_profile_${Date.now()}` : `agent_note_${Date.now()}`;
+      await prisma.vaultMemory.create({
+        data: {
+          vaultId,
+          key,
+          value: params.content,
+          category: params.target === 'user' ? 'preference' : 'context',
+        },
       });
 
       const isProfileUpdate = params.target === 'user' && params.content.length > 20;
       if (isProfileUpdate) {
         console.log('[Event] axiom:toast — profile: 已更新用户画像');
+        emitNotification(vaultId, { type: 'toast', message: 'profile: 已更新用户画像' });
       }
 
       return {
-        content: [{ type: 'text', text: String(result) }],
+        content: [{ type: 'text', text: '记忆已保存到数据库。' }],
         details: { target: params.target, contentLength: params.content.length },
       };
     } catch (error) {
@@ -186,22 +271,56 @@ const editMemoryTool = createTool(
   async (_id, params) => {
     try {
       const agent = (globalThis as any).__axiomAgent;
-      if (!agent || !agent.getMemory()) {
+      if (agent && agent.getMemory()) {
+        try {
+          const result = await agent.getMemory().handleToolCall('memory', {
+            action: 'replace',
+            target: params.target,
+            old_text: params.oldText,
+            content: params.newContent,
+          });
+
+          return {
+            content: [{ type: 'text', text: String(result) }],
+            details: { target: params.target, oldText: params.oldText },
+          };
+        } catch (agentErr) {
+          console.debug('[edit_memory] Agent memory failed, falling back to DB:', agentErr);
+        }
+      }
+
+      // Fallback: edit via prisma vaultMemory
+      const vaultId = getCurrentVaultId();
+      if (!vaultId) {
         return {
           content: [{ type: 'text', text: '记忆系统不可用。' }],
-          details: { error: 'MemoryManager not available' },
+          details: { error: 'No vault open' },
         };
       }
 
-      const result = await agent.getMemory().handleToolCall('memory', {
-        action: 'replace',
-        target: params.target,
-        old_text: params.oldText,
-        content: params.newContent,
+      const { prisma } = await import('@/lib/db');
+      const existing = await prisma.vaultMemory.findFirst({
+        where: {
+          vaultId,
+          value: { contains: params.oldText },
+        },
+      });
+
+      if (!existing) {
+        return {
+          content: [{ type: 'text', text: `未找到包含 "${params.oldText}" 的记忆条目。` }],
+          details: { target: params.target, oldText: params.oldText },
+        };
+      }
+
+      const newValue = existing.value.replace(params.oldText, params.newContent);
+      await prisma.vaultMemory.update({
+        where: { id: existing.id },
+        data: { value: newValue },
       });
 
       return {
-        content: [{ type: 'text', text: String(result) }],
+        content: [{ type: 'text', text: '记忆已更新。' }],
         details: { target: params.target, oldText: params.oldText },
       };
     } catch (error) {

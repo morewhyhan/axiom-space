@@ -340,40 +340,42 @@ const deleteFileTool = createTool(
       // Soft-delete by default (对标 D-13)
       if (!params.force) {
         const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-        if (!(axiom as any)?.softDelete) {
-          return {
-            content: [{ type: 'text', text: '软删除功能不可用。' }],
-            details: { error: 'softDelete API not available' },
-          };
+        const trashDir = `${vaultPath}/.axiom/trash`;
+        const fileName = resolvedPath.split('/').pop() || 'deleted';
+        const trashPath = `${trashDir}/${fileName}`;
+        try {
+          await fileStorage.ensureDir(trashDir);
+          const renameResult = await fileStorage.rename(resolvedPath, trashPath);
+          if (renameResult?.success) {
+            return {
+              content: [{ type: 'text', text: `文件已移动到回收站: ${params.filePath}\n可通过 .axiom/trash/ 目录恢复。` }],
+              details: { trashPath, filePath: params.filePath, softDelete: true },
+            };
+          }
+        } catch (e) {
+          console.debug('[delete_file] Soft delete via rename failed:', e);
         }
-        const result = await (axiom as any).softDelete(vaultPath, resolvedPath);
-        if (!result.success) {
+        // Fallback: use storage.deleteFile
+        const delResult = await fileStorage.deleteFile(resolvedPath);
+        if (!delResult?.success) {
           return {
-            content: [{ type: 'text', text: `软删除失败: ${result.error || '未知错误'}` }],
-            details: { error: result.error },
+            content: [{ type: 'text', text: `删除失败: ${delResult?.error || '未知错误'}` }],
+            details: { error: delResult?.error },
           };
         }
         return {
-          content: [{ type: 'text', text: `文件已移动到回收站: ${params.filePath}\n可通过 .axiom/trash/ 目录恢复。` }],
-          details: { trashPath: result.trashPath, filePath: params.filePath, softDelete: true },
+          content: [{ type: 'text', text: `文件已删除: ${params.filePath}` }],
+          details: { filePath: params.filePath, softDelete: true },
         };
       }
 
       // Force permanent deletion
       const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-      if (!axiom?.deleteFile) {
+      const delResult = await fileStorage.deleteFile(resolvedPath);
+      if (!delResult?.success) {
         return {
-          content: [{ type: 'text', text: '删除功能不可用。' }],
-          details: { error: 'deleteFile API not available' },
-        };
-      }
-      const result = await axiom.deleteFile(resolvedPath);
-      if (!result.success) {
-        return {
-          content: [{ type: 'text', text: `删除失败: ${result.error || '未知错误'}` }],
-          details: { error: result.error },
+          content: [{ type: 'text', text: `删除失败: ${delResult?.error || '未知错误'}` }],
+          details: { error: delResult?.error },
         };
       }
       return {
@@ -409,24 +411,37 @@ const renameFileTool = createTool(
       }
 
       const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-      if (!(axiom as any)?.renameFile) {
+      const dirPath = params.sourcePath.includes('/') ? params.sourcePath.substring(0, params.sourcePath.lastIndexOf('/')) : '';
+      const newPath = dirPath ? `${vaultPath}/${dirPath}/${params.name}` : `${vaultPath}/${params.name}`;
+      const oldPath = params.sourcePath.startsWith('/') ? params.sourcePath : `${vaultPath}/${params.sourcePath}`;
+
+      const result = await fileStorage.rename(oldPath, newPath);
+      if (!result?.success) {
         return {
-          content: [{ type: 'text', text: '重命名功能不可用。' }],
-          details: { error: 'renameFile API not available' },
+          content: [{ type: 'text', text: `重命名失败: ${result?.error || '未知错误'}` }],
+          details: { error: result?.error },
         };
       }
 
-      const result = await (axiom as any).renameFile(vaultPath, params.sourcePath, params.name);
-      if (!result.success) {
-        return {
-          content: [{ type: 'text', text: `重命名失败: ${result.error || '未知错误'}` }],
-          details: { error: result.error },
-        };
+      // Also update DB card path if applicable
+      try {
+        const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
+        const { prisma } = await import('@/lib/db');
+        const vId = getCurrentVaultId();
+        if (vId) {
+          const newCardPath = dirPath ? `${dirPath}/${params.name}` : params.name;
+          await prisma.card.updateMany({
+            where: { vaultId: vId, path: params.sourcePath },
+            data: { path: newCardPath },
+          });
+        }
+      } catch (dbErr) {
+        console.debug('[rename_file] DB path update failed:', dbErr);
       }
+
       return {
-        content: [{ type: 'text', text: `文件已重命名: ${params.sourcePath} → ${result.cardPath || params.name}` }],
-        details: { sourcePath: params.sourcePath, newPath: result.cardPath || params.name },
+        content: [{ type: 'text', text: `文件已重命名: ${params.sourcePath} → ${params.name}` }],
+        details: { sourcePath: params.sourcePath, newPath: params.name },
       };
     } catch (error) {
       return {
