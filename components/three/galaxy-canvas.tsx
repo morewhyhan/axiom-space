@@ -534,20 +534,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       }
 
       const directNeighbors = Array.from(adjMap.get(node) || []).filter(n => n.visible !== false);
-      const selection = new Set<THREE.Group>([node, ...directNeighbors]);
-
-      // For highly connected nodes, include a controlled second ring so the
-      // camera frames the visible relationship context instead of just endpoints.
-      if (directNeighbors.length >= 8) {
-        directNeighbors.slice(0, 12).forEach(neighbor => {
-          Array.from(adjMap.get(neighbor) || [])
-            .filter(n => n.visible !== false)
-            .slice(0, 3)
-            .forEach(n => selection.add(n));
-        });
-      }
-
-      return Array.from(selection);
+      return [node, ...directNeighbors];
     }
 
     function frameSelection(selection: THREE.Group[], focusNode?: THREE.Group, duration = 1.35): void {
@@ -680,19 +667,15 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         const s = l.userData.source as THREE.Group;
         const t = l.userData.target as THREE.Group;
         const directlyRelated = (s === node && neighbors.has(t)) || (t === node && neighbors.has(s));
-        const localContext = primary.has(s) && primary.has(t);
         if (l.userData.flowMesh) l.userData.flowMesh.visible = directlyRelated && locked;
 
         if (directlyRelated) {
           (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor || l.userData.clusterColor || 0xffffff);
           setLinkOpacity(l, locked ? 0.88 : 0.72, 0.18);
-        } else if (localContext && (l.userData.semantic || l.userData.isInternal)) {
-          (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor || l.userData.clusterColor || 0xffffff);
-          setLinkOpacity(l, 0.2, 0.18);
         } else if (l.userData.semantic || l.userData.isInternal) {
           setLinkOpacity(l, 0, 0.18);
         } else {
-          setLinkOpacity(l, locked ? 0.008 : 0.035, 0.18);
+          setLinkOpacity(l, locked ? 0 : 0.025, 0.18);
         }
       });
 
