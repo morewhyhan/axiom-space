@@ -613,6 +613,29 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       gsap.to(node.scale, { x: scale, y: scale, z: scale, duration, ease: 'power2.out' });
     }
 
+    function setNodeOpacity(node: THREE.Group, opacityFactor: number, duration = 0.24): void {
+      node.children.forEach((child) => {
+        const material = (child as THREE.Mesh | THREE.Sprite).material as THREE.Material | THREE.Material[] | undefined;
+        const materials = Array.isArray(material) ? material : material ? [material] : [];
+        materials.forEach((mat) => {
+          const maybeTransparent = mat as THREE.Material & { opacity?: number };
+          if (typeof maybeTransparent.opacity !== 'number') return;
+          if (mat.userData.nodeBaseOpacity === undefined) mat.userData.nodeBaseOpacity = maybeTransparent.opacity;
+          mat.transparent = true;
+          gsap.to(maybeTransparent, {
+            opacity: (mat.userData.nodeBaseOpacity as number) * opacityFactor,
+            duration,
+            ease: 'power2.out',
+          });
+        });
+      });
+    }
+
+    function setNodePresence(node: THREE.Group, scale: number, opacity: number, duration = 0.24): void {
+      setNodeScale(node, scale, duration);
+      setNodeOpacity(node, opacity, duration);
+    }
+
     function setLinkOpacity(line: THREE.Line, opacity: number, duration = 0.22): void {
       if (line.userData._filtered) return;
       const mat = line.material as THREE.LineBasicMaterial;
@@ -624,7 +647,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (!node) {
         allNodes.forEach((n) => {
           if (!n.visible) return;
-          setNodeScale(n, 1, 0.26);
+          setNodePresence(n, 1, 1, 0.26);
           if (n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
         });
         allLinks.forEach((l) => {
@@ -646,9 +669,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const primary = new Set<THREE.Group>([node, ...neighbors]);
       allNodes.forEach((n) => {
         if (!n.visible) return;
-        if (n === node) setNodeScale(n, locked ? 1.34 : 1.2, 0.24);
-        else if (neighbors.has(n)) setNodeScale(n, 1.02, 0.24);
-        else setNodeScale(n, locked ? 0.72 : 0.82, 0.24);
+        if (n === node) setNodePresence(n, locked ? 1.34 : 1.2, 1, 0.24);
+        else if (neighbors.has(n)) setNodePresence(n, 1.02, locked ? 0.9 : 0.82, 0.24);
+        else setNodePresence(n, locked ? 0.58 : 0.78, locked ? 0.12 : 0.32, 0.24);
         if (primary.has(n) && n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
       });
 
@@ -669,7 +692,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         } else if (l.userData.semantic || l.userData.isInternal) {
           setLinkOpacity(l, 0, 0.18);
         } else {
-          setLinkOpacity(l, locked ? 0.035 : 0.055, 0.18);
+          setLinkOpacity(l, locked ? 0.008 : 0.035, 0.18);
         }
       });
 
@@ -693,8 +716,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         gsap.to(node.userData.ring.material, { opacity: 0.8, duration: 0.5 });
       }
       if (node.userData.isSun) currentClusterId = node.userData.clusterId;
-      applyGraphAttention(node, true);
       applyNodeModeVisual(useAppStore.getState().mode);
+      applyGraphAttention(node, true);
     }
 
     // --- Learning Path ---
