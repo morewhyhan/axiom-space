@@ -127,20 +127,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let cometSpeedMultiplier = 1.0;
     let autoRotateBeforeFocus: boolean | null = null;
     let lastFocusSelection: THREE.Group[] = [];
-    let hoveredNode: THREE.Group | null = null;
-    let lockedNode: THREE.Group | null = null;
-    let draggingNode: THREE.Group | null = null;
-    let dragPlane: THREE.Plane | null = null;
-    let dragStartPointer: { x: number; y: number } | null = null;
-    let dragStartNode: THREE.Group | null = null;
-    let dragStarted = false;
-    let dragAutoRotateBefore: boolean | null = null;
-    let bloomStrengthBeforeDrag: number | null = null;
-    let linkUpdateCursor = 0;
-    let motionFrame = 0;
-    let lastHoverRaycastAt = 0;
-    let lastDragLinkUpdateAt = 0;
-    let lastLabelRenderAt = 0;
+    let spreadNodes = new Set<THREE.Group>();
     const dimNodeModes = new Set(['forge', 'cognition', 'learn']);
 
     const { register, unregister } = useGalaxyActions.getState()
@@ -407,8 +394,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       opacity: number,
       isInternal?: boolean,
       trueColor?: number,
-      semantic?: boolean,
-      edgeWeight = 1
+      semantic?: boolean
     ): void {
       const start = sourceNode.position;
       const end = targetNode.position;
@@ -431,7 +417,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         .add(centerOut.multiplyScalar(Math.min(90, dist * 0.16)));
 
       const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
-      const points = curve.getPoints(16);
+      const points = curve.getPoints(56);
       const geo = new THREE.BufferGeometry().setFromPoints(points);
 
       const line = new THREE.Line(
@@ -451,14 +437,12 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         baseOpacity: opacity,
         isInternal: !!isInternal,
         semantic: !!semantic,
-        edgeWeight,
         clusterColor: color,
         trueColor: trueColor || color,
         curve,
       };
 
-      if (isInternal) line.visible = false;
-      if (semantic) line.visible = true;
+      if (isInternal || semantic) line.visible = false;
       linksGroup.add(line);
       allLinks.push(line);
 
@@ -469,7 +453,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         adjMap.get(targetNode)!.add(sourceNode);
 
         // Add energy flow for semantic links
-        const pCount = Math.min(12, Math.floor(dist / 42) + 2);
+        const pCount = Math.floor(dist / 20) + 2;
         const pGeo = new THREE.BufferGeometry();
         const pPos = new Float32Array(pCount * 3);
         pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
@@ -614,146 +598,100 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
-    function nodeMaterials(node: THREE.Group): Array<THREE.Material & { opacity?: number }> {
-      const mats: Array<THREE.Material & { opacity?: number }> = [];
-      node.traverse((child) => {
-        const material = (child as THREE.Mesh | THREE.Sprite).material as THREE.Material | THREE.Material[] | undefined;
-        if (!material) return;
-        const list = Array.isArray(material) ? material : [material];
-        list.forEach((mat) => {
-          const maybeTransparent = mat as THREE.Material & { opacity?: number };
-          if (typeof maybeTransparent.opacity !== 'number') return;
-          if (mat.userData.nodeBaseOpacity === undefined) mat.userData.nodeBaseOpacity = maybeTransparent.opacity;
-          maybeTransparent.transparent = true;
-          mats.push(maybeTransparent);
+    function updateCurveGeometry(line: THREE.Line): void {
+      const sourceNode = line.userData.source as THREE.Group | undefined;
+      const targetNode = line.userData.target as THREE.Group | undefined;
+      if (!sourceNode || !targetNode) return;
+
+      const start = sourceNode.position;
+      const end = targetNode.position;
+      const dist = start.distanceTo(end);
+      const mid = new THREE.Vector3().lerpVectors(start, end, 0.5);
+      const curveSeed = hashId(String(sourceNode.userData.id || '') + String(targetNode.userData.id || ''));
+      const direction = new THREE.Vector3().subVectors(end, start).normalize();
+      const centerOut = mid.lengthSq() > 1 ? mid.clone().normalize() : new THREE.Vector3(0, 1, 0);
+      const side = new THREE.Vector3().crossVectors(direction, centerOut);
+      if (side.lengthSq() < 0.01) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
+      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+      side.normalize().multiplyScalar(seededRandom(curveSeed) > 0.5 ? 1 : -1);
+      const arcStrength = line.userData.semantic ? 0.28 : 0.36;
+      const offsetMag = Math.min(180, Math.max(34, dist * arcStrength));
+      mid
+        .add(side.multiplyScalar(offsetMag))
+        .add(centerOut.multiplyScalar(Math.min(90, dist * 0.16)));
+
+      const curve = new THREE.QuadraticBezierCurve3(start.clone(), mid, end.clone());
+      const points = curve.getPoints(28);
+      const position = line.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
+      if (position && position.count === points.length) {
+        for (let i = 0; i < points.length; i++) position.setXYZ(i, points[i].x, points[i].y, points[i].z);
+        position.needsUpdate = true;
+        line.geometry.computeBoundingSphere();
+      } else {
+        line.geometry.setFromPoints(points);
+      }
+      line.userData.curve = curve;
+      if (line.userData.flowMesh) {
+        const flow = flows.find(f => f.mesh === line.userData.flowMesh);
+        if (flow) flow.points = points;
+      }
+    }
+
+    function updateLinksForNodes(nodes: Set<THREE.Group>): void {
+      allLinks.forEach((line) => {
+        const s = line.userData.source as THREE.Group | undefined;
+        const t = line.userData.target as THREE.Group | undefined;
+        if ((s && nodes.has(s)) || (t && nodes.has(t))) updateCurveGeometry(line);
+      });
+    }
+
+    function restoreSpreadNodes(duration = 0.35): void {
+      if (spreadNodes.size === 0) return;
+      const touched = new Set(spreadNodes);
+      spreadNodes.forEach((n) => {
+        const base = n.userData.focusBasePosition as THREE.Vector3 | undefined;
+        if (!base) return;
+        gsap.to(n.position, {
+          x: base.x,
+          y: base.y,
+          z: base.z,
+          duration,
+          ease: 'power2.out',
+          onUpdate: () => updateLinksForNodes(touched),
         });
       });
-      return mats;
+      spreadNodes = new Set();
     }
 
-    function setNodeVisual(node: THREE.Group, scale: number, opacity: number, duration = 0.28): void {
-      if (!node.visible) return;
-      gsap.to(node.scale, { x: scale, y: scale, z: scale, duration, ease: 'power2.out' });
-      nodeMaterials(node).forEach((mat) => {
-        const base = typeof mat.userData.nodeBaseOpacity === 'number' ? mat.userData.nodeBaseOpacity : 1;
-        gsap.to(mat, { opacity: base * opacity, duration, ease: 'power2.out' });
-      });
-      if (node.userData.trueColor) setNodeColor(node, node.userData.trueColor);
-    }
+    function spreadFocusNeighborhood(node: THREE.Group): void {
+      if (node.userData.isSun) return;
+      const neighbors = Array.from(adjMap.get(node) || []).filter(n => n.visible !== false).slice(0, 18);
+      if (neighbors.length === 0) return;
 
-    function setLineOpacity(line: THREE.Line, opacity: number, duration = 0.28): void {
-      if (line.userData._filtered) return;
-      const mat = line.material as THREE.LineBasicMaterial;
-      line.visible = opacity > 0.012;
-      gsap.to(mat, { opacity, duration, ease: 'power2.out' });
-    }
+      const touched = new Set<THREE.Group>([node]);
+      const spreadDistance = THREE.MathUtils.clamp(110 - neighbors.length * 3, 52, 92);
+      neighbors.forEach((neighbor, index) => {
+        if (!neighbor.userData.focusBasePosition) neighbor.userData.focusBasePosition = neighbor.position.clone();
+        spreadNodes.add(neighbor);
+        touched.add(neighbor);
 
-    function overviewSemanticOpacity(line: THREE.Line): number {
-      if (!line.userData.semantic) return line.userData.baseOpacity;
-      const distance = camera.position.distanceTo(controls.target);
-      const s = line.userData.source as THREE.Group | undefined;
-      const t = line.userData.target as THREE.Group | undefined;
-      const weight = Number(line.userData.edgeWeight ?? 1);
-      const sampleSeed = hashId(String(s?.userData.id || '') + String(t?.userData.id || ''));
-      const sample = seededRandom(sampleSeed);
-
-      if (distance > 1350) return weight >= 0.92 || sample < 0.035 ? 0.035 : 0;
-      if (distance > 950) return weight >= 0.78 || sample < 0.08 ? 0.045 : 0;
-      if (distance > 650) return weight >= 0.62 || sample < 0.16 ? 0.055 : 0;
-      return weight >= 0.4 || sample < 0.32 ? 0.07 : 0;
-    }
-
-    function getNeighborSet(node: THREE.Group): Set<THREE.Group> {
-      if (node.userData.isSun) {
-        const cid = node.userData.clusterId;
-        return new Set((clusterNodes.get(cid) || []).filter(n => n.visible !== false));
-      }
-      return new Set(Array.from(adjMap.get(node) || []).filter(n => n.visible !== false));
-    }
-
-    function getSecondRing(neighbors: Set<THREE.Group>, focus: THREE.Group): Set<THREE.Group> {
-      const secondRing = new Set<THREE.Group>();
-      neighbors.forEach((neighbor) => {
-        Array.from(adjMap.get(neighbor) || [])
-          .filter(n => n.visible !== false && n !== focus && !neighbors.has(n))
-          .slice(0, 4)
-          .forEach(n => secondRing.add(n));
-      });
-      return secondRing;
-    }
-
-    function refreshOverviewEdgeDensity(duration = 0.2): void {
-      allLinks.forEach((l) => {
-        if (l.userData._filtered || !l.userData.semantic) return;
-        setLineOpacity(l, overviewSemanticOpacity(l), duration);
-      });
-    }
-
-    function applyAttention(node: THREE.Group | null, locked = false): void {
-      const mode = useAppStore.getState().mode;
-      const modeDimmed = dimNodeModes.has(mode);
-      const modeOpacity = modeDimmed ? 0.42 : 1;
-
-      if (!node) {
-        allNodes.forEach((n) => setNodeVisual(n, 1, modeOpacity, 0.3));
-        allLinks.forEach((l) => {
-          if (l.userData._filtered) return;
-          if (l.userData.isInternal) {
-            l.visible = false;
-            return;
-          }
-          const opacity = l.userData.semantic ? overviewSemanticOpacity(l) : l.userData.baseOpacity;
-          setLineOpacity(l, opacity, 0.3);
-          if (l.userData.flowMesh) l.userData.flowMesh.visible = false;
+        const base = neighbor.userData.focusBasePosition as THREE.Vector3;
+        const fromFocus = new THREE.Vector3().subVectors(base, node.position);
+        if (fromFocus.lengthSq() < 1) {
+          const angle = (index / Math.max(1, neighbors.length)) * Math.PI * 2;
+          fromFocus.set(Math.cos(angle), Math.sin(angle) * 0.35, Math.sin(angle));
+        }
+        fromFocus.normalize();
+        const target = base.clone().add(fromFocus.multiplyScalar(spreadDistance));
+        gsap.to(neighbor.position, {
+          x: target.x,
+          y: target.y,
+          z: target.z,
+          duration: 0.62,
+          ease: 'expo.out',
+          onUpdate: () => updateLinksForNodes(touched),
         });
-        clearNodeLabels();
-        return;
-      }
-
-      const neighbors = getNeighborSet(node);
-      const secondRing = getSecondRing(neighbors, node);
-      const primarySet = new Set<THREE.Group>([node, ...neighbors]);
-
-      allNodes.forEach((n) => {
-        if (!n.visible) return;
-        if (n === node) {
-          setNodeVisual(n, locked ? 1.42 : 1.24, 1, 0.26);
-        } else if (neighbors.has(n)) {
-          setNodeVisual(n, locked ? 1.08 : 1.02, 0.88, 0.26);
-        } else if (secondRing.has(n)) {
-          setNodeVisual(n, 0.96, 0.42 * modeOpacity, 0.26);
-        } else {
-          setNodeVisual(n, 0.9, (locked ? 0.18 : 0.24) * modeOpacity, 0.26);
-        }
       });
-
-      allLinks.forEach((l) => {
-        if (l.userData._filtered) return;
-        const s = l.userData.source as THREE.Group;
-        const t = l.userData.target as THREE.Group;
-        const directlyRelated = (s === node && neighbors.has(t)) || (t === node && neighbors.has(s));
-        const inPrimary = primarySet.has(s) && primarySet.has(t);
-        const touchesSecondRing = (primarySet.has(s) && secondRing.has(t)) || (primarySet.has(t) && secondRing.has(s));
-
-        if (l.userData.flowMesh) l.userData.flowMesh.visible = directlyRelated && locked;
-
-        if (directlyRelated) {
-          (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor || l.userData.clusterColor || 0xffffff);
-          setLineOpacity(l, locked ? 0.86 : 0.68, 0.24);
-        } else if (inPrimary) {
-          setLineOpacity(l, l.userData.semantic ? 0.34 : 0.22, 0.24);
-        } else if (touchesSecondRing) {
-          setLineOpacity(l, 0.12, 0.24);
-        } else if (l.userData.semantic) {
-          setLineOpacity(l, 0, 0.18);
-        } else if (l.userData.isInternal) {
-          setLineOpacity(l, 0, 0.18);
-        } else {
-          setLineOpacity(l, locked ? 0.035 : 0.06, 0.24);
-        }
-      });
-
-      setNodeLabelsFromNode(node);
     }
 
     function focusNode(node: THREE.Group): void {
@@ -761,11 +699,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (resetBtn) resetBtn.classList.add('visible');
       if (autoRotateBeforeFocus === null) autoRotateBeforeFocus = controls.autoRotate;
       controls.autoRotate = false;
+      restoreSpreadNodes(0.22);
+      spreadFocusNeighborhood(node);
       const focusSelection = getFocusSelection(node);
       lastFocusSelection = focusSelection;
       frameSelection(focusSelection, node);
-      lockedNode = node;
-      hoveredNode = null;
 
       // Special highlight for focused node
       if (node.userData.ring) {
@@ -773,8 +711,108 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         gsap.to(node.userData.ring.material, { opacity: 0.8, duration: 0.5 });
       }
 
-      if (node.userData.isSun) currentClusterId = node.userData.clusterId;
-      applyAttention(node, true);
+      if (node.userData.isSun) {
+        currentClusterId = node.userData.clusterId;
+        const cid = node.userData.clusterId;
+        const mySubNodes = clusterNodes.get(cid) || [];
+        const myClusterSet = new Set<THREE.Group>([node, ...mySubNodes]);
+        allNodes.forEach((n) => {
+          if (!n.visible) return;
+          const inCluster = myClusterSet.has(n);
+          gsap.to(n.scale, {
+            x: inCluster ? 1 : 0.15,
+            y: inCluster ? 1 : 0.15,
+            z: inCluster ? 1 : 0.15,
+            duration: 0.5,
+          });
+          if (inCluster && n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
+        });
+        allLinks.forEach((l) => {
+          if (l.userData._filtered) return;
+          const s = l.userData.source as THREE.Group;
+          const t = l.userData.target as THREE.Group;
+          const inCluster = myClusterSet.has(s) && myClusterSet.has(t);
+
+          if (l.userData.flowMesh) l.userData.flowMesh.visible = inCluster;
+
+          if (l.userData.isInternal) {
+            l.visible = inCluster;
+            if (inCluster) {
+              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
+              gsap.to(l.material, { opacity: 0.5, duration: 0.5 });
+            }
+          } else if (l.userData.semantic) {
+            // Semantic (WikiLink) edges: show only within this cluster
+            l.visible = inCluster;
+            if (inCluster) {
+              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
+              gsap.to(l.material, { opacity: 0.74, duration: 0.5 });
+            }
+          } else {
+            if (
+              inCluster &&
+              l.userData.trueColor !== l.userData.clusterColor
+            )
+              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
+            if (inCluster) {
+              gsap.to(l.material, { opacity: 0.52, duration: 0.5 });
+            } else {
+              l.visible = false;
+              gsap.to(l.material, { opacity: 0, duration: 0.2 });
+            }
+          }
+        });
+      } else {
+        const neighbors = adjMap.get(node) || new Set<THREE.Group>();
+        // Only include visible neighbors
+        const visibleNeighbors = new Set(Array.from(neighbors).filter(n => n.visible));
+        const visibleSet = new Set<THREE.Group>([node, ...visibleNeighbors]);
+        allNodes.forEach((n) => {
+          if (!n.visible) return;
+          const isVisible = visibleSet.has(n);
+          gsap.to(n.scale, {
+            x: isVisible ? (n === node ? 1.5 : 1) : 0.1,
+            y: isVisible ? (n === node ? 1.5 : 1) : 0.1,
+            z: isVisible ? (n === node ? 1.5 : 1) : 0.1,
+            duration: 0.5,
+          });
+          if (isVisible && n.userData.trueColor)
+            setNodeColor(n, n.userData.trueColor);
+        });
+        allLinks.forEach((l) => {
+          if (l.userData._filtered) return;
+          const s = l.userData.source as THREE.Group;
+          const t = l.userData.target as THREE.Group;
+          const isRelated = s === node || t === node;
+
+          if (l.userData.flowMesh) l.userData.flowMesh.visible = isRelated;
+
+          if (l.userData.isInternal) {
+            l.visible = isRelated;
+            if (isRelated) {
+              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
+              gsap.to(l.material, { opacity: 0.82, duration: 0.5 });
+            }
+          } else if (l.userData.semantic) {
+            // Semantic edges: show only when directly connected to focused node
+            l.visible = isRelated;
+            if (isRelated) {
+              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
+              gsap.to(l.material, { opacity: 0.92, duration: 0.5 });
+            }
+          } else {
+            // Visual-only curves (sun→subnode, core→sun): hidden completely in leaf focus
+            l.visible = false;
+            gsap.to(l.material, {
+              opacity: 0,
+              duration: 0.2,
+            });
+          }
+        });
+      }
+      // Show card name labels for focused node + neighbors
+      setNodeLabelsFromNode(node);
+      applyNodeModeVisual(useAppStore.getState().mode);
     }
 
     // --- Learning Path ---
@@ -1110,7 +1148,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         const targetNode = allNodes.find(n => n.userData.id === edge.targetId);
         if (sourceNode && targetNode) {
           const edgeColor = sourceNode.userData.trueColor || sourceNode.userData.clusterColor || 0xffffff;
-          createCurve(sourceNode, targetNode, edgeColor, 0.5, false, edgeColor, true, edge.weight ?? 1);
+          createCurve(sourceNode, targetNode, edgeColor, 0.5, false, edgeColor, true);
         }
       });
     }
@@ -1122,8 +1160,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         controls.autoRotate = autoRotateBeforeFocus;
         autoRotateBeforeFocus = null;
       }
-      lockedNode = null;
-      hoveredNode = null;
+      restoreSpreadNodes(0.45);
       lastFocusSelection = [];
       clearNodeLabels();
       gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.2 });
@@ -1136,10 +1173,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       allNodes.forEach((n) => {
         gsap.to(n.scale, { x: 1, y: 1, z: 1, duration: 0.5 });
         if (n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
-        nodeMaterials(n).forEach((mat) => {
-          const base = typeof mat.userData.nodeBaseOpacity === 'number' ? mat.userData.nodeBaseOpacity : 1;
-          gsap.to(mat, { opacity: base, duration: 0.5 });
-        });
         // Reapply type visibility filter
         const t = n.userData.type as string;
         if (t && typeVisible[t] !== undefined) n.visible = typeVisible[t];
@@ -1150,8 +1183,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         if (l.userData.isInternal) {
           l.visible = false;
         } else if (l.userData.semantic) {
-          (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
-          setLineOpacity(l, overviewSemanticOpacity(l), 0.5);
+          l.visible = false; // Hide WikiLink edges when resetting to overview
         } else {
           l.visible = true;
           (l.material as THREE.LineBasicMaterial).color.set(l.userData.clusterColor);
@@ -1338,7 +1370,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ReinhardToneMapping;
     containerRef.current.appendChild(renderer.domElement);
 
@@ -1648,11 +1680,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       }
       allNodes.length = 0;
       allLinks.length = 0;
-      flows.length = 0;
       Object.keys(typeVisible).forEach(k => delete typeVisible[k]);
       adjMap.clear();
       clusterNodes.clear();
       clusterSuns.clear();
+      spreadNodes = new Set();
       clusterLabelData.length = 0;
       nodeLabelItems.length = 0;
       clearNodeLabels();
@@ -1661,12 +1693,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const vaultName = storeVaults.find(v => v.id === vid)?.name || vid || `CENTRAL_INTELLIGENCE`;
       createCore(vaultName);
       createClustersFromData(c, n, e);
-      initializeNodeMotion();
       clearLearningPath();
       buildDemoLearningPath(dataRef.current.learningPathSteps);
       createLearningPath();
       applyNodeModeVisual(useAppStore.getState().mode, true);
-      applyAttention(null);
     }
 
     // If data already available at mount time (fast fetch), render immediately
@@ -1676,195 +1706,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const initVid = useAppStore.getState().currentVaultId;
       const buildFn = useGalaxyActions.getState().actions.buildGalaxyScene
       if (buildFn) buildFn(dn, de, dc, initVid);
-    }
-
-    function initializeNodeMotion(): void {
-      allNodes.forEach((node) => {
-        node.userData.basePosition = node.position.clone();
-        node.userData.velocity = new THREE.Vector3();
-        node.userData.motionSeed = hashId(String(node.userData.id || node.userData.name || 'node'));
-        node.userData.pinnedUntil = 0;
-      });
-    }
-
-    function updateCurveGeometry(line: THREE.Line): void {
-      const sourceNode = line.userData.source as THREE.Group | undefined;
-      const targetNode = line.userData.target as THREE.Group | undefined;
-      if (!sourceNode || !targetNode) return;
-
-      const start = sourceNode.position;
-      const end = targetNode.position;
-      const dist = start.distanceTo(end);
-      const mid = new THREE.Vector3().lerpVectors(start, end, 0.5);
-      const curveSeed = hashId(String(sourceNode.userData.id || '') + String(targetNode.userData.id || ''));
-      const direction = new THREE.Vector3().subVectors(end, start).normalize();
-      const centerOut = mid.lengthSq() > 1 ? mid.clone().normalize() : new THREE.Vector3(0, 1, 0);
-      const side = new THREE.Vector3().crossVectors(direction, centerOut);
-      if (side.lengthSq() < 0.01) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
-      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
-      side.normalize().multiplyScalar(seededRandom(curveSeed) > 0.5 ? 1 : -1);
-      const arcStrength = line.userData.semantic ? 0.28 : 0.36;
-      const offsetMag = Math.min(180, Math.max(34, dist * arcStrength));
-      mid
-        .add(side.multiplyScalar(offsetMag))
-        .add(centerOut.multiplyScalar(Math.min(90, dist * 0.16)));
-
-      const curve = new THREE.QuadraticBezierCurve3(start.clone(), mid, end.clone());
-      const points = curve.getPoints(16);
-      const position = line.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
-      if (position && position.count === points.length) {
-        for (let i = 0; i < points.length; i++) position.setXYZ(i, points[i].x, points[i].y, points[i].z);
-        position.needsUpdate = true;
-        line.geometry.computeBoundingSphere();
-      } else {
-        line.geometry.setFromPoints(points);
-      }
-      line.userData.curve = curve;
-      if (line.userData.flowMesh) {
-        const flow = flows.find(f => f.mesh === line.userData.flowMesh);
-        if (flow) flow.points = points;
-      }
-    }
-
-    function updateDynamicLinks(force = false): void {
-      if (!force && !lockedNode && !hoveredNode) return;
-      const candidates = allLinks.filter(l => l.visible || l.userData.flowMesh?.visible);
-      if (force || candidates.length <= 90) {
-        candidates.forEach(updateCurveGeometry);
-        return;
-      }
-
-      const batchSize = lockedNode ? 70 : 48;
-      for (let i = 0; i < batchSize; i++) {
-        if (candidates.length === 0) return;
-        const idx = (linkUpdateCursor + i) % candidates.length;
-        updateCurveGeometry(candidates[idx]);
-      }
-      linkUpdateCursor = (linkUpdateCursor + batchSize) % candidates.length;
-    }
-
-    function updateLinksForNode(node: THREE.Group): void {
-      let updated = 0;
-      allLinks.forEach((line) => {
-        if (updated >= 36) return;
-        if (!line.visible && !line.userData.flowMesh?.visible) return;
-        const s = line.userData.source as THREE.Group | undefined;
-        const t = line.userData.target as THREE.Group | undefined;
-        if (s === node || t === node) {
-          updateCurveGeometry(line);
-          updated++;
-        }
-      });
-    }
-
-    function enterArrangePerformanceMode(node: THREE.Group): void {
-      if (bloomStrengthBeforeDrag === null) bloomStrengthBeforeDrag = bloomPass?.strength ?? null;
-      if (bloomPass) bloomPass.strength = Math.min(bloomPass.strength, 0.65);
-
-      const neighbors = getNeighborSet(node);
-      const visibleSet = new Set<THREE.Group>([node, ...neighbors]);
-      allNodes.forEach((n) => {
-        if (!n.visible) return;
-        if (n === node) setNodeVisual(n, 1.28, 1, 0.12);
-        else if (neighbors.has(n)) setNodeVisual(n, 1, 0.78, 0.12);
-        else setNodeVisual(n, 0.86, 0.08, 0.12);
-      });
-
-      allLinks.forEach((line) => {
-        if (line.userData._filtered) return;
-        const s = line.userData.source as THREE.Group;
-        const t = line.userData.target as THREE.Group;
-        const directlyRelated = s === node || t === node;
-        const inLocal = visibleSet.has(s) && visibleSet.has(t);
-        if (line.userData.flowMesh) line.userData.flowMesh.visible = false;
-        if (directlyRelated) setLineOpacity(line, 0.72, 0.08);
-        else if (inLocal && !line.userData.semantic) setLineOpacity(line, 0.16, 0.08);
-        else setLineOpacity(line, 0, 0.08);
-      });
-    }
-
-    function exitArrangePerformanceMode(): void {
-      if (bloomStrengthBeforeDrag !== null && bloomPass) {
-        gsap.to(bloomPass, { strength: bloomStrengthBeforeDrag, duration: 0.28, ease: 'power2.out' });
-      }
-      bloomStrengthBeforeDrag = null;
-      if (lockedNode) applyAttention(lockedNode, true);
-      else if (hoveredNode) applyAttention(hoveredNode, false);
-      else applyAttention(null);
-    }
-
-    function getActiveInteractionNodes(): THREE.Group[] {
-      const focus = lockedNode || hoveredNode;
-      if (!focus) return [];
-      const neighbors = getNeighborSet(focus);
-      return [focus, ...Array.from(neighbors).slice(0, lockedNode ? 40 : 24)];
-    }
-
-    function applyOrganicMotion(time: number): void {
-      const nodes = getActiveInteractionNodes().filter(n => n.visible !== false && n.userData.name !== 'CENTRAL_INTELLIGENCE');
-      if (nodes.length === 0) return;
-      if (draggingNode) return;
-
-      const now = performance.now();
-      const activeSet = new Set(nodes);
-      const anchorStrength = 0.018;
-      const springStrength = 0.0007;
-      const repulseStrength = 0.72;
-
-      nodes.forEach((node) => {
-        if (!node.userData.velocity) node.userData.velocity = new THREE.Vector3();
-        if (!node.userData.basePosition) node.userData.basePosition = node.position.clone();
-        const velocity = node.userData.velocity as THREE.Vector3;
-        const base = node.userData.basePosition as THREE.Vector3;
-
-        if (node !== draggingNode && now > (node.userData.pinnedUntil || 0)) {
-          const toBase = new THREE.Vector3().subVectors(base, node.position).multiplyScalar(anchorStrength);
-          velocity.add(toBase);
-          const seed = node.userData.motionSeed || 1;
-          const floatAmp = lockedNode ? 0.006 : 0.014;
-          velocity.x += Math.sin(time * 0.55 + seed) * floatAmp;
-          velocity.y += Math.cos(time * 0.45 + seed * 0.7) * floatAmp;
-          velocity.z += Math.sin(time * 0.38 + seed * 1.3) * floatAmp;
-        }
-      });
-
-      allLinks.forEach((line) => {
-        if (!line.userData.semantic) return;
-        const s = line.userData.source as THREE.Group;
-        const t = line.userData.target as THREE.Group;
-        if (!activeSet.has(s) || !activeSet.has(t)) return;
-        if (!s.visible || !t.visible || s === draggingNode || t === draggingNode) return;
-        const delta = new THREE.Vector3().subVectors(t.position, s.position);
-        const dist = Math.max(delta.length(), 1);
-        const desired = 145 + Math.min(90, ((s.userData.baseSize || 3) + (t.userData.baseSize || 3)) * 8);
-        const force = (dist - desired) * springStrength;
-        delta.normalize().multiplyScalar(force);
-        (s.userData.velocity as THREE.Vector3 | undefined)?.add(delta);
-        (t.userData.velocity as THREE.Vector3 | undefined)?.sub(delta);
-      });
-
-      const pairLimit = nodes.length > 48 ? 48 : nodes.length;
-      for (let i = 0; i < pairLimit; i++) {
-        const a = nodes[i];
-        for (let j = i + 1; j < pairLimit; j++) {
-          const b = nodes[j];
-          const delta = new THREE.Vector3().subVectors(a.position, b.position);
-          const distSq = Math.max(delta.lengthSq(), 1);
-          if (distSq > 15000) continue;
-          const push = Math.min(0.26, repulseStrength * 80 / distSq);
-          delta.normalize().multiplyScalar(push);
-          if (a !== draggingNode) (a.userData.velocity as THREE.Vector3 | undefined)?.add(delta);
-          if (b !== draggingNode) (b.userData.velocity as THREE.Vector3 | undefined)?.sub(delta);
-        }
-      }
-
-      nodes.forEach((node) => {
-        if (node === draggingNode) return;
-        const velocity = node.userData.velocity as THREE.Vector3;
-        velocity.multiplyScalar(0.86);
-        velocity.clampLength(0, lockedNode ? 0.8 : 1.25);
-        node.position.add(velocity);
-      });
     }
 
     // --- Event listeners ---
@@ -1974,143 +1815,45 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     };
     renderer.domElement.addEventListener('contextmenu', onContextMenu);
 
-    // Hover, click to focus, drag to arrange
+    // Click to focus
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     let pointerDown: { x: number; y: number } | null = null;
-    const dragIntersection = new THREE.Vector3();
-
-    function setMouseFromEvent(e: MouseEvent): void {
-      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-    }
-
-    function findNodeAt(e: MouseEvent): THREE.Group | null {
-      setMouseFromEvent(e);
-      raycaster.setFromCamera(mouse, camera);
-      const hits = raycaster.intersectObjects(nodesGroup.children, true);
-      for (const hit of hits) {
-        let obj = hit.object as THREE.Object3D;
-        while (obj.parent && obj.parent !== nodesGroup && obj.parent !== scene) obj = obj.parent;
-        if (obj.userData && obj.userData.name) return obj as THREE.Group;
-      }
-      return null;
-    }
-
-    function startDragging(node: THREE.Group, e: MouseEvent): void {
-      draggingNode = node;
-      dragStarted = true;
-      if (dragAutoRotateBefore === null) dragAutoRotateBefore = controls.autoRotate;
-      controls.autoRotate = false;
-      controls.enabled = false;
-
-      const cameraDirection = new THREE.Vector3();
-      camera.getWorldDirection(cameraDirection);
-      dragPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(cameraDirection, node.position);
-      setMouseFromEvent(e);
-      raycaster.setFromCamera(mouse, camera);
-      raycaster.ray.intersectPlane(dragPlane, dragIntersection);
-      node.userData.pinnedUntil = performance.now() + 5000;
-      enterArrangePerformanceMode(node);
-      renderer.domElement.style.cursor = 'grabbing';
-    }
-
-    function finishDragging(): void {
-      if (draggingNode) {
-        draggingNode.userData.basePosition = draggingNode.position.clone();
-        draggingNode.userData.velocity = new THREE.Vector3();
-        draggingNode.userData.pinnedUntil = performance.now() + 5000;
-      }
-      draggingNode = null;
-      dragPlane = null;
-      dragStarted = false;
-      controls.enabled = true;
-      if (dragAutoRotateBefore !== null && !lockedNode) controls.autoRotate = dragAutoRotateBefore;
-      dragAutoRotateBefore = null;
-      exitArrangePerformanceMode();
-      renderer.domElement.style.cursor = hoveredNode ? 'pointer' : '';
-    }
-
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
       pointerDown = { x: e.clientX, y: e.clientY };
-      dragStartPointer = pointerDown;
-      dragStartNode = findNodeAt(e);
-      dragStarted = false;
 
       // Dismiss any existing edge info panel first
       const existing = document.getElementById('galaxy-edge-panel');
       if (existing) existing.remove();
     };
-    const onMouseMove = (e: MouseEvent) => {
-      if (draggingNode && dragPlane) {
-        setMouseFromEvent(e);
-        raycaster.setFromCamera(mouse, camera);
-        if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
-          draggingNode.position.lerp(dragIntersection, 0.55);
-          draggingNode.userData.pinnedUntil = performance.now() + 5000;
-          const now = performance.now();
-          if (now - lastDragLinkUpdateAt > 120) {
-            lastDragLinkUpdateAt = now;
-            updateLinksForNode(draggingNode);
-          }
-        }
-        return;
-      }
-
-      if (dragStartPointer && dragStartNode) {
-        const moved = Math.hypot(e.clientX - dragStartPointer.x, e.clientY - dragStartPointer.y);
-        if (moved > 7) {
-          startDragging(dragStartNode, e);
-          return;
-        }
-      }
-
-      if (pointerDown) return;
-      const now = performance.now();
-      if (now - lastHoverRaycastAt < 140) return;
-      lastHoverRaycastAt = now;
-      const node = findNodeAt(e);
-      renderer.domElement.style.cursor = node ? 'pointer' : '';
-      if (node === hoveredNode) return;
-      hoveredNode = node;
-      if (!lockedNode) applyAttention(hoveredNode, false);
-    };
     const onMouseUp = (e: MouseEvent) => {
       if (e.button !== 0 || !pointerDown) return;
-      if (draggingNode || dragStarted) {
-        finishDragging();
-        pointerDown = null;
-        dragStartPointer = null;
-        dragStartNode = null;
-        return;
-      }
       const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
       pointerDown = null;
-      dragStartPointer = null;
-      dragStartNode = null;
       if (moved > 5) return;
 
-      const node = findNodeAt(e);
-      if (node) {
-        focusNode(node);
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+
+      // Check node clicks first
+      const nodeHits = raycaster.intersectObjects(nodesGroup.children, true);
+      if (nodeHits.length > 0) {
+        let obj = nodeHits[0].object as THREE.Object3D;
+        while (
+          obj.parent &&
+          obj.parent !== nodesGroup &&
+          obj.parent !== scene
+        )
+          obj = obj.parent;
+        if (obj.userData && obj.userData.name) focusNode(obj as THREE.Group);
         return;
       }
 
     };
-    const onMouseLeave = () => {
-      if (draggingNode) finishDragging();
-      pointerDown = null;
-      dragStartPointer = null;
-      dragStartNode = null;
-      hoveredNode = null;
-      renderer.domElement.style.cursor = '';
-      if (!lockedNode) applyAttention(null);
-    };
     renderer.domElement.addEventListener('mousedown', onMouseDown);
-    renderer.domElement.addEventListener('mousemove', onMouseMove);
     renderer.domElement.addEventListener('mouseup', onMouseUp);
-    renderer.domElement.addEventListener('mouseleave', onMouseLeave);
 
     // Resize handler
     const onResize = () => {
@@ -2126,63 +1869,47 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     function animate() {
       animationId = requestAnimationFrame(animate);
       const time = performance.now() * 0.001;
-      const arranging = !!draggingNode;
       controls.update();
-      motionFrame++;
-      if (!arranging && lockedNode && motionFrame % 12 === 0) {
-        applyOrganicMotion(time);
-        updateDynamicLinks();
-      }
-      if (!lockedNode && !hoveredNode && motionFrame % 120 === 0) refreshOverviewEdgeDensity(0.35);
-      if (arranging) renderer.render(scene, camera);
-      else composer.render();
-      const labelNow = performance.now();
-      if (!arranging && labelNow - lastLabelRenderAt > 250) {
-        lastLabelRenderAt = labelNow;
-        renderLabels();
-      }
+      composer.render();
+      renderLabels();
 
       // Dynamic Nebula Rotation
-      if (!arranging && nebulaGroup) {
+      if (nebulaGroup) {
         nebulaGroup.children.forEach(c => {
           c.rotation.z += (c.userData.rotationSpeed || 0.0002);
         });
       }
 
       // Energy Flows animation
-      if (!arranging) {
-        flows.forEach(f => {
-          if (!f.mesh.visible) return;
-          f.offset += f.speed;
-          const pos = f.mesh.geometry.attributes.position.array as Float32Array;
-          const pCount = pos.length / 3;
-          for (let i = 0; i < pCount; i++) {
-            const t = (f.offset + i / pCount) % 1;
-            const idx = Math.floor(t * (f.points.length - 1));
-            const p = f.points[idx];
-            pos[i * 3] = p.x;
-            pos[i * 3 + 1] = p.y;
-            pos[i * 3 + 2] = p.z;
-          }
-          f.mesh.geometry.attributes.position.needsUpdate = true;
-        });
-      }
+      flows.forEach(f => {
+        if (!f.mesh.visible) return;
+        f.offset += f.speed;
+        const pos = f.mesh.geometry.attributes.position.array as Float32Array;
+        const pCount = pos.length / 3;
+        for (let i = 0; i < pCount; i++) {
+          const t = (f.offset + i / pCount) % 1;
+          const idx = Math.floor(t * (f.points.length - 1));
+          const p = f.points[idx];
+          pos[i * 3] = p.x;
+          pos[i * 3 + 1] = p.y;
+          pos[i * 3 + 2] = p.z;
+        }
+        f.mesh.geometry.attributes.position.needsUpdate = true;
+      });
 
       // Gentle breathing & Ring Rotation
-      if (!arranging && (lockedNode || hoveredNode)) {
-        allNodes.forEach(n => {
-          if (!n.visible) return;
-          if (n.userData.ring) {
-            n.userData.ring.rotation.z += 0.01;
-            n.userData.ring.material.opacity = 0.2 + Math.sin(time * 3) * 0.1;
-          }
-        });
-      }
+      allNodes.forEach(n => {
+        if (!n.visible) return;
+        if (n.userData.ring) {
+          n.userData.ring.rotation.z += 0.01;
+          n.userData.ring.material.opacity = 0.2 + Math.sin(time * 3) * 0.1;
+        }
+      });
 
       nodesGroup.position.y = 0;
       linksGroup.position.y = 0;
 
-      if (!arranging && motionFrame % 2 === 0) scene.children.forEach((child) => {
+      scene.children.forEach((child) => {
         if (child.userData && child.userData.isComet) {
           const d = child.userData;
           d.startAngle += d.speed * cometSpeedMultiplier;
@@ -2214,7 +1941,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
 
       // Learning path flow animation
-      if (!arranging && learningPath.visible && learningPath.curve && learningPath.flowParticles) {
+      if (learningPath.visible && learningPath.curve && learningPath.flowParticles) {
         learningPath.flowOffset += 0.002;
         if (learningPath.flowOffset > 1) learningPath.flowOffset -= 1;
         const fpArr = (
@@ -2276,9 +2003,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       window.removeEventListener('resize', onResize);
       renderer.domElement.removeEventListener('contextmenu', onContextMenu);
       renderer.domElement.removeEventListener('mousedown', onMouseDown);
-      renderer.domElement.removeEventListener('mousemove', onMouseMove);
       renderer.domElement.removeEventListener('mouseup', onMouseUp);
-      renderer.domElement.removeEventListener('mouseleave', onMouseLeave);
       unsubscribeModeVisual();
 
       // Kill any active gsap tweens
