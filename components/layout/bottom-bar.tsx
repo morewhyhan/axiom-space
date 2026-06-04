@@ -1,6 +1,7 @@
 'use client'
 
 import { useDashboardStats } from '@/hooks/use-dashboard'
+import type { GrowthPoint } from '@/types/dashboard'
 
 function toPath(pts: number[], max: number, height: number, width: number): string {
   if (pts.length === 0) return `M0,${height} L${width},${height}`
@@ -16,8 +17,8 @@ export default function BottomBar() {
   const { stats, growth, loading } = useDashboardStats()
 
   // Daily counts for the white sparkline (last 7 days)
-  const daily = (growth as any[])?.map((g: any) => g.count) || []
-  const cumul = (growth as any[])?.map((g: any) => g.cumulative) || []
+  const daily = growth?.map((g: GrowthPoint) => g.count) || []
+  const cumul = growth?.map((g: GrowthPoint) => g.cumulative) || []
   const maxDaily = Math.max(...daily, 10)
   const maxCumul = Math.max(...cumul, 100)
   const dailyPath = toPath(daily, maxDaily, 80, 600)

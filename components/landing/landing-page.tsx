@@ -8,10 +8,12 @@ import { client } from '@/lib/api-client'
 export default function LandingPage({
   showLoadingHint = false,
   isLoggedIn = false,
+  vaultsLoaded = false,
   onEnterApp,
 }: {
   showLoadingHint?: boolean
   isLoggedIn?: boolean
+  vaultsLoaded?: boolean
   onEnterApp?: () => void
 }) {
   const [showAuth, setShowAuth] = useState<'login' | 'register' | null>(null)
@@ -65,6 +67,11 @@ export default function LandingPage({
                 <button className="landing-btn landing-btn-secondary" onClick={() => setShowAuth('register')}>注册</button>
               </div>
             </>
+          ) : !vaultsLoaded ? (
+            <>
+              <h2 className="landing-section-title">加载知识库</h2>
+              <p className="landing-loading-hint">正在读取你的知识库...</p>
+            </>
           ) : vaults.length === 0 ? (
             <CreateVault onCreated={handleSelectVault} onSkip={onEnterApp} />
           ) : (
@@ -103,7 +110,7 @@ function CreateVault({ onCreated, onSkip }: { onCreated: (id: string) => void; o
     setCreating(true)
     try {
       const res = await client.api.vaults.$post({ json: { name: name.trim() } })
-      const data: any = await res.json()
+      const data: { success: boolean; vault?: { id: string; name: string }; vaults?: Array<{ id: string; name: string }>; error?: string } = await res.json()
       if (data.success && data.vault?.id) {
         useAppStore.getState().setCurrentVaultId(data.vault.id)
         useAppStore.getState().setVaults([{ id: data.vault.id, name: data.vault.name, cardCount: 0 }])

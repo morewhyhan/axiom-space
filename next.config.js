@@ -12,6 +12,12 @@ const nextConfig = {
     ],
   },
   webpack: (config, { isServer }) => {
+    config.resolve = config.resolve || {}
+    config.resolve.fallback = {
+      ...(config.resolve.fallback || {}),
+      encoding: false,
+    }
+
     if (isServer) {
       const fnExternals = [
         // pi-ai / pi-agent-core 内部用动态 require() 加载 provider 模块，

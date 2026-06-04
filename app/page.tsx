@@ -1,17 +1,16 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
-import type { PanelId, PanelLayout } from '@/stores/mode-store'
+import type { Mode, PanelId } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import ResizablePanel from '@/components/layout/ResizablePanel'
 import { useAuthSession } from '@/hooks/use-auth'
 import { useGalaxyData } from '@/hooks/use-galaxy'
 import { useLearningPaths, useLearningProfile, useMemorySearch } from '@/hooks/use-learning'
 import { useDashboardStats } from '@/hooks/use-dashboard'
-import type { GalaxyNode, GalaxyEdge, GalaxyCluster } from '@/types/galaxy'
 import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
 
@@ -20,15 +19,14 @@ const DashboardLeft = dynamic(() => import('@/components/dashboard/dashboard-lef
 const DashboardRight = dynamic(() => import('@/components/dashboard/dashboard-right'))
 const ForgeChat = dynamic(() => import('@/components/forge/forge-chat'))
 const ForgeEditor = dynamic(() => import('@/components/forge/forge-editor'))
-const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-list'))
+const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
 const CognitionSidebar = dynamic(() => import('@/components/cognition/cognition-sidebar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
 const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
-const LearnControls = dynamic(() => import('@/components/learn/learn-controls'))
-const LearnList = dynamic(() => import('@/components/learn/learn-list'))
+const LearnWorkspace = dynamic(() => import('@/components/learn/learn-workspace'))
 const PanelBar = dynamic(() => import('@/components/layout/panel-bar'))
 const Header = dynamic(() => import('@/components/layout/header'))
 const BottomBar = dynamic(() => import('@/components/layout/bottom-bar'))
@@ -44,13 +42,11 @@ export default function Home() {
     setSearchResults([])
     setNewCardTitle('')
     setNewCardContent('')
+    setNewCardType('fleeting')
   }, [])
   const immersive = useAppStore(s => s.immersive)
   const setImmersive = useAppStore(s => s.setImmersive)
   // Panel state
-  const filePanelOpen = useAppStore((s) => s.filePanelOpen)
-  const sessionsPanelOpen = useAppStore((s) => s.sessionsPanelOpen)
-  const rightPanelOpen = useAppStore((s) => s.rightPanelOpen)
   const panelLayout = useAppStore((s) => s.panelLayout)
   const chatPanelOpen = useAppStore((s) => s.chatPanelOpen)
   const { data: session, isPending: authPending } = useAuthSession()
@@ -63,6 +59,8 @@ export default function Home() {
   const [showApp, setShowApp] = useState(false)
   const [showLoading, setShowLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
+  const [vaultsLoaded, setVaultsLoaded] = useState(false)
+  const [visitedModes, setVisitedModes] = useState<Set<Mode>>(() => new Set([mode]))
   const queryClient = useQueryClient()
 
   // ── Search state ──
@@ -73,14 +71,18 @@ export default function Home() {
   // ── New card state ──
   const [newCardTitle, setNewCardTitle] = useState('')
   const [newCardContent, setNewCardContent] = useState('')
-  const [newCardType, setNewCardType] = useState<'fleeting' | 'literature' | 'permanent'>('fleeting')
+  const [newCardType, setNewCardType] = useState('fleeting')
   const [creating, setCreating] = useState(false)
+  const cardTypeOptions = useMemo(() => {
+    const labels: Record<string, string> = { fleeting: '灵感', literature: '文献', permanent: '永久' }
+    const existingTypes = Array.from(new Set((galaxyData?.nodes ?? []).map((node) => node.type).filter(Boolean)))
+    const types = Array.from(new Set(['fleeting', 'literature', 'permanent', ...existingTypes]))
+    return types.map((type) => ({ id: type, label: labels[type] ?? type }))
+  }, [galaxyData?.nodes])
 
   // ── Load vaults only when logged in ──
   const vaults = useAppStore((s) => s.vaults)
   const currentVaultId = useAppStore((s) => s.currentVaultId)
-  const setVaults = useAppStore((s) => s.setVaults)
-  const setCurrentVaultId = useAppStore((s) => s.setCurrentVaultId)
 
   // ── Onboarding ──
   const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding)
@@ -106,32 +108,39 @@ export default function Home() {
   }, [showOnboarding, openModal])
 
   useEffect(() => {
-    if (!isLoggedIn) return
+    if (!isLoggedIn) {
+      setVaultsLoaded(false)
+      return
+    }
     let cancelled = false
+    setVaultsLoaded(false)
     ;(async () => {
       try {
-        let res: any = await client.api.vaults.$get()
-        let data: any = await res.json()
+        const vaultsRes = await client.api.vaults.$get()
+        const vaultsData = await vaultsRes.json() as { success: boolean; vaults: Array<{ id: string; name: string; cardCount: number }> }
         if (cancelled) return
 
-        if (data.success && data.vaults.length === 0) {
-          res = await client.api.vaults.$post({ json: { name: 'My Vault' } })
-          data = await res.json()
+        if (vaultsData.success && vaultsData.vaults.length === 0) {
+          const createRes = await client.api.vaults.$post({ json: { name: 'My Vault' } })
+          const createData = await createRes.json() as { success: boolean; vault: { id: string; name: string } }
           if (cancelled) return
+          if (createData.success && createData.vault) {
+            useAppStore.getState().setVaults([{ id: createData.vault.id, name: createData.vault.name, cardCount: 0 }])
+            useAppStore.getState().setCurrentVaultId(createData.vault.id)
+          }
+          setVaultsLoaded(true)
+          return
         }
 
-        if (data.success && data.vaults?.length > 0) {
-          useAppStore.getState().setVaults(data.vaults)
+        if (vaultsData.success && vaultsData.vaults.length > 0) {
+          useAppStore.getState().setVaults(vaultsData.vaults)
           const persistedId = useAppStore.getState().currentVaultId
-          const stillExists = persistedId && data.vaults.some((v: any) => v.id === persistedId)
+          const stillExists = persistedId && vaultsData.vaults.some((v: { id: string }) => v.id === persistedId)
           if (!stillExists) {
-            useAppStore.getState().setCurrentVaultId(data.vaults[0].id)
+            useAppStore.getState().setCurrentVaultId(vaultsData.vaults[0].id)
           }
-        } else if (data.success && (data as any).vault?.id) {
-          const v = (data as any).vault
-          useAppStore.getState().setVaults([{ id: v.id, name: v.name, cardCount: 0 }])
-          useAppStore.getState().setCurrentVaultId(v.id)
         }
+        setVaultsLoaded(true)
       } catch (err) {
         if (!cancelled) console.warn('[Home] failed to load vaults:', err)
       }
@@ -162,6 +171,15 @@ export default function Home() {
       setShowLoading(true)
     }
   }
+
+  useEffect(() => {
+    setVisitedModes((prev) => {
+      if (prev.has(mode)) return prev
+      const next = new Set(prev)
+      next.add(mode)
+      return next
+    })
+  }, [mode])
 
   // When loading overlay is active and data arrives → dismiss
   useEffect(() => {
@@ -212,9 +230,9 @@ export default function Home() {
   useEffect(() => {
     if (!selectedNode) return
     let cancelled = false
-    ;(client as any).api.vault.card[':id']
-      .$get({ param: { id: selectedNode.id }, query: currentVaultId ? { vid: currentVaultId } : undefined })
-      .then((res: any) => res.json() as Promise<{ success: boolean; card: { content: string; title: string } }>)
+    ;client.api.vault.card[':id']
+      .$get({ param: { id: selectedNode.id } })
+      .then((res) => res.json() as Promise<{ success: boolean; card: { content: string; title: string } }>)
       .then((data: { success: boolean; card: { content: string; title: string } }) => {
         if (cancelled) return
         if (data.success) {
@@ -241,8 +259,8 @@ export default function Home() {
 
       // Search titles first (fast, always)
       const titleRes = await client.api.vault['search-titles'].$get({ query: params })
-      const titleData = await titleRes.json() as any
-      const titleResults = (titleData?.results ?? []).map((r: any) => ({
+      const titleData: { success: boolean; results?: Array<{ id: string; title: string | null; type: string }> } = await titleRes.json()
+      const titleResults = (titleData?.results ?? []).map((r) => ({
         id: r.id || '',
         title: r.title || '',
         snippet: r.title || '',
@@ -252,15 +270,15 @@ export default function Home() {
       let contentResults: { id: string; title: string; snippet: string }[] = []
       if (titleResults.length < 5) {
         try {
-          const contentRes = await (client as any).api.vault.search.$get({ query: { q } })
-          const contentData: { success: boolean; results?: Array<{ path: string; title: string; content: string }> } = await contentRes.json()
+          const contentRes = await client.api.vault.search.$get({ query: { q } })
+          const contentData = await contentRes.json() as { success: boolean; results?: Array<{ path: string; title: string; content: string }> }
           // Content search returns { path, title, content } — use title for dedup
           // since the two APIs use different ID formats (UUID vs file path).
-          const knownTitles = new Set(titleResults.map((r: any) => r.title))
+          const knownTitles = new Set(titleResults.map((r) => r.title))
           contentResults = (contentData?.results ?? [])
-            .filter((r: any) => !knownTitles.has(r.title || ''))
+            .filter((r) => !knownTitles.has(r.title || ''))
             .slice(0, 10 - titleResults.length)
-            .map((r: any) => ({
+            .map((r) => ({
               id: r.path || r.title || '',
               title: r.title || r.path || 'Untitled',
               snippet: (r.content || r.title || '').slice(0, 100),
@@ -275,8 +293,8 @@ export default function Home() {
           const memResults = await memorySearch.mutateAsync({ query: q, limit: 5 })
           const knownTitles = new Set([...titleResults, ...contentResults].map(r => r.title))
           memoryResults = memResults
-            .filter((r: any) => !knownTitles.has(r.title || ''))
-            .map((r: any) => ({
+            .filter((r) => !knownTitles.has(r.title || ''))
+            .map((r) => ({
               id: r.id,
               title: r.title,
               snippet: (r.clusterName ? `[${r.clusterName}] ` : '') + (r.snippet || r.title || '').slice(0, 80),
@@ -323,10 +341,11 @@ export default function Home() {
   }, [modal, closeModal, openModal])
 
   // ── Create card handler ──
-  const handleCreateCard = async () => {
+  const handleCreateCard = async (typeOverride?: string) => {
     if (!newCardTitle.trim() || !currentVaultId) return
     setCreating(true)
     try {
+      const cardType = (typeOverride || newCardType).trim() || 'fleeting'
       // Sanitize title to a safe filename slug — strip path separators, dot-only
       // segments, and any char outside a conservative whitelist. Prevents the
       // user accidentally (or maliciously) writing to "../../foo.md" or
@@ -348,7 +367,7 @@ export default function Home() {
         json: {
           path: `${safeTitle}.md`,
           content: `# ${rawTitle}\n\n${newCardContent}`,
-          type: newCardType,
+          type: cardType,
           vaultId: currentVaultId,
         },
       })
@@ -369,11 +388,11 @@ export default function Home() {
             const byTitle = useGalaxyActions.getState().actions.findNodeByTitle
             const focusFn = useGalaxyActions.getState().actions.focusNodeById
             if (typeof byTitle === 'function') {
-              const id = byTitle(dbTitle)
+              const id = String(byTitle(dbTitle) ?? '')
               if (id && typeof focusFn === 'function') {
                 focusFn(id)
                 // Also open the card in Forge editor
-                useAppStore.getState().setSelectedNode({ id, title: dbTitle, type: 'fleeting' })
+                useAppStore.getState().setSelectedNode({ id, title: dbTitle, type: cardType })
                 useAppStore.getState().setMode('forge')
               }
             }
@@ -390,17 +409,21 @@ export default function Home() {
   useEffect(() => {
     const preloadPanels = async () => {
       await Promise.all([
+        import('@/components/layout/header'),
+        import('@/components/layout/bottom-bar'),
+        import('@/components/layout/panel-bar'),
         import('@/components/dashboard/dashboard-left'),
         import('@/components/dashboard/dashboard-right'),
         import('@/components/forge/forge-chat'),
         import('@/components/forge/forge-editor'),
+        import('@/components/forge/chat-session-list'),
+        import('@/components/forge/file-tree'),
         import('@/components/galaxy/galaxy-controls'),
         import('@/components/galaxy/galaxy-filter'),
+        import('@/components/cognition/cognition-sidebar'),
         import('@/components/cognition/learning-profile'),
-        import('@/components/cognition/profile-bar'),
         import('@/components/cognition/observations-panel'),
-        import('@/components/learn/learn-controls'),
-        import('@/components/learn/learn-list'),
+        import('@/components/learn/learn-workspace'),
       ])
     }
     if ('requestIdleCallback' in window) {
@@ -451,84 +474,106 @@ export default function Home() {
 
           {!immersive && <div className="relative z-10 flex flex-col h-screen pointer-events-none">
             <Header />
-            <main className={`main-grid${mode !== 'dashboard' ? ' no-bottom-pad' : ''}${mode === 'cognition' ? ' cognition-mode' : ''}`}>
-              {mode === 'cognition' ? (
-                <>
+            <main className={`main-grid mode-${mode}${mode !== 'dashboard' ? ' no-bottom-pad' : ''}${mode === 'cognition' ? ' cognition-mode' : ''}`}>
+              {(visitedModes.has('dashboard') || mode === 'dashboard') && (
+                <div className={`mode-stage ${mode === 'dashboard' ? 'active' : ''}`} aria-hidden={mode !== 'dashboard'}>
+                  <div className="left-zone">
+                    <DashboardLeft />
+                  </div>
+                  <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
+                    <div className="graph-hint" id={mode === 'dashboard' ? 'graph-hint' : undefined}>拖拽旋转 · 滚轮缩放 · 点击选择节点</div>
+                    <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'dashboard' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'dashboard' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
+                    <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
+                      <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
+                      <div className="w-px h-3 bg-white/10"></div>
+                      <button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入</button>
+                      <div className="w-px h-3 bg-white/10"></div>
+                      <button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('shortcuts')}>⌨ 快捷键</button>
+                    </div>
+                  </section>
+                  <div className="right-zone">
+                    <DashboardRight />
+                  </div>
+                  <BottomBar />
+                </div>
+              )}
+
+              {(visitedModes.has('forge') || mode === 'forge') && (
+                <div className={`mode-stage ${mode === 'forge' ? 'active' : ''}`} aria-hidden={mode !== 'forge'}>
+                  <div className="left-zone">
+                    {panelLayout.left.map((panelId: string) => {
+                      const isFileTree = panelId === 'fileTree'
+                      return (
+                        <ResizablePanel
+                          key={panelId}
+                          id={panelId as PanelId}
+                          zone="left"
+                          minWidth={isFileTree ? 240 : 300}
+                          maxWidth={isFileTree ? 340 : 420}
+                        >
+                          {panelId === 'sessionList' ? <ChatSessionList /> : null}
+                          {panelId === 'fileTree' ? <FileTree /> : null}
+                        </ResizablePanel>
+                      )
+                    })}
+                  </div>
+                  <section className={`flex-1 flex flex-col min-w-0 overflow-hidden ${chatPanelOpen ? '' : 'items-center justify-end pb-6'}`}>
+                    {chatPanelOpen && <ForgeChat />}
+                    {!chatPanelOpen && (
+                      <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
+                        <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
+                        <div className="w-px h-3 bg-white/10"></div>
+                        <button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入</button>
+                        <div className="w-px h-3 bg-white/10"></div>
+                        <button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('shortcuts')}>⌨ 快捷键</button>
+                      </div>
+                    )}
+                  </section>
+                  <div className="right-zone">
+                    {panelLayout.right.map((panelId: string) => (
+                      <ResizablePanel key={panelId} id={panelId as PanelId} zone="right">
+                        {panelId === 'editor' ? <ForgeEditor /> : null}
+                      </ResizablePanel>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {(visitedModes.has('galaxy') || mode === 'galaxy') && (
+                <div className={`mode-stage ${mode === 'galaxy' ? 'active' : ''}`} aria-hidden={mode !== 'galaxy'}>
+                  <div className="left-zone">
+                    <GalaxyControls />
+                  </div>
+                  <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
+                    <div className="graph-hint" id={mode === 'galaxy' ? 'graph-hint' : undefined}>拖拽旋转 · 滚轮缩放 · 点击选择节点</div>
+                    <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'galaxy' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'galaxy' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
+                    <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
+                      <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
+                      <div className="w-px h-3 bg-white/10"></div>
+                      <button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入</button>
+                      <div className="w-px h-3 bg-white/10"></div>
+                      <button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('shortcuts')}>⌨ 快捷键</button>
+                    </div>
+                  </section>
+                  <div className="right-zone">
+                    <GalaxyFilter />
+                  </div>
+                </div>
+              )}
+
+              {(visitedModes.has('cognition') || mode === 'cognition') && (
+                <div className={`mode-stage cognition-stage ${mode === 'cognition' ? 'active' : ''}`} aria-hidden={mode !== 'cognition'}>
                   <CognitionSidebar />
                   <LearningProfile />
                   <InsightsPanel />
-                </>
-              ) : (
-              <>
-              <div className="left-zone">
-                {mode === 'dashboard' && <DashboardLeft />}
-                {mode === 'galaxy' && <GalaxyControls />}
-                {mode === 'forge' && (
-                  <>
-                    {/* P1 FIX: Ensure sessionList is always present in Forge mode for session management */}
-                    {!panelLayout.left.includes('sessionList') ? (
-                      <ResizablePanel id="sessionList" zone="left">
-                        <ChatSessionList />
-                      </ResizablePanel>
-                    ) : (
-                      panelLayout.left.map((panelId: string) => (
-                        <ResizablePanel key={panelId} id={panelId as PanelId} zone="left">
-                          {panelId === 'fileTree' ? <FileTree /> : null}
-                          {panelId === 'sessionList' ? <ChatSessionList /> : null}
-                        </ResizablePanel>
-                      ))
-                    )}
-                  </>
-                )}
-                {mode === 'learn' && <LearnControls />}
-              </div>
+                </div>
+              )}
 
-              <section className={`flex-1 flex flex-col min-w-0 overflow-hidden ${mode !== 'forge' || !chatPanelOpen ? 'items-center justify-end pb-6' : ''}`}>
-                {mode === 'forge' && chatPanelOpen && <ForgeChat />}
-                {(mode !== 'forge' || !chatPanelOpen) && (<>
-                  <div className="graph-hint" id="graph-hint">拖拽旋转 · 滚轮缩放 · 点击选择节点</div>
-                  <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id="cluster-fps">—</span> &nbsp;│&nbsp; XYZ <span id="cluster-coords">0 / 0 / 0</span></div>
-                  <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
-                    <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
-                    <div className="w-px h-3 bg-white/10"></div>
-                    <button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入</button>
-                    <div className="w-px h-3 bg-white/10"></div>
-                    <button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('shortcuts')}>⌨ 快捷键</button>
-                  </div>
-                </>)}
-              </section>
-
-              <div className="right-zone">
-                {mode === 'dashboard' && <DashboardRight />}
-                {mode === 'galaxy' && <GalaxyFilter />}
-                {mode === 'forge' && panelLayout.right.map((panelId: string) => (
-                  <ResizablePanel key={panelId} id={panelId as PanelId} zone="right">
-                    {panelId === 'editor' ? <ForgeEditor /> : null}
-                  </ResizablePanel>
-                ))}
-                {mode === 'learn' && <LearnList />}
-              </div>
-              </>)}
-
-              {mode === 'dashboard' && <BottomBar />}
-              {mode === 'learn' && learningData && (
-                <div className="absolute bottom-0 left-[var(--pad-x)] right-[calc(var(--panel-xl)+var(--pad-x)+12px+var(--panel-sm))] border-t border-white/5 py-3 pointer-events-auto flex justify-between items-center opacity-30">
-                  <div className="flex gap-4">
-                    <div className="flex flex-col">
-                      <span className="mono text-[7px] text-white/20 tracking-wider">学习路径</span>
-                      <span className="mono text-[9px] text-purple-500/60 font-bold">{learningData.paths.length} 个</span>
-                    </div>
-                    <div className="flex flex-col">
-                      <span className="mono text-[7px] text-white/20 tracking-wider">已掌握</span>
-                      <span className="mono text-[9px] text-purple-500/60 font-bold">{learningData.paths.reduce((s, p) => s + p.doneCount, 0)} 步</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className="mono text-[8px] text-white/10">路径规划引擎已就绪</span>
-                    <div className="flex gap-1">
-                      {[1,2,3,4].map(i => <div key={i} className="w-1 h-1 bg-purple-500/40 rounded-full" />)}
-                    </div>
-                  </div>
+              {(visitedModes.has('learn') || mode === 'learn') && (
+                <div className={`mode-stage ${mode === 'learn' ? 'active' : ''}`} aria-hidden={mode !== 'learn'}>
+                  <section className="flex-1 min-w-0 overflow-hidden pointer-events-auto">
+                    <LearnWorkspace />
+                  </section>
                 </div>
               )}
             </main>
@@ -622,9 +667,29 @@ export default function Home() {
                     </div>
                     <div>
                       <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>Type</span>
-                      <div className="mono text-cyan-400/60 px-3 py-1.5 rounded-lg border border-cyan-500/20 bg-cyan-500/5 inline-block" style={{ fontSize: 'var(--f9)' }}>
-                        ◇ 灵感 <span className="text-white/30 ml-2">(新建默认为灵感卡片，可在编辑器中提炼为永久)</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {cardTypeOptions.map((type) => (
+                          <button
+                            key={type.id}
+                            className={`mono rounded-lg border px-2.5 py-1.5 transition-colors ${
+                              newCardType === type.id
+                                ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200/80'
+                                : 'border-white/8 bg-white/[0.025] text-white/38 hover:text-white/68'
+                            }`}
+                            style={{ fontSize: 'var(--f9)' }}
+                            onClick={() => setNewCardType(type.id)}
+                          >
+                            {type.label}
+                          </button>
+                        ))}
                       </div>
+                      <input
+                        type="text"
+                        className="axiom-input mt-2"
+                        placeholder="自定义类型，例如：问题 / 项目 / 概念"
+                        value={newCardType}
+                        onChange={e => setNewCardType(e.target.value)}
+                      />
                     </div>
                     <div>
                       <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>Content</span>
@@ -639,7 +704,7 @@ export default function Home() {
                     <button
                       className="axiom-btn primary w-full text-center"
                       disabled={!newCardTitle.trim() || creating}
-                      onClick={handleCreateCard}
+                      onClick={() => handleCreateCard()}
                     >
                       {creating ? '创建中...' : '创建卡片'}
                     </button>
@@ -678,7 +743,7 @@ export default function Home() {
                     <button
                       className="axiom-btn primary w-full text-center"
                       disabled={!newCardTitle.trim() || creating}
-                      onClick={async () => { setNewCardType('literature'); await handleCreateCard() }}
+                      onClick={() => handleCreateCard('literature')}
                     >
                       {creating ? '导入中...' : '导入为文献卡片'}
                     </button>
@@ -898,7 +963,7 @@ export default function Home() {
 
       {/* ── Landing Page ── */}
       <div className={`landing-stage ${showApp ? 'landing-stage-exit' : ''}`}>
-        <LandingPage showLoadingHint={showLoadingHint} isLoggedIn={isLoggedIn} onEnterApp={handleEnterApp} />
+        <LandingPage showLoadingHint={showLoadingHint} isLoggedIn={isLoggedIn} vaultsLoaded={vaultsLoaded} onEnterApp={handleEnterApp} />
       </div>
     </>
   )

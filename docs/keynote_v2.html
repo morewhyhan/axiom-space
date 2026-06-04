@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AXIOM · A Keynote v2.0</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Noto+Serif+SC:wght@400;700&family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --pink: #f472b6;
+            --cyan: #22d3ee;
+            --purple: #a855f7;
+            --amber: #f59e0b;
+            --panel-bg: rgba(255, 255, 255, 0.03);
+            --panel-border: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+            margin: 0;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .serif { font-family: 'Noto Serif SC', serif; }
+
+        canvas#galaxy-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .glass-panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--panel-border);
+            border-radius: 1.5rem;
+        }
+
+        .section {
+            min-height: 100vh;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            padding: 5rem 2rem;
+            z-index: 10;
+        }
+
+        .hologram-video {
+            position: relative;
+            width: 100%;
+            max-width: 900px;
+            aspect-ratio: 16 / 9;
+            background: rgba(34, 211, 238, 0.05);
+            border: 1px solid rgba(34, 211, 238, 0.2);
+            border-radius: 1rem;
+            overflow: hidden;
+            box-shadow: 0 0 50px rgba(34, 211, 238, 0.1);
+        }
+
+        .hologram-video::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0) 0px,
+                rgba(0, 0, 0, 0) 1px,
+                rgba(255, 255, 255, 0.03) 2px,
+                rgba(255, 255, 255, 0.03) 3px
+            );
+            pointer-events: none;
+        }
+
+        .thinking-step {
+            border-left: 2px solid var(--amber);
+            padding-left: 1rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+            transition: all 0.3s;
+        }
+
+        .thinking-step.active {
+            opacity: 1;
+            color: var(--amber);
+            box-shadow: -5px 0 15px rgba(245, 158, 11, 0.1);
+        }
+
+        .axiom-title-gradient {
+            background: linear-gradient(to bottom, #fff, #888);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        /* Scanline effect */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%,
+                rgba(0, 0, 0, 0.1) 50%
+            ), linear-gradient(
+                90deg,
+                rgba(255, 0, 0, 0.03),
+                rgba(0, 255, 0, 0.01),
+                rgba(0, 0, 255, 0.03)
+            );
+            z-index: 1000;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.3;
+        }
+
+        .floating {
+            animation: floating 6s ease-in-out infinite;
+        }
+
+        @keyframes floating {
+            0% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+            100% { transform: translateY(0px); }
+        }
+
+        .content-reveal {
+            clip-path: polygon(0 0, 0 0, 0 100%, 0% 100%);
+            transition: clip-path 1.5s cubic-bezier(0.77, 0, 0.175, 1);
+        }
+
+        .content-reveal.active {
+            clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+        }
+
+        .progress-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            transition: all 0.5s;
+        }
+        .progress-dot.active {
+            background: var(--pink);
+            box-shadow: 0 0 10px var(--pink);
+            transform: scale(1.5);
+        }
+    </style>
+</head>
+<body>
+    <canvas id="galaxy-bg"></canvas>
+    <div class="scanlines"></div>
+
+    <!-- Navigation Dots -->
+    <div class="fixed left-8 top-1/2 -translate-y-1/2 z-50 flex flex-col gap-4">
+        <div class="progress-dot active" data-target="act1"></div>
+        <div class="progress-dot" data-target="act2"></div>
+        <div class="progress-dot" data-target="act3"></div>
+        <div class="progress-dot" data-target="act4"></div>
+        <div class="progress-dot" data-target="act5"></div>
+    </div>
+
+    <!-- Top Label -->
+    <div class="fixed top-8 left-8 z-50 flex items-center gap-4">
+        <div class="w-2 h-2 rounded-full bg-pink-500 animate-pulse"></div>
+        <span class="mono text-[10px] tracking-[0.3em] opacity-40 uppercase">Axiom_Keynote_v2.0 // MISSION_CONTROL</span>
+    </div>
+
+    <!-- Act 1: The Truth -->
+    <section class="section" id="act1">
+        <div class="max-w-4xl text-center">
+            <h1 class="text-[12rem] font-extrabold tracking-tighter axiom-title-gradient opacity-0 scale-95" id="hero-num">98%</h1>
+            <div class="mt-4 overflow-hidden">
+                <p class="text-2xl text-gray-400 serif tracking-widest translate-y-full" id="hero-sub">
+                    拥有一对一导师的学生，比同龄人多学到的部分。
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="max-w-3xl text-center space-y-12">
+            <h2 class="text-6xl font-light leading-tight opacity-0" id="text-1984">这个数字，来自 <span class="mono font-bold text-pink-500">1984</span> 年。</h2>
+            <p class="text-3xl text-gray-500 serif opacity-0" id="text-waiting">四十年了。我们还在等。</p>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-20 items-center max-w-6xl">
+            <div class="space-y-8">
+                <div class="mono text-cyan-400 text-sm tracking-widest">ERROR_LOG // 0xHIGHER_EDU</div>
+                <h2 class="text-5xl font-bold leading-tight">课堂，只能照顾<span class="text-pink-500">"平均"</span>。</h2>
+                <p class="text-xl text-gray-400 leading-relaxed">
+                    但没有人，是"平均"的。<br>
+                    不同专业，不同基础的学生——<br>
+                    面对的是同一堆，没有人帮你筛选的资源。
+                </p>
+            </div>
+            <div class="glass-panel p-8 relative overflow-hidden group">
+                <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent opacity-50"></div>
+                <div class="space-y-4 mono text-xs text-white/40">
+                    <p>> FETCHING HIGHER_EDUCATION_STATUS...</p>
+                    <p>> [OK] 100+ MAJORS DETECTED</p>
+                    <p>> [WARN] RESOURCE_OVERLOAD</p>
+                    <p>> [CRITICAL] INDIVIDUAL_GAP_WIDENING</p>
+                </div>
+                <div class="mt-12 flex justify-center">
+                    <div class="w-48 h-48 rounded-full border border-white/5 flex items-center justify-center relative">
+                        <div class="absolute inset-0 border border-cyan-500/20 rounded-full animate-ping" style="animation-duration: 3s;"></div>
+                        <div class="text-4xl font-bold text-cyan-400">平均</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="flex flex-col items-center gap-12">
+            <div class="w-96 h-20 glass-panel flex items-center px-6 border-cyan-500/30 shadow-[0_0_30px_rgba(34,211,238,0.1)] opacity-0" id="search-bar">
+                <div class="w-1 h-8 bg-cyan-400 animate-pulse"></div>
+                <span class="ml-4 mono text-cyan-400/50">你不知道该问什么...</span>
+            </div>
+            <p class="text-3xl text-center text-gray-500 max-w-2xl serif leading-relaxed opacity-0" id="search-desc">
+                你在陌生领域里最深的困境是——<br>
+                <span class="text-white font-bold">不知道自己不知道什么。</span>
+            </p>
+        </div>
+    </section>
+
+    <!-- Act 2: AXIOM Reveal -->
+    <section class="section bg-black" id="act2">
+        <div class="absolute inset-0 flex items-center justify-center opacity-0" id="reveal-glow">
+            <div class="w-[800px] h-[800px] bg-purple-600/20 rounded-full blur-[120px]"></div>
+        </div>
+        <div class="text-center relative z-10">
+            <h1 class="text-[14rem] font-extrabold tracking-[-0.05em] axiom-title-gradient opacity-0 scale-110" id="axiom-name">AXIOM</h1>
+            <p class="mono text-xl tracking-[1em] text-cyan-400 mt-[-2rem] opacity-0" id="axiom-sub">A COGNITIVE OPERATING SYSTEM</p>
+        </div>
+    </section>
+
+    <!-- Act 3: Architecture -->
+    <section class="section" id="act3">
+        <div class="max-w-6xl w-full">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-20">
+                <div class="space-y-12">
+                    <div class="space-y-4">
+                        <h3 class="text-purple-400 mono tracking-widest text-sm uppercase">The Kernel</h3>
+                        <h2 class="text-7xl font-bold">Hermes</h2>
+                        <p class="text-gray-400 text-xl font-light">
+                            不基于 LangChain。不基于 AutoGen。<br>
+                            不基于任何开源框架。
+                        </p>
+                    </div>
+
+                    <div class="space-y-6">
+                        <div class="thinking-step active" data-step="1">
+                            <div class="mono text-[10px] mb-1 text-amber-500/50">LAYER_01</div>
+                            <div class="text-lg">两个并行的 Agent：教你，听你</div>
+                        </div>
+                        <div class="thinking-step" data-step="2">
+                            <div class="mono text-[10px] mb-1 text-amber-500/50">LAYER_02</div>
+                            <div class="text-lg">五个专业角色：导师、画像、锻造、向导、评估</div>
+                        </div>
+                        <div class="thinking-step" data-step="3">
+                            <div class="mono text-[10px] mb-1 text-amber-500/50">LAYER_03</div>
+                            <div class="text-lg">底层编排、记忆、与认知。</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="relative h-[600px]">
+                    <!-- DIY PLACEHOLDER: HERMES ARCHITECTURE -->
+                    <div class="hologram-video floating h-full" id="hermes-visual">
+                        <div class="absolute inset-0 flex items-center justify-center text-cyan-400/20 mono text-xs p-12 text-center">
+                            [ 插入 HERMES 架构 3D 翻面视频 / 动画 ]<br><br>
+                            此处应展示架构从平面的 Hermes 文字翻转为立体三层结构的动画
+                        </div>
+                        <!-- Canvas overlay for tech stats -->
+                        <div class="absolute bottom-6 left-6 mono text-[10px] text-cyan-400/60 space-y-1">
+                            <p>CORE_LOAD: 12.4%</p>
+                            <p>MEMORY_STATE: SYNCED</p>
+                            <p>AGENT_STATUS: ACTIVE</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Act 4: Demos -->
+    <section class="section" id="act4">
+        <div class="max-w-6xl w-full space-y-32">
+            <!-- Demo 1 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
+                <div class="hologram-video" id="demo1">
+                    <div class="absolute inset-0 flex items-center justify-center text-cyan-400/20 mono text-xs p-12 text-center">
+                        [ 演示 ① · 画像更新 ]<br><br>
+                        Oracle 切换 -> 聊天反问 -> 后台 Profile 画像动态增长
+                    </div>
+                </div>
+                <div class="space-y-6">
+                    <h3 class="text-3xl font-bold">它在认识你</h3>
+                    <p class="text-gray-400 text-lg leading-relaxed">
+                        在你看不见的后台，Agent B 正在工作。<br>
+                        它不插话，它只是看着你。
+                    </p>
+                    <div class="glass-panel p-4 mono text-[10px] text-pink-400/80 bg-pink-500/5 border-pink-500/20">
+                        Profile: 用户偏好对比理解 / 认知风格 A ↑
+                    </div>
+                </div>
+            </div>
+
+            <!-- Demo 2 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
+                <div class="order-2 md:order-1 space-y-6">
+                    <h3 class="text-3xl font-bold">它为你准备</h3>
+                    <p class="text-gray-400 text-lg leading-relaxed">
+                        六路并行生成。每一份资料，<br>
+                        都为你目前的认知水平量身定制。
+                    </p>
+                    <div class="flex gap-2">
+                        <span class="px-2 py-1 bg-white/5 rounded text-[10px] mono">讲解长文</span>
+                        <span class="px-2 py-1 bg-white/5 rounded text-[10px] mono">思维导图</span>
+                        <span class="px-2 py-1 bg-white/5 rounded text-[10px] mono">可运行代码</span>
+                    </div>
+                </div>
+                <div class="hologram-video order-1 md:order-2" id="demo2">
+                    <div class="absolute inset-0 flex items-center justify-center text-cyan-400/20 mono text-xs p-12 text-center">
+                        [ 演示 ② · 资源并行生成 ]<br><br>
+                        Galaxy 星球迸发 -> 6 种资源图标飞向不同轨道
+                    </div>
+                </div>
+            </div>
+
+            <!-- Philosophy Break -->
+            <div class="text-center py-20 space-y-8">
+                <h2 class="text-6xl font-extrabold axiom-title-gradient">资料，不是你的知识。</h2>
+                <h2 class="text-4xl text-cyan-400 serif">知识，必须由你自己产出。</h2>
+            </div>
+
+            <!-- Demo 3 -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-20 items-center">
+                <div class="hologram-video" id="demo3">
+                    <div class="absolute inset-0 flex items-center justify-center text-cyan-400/20 mono text-xs p-12 text-center">
+                        [ 演示 ③ · 卡片锻造 ]<br><br>
+                        Forge 编辑器反问引导 -> 手动输入 4 要素 -> 卡片从青色变紫色升级
+                    </div>
+                </div>
+                <div class="space-y-6">
+                    <h3 class="text-3xl font-bold">你得自己写</h3>
+                    <p class="text-gray-400 text-lg leading-relaxed">
+                        Forge 子 Agent 不替你写。<br>
+                        它只引导你补齐四要素：定义、举例、关联、应用。
+                    </p>
+                    <div class="glass-panel p-6 border-purple-500/30">
+                        <div class="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_10px_#a855f7] mb-2"></div>
+                        <p class="mono text-xs">STATUS: PERMANENT_CARD_LOCKED</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Act 5: Finale -->
+    <section class="section" id="act5">
+        <div class="max-w-4xl text-center space-y-16">
+            <div class="space-y-8">
+                <p class="text-gray-500 serif text-xl opacity-0" id="final-1984">一九八四年。</p>
+                <h2 class="text-5xl font-light leading-relaxed opacity-0" id="final-quote">
+                    让一对一导师，<br>
+                    不再是少数人的特权。
+                </h2>
+            </div>
+
+            <div class="pt-20">
+                <h1 class="text-8xl font-bold axiom-title-gradient mb-4 opacity-0" id="final-axiom">AXIOM</h1>
+                <p class="mono text-cyan-400 tracking-[0.5em] opacity-0" id="final-meta">A COGNITIVE OPERATING SYSTEM</p>
+            </div>
+
+            <div class="pt-32 opacity-0" id="final-footer">
+                <p class="mono text-[10px] text-white/20">HERMES ARCHITECTURE // CHINA SOFTWARE CUP 15TH // GROUP A</p>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        // --- GALAXY BACKGROUND (THREE.JS) ---
+        const canvas = document.getElementById('galaxy-bg');
+        const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+
+        // Starfield
+        const starCount = 5000;
+        const starGeo = new THREE.BufferGeometry();
+        const starPos = new Float32Array(starCount * 3);
+        const starColors = new Float32Array(starCount * 3);
+
+        for(let i=0; i<starCount; i++) {
+            starPos[i*3] = (Math.random() - 0.5) * 50;
+            starPos[i*3+1] = (Math.random() - 0.5) * 50;
+            starPos[i*3+2] = (Math.random() - 0.5) * 50;
+
+            const color = new THREE.Color();
+            color.setHSL(0.6 + Math.random() * 0.1, 0.7, 0.8);
+            starColors[i*3] = color.r;
+            starColors[i*3+1] = color.g;
+            starColors[i*3+2] = color.b;
+        }
+
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+
+        const starMat = new THREE.PointsMaterial({
+            size: 0.05,
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending
+        });
+
+        const stars = new THREE.Points(starGeo, starMat);
+        scene.add(stars);
+
+        // Animation
+        function animate() {
+            requestAnimationFrame(animate);
+            stars.rotation.y += 0.0002;
+            stars.rotation.x += 0.0001;
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- GSAP ANIMATIONS ---
+        gsap.registerPlugin(ScrollTrigger);
+
+        // Scroll-driven Background movement
+        gsap.to(stars.position, {
+            z: 20,
+            scrollTrigger: {
+                trigger: "body",
+                start: "top top",
+                end: "bottom bottom",
+                scrub: 1
+            }
+        });
+
+        // Act 1 Reveal
+        const act1Tl = gsap.timeline({ scrollTrigger: { trigger: "#act1", start: "top center", toggleActions: "play none none reverse" }});
+        act1Tl.to("#hero-num", { opacity: 1, scale: 1, duration: 2, ease: "expo.out" })
+              .to("#hero-sub", { y: 0, opacity: 1, duration: 1.5, ease: "power4.out" }, "-=1");
+
+        gsap.to("#text-1984", { opacity: 1, duration: 1.5, scrollTrigger: { trigger: "#text-1984", start: "top 80%" }});
+        gsap.to("#text-waiting", { opacity: 1, duration: 1.5, delay: 0.5, scrollTrigger: { trigger: "#text-1984", start: "top 80%" }});
+
+        gsap.to("#search-bar", { opacity: 1, y: -20, duration: 1.5, scrollTrigger: { trigger: "#search-bar", start: "top 80%" }});
+        gsap.to("#search-desc", { opacity: 1, duration: 1.5, delay: 0.5, scrollTrigger: { trigger: "#search-bar", start: "top 80%" }});
+
+        // Act 2 Reveal
+        const act2Tl = gsap.timeline({ scrollTrigger: { trigger: "#act2", start: "top center", toggleActions: "play none none reverse" }});
+        act2Tl.to("#reveal-glow", { opacity: 1, duration: 2 })
+              .to("#axiom-name", { opacity: 1, scale: 1, duration: 2, ease: "expo.out" }, "-=1.5")
+              .to("#axiom-sub", { opacity: 1, letterSpacing: "1.2em", duration: 2 }, "-=1");
+
+        // Act 3: Hermes steps
+        document.querySelectorAll('.thinking-step').forEach(step => {
+            gsap.to(step, {
+                scrollTrigger: {
+                    trigger: step,
+                    start: "top 70%",
+                    onEnter: () => {
+                        document.querySelectorAll('.thinking-step').forEach(s => s.classList.remove('active'));
+                        step.classList.add('active');
+                    },
+                    onEnterBack: () => {
+                        document.querySelectorAll('.thinking-step').forEach(s => s.classList.remove('active'));
+                        step.classList.add('active');
+                    }
+                }
+            });
+        });
+
+        // Act 5: Finale
+        const act5Tl = gsap.timeline({ scrollTrigger: { trigger: "#act5", start: "top 60%" }});
+        act5Tl.to("#final-1984", { opacity: 1, y: -10, duration: 1 })
+              .to("#final-quote", { opacity: 1, y: -10, duration: 1.5 }, "-=0.5")
+              .to("#final-axiom", { opacity: 1, y: -10, duration: 2 }, "-=0.5")
+              .to("#final-meta", { opacity: 1, duration: 1 }, "-=1")
+              .to("#final-footer", { opacity: 1, duration: 1 }, "-=0.5");
+
+        // Navigation Sync
+        const dots = document.querySelectorAll('.progress-dot');
+        const sections = ['act1', 'act2', 'act3', 'act4', 'act5'];
+
+        sections.forEach((id, i) => {
+            ScrollTrigger.create({
+                trigger: `#${id}`,
+                start: "top center",
+                end: "bottom center",
+                onEnter: () => updateDots(i),
+                onEnterBack: () => updateDots(i)
+            });
+        });
+
+        function updateDots(index) {
+            dots.forEach((dot, i) => {
+                dot.classList.toggle('active', i === index);
+            });
+        }
+
+        dots.forEach((dot, i) => {
+            dot.addEventListener('click', () => {
+                const target = document.getElementById(sections[i]);
+                window.scrollTo({ top: target.offsetTop, behavior: 'smooth' });
+            });
+        });
+
+    </script>
+</body>
+</html>

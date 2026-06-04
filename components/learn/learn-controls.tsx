@@ -40,8 +40,8 @@ export default function LearnControls() {
       setCreateMode('idle')
       setCustomTopic('')
       setCustomMaterial('')
-    } catch (e: any) {
-      setGenError(e?.message || '生成失败')
+    } catch (e: unknown) {
+      setGenError(e instanceof Error ? e.message : '生成失败')
     }
   }
 
@@ -69,8 +69,8 @@ export default function LearnControls() {
       setCustomTopic('')
       setCustomMaterial('')
       setTimeout(() => setImportResult(null), 8000)
-    } catch (e: any) {
-      setGenError(e?.message || '导入失败')
+    } catch (e: unknown) {
+      setGenError(e instanceof Error ? e.message : '导入失败')
     }
   }
 

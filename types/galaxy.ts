@@ -1,7 +1,7 @@
 export interface GalaxyNode {
   id: string
   title: string
-  type: 'fleeting' | 'permanent' | 'literature'
+  type: string
   clusterId: string | null
   clusterName: string | null
   clusterColor: string | null

@@ -1,302 +1,443 @@
 'use client'
 
-/**
- * File Tree — 左侧面板的文件浏览器
- * 按集群分组显示 vault 中的所有卡片，支持筛选、排序、搜索。
- */
+import { useMemo, useState } from 'react'
+import {
+  ArrowUpAZ,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Filter,
+  Folder,
+  FolderPlus,
+  Plus,
+  Search,
+  X,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { useAppStore, type PanelLayout } from '@/stores/mode-store'
+import { useCreateCluster, useGalaxyData } from '@/hooks/use-galaxy'
+import type { GalaxyNode } from '@/types/galaxy'
 
-import { useState, useMemo } from 'react'
-import { useAppStore } from '@/stores/mode-store'
-import { useGalaxyData } from '@/hooks/use-galaxy'
-
-type TypeFilter = 'all' | 'fleeting' | 'permanent' | 'literature'
-type SortMode = 'name' | 'updated' | 'type'
-type ViewMode = 'cluster' | 'type'
-
-const TYPE_LABELS: Record<TypeFilter, string> = {
-  all: '全部',
-  fleeting: '灵感',
-  permanent: '永久',
-  literature: '文献',
+type TypeFilter = 'all' | GalaxyNode['type']
+type SortMode = 'name' | 'type'
+type GroupMode = 'flat' | 'type' | 'cluster'
+type DirectoryGroup = {
+  id: string
+  label: string
+  accent: string
+  color?: string
+  items: GalaxyNode[]
 }
 
-const TYPE_GROUP_META: Record<string, { label: string; color: string; dot: string }> = {
-  permanent: { label: '永久卡片', color: 'bg-purple-500', dot: '◆' },
-  literature: { label: '文献卡片', color: 'bg-pink-500', dot: '○' },
-  fleeting: { label: '灵感卡片', color: 'bg-cyan-500', dot: '◇' },
+const DEFAULT_TYPE_META: Record<string, { label: string; dot: string; tone: string; order: number }> = {
+  fleeting: {
+    label: '灵感',
+    dot: 'bg-cyan-300',
+    tone: 'text-cyan-200',
+    order: 2,
+  },
+  literature: {
+    label: '文献',
+    dot: 'bg-pink-300',
+    tone: 'text-pink-200',
+    order: 1,
+  },
+  permanent: {
+    label: '永久',
+    dot: 'bg-purple-300',
+    tone: 'text-purple-200',
+    order: 0,
+  },
 }
 
 const TYPE_ORDER = ['permanent', 'literature', 'fleeting']
 
-const SORT_LABELS: Record<SortMode, string> = {
-  name: '名称',
-  updated: '更新',
-  type: '类型',
+function getTypeMeta(type: string) {
+  return DEFAULT_TYPE_META[type] ?? {
+    label: type,
+    dot: 'bg-emerald-300',
+    tone: 'text-emerald-200',
+    order: 10,
+  }
 }
+
+const GROUP_LABEL: Record<GroupMode, string> = {
+  flat: '全部',
+  type: '类型',
+  cluster: '星团',
+}
+
+const CLUSTER_COLORS = ['#a855f7', '#22d3ee', '#f472b6', '#34d399', '#fbbf24', '#818cf8']
 
 export default function FileTree() {
   const { data } = useGalaxyData()
+  const createCluster = useCreateCluster()
+  const openModal = useAppStore((s) => s.openModal)
+  const selectedNode = useAppStore((s) => s.selectedNode)
   const setSelectedNode = useAppStore((s) => s.setSelectedNode)
   const setMode = useAppStore((s) => s.setMode)
-  const setRightOpen = useAppStore((s) => s.setRightPanelOpen)
-  const setRightView = useAppStore((s) => s.setRightPanelView)
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [search, setSearch] = useState('')
+  const panelLayout = useAppStore((s) => s.panelLayout)
+  const setPanelLayout = useAppStore((s) => s.setPanelLayout)
+  const [query, setQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [sortMode, setSortMode] = useState<SortMode>('name')
-  const [viewMode, setViewMode] = useState<ViewMode>('cluster')
-  const [showFilters, setShowFilters] = useState(false)
+  const [groupMode, setGroupMode] = useState<GroupMode>('flat')
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(['permanent', 'literature', 'fleeting', '_uncategorized']))
+  const [showNewSpace, setShowNewSpace] = useState(false)
+  const [newSpaceName, setNewSpaceName] = useState('')
+  const [newSpaceColor, setNewSpaceColor] = useState(CLUSTER_COLORS[0])
 
-  const clusters = data?.clusters ?? []
-  const nodes = data?.nodes ?? []
+  const nodes = useMemo(() => data?.nodes ?? [], [data?.nodes])
+  const clusters = useMemo(() => data?.clusters ?? [], [data?.clusters])
+  const clusterMap = useMemo(() => new Map(clusters.map((cluster) => [cluster.id, cluster])), [clusters])
+  const typeFilters = useMemo<Array<{ id: TypeFilter; label: string }>>(() => {
+    const customTypes = Array.from(new Set(nodes.map((node) => node.type).filter(Boolean)))
+      .sort((a, b) => {
+        const aIndex = TYPE_ORDER.indexOf(a)
+        const bIndex = TYPE_ORDER.indexOf(b)
+        if (aIndex !== -1 || bIndex !== -1) return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex)
+        return a.localeCompare(b)
+      })
+    const knownTypes = customTypes.length > 0 ? customTypes : TYPE_ORDER
+    return [
+      { id: 'all', label: '全部' },
+      ...knownTypes.map((type) => ({ id: type, label: getTypeMeta(type).label })),
+    ]
+  }, [nodes])
 
-  const toggleCluster = (id: string) => {
-    setExpanded(prev => {
+  const filteredNodes = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return nodes
+      .filter((node) => typeFilter === 'all' || node.type === typeFilter)
+      .filter((node) => {
+        if (!q) return true
+        return [
+          node.title,
+          node.type,
+          node.clusterName,
+          ...(node.tags ?? []),
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
+      })
+      .sort((a, b) => {
+        if (sortMode === 'type') {
+          const typeDiff = getTypeMeta(a.type).order - getTypeMeta(b.type).order
+          if (typeDiff !== 0) return typeDiff
+        }
+        return (a.title || '').localeCompare(b.title || '')
+      })
+  }, [nodes, query, sortMode, typeFilter])
+
+  const groups = useMemo<DirectoryGroup[]>(() => {
+    if (groupMode === 'type') {
+      const types = typeFilters
+        .map((item) => item.id)
+        .filter((type): type is string => type !== 'all')
+      return types
+        .map((type) => ({
+          id: type,
+          label: getTypeMeta(type).label,
+          accent: getTypeMeta(type).dot,
+          items: filteredNodes.filter((node) => node.type === type),
+        }))
+        .filter((group) => group.items.length > 0)
+    }
+
+    if (groupMode === 'cluster') {
+      const knownClusterIds = new Set(clusters.map((cluster) => cluster.id))
+      const clusterGroups = clusters
+        .map((cluster) => ({
+          id: cluster.id,
+          label: cluster.name,
+          accent: '',
+          color: cluster.color,
+          items: filteredNodes.filter((node) => node.clusterId === cluster.id),
+        }))
+        .filter((group) => group.items.length > 0)
+      const uncategorized = filteredNodes.filter((node) => !node.clusterId || !knownClusterIds.has(node.clusterId))
+      return uncategorized.length > 0
+        ? [...clusterGroups, { id: '_uncategorized', label: '未分类', accent: 'bg-white/25', items: uncategorized }]
+        : clusterGroups
+    }
+
+    return []
+  }, [clusters, filteredNodes, groupMode, typeFilters])
+
+  const openCard = (node: GalaxyNode) => {
+    setSelectedNode({ id: node.id, title: node.title, type: node.type })
+    setMode('forge')
+    if (!panelLayout.right.includes('editor')) {
+      const nextLayout: PanelLayout = {
+        left: panelLayout.left.filter((panel) => panel !== 'editor'),
+        right: [...panelLayout.right, 'editor'],
+      }
+      setPanelLayout(nextLayout)
+    }
+  }
+
+  const toggleGroup = (id: string) => {
+    setExpanded((prev) => {
       const next = new Set(prev)
-      if (next.has(id)) next.delete(id); else next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
   }
 
-  const handleOpen = (node: { id: string; title: string; type: string }) => {
-    setSelectedNode({ id: node.id, title: node.title, type: node.type })
-    setRightView('editor')
-    setRightOpen(true)
-    setMode('forge')
+  const handleCreateSpace = async () => {
+    const name = newSpaceName.trim()
+    if (!name || createCluster.isPending) return
+    try {
+      const result = await createCluster.mutateAsync({ name, color: newSpaceColor }) as {
+        success?: boolean
+        cluster?: { id: string; name: string }
+        error?: string
+      }
+      if (!result.success || !result.cluster) {
+        toast.error(result.error || '创建知识空间失败')
+        return
+      }
+      setNewSpaceName('')
+      setShowNewSpace(false)
+      setGroupMode('cluster')
+      setExpanded((prev) => new Set(prev).add(result.cluster!.id))
+      toast.success(`知识空间「${result.cluster.name}」已创建`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '创建知识空间失败')
+    }
   }
 
-  // Filter by type
-  const filteredByType = useMemo(() => {
-    if (typeFilter === 'all') return nodes
-    return nodes.filter(n => n.type === typeFilter)
-  }, [nodes, typeFilter])
-
-  // Search filter (title only for now — content requires extra API calls)
-  const q = search.toLowerCase().trim()
-  const filteredNodes = useMemo(() => {
-    if (!q) return filteredByType
-    return filteredByType.filter(n =>
-      (n.title || '').toLowerCase().includes(q)
-    )
-  }, [filteredByType, q])
-
-  // Sort
-  const sortedNodes = useMemo(() => {
-    const arr = [...filteredNodes]
-    switch (sortMode) {
-      case 'name':
-        arr.sort((a, b) => (a.title || '').localeCompare(b.title || ''))
-        break
-      case 'type':
-        arr.sort((a, b) => {
-          const ta = a.type === 'permanent' ? 0 : a.type === 'literature' ? 1 : 2
-          const tb = b.type === 'permanent' ? 0 : b.type === 'literature' ? 1 : 2
-          return ta - tb
-        })
-        break
-      default:
-        arr.sort((a, b) => (a.title || '').localeCompare(b.title || ''))
-    }
-    return arr
-  }, [filteredNodes, sortMode])
-
-  // Group by cluster
-  const grouped = useMemo(() => {
-    const clusterIds = new Set(clusters.map(c => c.id))
-    const groups = clusters
-      .map(cluster => ({
-        ...cluster,
-        items: sortedNodes.filter(n => n.clusterId === cluster.id),
-      }))
-      .filter(g => g.items.length > 0)
-    const unclustered = sortedNodes.filter(n => !n.clusterId || !clusterIds.has(n.clusterId))
-    return { groups, unclustered }
-  }, [clusters, sortedNodes])
-
-  // Group by type
-  const typeGroups = useMemo(() => {
-    return TYPE_ORDER.map(t => ({
-      id: t,
-      name: TYPE_GROUP_META[t].label,
-      color: TYPE_GROUP_META[t].color,
-      dot: TYPE_GROUP_META[t].dot,
-      items: sortedNodes.filter(n => n.type === t),
-    })).filter(g => g.items.length > 0)
-  }, [sortedNodes])
-
-  // Active grouping
-  const activeList = viewMode === 'type' ? typeGroups : [...grouped.groups]
-  const showUnclustered = viewMode === 'cluster' && grouped.unclustered.length > 0
-
-  // Type color helper
-  const typeColor = (type: string) =>
-    type === 'permanent' ? 'bg-purple-400'
-    : type === 'literature' ? 'bg-pink-400'
-    : 'bg-cyan-400'
-
   return (
-    <aside className="side-slot visible flex-col pointer-events-auto" style={{ width: 'var(--panel-sm)', flex: 1, padding: 'var(--panel-py) 0' }}>
-      <div className="glass-panel rounded-2xl flex-1 flex flex-col overflow-hidden">
-        {/* Search */}
-        <div className="px-3 pt-3 pb-2 space-y-2">
-          <div className="relative">
-            <input
-              type="text"
-              className="w-full bg-white/5 border border-white/10 rounded-lg pl-3 pr-8 py-1.5 outline-none text-white/70 mono transition-all focus:border-purple-500/30 focus:bg-purple-500/5"
-              placeholder="搜索标题或内容..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{ fontSize: 'var(--f9)' }}
-            />
-            {/* Filter toggle */}
+    <aside className="side-slot visible flex-col pointer-events-auto" style={{ width: '100%', flex: 1, padding: 'var(--panel-py) 0' }}>
+      <div className="glass-panel flex flex-1 flex-col overflow-hidden rounded-2xl border-white/10 bg-black/45">
+        <div className="border-b border-white/8 px-3 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-purple-400/18 bg-purple-400/8 text-purple-200">
+                <Folder className="h-3.5 w-3.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="mono text-[9px] uppercase tracking-[0.16em] text-white/42">Cards</div>
+                <div className="truncate text-[11px] text-white/76">知识空间</div>
+              </div>
+            </div>
+            <div className="mono text-[8px] text-white/24">{filteredNodes.length}/{nodes.length}</div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-1.5">
             <button
-              className={`absolute right-1.5 top-1/2 -translate-y-1/2 mono transition-colors ${showFilters ? 'text-purple-400' : 'text-white/20 hover:text-white/50'}`}
-              style={{ fontSize: 9 }}
-              onClick={() => setShowFilters(!showFilters)}
+              className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-pink-400/18 bg-pink-400/8 text-[10px] text-pink-100/80 transition-colors hover:bg-pink-400/12 hover:text-pink-100"
+              onClick={() => openModal('newcard')}
             >
-              ☰
+              <Plus className="h-3.5 w-3.5" />
+              新建卡片
+            </button>
+            <button
+              className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border text-[10px] transition-colors ${
+                showNewSpace
+                  ? 'border-purple-400/24 bg-purple-400/12 text-purple-100'
+                  : 'border-white/8 bg-white/[0.025] text-white/44 hover:text-white/70'
+              }`}
+              onClick={() => setShowNewSpace((value) => !value)}
+            >
+              {showNewSpace ? <X className="h-3.5 w-3.5" /> : <FolderPlus className="h-3.5 w-3.5" />}
+              新建空间
             </button>
           </div>
 
-          {/* Filter bar */}
-          {showFilters && (
-            <div className="flex items-center gap-2 pt-1 pb-0.5 animate-in fade-in duration-200">
-              {/* View mode toggle */}
-              <div className="flex gap-0.5 border border-white/10 rounded-lg p-0.5">
-                <button
-                  className={`px-2 py-0.5 rounded-md mono transition-all ${viewMode === 'cluster' ? 'text-white bg-white/15' : 'text-white/30 hover:text-white/50'}`}
-                  style={{ fontSize: 8 }}
-                  onClick={() => { setViewMode('cluster'); typeFilter !== 'all' && setTypeFilter('all') }}
-                >星团</button>
-                <button
-                  className={`px-2 py-0.5 rounded-md mono transition-all ${viewMode === 'type' ? 'text-white bg-white/15' : 'text-white/30 hover:text-white/50'}`}
-                  style={{ fontSize: 8 }}
-                  onClick={() => setViewMode('type')}
-                >类型</button>
-              </div>
-
-              {/* Type filter (only in cluster mode) */}
-              {viewMode === 'cluster' && (
-                <div className="flex gap-0.5">
-                  {(Object.keys(TYPE_LABELS) as TypeFilter[]).map(t => (
-                    <button
-                      key={t}
-                      className={`px-1.5 py-0.5 rounded-md mono transition-all ${
-                        typeFilter === t
-                          ? 'text-white bg-white/15'
-                          : 'text-white/25 hover:text-white/50'
-                      }`}
-                      style={{ fontSize: 8 }}
-                      onClick={() => setTypeFilter(t)}
-                    >
-                      {TYPE_LABELS[t]}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Sort selector */}
-              <div className="flex items-center gap-0.5 ml-auto">
-                <span className="mono text-white/15" style={{ fontSize: 7 }}>排序</span>
-                {(Object.keys(SORT_LABELS) as SortMode[]).map(s => (
+          {showNewSpace && (
+            <div className="mt-2 rounded-xl border border-purple-400/14 bg-purple-400/[0.045] p-2">
+              <input
+                className="h-8 w-full rounded-lg border border-white/8 bg-black/30 px-2 text-[11px] text-white/72 outline-none placeholder:text-white/22 focus:border-purple-400/28"
+                value={newSpaceName}
+                onChange={(event) => setNewSpaceName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void handleCreateSpace()
+                  if (event.key === 'Escape') setShowNewSpace(false)
+                }}
+                placeholder="知识空间名称"
+                autoFocus
+              />
+              <div className="mt-2 flex items-center gap-1.5">
+                {CLUSTER_COLORS.map((color) => (
                   <button
-                    key={s}
-                    className={`px-1 py-0.5 rounded mono transition-all ${sortMode === s ? 'text-purple-400 bg-purple-500/10' : 'text-white/20 hover:text-white/40'}`}
-                    style={{ fontSize: 7 }}
-                    onClick={() => setSortMode(s)}
-                  >
-                    {SORT_LABELS[s]}
-                  </button>
+                    key={color}
+                    className={`h-5 w-5 rounded-full border transition-transform ${newSpaceColor === color ? 'scale-110 border-white/70' : 'border-white/12'}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setNewSpaceColor(color)}
+                    title={color}
+                  />
                 ))}
+                <button
+                  className="ml-auto h-7 rounded-md border border-purple-400/20 bg-purple-400/10 px-2 text-[10px] text-purple-100/80 transition-colors hover:bg-purple-400/14 disabled:cursor-not-allowed disabled:opacity-40"
+                  disabled={!newSpaceName.trim() || createCluster.isPending}
+                  onClick={() => void handleCreateSpace()}
+                >
+                  {createCluster.isPending ? '创建中' : '创建'}
+                </button>
               </div>
             </div>
           )}
+
+          <div className="mt-3 flex items-center gap-2 rounded-lg border border-white/8 bg-black/28 px-2 py-1.5">
+            <Search className="h-3.5 w-3.5 shrink-0 text-white/24" />
+            <input
+              className="min-w-0 flex-1 bg-transparent text-[11px] text-white/70 outline-none placeholder:text-white/22"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索卡片、标签、星团"
+            />
+          </div>
+
+          <div className="mt-2 grid grid-cols-4 gap-1">
+            {typeFilters.map((item) => {
+              const active = typeFilter === item.id
+              return (
+                <button
+                  key={item.id}
+                  className={`h-7 rounded-md border text-[10px] transition-colors ${
+                    active
+                      ? 'border-purple-400/25 bg-purple-400/12 text-purple-100'
+                      : 'border-white/6 bg-white/[0.025] text-white/34 hover:text-white/62'
+                  }`}
+                  onClick={() => setTypeFilter(item.id)}
+                >
+                  {item.label}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="mt-2 flex items-center gap-1">
+            <Filter className="h-3.5 w-3.5 text-white/20" />
+            {(['flat', 'type', 'cluster'] as GroupMode[]).map((mode) => (
+              <button
+                key={mode}
+                className={`rounded-md px-2 py-1 mono text-[8px] transition-colors ${
+                  groupMode === mode ? 'bg-white/10 text-white/66' : 'text-white/24 hover:bg-white/[0.04] hover:text-white/48'
+                }`}
+                onClick={() => setGroupMode(mode)}
+              >
+                {GROUP_LABEL[mode]}
+              </button>
+            ))}
+            <button
+              className={`ml-auto flex items-center gap-1 rounded-md px-2 py-1 mono text-[8px] transition-colors ${
+                sortMode === 'type' ? 'bg-white/10 text-white/66' : 'text-white/24 hover:bg-white/[0.04] hover:text-white/48'
+              }`}
+              onClick={() => setSortMode((mode) => mode === 'name' ? 'type' : 'name')}
+              title={sortMode === 'name' ? '按名称排序' : '按类型排序'}
+            >
+              <ArrowUpAZ className="h-3 w-3" />
+              {sortMode === 'name' ? '名称' : '类型'}
+            </button>
+          </div>
         </div>
 
-        {/* File list */}
-        <div className="flex-1 overflow-y-auto no-scrollbar px-2 pb-2">
-          {sortedNodes.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center px-8">
-              <div className="mono text-white/10 text-[10px] leading-relaxed">
-                {q ? '未找到匹配节点' : typeFilter !== 'all' ? '该类型暂无卡片' : '暂无卡片'}
+        <div className="flex-1 overflow-y-auto no-scrollbar px-2 py-2">
+          {filteredNodes.length === 0 ? (
+            <div className="flex h-full min-h-[220px] flex-col items-center justify-center px-6 text-center">
+              <FileText className="mb-3 h-7 w-7 text-white/12" />
+              <div className="mono text-[10px] text-white/22">
+                {query.trim() ? '没有匹配的卡片' : '暂无卡片'}
               </div>
             </div>
           ) : (
-            <>
-              {activeList.map(group => {
-                const isType = viewMode === 'type'
+            <div className="space-y-1">
+              {groupMode === 'flat' ? (
+                filteredNodes.map((node) => (
+                  <CardRow
+                    key={node.id}
+                    node={node}
+                    clusterColor={node.clusterId ? clusterMap.get(node.clusterId)?.color : undefined}
+                    active={selectedNode?.id === node.id}
+                    onOpen={() => openCard(node)}
+                  />
+                ))
+              ) : groups.map((group) => {
+                const isOpen = expanded.has(group.id)
                 return (
-                <div key={group.id} className="mb-1">
-                  <div
-                    className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-white/5 transition-colors group"
-                    onClick={() => toggleCluster(group.id)}
-                  >
-                    <span className="text-white/20 mono group-hover:text-white/40 transition-colors" style={{ fontSize: 9 }}>
-                      {expanded.has(group.id) ? '▼' : '▶'}
-                    </span>
-                    {isType ? (
-                      <span className={`w-2 h-2 rounded-full ${group.color}`} />
-                    ) : (
-                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: (group as any).color }} />
-                    )}
-                    <span className={`truncate ${isType ? 'text-white/80 font-medium' : 'text-white/60 font-medium'}`} style={{ fontSize: 'var(--f9)' }}>{group.name}</span>
-                    <span className="mono text-white/15 ml-auto" style={{ fontSize: 8 }}>{group.items.length}</span>
-                  </div>
-                  {expanded.has(group.id) && group.items.map(node => (
-                    <div
-                      key={node.id}
-                      className="flex items-center gap-2 pl-7 pr-2 py-1 rounded-lg cursor-pointer hover:bg-white/5 transition-colors group"
-                      onClick={() => handleOpen(node)}
+                  <div key={group.id}>
+                    <button
+                      className="flex h-8 w-full items-center gap-2 rounded-lg px-2 text-left transition-colors hover:bg-white/[0.04]"
+                      onClick={() => toggleGroup(group.id)}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${typeColor(node.type)}`} />
-                      <span className="text-white/45 group-hover:text-white/80 truncate flex-1" style={{ fontSize: 'var(--f9)' }}>{node.title}</span>
-                      <span className="mono text-white/10 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" style={{ fontSize: 7 }}>
-                        {node.type === 'fleeting' ? '◇' : node.type === 'permanent' ? '◆' : '○'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                      {isOpen ? <ChevronDown className="h-3.5 w-3.5 text-white/28" /> : <ChevronRight className="h-3.5 w-3.5 text-white/24" />}
+                      {group.color ? (
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: group.color }} />
+                      ) : (
+                        <span className={`h-2 w-2 shrink-0 rounded-full ${group.accent}`} />
+                      )}
+                      <span className="min-w-0 flex-1 truncate text-[10px] font-medium text-white/54">{group.label}</span>
+                      <span className="mono text-[8px] text-white/20">{group.items.length}</span>
+                    </button>
+
+                    {isOpen && (
+                      <div className="space-y-0.5 pb-1">
+                        {group.items.map((node) => (
+                          <CardRow
+                            key={node.id}
+                            node={node}
+                            clusterColor={node.clusterId ? clusterMap.get(node.clusterId)?.color : undefined}
+                            active={selectedNode?.id === node.id}
+                            onOpen={() => openCard(node)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )
               })}
-
-              {/* Unclustered (cluster mode only) */}
-              {showUnclustered && (
-                <div className="mt-2 pt-2 border-t border-white/5">
-                  <div
-                    className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg cursor-pointer hover:bg-white/5 transition-colors"
-                    onClick={() => toggleCluster('_orphans')}
-                  >
-                    <span className="text-white/20 mono" style={{ fontSize: 9 }}>{expanded.has('_orphans') ? '▼' : '▶'}</span>
-                    <span className="w-2 h-2 rounded-full bg-white/20" />
-                    <span className="text-white/40 truncate" style={{ fontSize: 'var(--f9)' }}>未分类</span>
-                    <span className="mono text-white/15 ml-auto" style={{ fontSize: 8 }}>{grouped.unclustered.length}</span>
-                  </div>
-                  {expanded.has('_orphans') && grouped.unclustered.map(node => (
-                    <div
-                      key={node.id}
-                      className="flex items-center gap-2 pl-7 pr-2 py-1 rounded-lg cursor-pointer hover:bg-white/5 group transition-colors"
-                      onClick={() => handleOpen(node)}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${typeColor(node.type)}`} />
-                      <span className="text-white/45 group-hover:text-white/80 truncate" style={{ fontSize: 'var(--f9)' }}>{node.title}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
+            </div>
           )}
-        </div>
-
-        {/* Status bar */}
-        <div className="px-3 py-2 border-t border-white/5 flex items-center justify-between">
-          <span className="mono text-white/15" style={{ fontSize: 'var(--f6)' }}>
-            {sortedNodes.length} / {nodes.length} 个节点
-          </span>
-          <span className="mono text-white/10" style={{ fontSize: 'var(--f6)' }}>
-            {viewMode === 'type' ? `${typeGroups.length} 个类型` : `${clusters.length} 个集群`}
-          </span>
         </div>
       </div>
     </aside>
+  )
+}
+
+function CardRow({
+  node,
+  clusterColor,
+  active,
+  onOpen,
+}: {
+  node: GalaxyNode
+  clusterColor?: string
+  active: boolean
+  onOpen: () => void
+}) {
+  const meta = getTypeMeta(node.type)
+  return (
+    <button
+      className={`group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
+        active ? 'bg-pink-400/[0.09] text-white' : 'text-white/48 hover:bg-white/[0.04] hover:text-white/78'
+      }`}
+      onClick={onOpen}
+      title={node.title}
+    >
+      <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/7 bg-black/24">
+        <FileText className={`h-3.5 w-3.5 ${active ? 'text-pink-200' : meta.tone}`} />
+        {clusterColor && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border border-black/60" style={{ backgroundColor: clusterColor }} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[11px] leading-4">{node.title || '未命名卡片'}</span>
+        <span className="mt-0.5 flex min-w-0 items-center gap-1.5">
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${meta.dot}`} />
+          <span className="mono text-[8px] text-white/24">{meta.label}</span>
+          {node.clusterName && (
+            <>
+              <span className="text-white/12">/</span>
+              <span className="truncate mono text-[8px] text-white/20">{node.clusterName}</span>
+            </>
+          )}
+        </span>
+      </span>
+      {active && <Check className="h-3.5 w-3.5 shrink-0 text-pink-200/70" />}
+    </button>
   )
 }

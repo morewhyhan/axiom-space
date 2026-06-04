@@ -40,7 +40,7 @@ export default function LearnInsightsPage() {
         ].map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
+            onClick={() => setActiveTab(tab.id as typeof activeTab)}
             className={`flex-shrink-0 px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap ${
               activeTab === tab.id
                 ? 'bg-purple-500/50 text-white'

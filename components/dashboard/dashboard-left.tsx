@@ -51,46 +51,46 @@ export default function DashboardLeft() {
   return (
     <aside
       className="side-slot visible dashboard-panel flex-col pointer-events-auto no-scrollbar"
-      style={{ width: 'var(--panel-sm)', justifyContent: 'space-evenly', overflowY: 'auto' }}
+      style={{ width: 'var(--panel-sm)', justifyContent: 'space-between', overflow: 'hidden', padding: 'var(--panel-py) 0 var(--panel-py) 14px' }}
     >
       <div>
         <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>NODES</span>
-        <div className="serif font-bold glow-text-purple leading-none mt-1" style={{ fontSize: 'var(--t-hero)' }}>
+        <div className="serif font-bold glow-text-purple leading-none mt-0.5" style={{ fontSize: 'min(96px, calc(var(--t-hero) * 0.88))' }}>
           <CountUp end={stats?.totalNodes ?? 0} loading={loading} />
         </div>
-        <span className="mono text-white/60 block mt-1" style={{ fontSize: 'var(--f9)' }}>Total knowledge nodes</span>
+        <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Total knowledge nodes</span>
       </div>
       <div>
         <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>EDGES</span>
-        <div className="serif font-bold glow-text-cyan leading-none mt-1" style={{ fontSize: 'var(--t-huge)' }}>
+        <div className="serif font-bold glow-text-cyan leading-none mt-0.5" style={{ fontSize: 'min(72px, calc(var(--t-huge) * 0.86))' }}>
           <CountUp end={stats?.totalEdges ?? 0} loading={loading} />
         </div>
-        <span className="mono text-white/60 block mt-1" style={{ fontSize: 'var(--f9)' }}>Total connections in system</span>
+        <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Total connections in system</span>
       </div>
 
       <div className="hud-line"></div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-stats, 24px)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'calc(var(--space-stats, 24px) * 0.62)' }}>
         <div>
           <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>PERMANENT</span>
-          <div className="serif font-bold text-purple-300 leading-none mt-1" style={{ fontSize: 'var(--t-big)' }}>
+          <div className="serif font-bold text-purple-300 leading-none mt-0.5" style={{ fontSize: 'min(60px, calc(var(--t-big) * 0.84))' }}>
             <CountUp end={stats?.permanent ?? 0} loading={loading} />
           </div>
-          <span className="mono text-white/60 block mt-1" style={{ fontSize: 'var(--f9)' }}>Solidified knowledge cards</span>
+          <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Solidified knowledge cards</span>
         </div>
         <div>
           <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>FLEETING</span>
-          <div className="serif font-bold text-cyan-300 leading-none mt-1" style={{ fontSize: 'var(--t-big)' }}>
+          <div className="serif font-bold text-cyan-300 leading-none mt-0.5" style={{ fontSize: 'min(60px, calc(var(--t-big) * 0.84))' }}>
             <CountUp end={stats?.fleeting ?? 0} loading={loading} />
           </div>
-          <span className="mono text-white/60 block mt-1" style={{ fontSize: 'var(--f9)' }}>Ideas awaiting refinement</span>
+          <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Ideas awaiting refinement</span>
         </div>
         <div>
           <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>LITERATURE</span>
-          <div className="serif font-bold text-pink-300 leading-none mt-1" style={{ fontSize: 'var(--t-big)' }}>
+          <div className="serif font-bold text-pink-300 leading-none mt-0.5" style={{ fontSize: 'min(60px, calc(var(--t-big) * 0.84))' }}>
             <CountUp end={stats?.literature ?? 0} loading={loading} />
           </div>
-          <span className="mono text-white/60 block mt-1" style={{ fontSize: 'var(--f9)' }}>Source materials imported</span>
+          <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Source materials imported</span>
         </div>
       </div>
 
@@ -100,10 +100,10 @@ export default function DashboardLeft() {
         <div className="w-0.5 bg-green-400/60 rounded-full flex-shrink-0"></div>
         <div>
           <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f8)' }}>STATUS</span>
-          <div className="text-sm text-white/90 font-bold mt-0.5">
+          <div className="text-[13px] leading-tight text-white/90 font-bold mt-0.5">
             {loading ? 'Loading...' : !stats ? 'No data — seed the database' : agentOnline ? 'System stable — learning active' : 'Agent offline — check connection'}
           </div>
-          <p className="text-white/30 leading-relaxed mt-1" style={{ fontSize: 'var(--f10)' }}>
+          <p className="text-white/30 leading-snug mt-0.5" style={{ fontSize: 'var(--f10)' }}>
             {!stats ? "Run `npx tsx scripts/seed-cs408.ts` to populate."
               : agentOnline ? 'Knowledge base healthy. Agent online. All connections nominal.'
               : 'Knowledge base loaded but Agent unreachable. Some features may be limited.'}
@@ -111,18 +111,18 @@ export default function DashboardLeft() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3 pb-4">
+      <div className="grid grid-cols-3 gap-3">
         <div>
           <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>CARDS TODAY</span>
-          <div className="mono text-sm text-white/90 font-bold mt-0.5">{loading ? '—' : stats?.cardsToday ?? 0}</div>
+          <div className="mono text-[15px] leading-none text-white/90 font-bold mt-0.5">{loading ? '—' : stats?.cardsToday ?? 0}</div>
         </div>
         <div>
           <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>REVIEW RATE</span>
-          <div className="mono text-sm text-white/90 font-bold mt-0.5">{loading ? '—' : stats ? `${stats.reviewRate}%` : '—'}</div>
+          <div className="mono text-[15px] leading-none text-white/90 font-bold mt-0.5">{loading ? '—' : stats ? `${stats.reviewRate}%` : '—'}</div>
         </div>
         <div>
           <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>CONCEPTS</span>
-          <div className="mono text-sm text-white/90 font-bold mt-0.5">{loading ? '—' : stats?.conceptCount ?? 0}</div>
+          <div className="mono text-[15px] leading-none text-white/90 font-bold mt-0.5">{loading ? '—' : stats?.conceptCount ?? 0}</div>
         </div>
       </div>
     </aside>

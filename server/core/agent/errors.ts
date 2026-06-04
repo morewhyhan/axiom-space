@@ -22,10 +22,11 @@ export class AgentErrorClassifier {
    * Classify an API error, returning a structured classification with
    * recovery strategy flags (credential rotation, context compression, fallback).
    */
-  static classifyApiError(error: any): ClassifiedApiError {
+  static classifyApiError(error: unknown): ClassifiedApiError {
+    const err = error as Record<string, unknown>;
     const statusCode = AgentErrorClassifier._extractErrorStatus(error);
-    const message = typeof error?.message === 'string' && error.message.trim()
-      ? error.message.slice(0, 500)
+    const message = typeof err?.message === 'string' && (err.message as string).trim()
+      ? (err.message as string).slice(0, 500)
       : String(error).slice(0, 500);
     const msgLower = message.toLowerCase();
 
@@ -73,7 +74,8 @@ export class AgentErrorClassifier {
 
     // Transport/timeout errors
     const transportNames = ['TimeoutError', 'ConnectionError', 'APIConnectionError', 'APITimeoutError', 'ReadTimeout', 'ConnectTimeout'];
-    if (transportNames.includes(error?.constructor?.name || '') || transportNames.includes(error?.name || '')) return make('timeout');
+    const errObj = error as { constructor?: { name?: string }; name?: string };
+    if (transportNames.includes(errObj?.constructor?.name || '') || transportNames.includes(errObj?.name || '')) return make('timeout');
     if (error instanceof TypeError && message.includes('fetch')) return make('timeout');
 
     return make('unknown');
@@ -83,13 +85,13 @@ export class AgentErrorClassifier {
    * Extract HTTP status code from an error by walking up to 5 levels of
    * cause/error chains (status, statusCode, status_code).
    */
-  static _extractErrorStatus(error: any): number | null {
-    let current = error;
+  static _extractErrorStatus(error: unknown): number | null {
+    let current = error as Record<string, unknown> | null;
     for (let i = 0; i < 5; i++) {
       if (typeof current?.status === 'number' && current.status >= 100 && current.status < 600) return current.status;
       if (typeof current?.statusCode === 'number') return current.statusCode;
       if (typeof current?.status_code === 'number') return current.status_code;
-      current = current?.cause || current?.error || null;
+      current = (current?.cause || current?.error || null) as Record<string, unknown> | null;
       if (!current) break;
     }
     return null;
@@ -98,26 +100,27 @@ export class AgentErrorClassifier {
   /**
    * Maps an error to a concise reason string (shorthand for classifyApiError().reason).
    */
-  static classify(error: any): string {
+  static classify(error: unknown): string {
     return AgentErrorClassifier.classifyApiError(error).reason;
   }
 
   /**
    * Extracts a user-facing message from an error.
    */
-  static userMessage(error: any): string {
-    if (error?.message?.includes('rate limit')) return '请求过于频繁，请稍后再试。';
-    if (error?.message?.includes('timeout')) return '请求超时，请检查网络连接。';
-    if (error?.status === 401 || error?.status === 403) return 'API 密钥无效或权限不足。';
-    if (error?.status === 429) return 'API 速率限制，请稍后重试。';
-    if (error?.status && error.status >= 500) return 'AI 服务暂时不可用，请稍后重试。';
-    return error?.message || '未知错误';
+  static userMessage(error: unknown): string {
+    const err = error as { message?: string; status?: number };
+    if (err.message?.includes('rate limit')) return '请求过于频繁，请稍后再试。';
+    if (err.message?.includes('timeout')) return '请求超时，请检查网络连接。';
+    if (err.status === 401 || err.status === 403) return 'API 密钥无效或权限不足。';
+    if (err.status === 429) return 'API 速率限制，请稍后重试。';
+    if (err.status && err.status >= 500) return 'AI 服务暂时不可用，请稍后重试。';
+    return err.message || '未知错误';
   }
 
   /**
    * Check if an error is retryable.
    */
-  static isRetryable(error: any): boolean {
+  static isRetryable(error: unknown): boolean {
     const classification = AgentErrorClassifier.classifyApiError(error);
     const nonRetryable = ['auth_error', 'not_found', 'invalid_format', 'bad_request'];
     return !nonRetryable.includes(classification.reason);
@@ -126,7 +129,7 @@ export class AgentErrorClassifier {
   /**
    * Get retry delay in ms based on error type and attempt number.
    */
-  static retryDelay(error: any, attempt: number): number {
+  static retryDelay(error: unknown, attempt: number): number {
     const base = AgentErrorClassifier._extractErrorStatus(error) === 429 ? 2000 : 1000;
     return base * Math.pow(2, attempt - 1) + Math.random() * 500;
   }

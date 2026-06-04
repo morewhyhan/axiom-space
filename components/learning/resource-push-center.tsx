@@ -45,6 +45,8 @@ interface PushRecord {
   viewedAt?: number | string | null
   engagedCount?: number
   feedback?: string | { engagedResourceIds?: string[]; feedbackText?: string }
+  parsedResources?: PushableResource[]
+  parsedFeedback?: { engagedResourceIds?: string[]; feedbackText?: string }
 }
 
 export default function ResourcePushCenter() {
@@ -122,7 +124,7 @@ export default function ResourcePushCenter() {
         </div>
       ) : (
         <div className="space-y-3">
-          {records.map((push: any, idx: number) => {
+          {records.map((push: PushRecord, idx: number) => {
             const trigger = push.trigger || 'scheduled'
             const triggerIcon = PUSH_TRIGGER_ICONS[trigger] || '📌'
             const triggerLabel = PUSH_TRIGGER_LABELS[trigger] || '推荐资源'
@@ -171,7 +173,7 @@ export default function ResourcePushCenter() {
                       <div>
                         <p className="mono text-white/40 text-xs mb-2">📚 推荐资源:</p>
                         <div className="space-y-2">
-                          {push.parsedResources.map((res: any, i: number) => (
+                          {push.parsedResources.map((res: PushableResource, i: number) => (
                             <div key={i} className="p-2 bg-white/5 rounded flex items-start gap-2">
                               <span className="text-sm font-semibold text-purple-400">{res.type}</span>
                               <div className="flex-1">
@@ -270,20 +272,20 @@ export default function ResourcePushCenter() {
         <div className="glass-panel p-4 rounded-xl grid grid-cols-3 gap-4">
           <div className="text-center">
             <div className="text-2xl font-bold text-amber-400">
-              {records.filter((r: any) => r.trigger === 'assessment_failed').length}
+              {records.filter((r) => r.trigger === 'assessment_failed').length}
             </div>
             <p className="mono text-white/40 text-xs mt-1">补强推送</p>
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-green-400">
-              {records.filter((r: any) => r.trigger === 'assessment_excellent').length}
+              {records.filter((r) => r.trigger === 'assessment_excellent').length}
             </div>
             <p className="mono text-white/40 text-xs mt-1">进阶推送</p>
           </div>
           <div className="text-center">
             <div className="text-2xl font-bold text-blue-400">
               {Math.round(
-                (records.filter((r: any) => r.viewedAt).length / Math.max(records.length, 1)) * 100
+                (records.filter((r) => r.viewedAt).length / Math.max(records.length, 1)) * 100
               )}%
             </div>
             <p className="mono text-white/40 text-xs mt-1">查看率</p>

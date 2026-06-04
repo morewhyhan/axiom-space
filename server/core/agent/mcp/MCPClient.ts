@@ -13,6 +13,9 @@ import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { toolRegistry, createTool, Type } from '../tools';
 import { getAuditLogger, LogCategory } from '../audit/AuditLogger';
 
+// Declare Electron IPC bridge global (legacy — unused in web build)
+declare const axiom: { discoverTools?: (name: string, config: Record<string, unknown>) => Promise<{ success: boolean; tools?: unknown[]; error?: string }> } | undefined;
+
 // ===== 配置类型 =====
 
 export interface MCPServerConfig {

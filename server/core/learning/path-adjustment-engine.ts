@@ -99,6 +99,9 @@ export interface LearningPath {
  * 学习路径动态调整引擎
  */
 export class LearningPathAdjustmentEngine {
+  /** Reset internal state (called on vault switch). No-op since engine is stateless. */
+  reset(): void {}
+
   /**
    * 应用评估反馈
    */

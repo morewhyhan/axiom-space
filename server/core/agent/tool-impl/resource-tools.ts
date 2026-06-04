@@ -11,7 +11,19 @@ import { createTool, toolRegistry } from "../tools";
 import { getVaultPath } from "./helpers";
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { prisma } from '@/lib/db';
-import { emitNotification } from '../notification-bus';
+import { emitNotification, emitResourceProgress } from '../notification-bus';
+
+const RESOURCE_LABELS: Record<string, string> = {
+  document: '学习文档',
+  mindmap: '思维导图',
+  quiz: '练习题',
+  video: '教学视频',
+  svg: 'SVG 图解',
+  diagram: 'Mermaid 图表',
+  docx: 'Word 文档',
+  pdf: 'PDF 文档',
+  ppt: 'PPT 演示文稿',
+};
 
 /** Persist a resource generation record to DB (fire-and-forget, scoped by userId+vaultId) */
 function persistResourceToDb(userId: string, topic: string, types: string[], detail: Record<string, any>): void {
@@ -43,14 +55,18 @@ function persistResourceToDb(userId: string, topic: string, types: string[], det
 const pushResourceTool = createTool(
   'push_resource',
   '推送学习资源到文献盒',
-  '为当前学习主题生成全套学习资源（文档、思维导图、练习题、教学视频）并保存到文献盒。'
-  + '【关键时机】当用户说"整理成学习资料"、"保存到文献盒"、"记录下来"、"生成资料"、"生成文档"、"创建学习资源"等类似请求时，必须直接调用此工具。'
+  '为当前学习主题生成全套学习资料并保存到文献盒。支持 9 种格式：'
+  + '📄 文档(markdown)、🧠 思维导图(mermaid)、❓ 练习题(JSON)、🎬 教学视频(HTML/MP4)、'
+  + '📊 SVG矢量图、🔀 Mermaid流程图/时序图/类图等、📝 Word文档(docx)、📑 PDF文档、📽️ PPT演示文稿。'
+  + '【关键时机】当用户说"整理成学习资料"、"保存到文献盒"、"生成文档"、"导出Word"、"导出PDF"、"做个PPT"'
+  + '"画个流程图"、"生成SVG"等类似请求时，必须直接调用此工具。不填 formats 则生成全部格式。'
   + '用户水平自动从画像推断，无需询问用户。自动跳过已有资源。',
   Type.Object({
     topic: Type.String({ description: '学习主题（必填）。从对话上下文或用户消息中提取。' }),
     level: Type.Optional(Type.String({ description: '可选。不填则自动从 .axiom/user-profile.json 读取。' })),
     literatureTitle: Type.Optional(Type.String({ description: '关联的文献标题。' })),
     literatureContent: Type.Optional(Type.String({ description: '文献内容截取。' })),
+    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成SVG和图表。不填则生成全部9种格式。可用值: document,mindmap,quiz,video,svg,diagram,docx,pdf,ppt' })),
   }),
   async (_id, params) => {
     try {
@@ -75,6 +91,7 @@ const pushResourceTool = createTool(
 
       // Use topic as fallback literature title
       const litTitle = params.literatureTitle || params.topic;
+      const progressVaultId = getCurrentVaultId();
 
       // Dynamic imports for cross-module dependencies
       const { ResourceGenerationOrchestrator } = await import('../ResourceGenerationOrchestrator');
@@ -89,7 +106,7 @@ const pushResourceTool = createTool(
         resourceExists: async (type: string, literatureTitle: string): Promise<boolean> => {
           const fileName = (RESOURCE_FILE_MAP as Record<string, string>)[type];
           if (!fileName) return false;
-          const resourceDir = `${vaultPath}/resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
+          const resourceDir = `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
           const fullPath = `${resourceDir}/${fileName}`;
           const result = await getFileStorage().readFile(fullPath);
           return result?.success === true;
@@ -98,38 +115,120 @@ const pushResourceTool = createTool(
           const fileName = (RESOURCE_FILE_MAP as Record<string, string>)[type];
           if (!fileName) return;
           const resourceDir = `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
-          await getFileStorage().ensureDir(`${vaultPath}/${resourceDir}`);
-          const fullPath = `${vaultPath}/${resourceDir}/${fileName}`;
+          await getFileStorage().ensureDir(resourceDir);
+          const fullPath = `${resourceDir}/${fileName}`;
           const result = await getFileStorage().writeFile(fullPath, content);
           if (!result?.success) {
             throw new Error(result?.error || 'Failed to save resource file');
           }
+        },
+        saveResourceFile: async (literatureTitle: string, fileName: string, content: string): Promise<void> => {
+          const resourceDir = `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
+          await getFileStorage().ensureDir(resourceDir);
+          const fullPath = `${resourceDir}/${fileName}`;
+          const result = await getFileStorage().writeFile(fullPath, content);
+          if (!result?.success) {
+            throw new Error(result?.error || `Failed to save resource file: ${fileName}`);
+          }
+        },
+        onProgress: (event: {
+          type: string;
+          status: 'queued' | 'generating' | 'validating' | 'saving' | 'ready' | 'rendering' | 'completed' | 'failed';
+          progress: number;
+          message: string;
+          path?: string;
+          fileName?: string;
+          error?: string;
+        }) => {
+          if (!progressVaultId) return;
+          emitResourceProgress(progressVaultId, {
+            topic: params.topic,
+            resourceType: event.type,
+            label: RESOURCE_LABELS[event.type] || event.type,
+            status: event.status,
+            progress: event.progress,
+            message: event.message,
+            path: event.path,
+            fileName: event.fileName,
+            error: event.error,
+          });
         },
       };
 
       const state = new ResourceGenerationState();
       const orchestrator = new ResourceGenerationOrchestrator(state, deps);
 
-      await orchestrator.orchestrate(params.topic, userLevel, litTitle, params.literatureContent);
+      const formats = params.formats
+        ? params.formats.split(',').map(f => f.trim()).filter(f => (RESOURCE_TYPES as readonly string[]).includes(f))
+        : undefined;
+      const requestedTypes = formats && formats.length > 0 ? formats : RESOURCE_TYPES;
+      if (progressVaultId) {
+        for (const type of requestedTypes) {
+          emitResourceProgress(progressVaultId, {
+            topic: params.topic,
+            resourceType: type,
+            label: RESOURCE_LABELS[type] || type,
+            status: 'queued',
+            progress: 0,
+            message: '等待生成',
+            fileName: (RESOURCE_FILE_MAP as Record<string, string>)[type],
+          });
+        }
+      }
+
+      await orchestrator.orchestrate(params.topic, userLevel, litTitle, params.literatureContent, formats);
 
       // 读取生成的资源，合并为一个文献卡片
       const sanitizedDir = litTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
-      const resourceDir = `${vaultPath}/resources/${sanitizedDir}`;
+      const resourceDir = `resources/${sanitizedDir}`;
       const sections: string[] = [];
+      const resourceManifest: Array<{
+        type: string;
+        title: string;
+        path: string;
+        mp4Path?: string;
+        fileName: string;
+      }> = [];
       let generatedCount = 0;
 
       for (const type of RESOURCE_TYPES) {
         if (state.getStatus(type) !== 'completed') continue;
         try {
           const fileName = RESOURCE_FILE_MAP[type];
+          const resourcePath = `resources/${sanitizedDir}/${fileName}`;
           const result = await getFileStorage().readFile(`${resourceDir}/${fileName}`);
           if (result?.success && result.content) {
+            const item = {
+              type,
+              title: RESOURCE_LABELS[type] || type,
+              path: resourcePath,
+              fileName,
+            };
             if (type === 'video') {
               // Embed a reference marker instead of the full HTML.
-              // The forge-editor will detect this and load the video HTML via API.
-              const videoRef = `resources/${sanitizedDir}/${fileName}`;
-              sections.push(`> 📺 **教学视频已生成** — 在 READ 模式下自动播放\n\n<!-- axiom-video:${videoRef} -->`);
+              // The forge-editor will detect these and prefer MP4 playback.
+              const videoHtmlRef = resourcePath;
+              const videoMp4Ref = `resources/${sanitizedDir}/video.mp4`;
+              const mp4Result = await getFileStorage().readFile(`${resourceDir}/video.mp4`).catch(() => null);
+              resourceManifest.push({
+                ...item,
+                mp4Path: mp4Result?.success ? videoMp4Ref : undefined,
+              });
+              sections.push([
+                `> 📺 **教学视频已生成** — 在 READ 模式下可预览和播放`,
+                '',
+                `<!-- axiom-video-html:${videoHtmlRef} -->`,
+                mp4Result?.success ? `<!-- axiom-video-mp4:${videoMp4Ref} -->` : '',
+                `<!-- axiom-video:${videoHtmlRef} -->`,
+              ].filter(Boolean).join('\n'));
+            } else if (type === 'mindmap' || type === 'diagram') {
+              resourceManifest.push(item);
+              sections.push(`## ${RESOURCE_LABELS[type]}\n\n\`\`\`mermaid\n${result.content.trim()}\n\`\`\``);
+            } else if (type === 'quiz' || type === 'svg' || type === 'docx' || type === 'pdf' || type === 'ppt') {
+              resourceManifest.push(item);
+              sections.push(`> **${RESOURCE_LABELS[type]}已生成** — 可在下方资源面板预览、放大或下载。`);
             } else {
+              resourceManifest.push(item);
               sections.push(result.content);
             }
             generatedCount++;
@@ -145,9 +244,10 @@ const pushResourceTool = createTool(
       }
 
       // 合并为一个文件，直接放 literature/ 文献盒
-      const litDir = `${vaultPath}/literature`;
+      const litDir = `literature`;
       await getFileStorage().ensureDir(litDir);
       const litFileName = `lit-${Date.now()}.md`;
+      const litPath = `${litDir}/${litFileName}`;
       const fullContent = `---
 title: "${params.topic}"
 source_type: ai
@@ -156,9 +256,11 @@ created: ${new Date().toISOString()}
 tags: [ai-generated, ${params.topic}]
 ---
 
+<!-- axiom-resources:${JSON.stringify(resourceManifest)} -->
+
 ${sections.join('\n\n---\n\n')}
 `;
-      await getFileStorage().writeFile(`${litDir}/${litFileName}`, fullContent);
+      await getFileStorage().writeFile(litPath, fullContent);
 
       // Also create a DB Card record for the literature so it appears in galaxy/knowledge graph
       try {
@@ -182,6 +284,29 @@ ${sections.join('\n\n---\n\n')}
             },
           });
         }
+
+        // ── Assign to relevant cluster ──
+        try {
+          const clusters = await litDb.cluster.findMany({
+            where: { vaultId: litVid },
+            select: { id: true, name: true },
+          });
+          const topicLower = params.topic.toLowerCase();
+          // Find best matching cluster by name overlap
+          const matchedCluster = clusters.find(c => {
+            const cn = c.name.toLowerCase();
+            return cn.includes(topicLower) || topicLower.includes(cn);
+          });
+          if (matchedCluster) {
+            await litDb.card.updateMany({
+              where: { vaultId: litVid, path: `literature/${litFileName}` },
+              data: { clusterId: matchedCluster.id },
+            });
+          }
+          // else: no matching cluster → leave as unattached (游离)
+        } catch (clErr) {
+          console.warn('[push_resource] Failed to assign cluster:', clErr);
+        }
       } catch (dbErr) {
         console.warn('[push_resource] Failed to create DB literature card:', dbErr);
       }
@@ -192,12 +317,39 @@ ${sections.join('\n\n---\n\n')}
         emitNotification(srcVaultId, { type: 'toast', message: `card: 生成学习资料: ${params.topic}` });
       }
 
+      const generatedResources = resourceManifest.map((item) => ({
+        type: item.type,
+        title: RESOURCE_LABELS[item.type as keyof typeof RESOURCE_LABELS] || item.title || item.type,
+        path: item.path,
+        mp4Path: item.mp4Path,
+        fileName: item.fileName,
+      }));
+      const resourceLines = generatedResources.map((item) => {
+        const preview = item.type === 'video'
+          ? '卡片 READ 模式可播放'
+          : '卡片资源面板可预览/下载';
+        return `- ${item.title}: \`${item.fileName}\` (${preview})`;
+      }).join('\n');
+
       return {
         content: [{
           type: 'text',
-          text: `学习资料已放入文献盒。「${params.topic}」包含文档、导图、练习题、教学视频，点开即可阅读。`,
+          text: [
+            `学习资料已放入文献盒：\`${litPath}\``,
+            '',
+            `「${params.topic}」已生成 ${generatedResources.length} 个资源：`,
+            resourceLines,
+            '',
+            '打开这张文献卡并切到 READ 模式，可以直接预览、放大或下载资源。视频 HTML 会先可播，MP4 会在后台完成后自动作为下载源。',
+          ].join('\n'),
         }],
-        details: { topic: params.topic, userLevel, types_generated: generatedCount },
+        details: {
+          topic: params.topic,
+          userLevel,
+          types_generated: generatedCount,
+          cardPath: litPath,
+          resources: generatedResources,
+        },
       };
     } catch (error) {
       return {
@@ -453,61 +605,18 @@ ${(concept.examples || []).map(e => `- ${e}`).join('\n')}
 const generatePptTool = createTool(
   'generate_ppt',
   '生成 PPT 文件',
-  '生成一个真实的 .pptx PowerPoint 文件并放入文献盒。只需提供主题，工具内部自动生成幻灯片内容。用户说"生成PPT"、"做个演示文稿"、"给我一个ppt"时直接调用，不要手动写文件。',
+  '生成一个真实的 .pptx PowerPoint 文件并放入文献盒。此工具已收敛到 push_resource(formats="ppt") 资源生成主链路，用户说"生成PPT"、"做个演示文稿"、"给我一个ppt"时直接调用。',
   Type.Object({
     topic: Type.String({ description: 'PPT 主题，从对话上下文提取' }),
     slides: Type.Optional(Type.String({ description: '可选。PPT 内容，每页用 --- 分隔。不填则工具内部自动生成。' })),
   }),
   async (_id, params) => {
-    try {
-      const vaultPath = getVaultPath();
-      if (!vaultPath) return { content: [{ type: 'text', text: '错误: 未打开 Vault。' }], details: {} };
-
-      // 如果没有提供 slides，内部调 LLM 生成
-      let slidesText = params.slides || '';
-      if (!slidesText) {
-        const { aiManager } = await import('../../ai/AIManager');
-        const prompt = `生成一份关于"${params.topic}"的PPT内容。每页用 --- 分隔。每页格式：# 标题\\n- 要点1\\n- 要点2...。至少8页，包括封面和总结页。不要用emoji。内部推理即可，不要输出思考过程。直接返回 JSON 结果。`;
-        slidesText = await aiManager.callAPI(prompt, [{ role: 'user', content: `主题: ${params.topic}
-
-## ⚠️ 强制输出语言：中文
-所有内容必须用中文输出。专有名词保留原文。` }]);
-        if (!slidesText || slidesText.trim().length < 50) {
-          return { content: [{ type: 'text', text: 'PPT 内容生成失败，请重试。' }], details: {} };
-        }
-      }
-
-      const slides = slidesText.split(/\n---\n/).filter((s: string) => s.trim());
-      if (slides.length < 3) {
-        return { content: [{ type: 'text', text: 'PPT 内容不足，至少需要3页幻灯片。' }], details: {} };
-      }
-
-      // 调主进程生成 PPTX
-      const generatePptx = (axiom as any).generatePptx;
-      if (typeof generatePptx !== 'function') {
-        return { content: [{ type: 'text', text: 'PPT 生成功能不可用，请重启应用。' }], details: {} };
-      }
-      const result = await generatePptx(params.topic, slidesText, vaultPath);
-      if (!result?.success) {
-        return { content: [{ type: 'text', text: `PPT 生成失败: ${result?.error || '未知错误'}` }], details: {} };
-      }
-
-      console.log(`[Event] axiom:toast — card: 生成 PPT: ${params.topic} (${result.slides}页)`);
-      const pptVaultId = getCurrentVaultId();
-      if (pptVaultId) {
-        emitNotification(pptVaultId, { type: 'toast', message: `card: 生成 PPT: ${params.topic}` });
-      }
-
-      return {
-        content: [{ type: 'text', text: `PPT 已生成！"${params.topic}" ${result.slides} 页，文献盒中可查看。刷新文献列表即可看到。` }],
-        details: { topic: params.topic, slides: result.slides, file: result.file },
-      };
-    } catch (error) {
-      return {
-        content: [{ type: 'text', text: `PPT 生成失败: ${(error as Error).message}` }],
-        details: { error: (error as Error).message },
-      };
-    }
+    return pushResourceTool.execute('generate_ppt', {
+      topic: params.topic,
+      literatureTitle: params.topic,
+      literatureContent: params.slides,
+      formats: 'ppt',
+    });
   }
 );
 

@@ -112,7 +112,7 @@ export class ResourcePushEngine {
 
           // 读取最近的推送记录（用于 scheduled 检测）
           const lastPush = await prisma.pushRecord.findFirst({
-            where: { userId },
+            where: { userId, vaultId: vault.id },
             orderBy: { sentAt: 'desc' },
             select: { sentAt: true },
           });
@@ -158,6 +158,13 @@ export class ResourcePushEngine {
       clearInterval(timer);
       this.pushIntervals.delete('main');
     }
+  }
+
+  /**
+   * Clear in-memory cache for a specific user (called on vault switch).
+   */
+  clearCache(userId: string): void {
+    this.histories.delete(userId);
   }
 
   /**
@@ -335,6 +342,7 @@ export class ResourcePushEngine {
     await prisma.pushRecord.create({
       data: {
         userId: notification.userId,
+        vaultId: notification.vaultId,
         resources: JSON.stringify(notification.resources),
         trigger: triggerMap[notification.triggerType] || 'scheduled',
         reason: notification.reason,

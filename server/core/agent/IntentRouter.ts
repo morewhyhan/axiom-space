@@ -18,6 +18,12 @@ export interface IntentRoute {
   confidence: number;    // 0-1
   tools?: string[];      // 该意图激活的工具子集（空 = 全部）
   promptSuffix?: string; // 追加到 system prompt 的片段
+  /** LLM 抽取的参数槽位（仅 LLM 仲裁路径填充） */
+  slots?: Record<string, string>;
+  /** 是否需要向用户确认（低置信度 + 破坏性操作） */
+  needsConfirmation?: boolean;
+  /** 仲裁路径来源，便于观测 */
+  source?: 'rules' | 'llm' | 'fallback';
 }
 
 interface IntentRule {
@@ -44,7 +50,7 @@ const RULES: IntentRule[] = [
       'create', 'write', 'add', 'new', 'make', 'generate', '笔记', '卡片', '题目', '出题', 'quiz', '出卷', '做题', '试题', '测试', '考题', '资料', '文献', '给我', 'ppt', 'PPT', '演示文稿'],
     patterns: [/帮我(写|创建|新建|生成|出)/, /(写|创建|新建|生成|出)(一个|一份|一篇|一套)/, /(出题|生成题目|生成资源|生成文档|生成导图|出卷|做题|练习题|来.*题目|来.*测试)/, /给我.*(资料|文献|文档|ppt|PPT)/, /(生成|做|弄).*(ppt|PPT|演示文稿)/],
     tools: ['push_resource', 'generate_ppt', 'web_search', 'read', 'write', 'mkdir', 'create_fleeing_card', 'create_permanent_card', 'memory'],
-    promptSuffix: '【系统指令-最高优先级】用户发出了创建/生成请求。PPT→调 generate_ppt(topic从上下文提取)。学习资料→调 push_resource。generate_ppt 只需传 topic，工具内部自动生成内容。不要手动写文件、不要创建目录。直接调工具。',
+    promptSuffix: '【系统指令-最高优先级】用户发出了创建/生成请求。PPT→调 generate_ppt(topic从上下文提取)。学习资料→调 push_resource。如用户指定格式(如"导出Word/PDF/SVG/流程图/思维导图")，在 push_resource 的 formats 参数中指定(如 formats="docx,pdf")。generate_ppt 只需传 topic，工具内部自动生成内容。不要手动写文件、不要创建目录。直接调工具。',
   },
   {
     intent: 'analyze',
@@ -73,51 +79,162 @@ const RULES: IntentRule[] = [
 ];
 
 /**
- * 对用户消息进行意图分类
+ * 对用户消息进行意图分类（规则版，同步）
+ *
+ * 兜底入口，永远返回结果。用于不能阻塞的快路径。
+ * 模糊场景下建议优先使用 classifyIntentSmart（async，带 LLM 仲裁）。
  */
 export function classifyIntent(message: string): IntentRoute {
+  const ranked = rankByRules(message);
+  if (ranked.length === 0) {
+    return { intent: 'chat', confidence: 0.3, source: 'rules' };
+  }
+  const top = ranked[0];
+  const confidence = Math.min(0.95, 0.2 + top.score * 0.2);
+  return {
+    intent: top.intent,
+    confidence,
+    tools: top.rule.tools,
+    promptSuffix: top.rule.promptSuffix,
+    source: 'rules',
+  };
+}
+
+/** 规则打分（内部用）：返回所有得分 > 0 的候选，按分数降序 */
+interface RankedCandidate { intent: Intent; score: number; rule: IntentRule; }
+function rankByRules(message: string): RankedCandidate[] {
   const msg = message.trim().toLowerCase();
-
-  let bestMatch: { intent: Intent; score: number; rule: IntentRule } | null = null;
-
+  const ranked: RankedCandidate[] = [];
   for (const rule of RULES) {
     let score = 0;
-
-    // 关键词匹配
     for (const kw of rule.keywords) {
-      if (msg.includes(kw.toLowerCase())) {
-        score += 1;
-      }
+      if (msg.includes(kw.toLowerCase())) score += 1;
     }
-
-    // 正则匹配
     for (const pattern of rule.patterns) {
-      if (pattern.test(msg)) {
-        score += 2; // 正则权重更高
-      }
+      if (pattern.test(msg)) score += 2;
     }
-
-    if (score > 0 && (!bestMatch || score > bestMatch.score)) {
-      bestMatch = { intent: rule.intent, score, rule };
-    }
+    if (score > 0) ranked.push({ intent: rule.intent, score, rule });
   }
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked;
+}
 
-  if (bestMatch && bestMatch.score >= 1) {
-    // 归一化 confidence: score 1→0.4, 2→0.6, 3→0.8, 4+→0.95
-    const confidence = Math.min(0.95, 0.2 + bestMatch.score * 0.2);
+/**
+ * 智能意图分类（带 LLM 仲裁 + slot 抽取）
+ *
+ * 触发 LLM 仲裁的条件：
+ * - 无规则命中（全模糊）
+ * - 最高分 < 3（低置信）
+ * - top-1 与 top-2 分数差 < 2（候选难分）
+ *
+ * recentContext 可选传入最近 2-3 条对话便于消歧（"那这个怎么办" 之类）。
+ * LLM 调用失败时回退到规则结果，永不抛错。
+ */
+export async function classifyIntentSmart(
+  message: string,
+  recentContext?: Array<{ role: string; content: string }>,
+): Promise<IntentRoute> {
+  const ranked = rankByRules(message);
+  const top = ranked[0];
+  const second = ranked[1];
+
+  const needsLLM =
+    !top ||
+    top.score < 3 ||
+    (second && (top.score - second.score) < 2);
+
+  if (!needsLLM && top) {
+    const confidence = Math.min(0.95, 0.2 + top.score * 0.2);
     return {
-      intent: bestMatch.intent,
+      intent: top.intent,
       confidence,
-      tools: bestMatch.rule.tools,
-      promptSuffix: bestMatch.rule.promptSuffix,
+      tools: top.rule.tools,
+      promptSuffix: top.rule.promptSuffix,
+      source: 'rules',
     };
   }
 
-  // 默认: chat（不限制工具集）
-  return {
-    intent: 'chat',
-    confidence: 0.3,
-  };
+  // 调用辅助 LLM 仲裁
+  try {
+    const { getAuxiliaryClient } = await import('./AuxiliaryClient');
+    const aux = getAuxiliaryClient();
+    if (!aux) {
+      // 回退规则结果
+      return classifyIntent(message);
+    }
+
+    const candidates = ranked.slice(0, 3).map(r => r.intent);
+    const candidateHint = candidates.length > 0
+      ? `规则候选: ${candidates.join(', ')}`
+      : '规则未命中，全候选: chat/learn/create/analyze/manage/profile';
+
+    const contextHint = (recentContext && recentContext.length > 0)
+      ? `\n## 最近对话\n${recentContext.slice(-3).map(m => `[${m.role}]: ${String(m.content).slice(0, 200)}`).join('\n')}`
+      : '';
+
+    const systemPrompt = `你是意图分类器，输出严格 JSON。
+6 类意图：
+- chat: 闲聊问候
+- learn: 学概念、求解释
+- create: 创建卡片/笔记/PPT/题目/资源
+- analyze: 检索、阅读、对比、总结已有内容
+- manage: 设置、配置、删改
+- profile: 查询/更新学习画像
+
+输出 JSON: {"intent": "...", "confidence": 0.0-1.0, "slots": {"topic": "...", "format": "...", "count": "..."}, "reasoning": "一句话"}
+- slots 抽取用户提到的主题/格式/数量等参数（无则空对象）
+- confidence < 0.6 表示意图不清晰，下游会请用户确认
+只输出 JSON，无其他文字。`;
+
+    const userMessage = `${candidateHint}${contextHint}\n\n## 当前消息\n${message}`;
+
+    const result = await aux.call({
+      systemPrompt,
+      userMessage,
+      maxTokens: 300,
+      temperature: 0,
+    });
+
+    if (result.error || !result.content) {
+      return classifyIntent(message);
+    }
+
+    const jsonMatch = result.content.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return classifyIntent(message);
+
+    const parsed = JSON.parse(jsonMatch[0]) as {
+      intent?: string;
+      confidence?: number;
+      slots?: Record<string, string>;
+    };
+
+    const validIntents: Intent[] = ['chat', 'learn', 'create', 'analyze', 'manage', 'profile'];
+    const intent: Intent = validIntents.includes(parsed.intent as Intent)
+      ? (parsed.intent as Intent)
+      : (top?.intent ?? 'chat');
+
+    const matchedRule = RULES.find(r => r.intent === intent);
+    const confidence = typeof parsed.confidence === 'number'
+      ? Math.max(0, Math.min(1, parsed.confidence))
+      : 0.5;
+
+    // 破坏性意图 + 低置信度 → 标记需要确认
+    const destructive: Intent[] = ['create', 'manage'];
+    const needsConfirmation = destructive.includes(intent) && confidence < 0.5;
+
+    return {
+      intent,
+      confidence,
+      tools: matchedRule?.tools,
+      promptSuffix: matchedRule?.promptSuffix,
+      slots: parsed.slots && typeof parsed.slots === 'object' ? parsed.slots : undefined,
+      needsConfirmation,
+      source: 'llm',
+    };
+  } catch (err) {
+    console.debug('[IntentRouter] LLM disambiguation failed:', err);
+    return classifyIntent(message);
+  }
 }
 
 /**

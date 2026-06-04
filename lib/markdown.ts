@@ -4,6 +4,7 @@
  */
 
 import { Marked } from 'marked';
+import type { Tokens } from 'marked';
 import hljs from 'highlight.js/lib/core';
 
 // 注册常用语言（按需加载，减小体积）
@@ -44,19 +45,24 @@ hljs.registerLanguage('go', hljsGo);
 hljs.registerLanguage('markdown', hljsMarkdown);
 hljs.registerLanguage('md', hljsMarkdown);
 
+interface MermaidModule {
+  render: (id: string, text: string) => Promise<{ svg: string }>;
+  initialize: (config: Record<string, unknown>) => void;
+}
+
 // Mermaid 懒加载单例
-let mermaidModule: any = null;
+let mermaidModule: MermaidModule | null = null;
 let mermaidInitPromise: Promise<void> | null = null;
 
-async function getMermaid(): Promise<any> {
+async function getMermaid(): Promise<MermaidModule> {
   if (mermaidModule) return mermaidModule;
   if (mermaidInitPromise) {
     await mermaidInitPromise;
-    return mermaidModule;
+    return mermaidModule!;
   }
   mermaidInitPromise = (async () => {
     const m = await import('mermaid');
-    mermaidModule = m.default || m;
+    mermaidModule = (m.default || m) as MermaidModule;
     mermaidModule.initialize({
       startOnLoad: false,
       theme: 'dark',
@@ -73,7 +79,7 @@ async function getMermaid(): Promise<any> {
     });
   })();
   await mermaidInitPromise;
-  return mermaidModule;
+  return mermaidModule!;
 }
 
 // 唯一 ID 计数器
@@ -120,8 +126,8 @@ markedInstance.use({
       return `<pre><code${langLabel}>${highlighted}</code></pre>`;
     },
 
-    table(token: any): string {
-      return `<div class="md-table-wrapper"><table><thead>${token.header}</thead><tbody>${token.body}</tbody></table></div>`;
+    table(token: Tokens.Table): string {
+      return `<div class="md-table-wrapper"><table><thead>${token.header}</thead><tbody>${(token as unknown as { body: string }).body}</tbody></table></div>`;
     },
 
     codespan({ text }: { text: string }): string {
@@ -151,7 +157,7 @@ const wikilinkExtension = {
       };
     }
   },
-  renderer(token: any) {
+  renderer(token: { type: string; raw: string; title: string }) {
       const escapedTitle = token.title
         .replace(/&/g, '&amp;')
         .replace(/"/g, '&quot;')

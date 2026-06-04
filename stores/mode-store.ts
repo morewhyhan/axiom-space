@@ -11,13 +11,13 @@ export interface PanelLayout {
 }
 
 export const DEFAULT_PANEL_LAYOUT: PanelLayout = {
-  left: ['sessionList', 'fileTree'],
+  left: ['sessionList'],
   right: ['editor'],
 }
 
 export const DEFAULT_PANEL_SIZES: Record<PanelId, number> = {
-  fileTree: 340,
-  sessionList: 300,
+  fileTree: 280,
+  sessionList: 340,
   editor: 420,
 }
 
@@ -169,6 +169,23 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: 'axiom-store',
+      version: 4,
+      migrate: (persistedState, version) => {
+        if (version >= 4 || !persistedState || typeof persistedState !== 'object') return persistedState
+        const state = persistedState as Partial<AppStore>
+        return {
+          ...state,
+          panelLayout: {
+            left: ['sessionList'],
+            right: state.panelLayout?.right?.filter((panel) => panel === 'editor') ?? ['editor'],
+          },
+          panelSizes: {
+            ...state.panelSizes,
+            fileTree: 280,
+            sessionList: 340,
+          },
+        }
+      },
       partialize: (state) => ({
         lastVaultId: state.lastVaultId,
         currentVaultId: state.currentVaultId,
@@ -185,8 +202,8 @@ export const useAppStore = create<AppStore>()(
 /* ── Galaxy Actions Store (replaces window.__ globals) ── */
 
 interface GalaxyActionStore {
-  actions: Record<string, (...args: any[]) => any>
-  register: (name: string, fn: (...args: any[]) => any) => void
+  actions: Record<string, Function>
+  register: (name: string, fn: Function) => void
   unregister: (name: string) => void
 }
 

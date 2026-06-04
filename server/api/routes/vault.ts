@@ -211,6 +211,36 @@ const app = new Hono<{ Variables: { userId: string } }>()
     return card
   })
 
+  if (type === 'permanent' && card.type !== 'permanent') {
+    const sessions = await prisma.learningSession.findMany({
+      where: {
+        userId,
+        vaultId: updated.vaultId,
+        domain: '__agent__',
+        metadata: { contains: updated.id },
+      },
+      select: { id: true, metadata: true },
+    })
+    await Promise.all(
+      sessions
+        .filter((session) => parseThreadMetadata(session.metadata).cardId === updated.id)
+        .map((session) => prisma.learningSession.update({
+          where: { id: session.id },
+          data: {
+            status: 'completed',
+            phase: 'archived',
+            metadata: JSON.stringify({
+              ...parseThreadMetadata(session.metadata),
+              cardId: updated.id,
+              cardType: 'permanent',
+              threadStatus: 'archived',
+              archivedAt: new Date().toISOString(),
+            }),
+          },
+        })),
+    )
+  }
+
   return c.json({
     success: true,
     card: {
@@ -273,7 +303,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
   // 检测 dangling links：解析 [[Title]] 但未能匹配到任何 edge target 的
   const wikiTitles = parseWikiLinks(card.content)
-  const linkedTitles = new Set(outgoing.map((c: any) => c.title))
+  const linkedTitles = new Set(outgoing.map((c) => c?.title ?? ''))
   const dangling = wikiTitles.filter((t) => !linkedTitles.has(t))
 
   return c.json({
@@ -372,5 +402,30 @@ const app = new Hono<{ Variables: { userId: string } }>()
     },
   })
 })
+
+function parseThreadMetadata(metadata?: string | null): {
+  cardId?: string
+  cardType?: string
+  threadStatus?: string
+  archivedAt?: string
+} {
+  if (!metadata) return {}
+  try {
+    const parsed = JSON.parse(metadata) as {
+      cardId?: unknown
+      cardType?: unknown
+      threadStatus?: unknown
+      archivedAt?: unknown
+    }
+    return {
+      cardId: typeof parsed.cardId === 'string' ? parsed.cardId : undefined,
+      cardType: typeof parsed.cardType === 'string' ? parsed.cardType : undefined,
+      threadStatus: typeof parsed.threadStatus === 'string' ? parsed.threadStatus : undefined,
+      archivedAt: typeof parsed.archivedAt === 'string' ? parsed.archivedAt : undefined,
+    }
+  } catch {
+    return {}
+  }
+}
 
 export default app

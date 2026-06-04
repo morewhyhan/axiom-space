@@ -8,18 +8,20 @@
  * because Hono RPC doesn't expose the raw Response body for streaming.
  */
 
-import { useCallback, useRef, useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useAgentStore } from '@/stores/agent-store'
 import { useAppStore } from '@/stores/mode-store'
+import { useAuthSession } from '@/hooks/use-auth'
 import { getSiteUrl } from '@/lib/site-url'
 import type { AgentMessage, SessionSummary } from '@/stores/agent-store'
+import type { ResourceProgressStatus } from '@/stores/agent-store'
 
 // Re-export for callers that import the types from this file
 export type { AgentMessage, SessionSummary }
 
 // Module-level guard: prevent double auto-init when ChatSessionList and
-// ForgeChat both mount in the same render cycle.
-let didAutoInit = false
+// ForgeChat both mount in the same render cycle for the same vault.
+let autoInitVaultId: string | null = null
 
 export function useAgent() {
   /* ── Read state from the shared store ── */
@@ -29,12 +31,22 @@ export function useAgent() {
   const loading = useAgentStore((s) => s.loading)
   const streaming = useAgentStore((s) => s.streaming)
   const error = useAgentStore((s) => s.error)
+  const currentProgress = useAgentStore((s) => s.currentProgress)
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const { data: sessionData } = useAuthSession()
+  const isLoggedIn = !!sessionData?.session
 
-  /* ── Load on mount (only once across all hook instances) ── */
+  /* ── Load when the active vault changes (once across all hook instances) ── */
   useEffect(() => {
-    if (didAutoInit) return
-    didAutoInit = true
+    if (!isLoggedIn || !currentVaultId) return
+    if (autoInitVaultId === currentVaultId) return
+    autoInitVaultId = currentVaultId
     let cancelled = false
+    useAgentStore.getState()._abortStream()
+    useAgentStore.getState()._setLoading(true)
+    useAgentStore.getState()._setSessionId(null)
+    useAgentStore.getState()._setMessages([])
+    useAgentStore.getState()._setError(null)
     ;(async () => {
       try {
         const sessionsList = await useAgentStore.getState().loadSessions()
@@ -53,7 +65,19 @@ export function useAgent() {
       }
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [currentVaultId, isLoggedIn])
+
+  /* ── Reset didAutoInit on sign-out so re-login re-triggers auto-load ── */
+  useEffect(() => {
+    if (!sessionData?.session) {
+      autoInitVaultId = null
+      useAgentStore.getState()._abortStream()
+      useAgentStore.getState()._setSessionId(null)
+      useAgentStore.getState()._setMessages([])
+      useAgentStore.getState()._setError(null)
+      useAgentStore.getState()._setLoading(false)
+    }
+  }, [sessionData])
 
   /* ── sendMessage — SSE streaming, kept in the hook ── */
   const sendMessage = useCallback(async (text: string) => {
@@ -61,18 +85,48 @@ export function useAgent() {
 
     const store = useAgentStore.getState()
     if (store.streaming) return // prevent concurrent streams
+    const currentVaultId = useAppStore.getState().currentVaultId
+    const selectedNode = useAppStore.getState().selectedNode
+    if (!currentVaultId) {
+      store._setError('请先选择一个知识库。')
+      return
+    }
+    const currentSession = store.sessions.find((session) => session.id === store.sessionId)
+    const isConversationSession = !!currentSession && !currentSession.cardId && !currentSession.pathId
+
+    if (!selectedNode && !isConversationSession) {
+      const created = await store.createTalkSession()
+      if (!created) {
+        store._setError('请先创建一个普通会话，或者先选择一张卡片。')
+        return
+      }
+    }
+
+    if (selectedNode?.type === 'permanent') {
+      store._setError('这张卡片已升级为永久卡片，绑定会话已归档。需要继续讨论时请创建新的 Fleeting 卡片。')
+      return
+    }
+
+    const currentSessionAfterInit = useAgentStore.getState().sessions.find((session) => session.id === useAgentStore.getState().sessionId)
+    const isConversationSessionAfterInit = !!currentSessionAfterInit && !currentSessionAfterInit.cardId && !currentSessionAfterInit.pathId
+    if (selectedNode && (!currentSessionAfterInit || (!isConversationSessionAfterInit && currentSessionAfterInit.cardId !== selectedNode.id))) {
+      await store.openCardThread(selectedNode)
+    }
 
     store._setStreaming(true)
     store._setError(null)
     store._appendMessage({ role: 'user', content: text })
 
-    // Abort any previous stream (defensive)
-    store._abortStream()
+    // Defensive: clear any stale abort state before starting new stream
+    if (store._abortController) {
+      try { store._abortController.abort() } catch {}
+    }
+    store._setCurrentProgress('')
 
     const controller = new AbortController()
     store._setAbortController(controller)
 
-    const currentSessionId = store.sessionId
+    const currentSessionId = useAgentStore.getState().sessionId
 
     try {
       const response = await fetch(`${getSiteUrl()}/api/agent/chat`, {
@@ -80,7 +134,7 @@ export function useAgent() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: text,
-          vaultId: useAppStore.getState().currentVaultId,
+          vaultId: currentVaultId,
           oracleId: useAppStore.getState().oracle,
           sessionId: currentSessionId ?? undefined,
         }),
@@ -99,6 +153,7 @@ export function useAgent() {
       const decoder = new TextDecoder()
       let assistantContent = ''
       let buffer = ''
+      let insertedResourceSummary = false
 
       store._appendMessage({ role: 'assistant', content: '' })
 
@@ -126,6 +181,36 @@ export function useAgent() {
                   useAgentStore.getState()._updateLastMessage(assistantContent)
                 }
               }
+              if (payload.type === 'tool_start') {
+                useAgentStore.getState()._setCurrentProgress(`正在执行 ${payload.tool || payload.text || ''}`)
+              }
+              if (payload.type === 'resource_progress') {
+                const status = typeof payload.status === 'string'
+                  ? payload.status as ResourceProgressStatus
+                  : 'generating'
+                useAgentStore.getState()._upsertLastResourceProgress({
+                  topic: String(payload.topic || ''),
+                  resourceType: String(payload.resourceType || ''),
+                  label: String(payload.label || payload.resourceType || ''),
+                  status,
+                  progress: typeof payload.progress === 'number' ? payload.progress : 0,
+                  message: String(payload.message || ''),
+                  path: typeof payload.path === 'string' ? payload.path : undefined,
+                  fileName: typeof payload.fileName === 'string' ? payload.fileName : undefined,
+                  error: typeof payload.error === 'string' ? payload.error : undefined,
+                  timestamp: typeof payload.timestamp === 'number' ? payload.timestamp : undefined,
+                })
+              }
+              if (payload.type === 'tool_end') {
+                useAgentStore.getState()._setCurrentProgress('')
+                if (payload.tool === 'push_resource' && typeof payload.text === 'string' && payload.text.trim() && !insertedResourceSummary) {
+                  insertedResourceSummary = true
+                  assistantContent += `${assistantContent ? '\n\n' : ''}${payload.text.trim()}`
+                  if (useAgentStore.getState().sessionId === currentSessionId) {
+                    useAgentStore.getState()._updateLastMessage(assistantContent)
+                  }
+                }
+              }
               if (payload.error) useAgentStore.getState()._setError(payload.error)
             } catch {
               // skip non-JSON data lines
@@ -142,14 +227,15 @@ export function useAgent() {
       }
 
       useAgentStore.getState().loadSessions()
-    } catch (err: any) {
-      if (err?.name === 'AbortError') return
-      const errorMsg = err?.message || '网络连接异常，请稍后重试。'
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      const errorMsg = err instanceof Error ? err.message : '网络连接异常，请稍后重试。'
       useAgentStore.getState()._setError(errorMsg)
       useAgentStore.getState()._appendMessage({ role: 'assistant', content: errorMsg })
     } finally {
       useAgentStore.getState()._setStreaming(false)
       useAgentStore.getState()._setAbortController(null)
+      useAgentStore.getState()._setCurrentProgress('')
     }
   }, [])
 
@@ -161,12 +247,18 @@ export function useAgent() {
     useAgentStore.getState().switchSession(id)
   }, [])
   const createSession = useCallback(() => useAgentStore.getState().createSession(), [])
+  const createTalkSession = useCallback(() => useAgentStore.getState().createTalkSession(), [])
+  const renameSession = useCallback((id: string, title: string) => useAgentStore.getState().renameSession(id, title), [])
+  const autoTitleSession = useCallback((id: string) => useAgentStore.getState().autoTitleSession(id), [])
+  const openCardThread = useCallback((card: { id: string; title: string; type: string }) => {
+    useAgentStore.getState().openCardThread(card)
+  }, [])
   const deleteSession = useCallback((id: string) => useAgentStore.getState().deleteSession(id), [])
   const clearMessages = useCallback(() => useAgentStore.getState().clearMessages(), [])
 
   return {
-    messages, loading, streaming, error,
+    messages, loading, streaming, error, currentProgress,
     sessions, sessionId,
-    sendMessage, clearMessages, switchSession, createSession, deleteSession, loadSessions,
+    sendMessage, clearMessages, switchSession, createSession, createTalkSession, renameSession, autoTitleSession, openCardThread, deleteSession, loadSessions,
   }
 }

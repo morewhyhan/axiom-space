@@ -5,7 +5,6 @@
  */
 
 import path from 'path'
-import type { MemorySearchResult } from "@/server/core/learning/memory/provider";
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 
 // In-memory cache replacing localStorage (browser API unavailable in Node.js)
@@ -20,8 +19,9 @@ export function getVaultPath(): string | null {
 export function resolvePath(inputPath: string): string {
   const vaultPath = getVaultPath();
   if (!vaultPath) throw new Error("Vault path not configured");
-  if (inputPath.startsWith("/") || inputPath.match(/^[A-Za-z]:\\/)) return inputPath;
-  return `${vaultPath}${path.sep}${inputPath}`;
+  if (path.isAbsolute(inputPath)) return inputPath;
+  const normalized = inputPath.replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/^\/+/, '');
+  return path.posix.join(vaultPath, normalized);
 }
 
 export function getSessionState(): Record<string, string> {

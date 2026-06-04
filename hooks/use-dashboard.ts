@@ -3,7 +3,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
 import { useAppStore } from '@/stores/mode-store'
-import type { DashboardStats } from '@/types/dashboard'
 
 export function useDashboardStats() {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
@@ -13,13 +12,20 @@ export function useDashboardStats() {
     queryFn: async () => {
       const params = currentVaultId ? { query: { vid: currentVaultId } } : {}
       const res = await client.api.dashboard.$get(params)
-      const data = await res.json() as any
-      if (!data.success) {
+      const responseData = await res.json()
+      if (!responseData.success) {
         return { stats: null, growth: [], recentActivity: [] }
       }
-      return { stats: data.stats as DashboardStats, growth: data.growth ?? [], recentActivity: data.recentActivity ?? [] }
+      return {
+        stats: responseData.stats ?? null,
+        growth: responseData.growth ?? [],
+        recentActivity: responseData.recentActivity ?? [],
+      }
     },
     enabled: !!currentVaultId,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
 
   return {

@@ -5,12 +5,12 @@ import { useAppStore, Mode } from '@/stores/mode-store'
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAuthSession } from '@/hooks/use-auth'
 import { useNotifications } from '@/hooks/use-notifications'
+import type { RecentActivity } from '@/types/dashboard'
 
 export default function Header() {
   const mode = useAppStore((s) => s.mode)
   const setMode = useAppStore((s) => s.setMode)
   const oracle = useAppStore((s) => s.oracle)
-  const setOracle = useAppStore((s) => s.setOracle)
   const openModal = useAppStore((s) => s.openModal)
   const { data: session } = useAuthSession()
   const vaults = useAppStore((s) => s.vaults)
@@ -26,7 +26,7 @@ export default function Header() {
   const { notifications: realNotifs, unreadCount, dismissAll } = useNotifications()
 
   // Build notifications from real activity data
-  const notifications = (recentActivity ?? []).slice(0, 4).map((a: any, i: number) => {
+  const notifications = (recentActivity ?? []).slice(0, 4).map((a: RecentActivity, i: number) => {
     const typeMap: Record<string, { dot: string; label: string; detail: string }> = {
       permanent: { dot: 'purple', label: '知识固化', detail: `「${a.title}」→ Permanent` },
       fleeting: { dot: 'cyan', label: '灵感捕获', detail: `「${a.title}」已创建` },
@@ -40,6 +40,14 @@ export default function Header() {
   })
 
   const notifCount = unreadCount
+  const oracleLabel = ({
+    Oracle: 'AXIOM',
+    default: 'AXIOM',
+    socrates: '苏格拉底',
+    musk: '马斯克',
+    munger: '芒格',
+    wittgenstein: '维特根斯坦',
+  } as Record<string, string>)[oracle] ?? oracle
 
   useEffect(() => {
     const tick = () => setTime(new Date().toLocaleTimeString('zh-CN', { hour12: false }))
@@ -106,6 +114,15 @@ export default function Header() {
         </nav>
       </div>
       <div className="flex items-center gap-5 mono text-xs">
+        <button
+          className="flex items-center gap-2 rounded-lg border border-pink-500/20 bg-pink-500/10 px-3 py-1.5 text-pink-300/80 transition-colors hover:border-pink-500/40 hover:bg-pink-500/15"
+          style={{ fontSize: 'var(--f9)' }}
+          onClick={() => openModal('oracle')}
+          title="切换 Oracle 导师"
+        >
+          <span className="opacity-50">ORACLE</span>
+          <span className="text-white/70">{oracleLabel}</span>
+        </button>
         <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 cursor-pointer" onClick={() => openModal('search')}>
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>⌘K</span>
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>搜索节点...</span>
@@ -138,7 +155,7 @@ export default function Header() {
               return (
                 <div key={n.id} className="notif-item"><span className={`notif-dot ${dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.message} · {time}</div></div></div>
               )
-            }) : notifications.length > 0 ? notifications.map((n: any, i: number) => (
+            }) : notifications.length > 0 ? notifications.map((n: { dot: string; label: string; detail: string; time: string }, i: number) => (
               <div key={i} className="notif-item"><span className={`notif-dot ${n.dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{n.label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.detail} · {n.time}</div></div></div>
             )) : (
               <div className="notif-item"><span className="notif-dot purple"></span><div><div className="text-white/40" style={{ fontSize: 'var(--f10)' }}>暂无新活动</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>创建知识卡片后，活动将在此显示</div></div></div>

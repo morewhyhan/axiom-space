@@ -188,7 +188,7 @@ export class MessageTransformer {
     });
 
     return applyAnthropicCacheControl(
-      filtered,
+      filtered as unknown as Record<string, unknown>[],
       this.services.config.modelId || '',
     );
   }

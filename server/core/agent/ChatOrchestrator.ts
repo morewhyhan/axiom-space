@@ -24,6 +24,7 @@ import {
 import { searchSessions, type SessionSearchResult } from "./SessionSearch";
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { emitNotification } from './notification-bus';
+import { homedir } from 'node:os';
 
 import { registerBuiltinTools } from "./builtin-tools";
 
@@ -167,7 +168,7 @@ export class ChatOrchestrator {
         sessionData: null,
       });
 
-      const homeDir = process.env.HOME || "";
+      const homeDir = homedir();
       if (homeDir) {
         _cache.set("axiom-home-dir", homeDir);
       }

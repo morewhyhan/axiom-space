@@ -16,9 +16,9 @@ import type { AgentServices } from './AgentServices';
 import type { StreamCallbacks, AgentMessage } from '@/types/agent';
 import type { IntentRoute } from '../IntentRouter';
 import type { ChatMessage } from '../feedback/SteerMechanism';
-import type { EmptyResponseMessage } from '../feedback/EmptyResponseHandler';
+import type { ToolCall as EmptyToolCall, EmptyResponseMessage } from '../feedback/EmptyResponseHandler';
 import { AgentState } from '../AgentStateMachine';
-import { classifyIntent, filterToolsByIntent } from '../IntentRouter';
+import { classifyIntent, classifyIntentSmart, filterToolsByIntent } from '../IntentRouter';
 import { shouldDelegate, getToolsForIntent } from '@/server/core/agent/subagent/SubagentRouter';
 import { getSkillEngine } from '../SkillEngine';
 import { toolRegistry } from '../tools';
@@ -33,7 +33,7 @@ import { MessageRole } from '@/types/learning';
 
 export interface ToolResult {
   toolName: string;
-  result: any;
+  result: unknown;
   error?: string;
 }
 
@@ -81,14 +81,43 @@ export class AgentPipeline {
     // ── Intent routing ──
     let intentRoute: IntentRoute | null = null;
     try {
-      intentRoute = classifyIntent(userMessage);
+      // 抽取最近 3 条对话作为消歧上下文（代词解析、话题延续）
+      const recentMsgs = this.services.agent.state.messages.slice(-3).map((m: any) => ({
+        role: String(m.role || ''),
+        content: typeof m.content === 'string'
+          ? m.content
+          : Array.isArray(m.content)
+            ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('')
+            : '',
+      })).filter(m => m.content);
+
+      intentRoute = await classifyIntentSmart(userMessage, recentMsgs);
       if (intentRoute.intent !== 'chat' && intentRoute.confidence >= INTENT_THRESHOLD) {
         console.log(
-          `[Agent] Intent: ${intentRoute.intent} (confidence: ${intentRoute.confidence.toFixed(2)})`,
+          `[Agent] Intent: ${intentRoute.intent} (confidence: ${intentRoute.confidence.toFixed(2)}, source: ${intentRoute.source || 'rules'})`,
         );
+        if (intentRoute.slots && Object.keys(intentRoute.slots).length > 0) {
+          console.log(`[Agent] Intent slots:`, intentRoute.slots);
+        }
       }
-    } catch (err: any) {
-      console.debug('[Agent] Intent classification failed (non-fatal):', err);
+    } catch (err: unknown) {
+      console.debug('[Agent] Intent classification failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      // 兜底：智能版失败时降级到规则版
+      try { intentRoute = classifyIntent(userMessage); } catch { /* ignore */ }
+    }
+
+    // ── Low-confidence confirmation short-circuit ──
+    // 破坏性意图（create/manage）且 LLM 仲裁置信度 < 0.5 → 注入提示让模型先用 ask_user 确认
+    if (intentRoute?.needsConfirmation) {
+      console.log(`[Agent] Low-confidence destructive intent — injecting confirmation prompt`);
+      this.services.agent.state.messages.push({
+        role: 'system',
+        content:
+          '[System] 用户意图不明确（破坏性操作 + 低置信度）。' +
+          '在执行任何 push_resource / generate_ppt / create_card / delete / edit 等工具前，' +
+          '先调用 ask_user 工具用一句话确认用户想要什么，不要直接执行。',
+        timestamp: Date.now(),
+      } as any);
     }
 
     // ── SkillEngine activation ──
@@ -105,8 +134,8 @@ export class AgentPipeline {
       }
       try {
         await skillEngine.onUserMessage(userMessage);
-      } catch (err: any) {
-        console.debug('[Agent] SkillEngine nudge counter failed (non-fatal):', err);
+      } catch (err: unknown) {
+        console.debug('[Agent] SkillEngine nudge counter failed (non-fatal):', err instanceof Error ? err.message : String(err));
       }
     } else if (
       intentRoute?.intent === 'create' &&
@@ -169,8 +198,8 @@ export class AgentPipeline {
             '\n</intent-override>';
         }
       }
-    } catch (err: any) {
-      console.debug('[Agent] buildSystemPrompt failed (non-fatal):', err);
+    } catch (err: unknown) {
+      console.debug('[Agent] buildSystemPrompt failed (non-fatal):', err instanceof Error ? err.message : String(err));
     }
 
     // ── Tool availability: always provide all tools ──
@@ -191,14 +220,14 @@ export class AgentPipeline {
           content:
             '[System] Budget exhausted. This is your final turn (grace call). Summarize and wrap up concisely.',
           timestamp: Date.now(),
-        } as any);
+        } as unknown as import('@mariozechner/pi-agent-core/dist/types').AgentMessage);
       }
     }
 
     // ── Clean injected messages from prior turn ──
     this.services.agent.state.messages =
       this.services.agent.state.messages.filter(
-        (m: any) => !(m.role === 'system' && (m._injected || m._auto_assess)),
+        (m: import('@mariozechner/pi-agent-core/dist/types').AgentMessage) => !((m as unknown as Record<string, unknown>).role === 'system' && ((m as unknown as Record<string, unknown>)._injected || (m as unknown as Record<string, unknown>)._auto_assess)),
       );
 
     // ── Turn tracking ──
@@ -226,7 +255,7 @@ export class AgentPipeline {
         if (relevantPatterns.length > 0) {
           const patternsText = relevantPatterns
             .map(
-              (p: any) =>
+              (p: { type: string; domain: string; usage: number; successRate: number; confidence: number }) =>
                 `- [${p.type}] domain=${p.domain} usage=${p.usage} successRate=${p.successRate.toFixed(2)} (confidence: ${p.confidence.toFixed(2)})`,
             )
             .join('\n');
@@ -234,10 +263,10 @@ export class AgentPipeline {
             userMessage +
             `\n\n<learning-patterns>\n${patternsText}\n</learning-patterns>`;
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.debug(
           '[Agent] Pattern extraction failed (non-fatal):',
-          err,
+          err instanceof Error ? err.message : String(err),
         );
       }
     }
@@ -291,9 +320,9 @@ export class AgentPipeline {
             content: `<learning-path>\n${pathRecommendation.reasoning}\n</learning-path>`,
             timestamp: Date.now(),
             _injected: true,
-          } as any);
+          } as unknown as import('@mariozechner/pi-agent-core/dist/types').AgentMessage);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.debug(
           '[Agent] Graph recommendation failed (non-fatal):',
           err,
@@ -325,6 +354,7 @@ export class AgentPipeline {
     const { userMessageWithContext, intentRoute } = ctx;
     const textQueue: string[] = [];
     let streamComplete = false;
+    let inThinking = false;
 
     // ── Event subscription ──
     const unsubscribe = this.services.agent.subscribe(
@@ -336,6 +366,11 @@ export class AgentPipeline {
 
           case 'message_update':
             if (event.assistantMessageEvent?.type === 'text_delta') {
+              // Close any open thinking block when normal text starts
+              if (inThinking) {
+                textQueue.push('</thinking>');
+                inThinking = false;
+              }
               const text = event.assistantMessageEvent.delta;
               textQueue.push(text);
               callbacks?.onTextDelta?.(text);
@@ -343,9 +378,16 @@ export class AgentPipeline {
               event.assistantMessageEvent?.type === 'thinking_delta'
             ) {
               const thinkingText = event.assistantMessageEvent.delta;
-              // Push thinking deltas to textQueue too — some providers (e.g.
-              // DeepSeek V4 Flash via relay) stream all visible text through
-              // reasoning_content, leaving content=null in the delta.
+              // Wrap thinking deltas in <thinking> tags so they can be
+              // separated on re-display by separateThinking() in forge-chat.
+              // Some providers (e.g. DeepSeek V4 Flash via relay) stream all
+              // visible text through reasoning_content, leaving content=null
+              // in the delta — without tags the raw thinking text ends up in
+              // the persisted content and shows as JSON on reload.
+              if (!inThinking) {
+                textQueue.push('<thinking>');
+                inThinking = true;
+              }
               textQueue.push(thinkingText);
               callbacks?.onThinkingDelta?.(thinkingText);
             }
@@ -374,7 +416,7 @@ export class AgentPipeline {
                   (event as { args?: Record<string, unknown> }).args || {},
                 ),
               },
-            });
+            } as EmptyToolCall);
             if (this.services.infra.steerMechanism.hasPending()) {
               const msgs = this.services.agent.state.messages;
               this.services.infra.steerMechanism.applyToToolResults(
@@ -384,6 +426,12 @@ export class AgentPipeline {
             break;
 
           case 'agent_end':
+            // Close any dangling thinking block before agent ends
+            if (inThinking) {
+              textQueue.push('</thinking>');
+              inThinking = false;
+            }
+
             // ── Session persistence ──
             this.services.sessionService.saveSession({
               messages: this.services.agent.state.messages,
@@ -423,10 +471,10 @@ export class AgentPipeline {
                     );
                   }
                 }
-              } catch (err: any) {
+              } catch (err: unknown) {
                 console.debug(
                   '[Agent] SkillEngine transition failed (non-fatal):',
-                  err,
+                  err instanceof Error ? err.message : String(err),
                 );
               }
             }
@@ -460,17 +508,22 @@ export class AgentPipeline {
       this.services.agent.state.messages.push({
         role: 'system',
         content:
-          '<intent-override>\n用户要求生成内容。PPT->调 generate_ppt(topic)。学习资料->调 push_resource。工具内部自动生成内容，你只需传 topic。不要手动写文件。\n</intent-override>',
+          '<intent-override>\n用户要求生成内容。PPT->调 generate_ppt(topic)。学习资料->调 push_resource。如用户指定格式(如"导出Word/PDF/SVG/流程图")，在 push_resource 的 formats 参数指定(如 formats="docx,pdf")。工具内部自动生成，你只需传 topic。不要手动写文件。\n</intent-override>',
         timestamp: Date.now(),
         _injected: true,
-      } as any);
+      } as unknown as import('@mariozechner/pi-agent-core/dist/types').AgentMessage);
     }
 
     // ── Call LLM with error recovery ──
     try {
       await this.services.agent.prompt(userMessageWithContext);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('[Agent] Error:', error);
+      // Close dangling thinking tag before error recovery
+      if (inThinking) {
+        textQueue.push('</thinking>');
+        inThinking = false;
+      }
       await this._handleLlmError(
         error,
         userMessageWithContext,
@@ -503,7 +556,7 @@ export class AgentPipeline {
    * `_onAfterToolCall` middleware on AxiomAgent. This stage exists
    * as an extension point for future out-of-loop tool execution.
    */
-  async executeTools(toolCalls: any[]): Promise<ToolResult[]> {
+  async executeTools(toolCalls: Record<string, unknown>[]): Promise<ToolResult[]> {
     // Tool execution is handled internally by pi-agent-core's prompt() loop.
     // The retry logic lives in AxiomAgent._onAfterToolCall middleware.
     // This method is an extension point for future out-of-loop tool execution
@@ -577,7 +630,7 @@ export class AgentPipeline {
           const capProvider =
             this.services.memoryService.getProvider(
               'capability-tracking',
-            ) as null as any;
+            ) as unknown as { getConceptsNeedingAssessment: () => Array<{ concept: string; method: string; reason: string }> };
           if (
             capProvider &&
             typeof capProvider.getConceptsNeedingAssessment === 'function'
@@ -588,7 +641,7 @@ export class AgentPipeline {
               const assessmentPrompts = assessments
                 .slice(0, 2)
                 .map(
-                  (a: any) =>
+                  (a: { concept: string; method: string; reason: string }) =>
                     `- 对"${a.concept}"使用 assess_understanding 工具（method: ${a.method}），原因：${a.reason}`,
                 )
                 .join('\n');
@@ -597,13 +650,13 @@ export class AgentPipeline {
                 content: `[自动检测触发]\n系统检测到以下概念需要理解度评估，请在回复中自然地使用 assess_understanding 工具进行检测：\n${assessmentPrompts}\n\n注意：请将检测自然融入对话中，不要生硬地切换话题。`,
                 timestamp: Date.now(),
                 _auto_assess: true,
-              } as any);
+              } as unknown as import('@mariozechner/pi-agent-core/dist/types').AgentMessage);
               console.log(
-                `[Agent] Auto-assessment triggered for: ${assessments.map((a: any) => a.concept).join(', ')}`,
+                `[Agent] Auto-assessment triggered for: ${assessments.map((a: { concept: string }) => a.concept).join(', ')}`,
               );
             }
           }
-        } catch (err: any) {
+        } catch (err: unknown) {
           console.debug(
             '[Agent] Assessment trigger check failed (non-fatal):',
             err,
@@ -622,8 +675,8 @@ export class AgentPipeline {
           user_message: this.agent.getLastUserMessage(),
           assistant_message: assistantContent,
         })
-        .catch((err: any) =>
-          console.warn('[Agent] Trajectory recording failed:', err),
+        .catch((err: unknown) =>
+          console.warn('[Agent] Trajectory recording failed:', err instanceof Error ? err.message : String(err)),
         );
       this.services.learning.database.touchSession(
         this.services.sessionId,
@@ -645,7 +698,7 @@ export class AgentPipeline {
       if (graph && this.agent.getLastUserMessage()) {
         const msgLower = this.agent.getLastUserMessage().toLowerCase();
         const learningNodes = graph.nodes.filter(
-          (n: any) =>
+          (n: { status: string; title: string; id: string; progress: number }) =>
             n.status === 'learning' &&
             msgLower.includes(n.title.toLowerCase()),
         );
@@ -662,8 +715,8 @@ export class AgentPipeline {
           );
         }
       }
-    } catch (err: any) {
-      console.debug('[Agent] Graph update failed (non-fatal):', err);
+    } catch (err: unknown) {
+      console.debug('[Agent] Graph update failed (non-fatal):', err instanceof Error ? err.message : String(err));
     }
 
     // ── Background analysis (Agent B) ──
@@ -674,7 +727,7 @@ export class AgentPipeline {
       this.agent
         .getBackgroundAnalyzer()
         .analyze(
-          this.services.agent.state.messages.map((m: any) => ({
+          this.services.agent.state.messages.map((m: { role: string; content: unknown; timestamp: number }) => ({
             role: m.role,
             content:
               typeof m.content === 'string'
@@ -698,8 +751,8 @@ export class AgentPipeline {
       this.agent
         .getBackgroundReview()!
         .onTurnEnd(
-          this.services.agent.state.messages.map((m: any) => ({
-            role: m.role,
+          this.services.agent.state.messages.map((m: { role: string; content: unknown }) => ({
+            role: m.role as 'user' | 'assistant' | 'system' | 'tool',
             content:
               typeof m.content === 'string'
                 ? m.content
@@ -738,7 +791,7 @@ export class AgentPipeline {
           role: 'assistant',
           content: emptyAction.reusedContent,
           timestamp: Date.now(),
-        } as any);
+        } as unknown as import('@mariozechner/pi-agent-core/dist/types').AgentMessage);
         callbacks?.onTextDelta?.(emptyAction.reusedContent);
       } else if (emptyAction.action === 'retry') {
         this.services.agent.state.messages.push({
@@ -767,7 +820,7 @@ export class AgentPipeline {
    * otherwise the error is re-thrown.
    */
   private async _handleLlmError(
-    error: any,
+    error: unknown,
     userMessageWithContext: string,
     callbacks?: StreamCallbacks,
     setStreamComplete?: () => void,
@@ -785,10 +838,10 @@ export class AgentPipeline {
     if (classified.reason === 'timeout' && classified.retryable) {
       const maxTimeoutRetries = 2;
       const timeoutKey = 'timeout_retry_count';
-      const retryCount = (this.services.agent as any)[timeoutKey] || 0;
+      const retryCount = ((this.services.agent as unknown as Record<string, number>)[timeoutKey]) || 0;
 
       if (retryCount < maxTimeoutRetries) {
-        (this.services.agent as any)[timeoutKey] = retryCount + 1;
+        (this.services.agent as unknown as Record<string, number>)[timeoutKey] = retryCount + 1;
         const delay = 1000 * Math.pow(2, retryCount) + Math.random() * 500;
         console.log(
           `[Agent] Timeout detected (${classified.message}), retrying in ${delay.toFixed(0)}ms (attempt ${retryCount + 1}/${maxTimeoutRetries})`,
@@ -799,14 +852,14 @@ export class AgentPipeline {
 
         try {
           await this.services.agent.prompt(userMessageWithContext);
-          (this.services.agent as any)[timeoutKey] = 0; // Reset on success
+          (this.services.agent as unknown as Record<string, number>)[timeoutKey] = 0; // Reset on success
           return; // Recovery succeeded
-        } catch (retryErr: any) {
-          console.warn('[Agent] Timeout retry failed:', retryErr);
+        } catch (retryErr: unknown) {
+          console.warn('[Agent] Timeout retry failed:', retryErr instanceof Error ? retryErr.message : String(retryErr));
           // Continue to other strategies
         }
       } else {
-        (this.services.agent as any)[timeoutKey] = 0; // Reset counter
+        (this.services.agent as unknown as Record<string, number>)[timeoutKey] = 0; // Reset counter
         console.warn('[Agent] Max timeout retries exceeded, falling back');
       }
     }
@@ -828,10 +881,10 @@ export class AgentPipeline {
           this.services.agent.state.model = this.agent.resolveModel()!;
           await this.services.agent.prompt(userMessageWithContext);
           return; // recovery succeeded
-        } catch (retryErr: any) {
+        } catch (retryErr: unknown) {
           console.warn(
             '[Agent] Retry after credential rotation also failed:',
-            retryErr,
+            retryErr instanceof Error ? retryErr.message : String(retryErr),
           );
         }
       }
@@ -845,18 +898,18 @@ export class AgentPipeline {
       try {
         const msgs = this.services.agent.state.messages;
         const learningMsgs =
-          this.services.promptService.toLearningMessages(msgs) as any[];
+          this.services.promptService.toLearningMessages(msgs) as unknown as Record<string, unknown>[];
         const totalChars = learningMsgs.reduce(
-          (s: number, m: any) =>
+          (s: number, m: Record<string, unknown>) =>
             s +
-            (typeof m.content === 'string' ? m.content.length : 0),
+            (typeof m.content === 'string' ? (m.content as string).length : 0),
           0,
         );
         const estimatedTokens = Math.ceil(totalChars / 4);
         const compressor = this.services.learning.compressor;
         if (compressor.shouldCompress(estimatedTokens)) {
           const compressResult = await compressor.compress(
-            learningMsgs as any,
+            learningMsgs as unknown as import('@/types/learning').Message[],
             (prompt: string) =>
               this.services.promptService.callLLMForSummary(prompt),
           );
@@ -864,7 +917,7 @@ export class AgentPipeline {
             this.services.agent.state.messages =
               this.services.promptService.fromLearningMessages(
                 compressResult.messages,
-              ) as any;
+              ) as unknown as import('@mariozechner/pi-agent-core/dist/types').AgentMessage[];
             this.services.infra.audit.info(
               LogCategory.LLM,
               'error_triggered_compression',
@@ -881,15 +934,15 @@ export class AgentPipeline {
                 'retry_after_compression',
               );
               setStreamComplete?.();
-            } catch (retryError: any) {
+            } catch (retryError: unknown) {
               // fall through to re-throw
             }
           }
         }
-      } catch (compressErr: any) {
+      } catch (compressErr: unknown) {
         console.debug(
           '[Agent] Error-triggered compression failed:',
-          compressErr,
+          compressErr instanceof Error ? compressErr.message : String(compressErr),
         );
       }
     }

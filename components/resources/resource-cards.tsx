@@ -13,8 +13,9 @@
 
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { Copy, Download, ChevronDown, ChevronUp, Play, Share2, Maximize2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Copy, Download, ChevronDown, ChevronUp, Play, Maximize2, X, FileText, Presentation, ListChecks, Image as ImageIcon, Network, BookOpen } from 'lucide-react';
+import { parseMD, renderMermaidBlocks } from '@/lib/markdown';
 
 interface CodeCardProps {
   title: string;
@@ -259,19 +260,20 @@ export function VideoCard({
           {/* 视频缩略图/播放器 */}
           <div className="flex-shrink-0 w-48 h-32 bg-black rounded-lg relative group cursor-pointer"
                onClick={() => setIsPlaying(true)}>
-            {htmlContent ? (
+            {videoUrl ? (
+              <video
+                src={videoUrl}
+                className="w-full h-full object-cover rounded-lg"
+                poster={thumbnail}
+                muted
+              />
+            ) : htmlContent ? (
               // HTML 动画内容 — 用 iframe 预览缩略图
               <iframe
                 srcDoc={htmlContent}
                 className="w-full h-full rounded-lg pointer-events-none"
                 style={{ border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left', width: '200%', height: '200%' }}
                 title={title}
-              />
-            ) : videoUrl ? (
-              <video
-                src={videoUrl}
-                className="w-full h-full object-cover rounded-lg"
-                poster={thumbnail}
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-900/50 to-purple-900/50 rounded-lg">
@@ -309,7 +311,20 @@ export function VideoCard({
               >
                 <Play className="w-4 h-4" /> 播放
               </button>
-              {htmlContent && (
+              {videoUrl && (
+                <button
+                  onClick={() => {
+                    const a = document.createElement('a');
+                    a.href = videoUrl;
+                    a.download = `${title.replace(/[\/\\:*?"<>|]/g, '-')}.mp4`;
+                    a.click();
+                  }}
+                  className="px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-colors text-sm flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> 下载 MP4
+                </button>
+              )}
+              {htmlContent && !videoUrl && (
                 <button
                   onClick={() => {
                     const blob = new Blob([htmlContent], { type: 'text/html' });
@@ -347,7 +362,15 @@ export function VideoCard({
             <Maximize2 className="w-6 h-6" />
           </button>
 
-          {htmlContent ? (
+          {videoUrl ? (
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              className={`${isFullscreen ? 'w-full h-full' : 'max-w-5xl max-h-[80vh]'} object-contain rounded-lg`}
+              controls
+              autoPlay
+            />
+          ) : htmlContent ? (
             <iframe
               ref={iframeRef}
               srcDoc={htmlContent}
@@ -356,15 +379,250 @@ export function VideoCard({
               title={title}
               allowFullScreen
             />
-          ) : videoUrl ? (
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              className={`${isFullscreen ? 'w-full h-full' : 'max-w-4xl max-h-screen'} object-contain`}
-              controls
-              autoPlay
-            />
           ) : null}
+        </div>
+      )}
+    </>
+  );
+}
+
+export type GeneratedResourceItem = {
+  type: string;
+  title: string;
+  path: string;
+  mp4Path?: string;
+  fileName: string;
+  content?: string;
+  videoUrl?: string;
+};
+
+interface LearningResourcePanelProps {
+  resources: GeneratedResourceItem[];
+  loading?: boolean;
+}
+
+const RESOURCE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
+  document: BookOpen,
+  mindmap: Network,
+  diagram: Network,
+  quiz: ListChecks,
+  svg: ImageIcon,
+  video: Play,
+  docx: FileText,
+  pdf: FileText,
+  ppt: Presentation,
+};
+
+const RESOURCE_MIME: Record<string, string> = {
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  pdf: 'application/pdf',
+  ppt: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  svg: 'image/svg+xml',
+  video: 'text/html',
+  document: 'text/markdown',
+  mindmap: 'text/plain',
+  diagram: 'text/plain',
+  quiz: 'application/json',
+};
+
+function downloadResource(item: GeneratedResourceItem) {
+  if (!item.content) return;
+  const a = document.createElement('a');
+  if (item.content.startsWith('data:')) {
+    a.href = item.content;
+  } else {
+    const blob = new Blob([item.content], { type: RESOURCE_MIME[item.type] || 'text/plain' });
+    a.href = URL.createObjectURL(blob);
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  a.download = item.fileName || `${item.title}.${item.type}`;
+  a.click();
+}
+
+function ResourcePreview({ item, expanded = false }: { item: GeneratedResourceItem; expanded?: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const content = item.content || '';
+  const isMermaid = item.type === 'mindmap' || item.type === 'diagram';
+  const markdown = useMemo(() => {
+    if (!content) return '<p style="color:var(--text-dim);font-style:italic;">资源内容为空</p>';
+    if (isMermaid) return parseMD(`\`\`\`mermaid\n${content}\n\`\`\``);
+    if (item.type === 'document') return parseMD(content);
+    return '';
+  }, [content, isMermaid, item.type]);
+
+  useEffect(() => {
+    if (ref.current && (isMermaid || item.type === 'document')) {
+      renderMermaidBlocks(ref.current);
+    }
+  }, [markdown, isMermaid, item.type]);
+
+  if (!content) {
+    return <div className="text-white/35 text-sm">资源加载中...</div>;
+  }
+
+  if (item.type === 'video') {
+    const htmlContent = content.startsWith('data:video/') ? undefined : content;
+    const videoUrl = item.videoUrl || (content.startsWith('data:video/') ? content : undefined);
+    return (
+      <VideoCard
+        title={item.title || '教学视频'}
+        videoUrl={videoUrl}
+        htmlContent={htmlContent}
+        duration={90}
+        topic={item.title || ''}
+      />
+    );
+  }
+
+  if (item.type === 'pdf' && content.startsWith('data:application/pdf')) {
+    return <iframe src={content} className={`${expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />;
+  }
+
+  if (item.type === 'svg') {
+    return <iframe srcDoc={content} className={`${expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />;
+  }
+
+  if (item.type === 'docx' || item.type === 'ppt') {
+    return (
+      <div className="flex min-h-44 flex-col items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-center">
+        <FileText className="mb-3 h-10 w-10 text-white/35" />
+        <div className="text-white/70">{item.title}</div>
+        <div className="mt-1 text-xs text-white/35">此格式需要下载后用本地应用打开</div>
+      </div>
+    );
+  }
+
+  if (item.type === 'quiz') {
+    try {
+      const questions = JSON.parse(content) as Array<{ question?: string; options?: string[]; answer?: string; explanation?: string }>;
+      return (
+        <div className="space-y-3">
+          {questions.map((q, index) => (
+            <div key={index} className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+              <div className="mb-2 text-sm font-medium text-white/80">{index + 1}. {q.question || '未命名题目'}</div>
+              {Array.isArray(q.options) && (
+                <div className="mb-3 grid gap-2">
+                  {q.options.map((option, i) => (
+                    <div key={i} className="rounded-md bg-black/20 px-3 py-2 text-xs text-white/55">{option}</div>
+                  ))}
+                </div>
+              )}
+              <div className="text-xs text-emerald-300/80">答案：{q.answer || '未提供'}</div>
+              {q.explanation && <div className="mt-1 text-xs text-white/45">解析：{q.explanation}</div>}
+            </div>
+          ))}
+        </div>
+      );
+    } catch {
+      return <pre className="max-h-80 overflow-auto rounded-lg bg-black/30 p-4 text-xs text-white/65">{content}</pre>;
+    }
+  }
+
+  if (item.type === 'document' || isMermaid) {
+    return (
+      <div
+        ref={ref}
+        className={`markdown-body text-white/80 ${expanded ? 'max-w-4xl' : ''}`}
+        dangerouslySetInnerHTML={{ __html: markdown }}
+      />
+    );
+  }
+
+  return <pre className="max-h-80 overflow-auto rounded-lg bg-black/30 p-4 text-xs text-white/65">{content}</pre>;
+}
+
+export function LearningResourcePanel({ resources, loading }: LearningResourcePanelProps) {
+  const [active, setActive] = useState<GeneratedResourceItem | null>(null);
+  const visibleResources = resources;
+
+  if (loading) {
+    return (
+      <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-5 text-center text-sm text-white/40">
+        加载资源面板...
+      </div>
+    );
+  }
+
+  if (visibleResources.length === 0) return null;
+
+  return (
+    <>
+      <div className="mt-8 border-t border-white/10 pt-6">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <div className="mono text-purple-400 uppercase" style={{ fontSize: 'var(--f8)' }}>Generated Resources</div>
+            <div className="mt-1 text-xs text-white/35">所有生成资源都在这里预览、放大和下载</div>
+          </div>
+          <div className="mono text-white/25" style={{ fontSize: 'var(--f8)' }}>{visibleResources.length} items</div>
+        </div>
+        <div className="grid gap-4">
+          {visibleResources.map((item) => {
+            const Icon = RESOURCE_ICON[item.type] || FileText;
+            return (
+              <div key={`${item.type}:${item.path}`} className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+                <div className="mb-3 flex items-center gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/8 text-white/60">
+                    <Icon className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-white/80">{item.title}</div>
+                    <div className="truncate text-xs text-white/30">{item.fileName}</div>
+                  </div>
+                  <button
+                    type="button"
+                    className="rounded-lg p-2 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+                    onClick={() => setActive(item)}
+                    title="放大查看"
+                  >
+                    <Maximize2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg p-2 text-white/45 transition-colors hover:bg-white/10 hover:text-white"
+                    onClick={() => downloadResource(item)}
+                    title="下载"
+                  >
+                    <Download className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="max-h-96 overflow-auto rounded-lg border border-white/5 bg-black/15 p-4">
+                  <ResourcePreview item={item} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {active && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6">
+          <div className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0b0b10] shadow-2xl">
+            <div className="flex items-center gap-3 border-b border-white/10 px-5 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-white/85">{active.title}</div>
+                <div className="truncate text-xs text-white/35">{active.fileName}</div>
+              </div>
+              <button
+                type="button"
+                className="rounded-lg p-2 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+                onClick={() => downloadResource(active)}
+                title="下载"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                className="rounded-lg p-2 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+                onClick={() => setActive(null)}
+                title="关闭"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto p-6">
+              <ResourcePreview item={active} expanded />
+            </div>
+          </div>
         </div>
       )}
     </>

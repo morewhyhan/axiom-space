@@ -75,7 +75,7 @@ export interface MessageMetadata {
 export interface ToolCall {
   id: string;
   name: string;
-  arguments: Record<string, any>;
+  arguments: Record<string, unknown>;
   timestamp: number;
 }
 
@@ -92,7 +92,7 @@ export interface LearningSession {
   userProfile: UserProfile;
   userResponse: UserResponse;
   outcome?: SessionOutcome;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;
@@ -121,7 +121,7 @@ export interface UserResponse {
 
 export interface UserProfile {
   updatedAt: number;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface UserIdentity {

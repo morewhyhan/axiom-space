@@ -115,6 +115,7 @@ model edge {
 model learningSession {
   id        String             @id @default(uuid())
   userId    String
+  vaultId   String?
   domain    String
   concept   String
   status    String             @default("idle") // idle | active | paused | completed | interrupted
@@ -125,9 +126,12 @@ model learningSession {
   updatedAt DateTime           @updatedAt
 
   user     user              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vault    vault?            @relation(fields: [vaultId], references: [id], onDelete: Cascade)
   messages learningMessage[]
 
   @@index([userId])
+  @@index([userId, vaultId])
+  @@index([vaultId])
 }
 
 model learningMessage {
@@ -280,6 +284,7 @@ model PathAdjustmentHistory {
 model PushRecord {
   id              String   @id @default(uuid())
   userId          String
+  vaultId         String?
   resources       String   // JSON: PushableResource[]（推送的资源列表）
   trigger         String   // stage_completion | assessment_pass | low_dimension | scheduled
   reason          String   // 推送理由
@@ -290,8 +295,11 @@ model PushRecord {
   feedback        String?  // JSON: { engagedResourceIds: [], feedbackText: '' }
 
   user user @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vault vault? @relation(fields: [vaultId], references: [id], onDelete: Cascade)
 
+  @@index([userId, vaultId])
   @@index([userId, sentAt])
+  @@index([vaultId])
   @@index([sentAt])
   @@index([expiresAt])
 }
@@ -341,12 +349,14 @@ model vault {
   cards                     card[]
   clusters                  cluster[]
   edges                     edge[]
+  learningSessions          learningSession[]
   agentSessions             agentSession[]
   vaultMemories             vaultMemory[]
   vaultCapabilities         vaultCapability[]
   vaultSkills               vaultSkill[]
   learningPaths             learningPath[]
   educationProfileHistory   EducationProfileHistory[]
+  pushRecords               PushRecord[]
 
 
   @@index([userId])

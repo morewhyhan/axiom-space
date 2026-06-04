@@ -9,6 +9,7 @@ import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { prisma } from '@/lib/db'
 import { emitNotification } from './notification-bus'
 import { getCurrentVaultId } from './agent-context'
+import type { UserProfile } from '@/server/core/learning/memory/profile-manager'
 
 const ANALYSIS_PROMPT = `你是后台分析 Agent。分析对话记录，只提取有价值的信息。
 
@@ -53,7 +54,7 @@ Skill 必须是完整的可迁移能力，不是随机关键词：
 
 // ── Types ──
 
-interface ProfileUpdate { [key: string]: any; }
+interface ProfileUpdate { [key: string]: unknown; }
 interface SkillUpdate {
   name: string; category: string; description: string; confidence?: number;
 }
@@ -142,7 +143,7 @@ export class BackgroundAnalyzer {
       const { loadUserProfile, saveUserProfile, mergeProfileUpdate } = await import(
         '@/server/core/learning/memory/profile-manager'
       );
-      const existing = (await loadUserProfile(this.vaultPath)) || ({} as any);
+      const existing = (await loadUserProfile(this.vaultPath) ?? {} as UserProfile);
       const merged = mergeProfileUpdate(existing, updates);
       await saveUserProfile(this.vaultPath, merged);
       console.log('[Event] axiom:profile-updated');

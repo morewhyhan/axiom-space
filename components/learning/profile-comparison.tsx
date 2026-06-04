@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react'
 import { useEducationProfile } from '@/hooks/use-learning'
+import type { EducationProfile, DimensionScore } from '@/hooks/use-learning'
 
 // 6维颜色映射
 const DIMENSION_COLORS: Record<string, { bg: string; text: string; bar: string }> = {
@@ -56,12 +57,12 @@ export default function ProfileComparison() {
     )
   }
 
-  const dimensions = profile.dimensions as any
+  const dimensions: EducationProfile['dimensions'] = profile.dimensions
   const dimList = Object.entries(dimensions).filter(([key]) => key in DIMENSION_NAMES)
-  const avgScore = dimList.length > 0 ? dimList.reduce((sum, [, val]: any) => sum + (val.score || 0), 0) / dimList.length : 0
+  const avgScore = dimList.length > 0 ? dimList.reduce((sum, [, val]: [string, DimensionScore]) => sum + (val.score || 0), 0) / dimList.length : 0
 
   // 6维雷达图数据
-  const radarData = dimList.map(([key, val]: any) => ({
+  const radarData = dimList.map(([key, val]: [string, DimensionScore]) => ({
     name: DIMENSION_NAMES[key],
     score: val.score || 0,
     confidence: val.confidence || 0,
@@ -164,7 +165,7 @@ export default function ProfileComparison() {
 
       {/* 6维详细数据 */}
       <div className="space-y-3">
-        {dimList.map(([key, val]: any, idx) => {
+        {dimList.map(([key, val]: [string, DimensionScore], idx) => {
           const colors = DIMENSION_COLORS[key] || DIMENSION_COLORS.depth
           const isLowConfidence = (val.confidence || 0) < 0.5
           const displayScore = val.score || 0
@@ -240,7 +241,7 @@ export default function ProfileComparison() {
         <div className="glass-panel p-4 rounded-xl">
           <p className="mono text-white/40 text-xs mb-3 uppercase">最近更新</p>
           <div className="space-y-2">
-            {profile.updateHistory.slice(-3).map((hist: any, i: number) => (
+            {profile.updateHistory.slice(-3).map((hist: { timestamp: number; trigger: string; dimensionsUpdated: string[] }, i: number) => (
               <div key={i} className="flex items-center justify-between text-xs">
                 <span className="mono text-white/30">
                   {new Date(hist.timestamp).toLocaleString('zh-CN', {

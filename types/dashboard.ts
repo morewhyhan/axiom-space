@@ -10,3 +10,15 @@ export interface DashboardStats {
   conceptCount: number
   clusters: number
 }
+
+export interface GrowthPoint {
+  date: string
+  count: number
+  cumulative: number
+}
+
+export interface RecentActivity {
+  title: string
+  type: string
+  time: string
+}

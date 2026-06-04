@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AXIOM · A Cognitive Operating System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@100;400;700&family=Noto+Serif+SC:wght@200;500;700&family=Inter:wght@100;300;400;600;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --apple-bg: #000000;
+            --text-main: #f5f5f7;
+            --text-dim: #86868b;
+            --purple: #a855f7;
+            --cyan: #22d3ee;
+            --pink: #f472b6;
+            --amber: #f59e0b;
+        }
+
+        body {
+            background-color: var(--apple-bg);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .serif { font-family: 'Noto Serif SC', serif; }
+
+        /* Scene Management */
+        .section-container {
+            position: relative;
+            width: 100%;
+        }
+
+        .sticky-wrapper {
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            width: 100%;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Typography */
+        .hero-num {
+            font-size: clamp(8rem, 25vw, 18rem);
+            font-weight: 800;
+            letter-spacing: -0.05em;
+            line-height: 0.8;
+            z-index: 10;
+        }
+
+        .headline {
+            font-size: clamp(2.5rem, 6vw, 5rem);
+            font-weight: 500;
+            line-height: 1.15;
+            letter-spacing: -0.02em;
+        }
+
+        .subheadline-v5 {
+            font-size: clamp(1rem, 2.5vw, 1.8rem);
+            color: var(--text-dim);
+            font-weight: 300;
+            line-height: 1.6;
+        }
+
+        /* Visual Elements */
+        .bloom-circle {
+            position: absolute;
+            width: 450px;
+            height: 450px;
+            border: 0.5px solid rgba(255,255,255,0.08);
+            border-radius: 50%;
+            z-index: 0;
+        }
+
+        .node-dot {
+            width: 12px;
+            height: 12px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 50%;
+        }
+
+        /* Input Metaphor */
+        .input-metaphor-box {
+            width: 640px;
+            height: 88px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 44px;
+            background: rgba(255,255,255,0.03);
+            display: flex;
+            align-items: center;
+            padding: 0 2.5rem;
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+            opacity: 0;
+        }
+        .cursor-v5 {
+            width: 2px;
+            height: 32px;
+            background: var(--text-main);
+            animation: blink 1.2s infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* Cinema Viewport (The Window into the App) */
+        .cinema-window {
+            position: absolute;
+            width: 80vw;
+            height: 45vw; /* 16:9 */
+            max-width: 1440px;
+            max-height: 810px;
+            background: #0a0a0a;
+            border-radius: 2.5rem;
+            overflow: hidden;
+            z-index: 100;
+            transform: scale(0.85);
+            opacity: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 100px 200px -40px rgba(0,0,0,0.8);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .app-mockup {
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, #151515 0%, #000 100%);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .app-tag {
+            position: absolute;
+            top: 2.5rem;
+            left: 2.5rem;
+            font-size: 0.7rem;
+            letter-spacing: 0.4em;
+            color: rgba(255,255,255,0.2);
+            text-transform: uppercase;
+            z-index: 10;
+            font-weight: 600;
+        }
+
+        .progress-bar {
+            position: absolute;
+            bottom: 3rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 400px;
+            height: 2px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 1px;
+            overflow: hidden;
+            z-index: 10;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--purple), var(--cyan));
+            width: 0%;
+        }
+
+        /* Script-Aligned Titles & Subtitles */
+        .scene-overlay {
+            position: absolute;
+            bottom: 6rem;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            width: 90%;
+            z-index: 15;
+            pointer-events: none;
+        }
+
+        .scene-title {
+            font-size: 2.2rem;
+            font-weight: 400;
+            color: #fff;
+            margin-bottom: 1rem;
+            opacity: 0;
+        }
+
+        .scene-sub {
+            font-size: 1.2rem;
+            font-weight: 300;
+            color: rgba(255,255,255,0.5);
+            opacity: 0;
+        }
+
+        /* Architecture Card */
+        .arch-card {
+            width: 500px;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 1.5rem;
+            padding: 2.5rem;
+            backdrop-filter: blur(40px);
+            opacity: 0;
+            transform: translateY(30px);
+        }
+
+        /* Overlays */
+        .mask-v5 {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .noise {
+            position: fixed;
+            inset: 0;
+            z-index: 9998;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            opacity: 0.04;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="mask-v5"></div>
+    <div class="noise"></div>
+
+    <!-- ACT 1: WE BELIEVE -->
+    <div class="section-container" style="height: 400vh;" id="act1-98">
+        <div class="sticky-wrapper">
+            <div class="bloom-circle" id="c1"></div>
+            <div class="bloom-circle" id="c2" style="width: 700px; height: 700px; border-color: rgba(168,85,247,0.15);"></div>
+            <h1 class="hero-num opacity-0" id="num-98">98%</h1>
+            <p class="subheadline-v5 opacity-0 text-center mt-12" id="num-desc">
+                拥有一对一导师的学生，<br>比同龄人多学到的部分。
+            </p>
+        </div>
+    </div>
+
+    <div class="section-container" style="height: 300vh;" id="act1-wait">
+        <div class="sticky-wrapper">
+            <div class="text-center space-y-12">
+                <h2 class="headline opacity-0" id="wait-t1">这个数字，来自 1984 年。</h2>
+                <h2 class="headline opacity-0 text-gray-500 font-light" id="wait-t2">四十年了。我们还在等。</h2>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-container" style="height: 300vh;" id="act1-average">
+        <div class="sticky-wrapper">
+            <div class="grid grid-cols-12 gap-8 opacity-10" id="dot-grid"></div>
+            <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                <div class="text-center opacity-0" id="avg-content">
+                    <h2 class="headline serif mb-10">课堂只能照顾"平均"。</h2>
+                    <p class="text-3xl text-gray-400 font-light">但没有人，是"平均"的。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-container" style="height: 350vh;" id="act1-dilemma">
+        <div class="sticky-wrapper">
+            <div class="input-metaphor-box" id="empty-input">
+                <div class="cursor-v5" id="input-cursor"></div>
+                <span class="ml-6 mono text-white/20 text-2xl">不知道该问什么...</span>
+            </div>
+            <div class="mt-20 text-center max-w-4xl opacity-0" id="dilemma-text">
+                <h2 class="headline mb-8">你得先知道该问什么。<br>它才能回答。</h2>
+                <p class="text-3xl text-gray-500 font-light">人最深的困境是：不知道自己不知道什么。</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="section-container" style="height: 300vh;" id="act1-rules">
+        <div class="sticky-wrapper">
+            <div class="space-y-24 text-center">
+                <div class="overflow-hidden">
+                    <p class="text-5xl font-light opacity-0" id="rule-1">一、AI 应当主动向你提问。</p>
+                </div>
+                <div class="overflow-hidden">
+                    <p class="text-5xl font-light opacity-0" id="rule-2">二、学习必须由你自己输出。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACT 2: AXIOM -->
+    <div class="section-container" style="height: 250vh;" id="act2-reveal">
+        <div class="sticky-wrapper">
+            <div class="relative">
+                <h1 class="hero-num tracking-tighter opacity-0 scale-105" id="axiom-logo">AXIOM</h1>
+                <div class="absolute -bottom-8 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white to-transparent opacity-0" id="axiom-line"></div>
+            </div>
+            <p class="mono text-sm tracking-[1.2em] text-white/40 mt-16 opacity-0" id="axiom-sub">A COGNITIVE OPERATING SYSTEM</p>
+        </div>
+    </div>
+
+    <!-- ACT 3: HERMES -->
+    <div class="section-container" style="height: 600vh;" id="act3-hermes">
+        <div class="sticky-wrapper">
+            <div class="arch-card" id="hermes-card">
+                <div class="mono text-xs text-cyan-400 mb-6 tracking-widest uppercase">System Core / Hermes</div>
+                <h3 class="text-5xl font-bold mb-8">Hermes</h3>
+                <div class="space-y-4 text-gray-400 text-lg font-light">
+                    <p id="h-line-1" class="opacity-0">不基于 LangChain。</p>
+                    <p id="h-line-2" class="opacity-0">不基于 AutoGen。</p>
+                    <p id="h-line-3" class="opacity-0">不基于任何现成框架。</p>
+                </div>
+            </div>
+            <div class="cinema-window" id="hermes-window">
+                <div class="app-tag">Architecture Visualization</div>
+                <div class="app-mockup">
+                    <div class="text-center">
+                        <div class="mono text-white/20 text-lg mb-8" id="h-viz-title">HERMES 三层架构</div>
+                        <div class="space-y-12" id="h-viz-layers">
+                            <div class="w-96 h-20 border border-white/10 rounded-2xl flex items-center justify-center bg-white/5 opacity-0" id="layer-3">Agent A (教) & Agent B (听)</div>
+                            <div class="w-96 h-20 border border-white/10 rounded-2xl flex items-center justify-center bg-white/5 opacity-0" id="layer-2">Oracle / Profile / Forge / Guide / Assess</div>
+                            <div class="w-96 h-20 border border-white/10 rounded-2xl flex items-center justify-center bg-white/5 opacity-0" id="layer-1">Memory / Orchestration / Cognition</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="scene-overlay">
+                    <div class="scene-title" id="h-sub-1">一个专心教你，另一个专心听你。</div>
+                    <div class="scene-sub" id="h-sub-2">没有任何框架，能让 AI 在教你的同时，默默记住你。</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" id="h-progress"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACT 4: DEMO 1 (Recognition) -->
+    <div class="section-container" style="height: 600vh;" id="act4-demo1">
+        <div class="sticky-wrapper">
+            <div class="cinema-window" id="demo1-window">
+                <div class="app-tag">Demo 01: Profile Recognition</div>
+                <div class="app-mockup">
+                    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center opacity-0" id="oracle-selector">
+                        <div class="text-white/30 mb-8 uppercase tracking-widest text-xs">Choose Your Oracle</div>
+                        <div class="flex gap-4">
+                            <div class="w-32 h-44 border border-white/10 rounded-xl bg-white/5 flex flex-col items-center justify-center">
+                                <div class="w-12 h-12 rounded-full bg-purple-500/20 mb-4"></div>
+                                <div class="text-xs">苏格拉底</div>
+                            </div>
+                            <div class="w-32 h-44 border border-white/20 rounded-xl bg-purple-500/10 flex flex-col items-center justify-center ring-1 ring-purple-500">
+                                <div class="w-12 h-12 rounded-full bg-purple-500 mb-4"></div>
+                                <div class="text-xs font-bold">AXIOM</div>
+                            </div>
+                            <div class="w-32 h-44 border border-white/10 rounded-xl bg-white/5 flex flex-col items-center justify-center">
+                                <div class="w-12 h-12 rounded-full bg-purple-500/20 mb-4"></div>
+                                <div class="text-xs">马斯克</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="scene-overlay">
+                    <div class="scene-title" id="d1-sub-1">它不立刻回答，它在反问你。</div>
+                    <div class="scene-sub" id="d1-sub-2">Agent B 在背后开始 Profile 的工作。它只是看着你。</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" id="d1-progress"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACT 4: DEMO 2 (Preparation) -->
+    <div class="section-container" style="height: 600vh;" id="act4-demo2">
+        <div class="sticky-wrapper">
+            <div class="cinema-window" id="demo2-window">
+                <div class="app-tag">Demo 02: Galaxy Preparation</div>
+                <div class="app-mockup">
+                    <div class="relative w-full h-full">
+                        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-purple-500 rounded-full blur-sm" id="galaxy-core"></div>
+                        <div id="galaxy-nodes">
+                            <!-- JS will spawn nodes -->
+                        </div>
+                    </div>
+                </div>
+                <div class="scene-overlay">
+                    <div class="scene-title" id="d2-sub-1">一次对话，六份资料。</div>
+                    <div class="scene-sub" id="d2-sub-2">不再是寻找资源，是资源在主动适配你的认知。</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" id="d2-progress"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PHILOSOPHY: MATERIAL VS KNOWLEDGE -->
+    <div class="section-container" style="height: 300vh;" id="act4-philosophy">
+        <div class="sticky-wrapper bg-white text-black">
+            <div class="text-center px-10">
+                <h2 class="headline serif mb-12 opacity-0" id="phi-1">资料，不是你的知识。</h2>
+                <h2 class="hero-num tracking-tighter mb-12 opacity-0" style="color: #000; -webkit-text-fill-color: initial;" id="phi-2">内化。</h2>
+                <p class="text-3xl font-light opacity-0" id="phi-3">知识，必须由你自己产出。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACT 4: DEMO 3 (Internalization) -->
+    <div class="section-container" style="height: 600vh;" id="act4-demo3">
+        <div class="sticky-wrapper">
+            <div class="cinema-window" id="demo3-window">
+                <div class="app-tag">Demo 03: Forge Internalization</div>
+                <div class="app-mockup">
+                    <div class="w-[600px] h-[400px] border border-white/10 rounded-2xl bg-white/5 p-10 flex flex-col opacity-0" id="forge-editor">
+                        <div class="flex justify-between items-center mb-10">
+                            <div class="mono text-xs text-white/30 uppercase tracking-widest">Forge Editor</div>
+                            <div class="w-16 h-6 rounded-full bg-cyan-500/20 border border-cyan-500/50"></div>
+                        </div>
+                        <div class="space-y-6">
+                            <div class="h-4 w-3/4 bg-white/10 rounded"></div>
+                            <div class="h-4 w-full bg-white/10 rounded"></div>
+                            <div class="h-4 w-1/2 bg-white/10 rounded"></div>
+                        </div>
+                        <div class="mt-auto flex justify-end">
+                            <div class="px-6 py-2 rounded-lg bg-purple-600 text-xs font-bold opacity-0" id="upgrade-btn">提炼为永久知识</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="scene-overlay">
+                    <div class="scene-title" id="d3-sub-1">AI 不替你写，因为它不能替你内化。</div>
+                    <div class="scene-sub" id="d3-sub-2">定义、举例、关联、应用。属于你的第一张卡片。</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" id="d3-progress"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACT 4: DEMO 4 (Learn & Assess) -->
+    <div class="section-container" style="height: 600vh;" id="act4-demo4">
+        <div class="sticky-wrapper">
+            <div class="cinema-window" id="demo4-window">
+                <div class="app-tag">Demo 04: Assess & Path</div>
+                <div class="app-mockup">
+                    <div class="flex w-full h-full p-20 gap-10">
+                        <div class="w-1/3 space-y-4 opacity-0" id="learn-list">
+                            <div class="h-12 w-full border border-white/10 rounded-lg bg-green-500/10 flex items-center px-4 text-xs">✓ 概念起源</div>
+                            <div class="h-12 w-full border border-white/10 rounded-lg bg-green-500/10 flex items-center px-4 text-xs">✓ 核心定义</div>
+                            <div class="h-12 w-full border border-cyan-500/30 rounded-lg bg-cyan-500/10 flex items-center px-4 text-xs ring-1 ring-cyan-500">⚠ 编程中的应用 (复习中)</div>
+                        </div>
+                        <div class="flex-1 border border-white/10 rounded-2xl bg-white/5 p-10 flex flex-col items-center justify-center opacity-0" id="assess-dialog">
+                            <div class="w-12 h-12 rounded-full bg-amber-500 mb-6"></div>
+                            <div class="text-xl font-bold mb-4">Assess · 评估结果</div>
+                            <p class="text-sm text-gray-400 text-center">理解不够充分，已为您自动规划复习路径。</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="scene-overlay">
+                    <div class="scene-title" id="d4-sub-1">它发现你没真的懂。</div>
+                    <div class="scene-sub" id="d4-sub-2">不是每个人跟着课表，是课表跟着每一个你。</div>
+                </div>
+                <div class="progress-bar"><div class="progress-fill" id="d4-progress"></div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ACT 5: FINALE -->
+    <div class="section-container" style="height: 350vh;" id="finale">
+        <div class="sticky-wrapper">
+            <div class="text-center space-y-16">
+                <p class="mono text-xs tracking-[1em] text-white/20 opacity-0" id="final-years">1984 — 2026</p>
+                <div class="overflow-hidden">
+                    <h2 class="headline font-light serif opacity-0" id="final-t1">让一对一导师，不再是少数人的特权。</h2>
+                </div>
+                <div class="relative inline-block mt-20">
+                    <h1 class="hero-num tracking-tighter opacity-0 scale-110" id="final-logo">AXIOM</h1>
+                </div>
+                <div class="pt-20 opacity-0" id="final-credit">
+                    <p class="text-white/30 mono text-xs uppercase tracking-[0.4em]">Hermes 自研架构 · 中国软件杯 · A 组</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        gsap.registerPlugin(ScrollTrigger);
+
+        // Grid Engine
+        const grid = document.getElementById('dot-grid');
+        for (let i = 0; i < 144; i++) {
+            const dot = document.createElement('div');
+            dot.className = 'node-dot';
+            grid.appendChild(dot);
+        }
+
+        window.addEventListener('load', () => {
+            gsap.to('.mask-v5', { opacity: 0, duration: 1.5, ease: "power2.inOut" });
+
+            // 1. Bloom 98%
+            const t1 = gsap.timeline({ scrollTrigger: { trigger: "#act1-98", start: "top top", end: "bottom bottom", scrub: true }});
+            t1.to("#num-98", { opacity: 1, duration: 1 })
+              .to("#num-desc", { opacity: 1, y: -10, duration: 1 }, "-=0.5")
+              .to("#c1", { scale: 1.4, opacity: 0, duration: 2 }, "-=1")
+              .to("#c2", { scale: 1.2, duration: 2 }, "-=2")
+              .to("#act1-98 .sticky-wrapper", { opacity: 0, filter: "blur(20px)", duration: 1 });
+
+            // 2. 1984 Wait
+            const t2 = gsap.timeline({ scrollTrigger: { trigger: "#act1-wait", start: "top top", end: "bottom bottom", scrub: true }});
+            t2.to("#wait-t1", { opacity: 1, y: -20, duration: 1 })
+              .to("#wait-t2", { opacity: 1, y: -20, duration: 1 })
+              .to("#act1-wait .sticky-wrapper", { opacity: 0, duration: 1 });
+
+            // 3. Average Grid
+            const t3 = gsap.timeline({ scrollTrigger: { trigger: "#act1-average", start: "top top", end: "bottom bottom", scrub: true }});
+            t3.to(".node-dot", { opacity: 1, duration: 1, stagger: { amount: 1, grid: [12, 12], from: "random" }})
+              .to("#avg-content", { opacity: 1, y: -20, duration: 1 })
+              .to(".node-dot", { backgroundColor: "rgba(255,255,255,0.05)", duration: 0.5 })
+              .to(".node-dot:nth-child(78)", { backgroundColor: "#a855f7", scale: 6, boxShadow: "0 0 50px #a855f7", opacity: 1, duration: 1 })
+              .to("#act1-average .sticky-wrapper", { opacity: 0, duration: 1 });
+
+            // 4. Dilemma Input
+            const t4 = gsap.timeline({ scrollTrigger: { trigger: "#act1-dilemma", start: "top top", end: "bottom bottom", scrub: true }});
+            t4.to("#empty-input", { opacity: 1, duration: 1 })
+              .to("#dilemma-text", { opacity: 1, y: -20, duration: 1 })
+              .to("#act1-dilemma .sticky-wrapper", { opacity: 0, duration: 1 });
+
+            // 5. Rules
+            const t5 = gsap.timeline({ scrollTrigger: { trigger: "#act1-rules", start: "top top", end: "bottom bottom", scrub: true }});
+            t5.to("#rule-1", { opacity: 1, y: -10, duration: 1.5, ease: "power2.out" })
+              .to("#rule-2", { opacity: 1, y: -10, duration: 1.5, ease: "power2.out" }, "-=0.8")
+              .to("#act1-rules .sticky-wrapper", { opacity: 0, duration: 1 });
+
+            // 6. AXIOM Reveal
+            const t6 = gsap.timeline({ scrollTrigger: { trigger: "#act2-reveal", start: "top top", end: "bottom bottom", scrub: true }});
+            t6.to("#axiom-logo", { opacity: 1, scale: 1, duration: 2, ease: "power4.out" })
+              .to("#axiom-line", { opacity: 1, scaleX: 1.2, duration: 1 }, "-=1")
+              .to("#axiom-sub", { opacity: 1, y: -10, duration: 1.5 }, "-=0.5")
+              .to("#act2-reveal .sticky-wrapper", { opacity: 0, duration: 1 });
+
+            // --- CINEMA ENGINE v5 ---
+            function setupCinema(id, windowId, cardId, progressId, subList = [], appBeats = () => {}) {
+                const tl = gsap.timeline({ scrollTrigger: { trigger: `#${id}`, start: "top top", end: "bottom bottom", scrub: true }});
+
+                // Entrance
+                tl.to(`#${windowId}`, { opacity: 1, scale: 0.95, duration: 1 });
+                tl.to(`#${windowId}`, { width: "100vw", height: "100vh", borderRadius: "0", scale: 1, duration: 2, ease: "power2.inOut" });
+
+                if (cardId) tl.to(`#${cardId}`, { opacity: 1, y: 0, duration: 1 }, "-=1.5");
+
+                // Subtitles & Progress
+                subList.forEach((subSet, idx) => {
+                    const [t, s] = subSet;
+                    tl.to(`#${t}`, { opacity: 1, y: -10, duration: 1 });
+                    if (s) tl.to(`#${s}`, { opacity: 1, y: -5, duration: 1 }, "-=0.5");
+                    tl.to([`#${t}`, `#${s}`], { opacity: 0, y: -20, duration: 1, delay: 1 });
+                });
+
+                tl.to(`#${progressId}`, { width: "100%", duration: 4 }, "-=" + (subList.length * 2));
+
+                // Custom App Logic
+                appBeats(tl);
+
+                // Exit
+                tl.to(`#${windowId}`, { scale: 1.1, filter: "blur(40px)", opacity: 0, duration: 1.5 });
+                if (cardId) tl.to(`#${cardId}`, { opacity: 0, y: -30, duration: 0.8 }, "-=1.5");
+            }
+
+            // Hermes
+            setupCinema('act3-hermes', 'hermes-window', 'hermes-card', 'h-progress',
+                [['h-sub-1', 'h-sub-2']],
+                (tl) => {
+                    tl.to("#h-line-1", { opacity: 1, x: 10, duration: 0.5 }, "-=4")
+                      .to("#h-line-2", { opacity: 1, x: 10, duration: 0.5 }, "-=3.5")
+                      .to("#h-line-3", { opacity: 1, x: 10, duration: 0.5 }, "-=3")
+                      .to("#layer-1", { opacity: 1, y: -5, duration: 0.8 }, "-=2.5")
+                      .to("#layer-2", { opacity: 1, y: -5, duration: 0.8 }, "-=2")
+                      .to("#layer-3", { opacity: 1, y: -5, duration: 0.8 }, "-=1.5");
+                }
+            );
+
+            // Demo 1
+            setupCinema('act4-demo1', 'demo1-window', null, 'd1-progress',
+                [['d1-sub-1', 'd1-sub-2']],
+                (tl) => {
+                    tl.to("#oracle-selector", { opacity: 1, scale: 1.1, duration: 2 }, "-=3");
+                }
+            );
+
+            // Demo 2 (Galaxy)
+            setupCinema('act4-demo2', 'demo2-window', null, 'd2-progress',
+                [['d2-sub-1', 'd2-sub-2']],
+                (tl) => {
+                    // Node spawning animation
+                    const container = document.getElementById('galaxy-nodes');
+                    for(let i=0; i<6; i++) {
+                        const node = document.createElement('div');
+                        node.className = `absolute w-2 h-2 rounded-full bg-cyan-400 opacity-0 node-i-${i}`;
+                        node.style.left = '50%';
+                        node.style.top = '50%';
+                        container.appendChild(node);
+
+                        const angle = (i / 6) * Math.PI * 2;
+                        const dist = 150 + Math.random() * 50;
+                        tl.to(`.node-i-${i}`, {
+                            opacity: 1,
+                            x: Math.cos(angle) * dist,
+                            y: Math.sin(angle) * dist,
+                            duration: 1.5,
+                            ease: "back.out(2)"
+                        }, "-=3");
+                    }
+                }
+            );
+
+            // Philosophy
+            const tp = gsap.timeline({ scrollTrigger: { trigger: "#act4-philosophy", start: "top top", end: "bottom bottom", scrub: true }});
+            tp.to("#phi-1", { opacity: 1, y: -10, duration: 1 })
+              .to("#phi-2", { opacity: 1, scale: 0.9, duration: 1.5 })
+              .to("#phi-3", { opacity: 1, y: -10, duration: 1 });
+
+            // Demo 3 (Forge)
+            setupCinema('act4-demo3', 'demo3-window', null, 'd3-progress',
+                [['d3-sub-1', 'd3-sub-2']],
+                (tl) => {
+                    tl.to("#forge-editor", { opacity: 1, y: -20, duration: 1.5 }, "-=4")
+                      .to("#upgrade-btn", { opacity: 1, duration: 0.8 }, "-=2");
+                }
+            );
+
+            // Demo 4 (Learn)
+            setupCinema('act4-demo4', 'demo4-window', null, 'd4-progress',
+                [['d4-sub-1', 'd4-sub-2']],
+                (tl) => {
+                    tl.to("#learn-list", { opacity: 1, x: 20, duration: 1.5 }, "-=4")
+                      .to("#assess-dialog", { opacity: 1, scale: 1.05, duration: 1 }, "-=2");
+                }
+            );
+
+            // Finale
+            const tf = gsap.timeline({ scrollTrigger: { trigger: "#finale", start: "top top", end: "bottom bottom", scrub: true }});
+            tf.to("#final-years", { opacity: 0.3, y: -10, duration: 1 })
+              .to("#final-t1", { opacity: 1, y: -10, duration: 1.5 })
+              .to("#final-logo", { opacity: 1, scale: 1, duration: 2, ease: "expo.out" })
+              .to("#final-credit", { opacity: 1, y: -5, duration: 1 });
+        });
+    </script>
+</body>
+</html>

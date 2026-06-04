@@ -6,14 +6,17 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { Copy, Check, RefreshCw, Square, Bot, Send } from 'lucide-react'
+import { Copy, Check, RefreshCw, Square, Bot, Send, Crosshair, Hammer, Sparkles } from 'lucide-react'
 import 'katex/dist/katex.min.css'
 import { useAgent } from '@/hooks/use-agent'
+import { useLearningPaths } from '@/hooks/use-learning'
 import { toast } from 'sonner'
 import { useAppStore } from '@/stores/mode-store'
 import type { AgentMessage } from '@/stores/agent-store'
+import type { ResourceProgressItem } from '@/stores/agent-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { parseMD } from '@/lib/markdown'
+import { filterAgentCommands, findAgentCommand } from '@/lib/agent-commands'
 
 /* ───────────────────────────────────────────────
    Constants
@@ -31,7 +34,22 @@ const PROGRESS_STEPS = [
    Don't send on the Enter that commits an IME candidate
    ─────────────────────────────────────────────── */
 const isImeComposing = (e: React.KeyboardEvent) =>
-  (e.nativeEvent as any).isComposing || e.key === 'Process' || (e as any).isComposing
+  (e.nativeEvent as KeyboardEvent).isComposing || e.key === 'Process'
+
+function buildForgeGuide(cardTitle?: string | null): string {
+  const title = cardTitle?.trim() || '当前卡片'
+  return [
+    `Forge · 卡片锻造师已接管「${title}」。`,
+    '',
+    '我会按三个层次帮你把这张 fleeting note 锻造成 permanent knowledge：',
+    '',
+    '1. 定义边界：先确认这个概念解决什么问题，以及它不是什么。',
+    '2. 补足论证：找出因果链、反例、约束条件和适用场景。',
+    '3. 形成知识卡：整理为标题、核心命题、证据、关联概念和可复用结论。',
+    '',
+    '建议下一步：在编辑器里补一句“我为什么认为它重要”，然后点击保存；确认内容稳定后再升级为 Permanent。',
+  ].join('\n')
+}
 
 /* ───────────────────────────────────────────────
    Separate <think> / <thinking> blocks from answer text (fallback)
@@ -83,36 +101,6 @@ function CopyButton({ content }: { content: string }) {
       {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
       <span className="mono" style={{ fontSize: 'var(--f8)' }}>{copied ? '已复制' : '复制'}</span>
     </button>
-  )
-}
-
-/* ───────────────────────────────────────────────
-   Streaming Thinking Block — shows last ~5 lines
-   ─────────────────────────────────────────────── */
-function StreamingThinkingBlock({ content }: { content: string }) {
-  const lines = content.split('\n').filter((l) => l.trim())
-  const visibleLines = lines.slice(-5)
-
-  return (
-    <div className="rounded-md border border-dashed border-amber-500/20 bg-amber-500/5 px-2.5 py-2 mb-2">
-      <div className="flex items-center gap-1.5 mb-1.5">
-        <span className="mono text-amber-400/80" style={{ fontSize: 'var(--f8)' }}>THINKING</span>
-        <span className="text-[10px] text-amber-500/40">{lines.length} lines</span>
-        <span className="ml-auto text-amber-400 animate-pulse">...</span>
-      </div>
-      <div className="h-[5lh] overflow-hidden font-mono leading-relaxed" style={{ fontSize: 'var(--f9)' }}>
-        {visibleLines.map((line, i) => (
-          <div
-            key={lines.length - 5 + i}
-            className="truncate text-amber-300/60"
-            style={{ opacity: 0.3 + (i / visibleLines.length) * 0.7 }}
-          >
-            {line}
-          </div>
-        ))}
-        <span className="animate-pulse text-amber-400/60">▊</span>
-      </div>
-    </div>
   )
 }
 
@@ -234,6 +222,75 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
+const RESOURCE_STATUS_LABEL: Record<string, string> = {
+  queued: '等待',
+  generating: '生成中',
+  validating: '校验',
+  saving: '保存',
+  ready: '可预览',
+  rendering: '渲染',
+  completed: '完成',
+  failed: '失败',
+}
+
+function ResourceProgressPanel({ items }: { items: ResourceProgressItem[] }) {
+  if (items.length === 0) return null
+  const topic = items.find((item) => item.topic)?.topic || '学习资料'
+  const doneCount = items.filter((item) => item.status === 'ready' || item.status === 'completed').length
+  const failedCount = items.filter((item) => item.status === 'failed').length
+  const overall = Math.round(items.reduce((sum, item) => sum + Math.max(0, Math.min(100, item.progress || 0)), 0) / items.length)
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-xl border border-cyan-500/15 bg-cyan-500/[0.04]">
+      <div className="border-b border-white/5 px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mono text-cyan-300/80 uppercase" style={{ fontSize: 'var(--f8)' }}>Resource Generation</div>
+            <div className="mt-0.5 truncate text-white/75" style={{ fontSize: 'var(--f10)' }}>正在生成「{topic}」</div>
+          </div>
+          <div className="mono text-white/35" style={{ fontSize: 'var(--f8)' }}>
+            {failedCount > 0 ? `${failedCount} failed` : `${doneCount}/${items.length}`}
+          </div>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/8">
+          <div
+            className="h-full rounded-full bg-cyan-300/70 transition-all duration-500"
+            style={{ width: `${overall}%` }}
+          />
+        </div>
+      </div>
+      <div className="divide-y divide-white/5">
+        {items.map((item) => {
+          const isFailed = item.status === 'failed'
+          const isDone = item.status === 'ready' || item.status === 'completed'
+          return (
+            <div key={item.resourceType} className="px-3 py-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 rounded-full ${isFailed ? 'bg-red-400' : isDone ? 'bg-emerald-400' : 'bg-cyan-300 animate-pulse'}`} />
+                    <span className="truncate text-white/70" style={{ fontSize: 'var(--f10)' }}>{item.label}</span>
+                    {item.fileName && <span className="mono truncate text-white/25" style={{ fontSize: 'var(--f8)' }}>{item.fileName}</span>}
+                  </div>
+                  <div className={`mt-1 truncate ${isFailed ? 'text-red-300/75' : 'text-white/35'}`} style={{ fontSize: 'var(--f8)' }}>
+                    {item.error || item.message}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className={`mono ${isFailed ? 'text-red-300/80' : isDone ? 'text-emerald-300/80' : 'text-cyan-300/75'}`} style={{ fontSize: 'var(--f8)' }}>
+                    {RESOURCE_STATUS_LABEL[item.status] || item.status}
+                  </div>
+                  <div className="mono text-white/25" style={{ fontSize: 'var(--f7)' }}>{Math.round(item.progress || 0)}%</div>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /* ───────────────────────────────────────────────
    Message Bubble — renders a single message
    ─────────────────────────────────────────────── */
@@ -297,7 +354,10 @@ function ChatMessage({
               {message.content}
             </p>
           ) : (
-            <MarkdownContent content={message.content} />
+            <>
+              {message.content && <MarkdownContent content={message.content} />}
+              <ResourceProgressPanel items={message.resourceProgress ?? []} />
+            </>
           )}
         </div>
 
@@ -332,7 +392,28 @@ export default function ForgeChat() {
   const [progressStep, setProgressStep] = useState(0)
   const [elapsedSec, setElapsedSec] = useState(0)
   const notifiedRef = useRef(false)
-  const { messages, streaming, sendMessage, clearMessages, createSession } = useAgent()
+  const { messages, sessions, sessionId, streaming, sendMessage, clearMessages, createTalkSession, autoTitleSession } = useAgent()
+  const selectedNode = useAppStore((s) => s.selectedNode)
+  const selectedPathId = useAppStore((s) => s.selectedPathId)
+  const activeLearningStepId = useAppStore((s) => s.activeLearningStepId)
+  const { data: learningData } = useLearningPaths()
+  const currentPath = learningData?.paths.find((path) => path.id === selectedPathId) ?? null
+  const currentStep = currentPath?.steps.find((step) => step.id === activeLearningStepId)
+    ?? currentPath?.steps.find((step) => step.status === 'available' || step.status === 'learning')
+    ?? currentPath?.steps[0]
+    ?? null
+  const currentSession = sessions.find((session) => session.id === sessionId) ?? null
+  const isConversationSession = !!currentSession && !currentSession.cardId && !currentSession.pathId
+  const canChat = (!!selectedNode && selectedNode.type !== 'permanent') || isConversationSession
+  const commandQuery = inputValue.trim().startsWith('/') ? inputValue.trim().slice(1) : ''
+  const filteredCommands = useMemo(() => filterAgentCommands(commandQuery), [commandQuery])
+  const chatPlaceholder = !canChat
+    ? '先在左侧选择一张卡片，或新建普通会话...'
+    : isConversationSession
+      ? `继续普通会话「${currentSession?.title || '新对话'}」...`
+      : selectedNode?.type === 'permanent'
+        ? '永久卡片线程已归档'
+        : '与此卡片的 Agent Thread 对话...'
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
@@ -364,9 +445,64 @@ export default function ForgeChat() {
     }
   }, [inputValue])
 
+  const executeCommand = useCallback(async (commandInput: string) => {
+    const command = findAgentCommand(commandInput)
+    const token = command?.id ?? commandInput.trim().slice(1).split(/\s+/, 1)[0]?.toLowerCase()
+    if (!token) return false
+
+    switch (token) {
+      case 'clear':
+        await clearMessages()
+        break
+      case 'new':
+        await createTalkSession()
+        break
+      case 'forge': {
+        const agentStore = useAgentStore.getState()
+        agentStore._appendMessage({ role: 'user', content: '/forge' })
+        agentStore._appendMessage({
+          role: 'assistant',
+          content: buildForgeGuide(selectedNode?.title),
+        })
+        break
+      }
+      case 'title': {
+        if (currentSession) {
+          const ok = await autoTitleSession(currentSession.id)
+          if (!ok) toast.error('重命名失败')
+        }
+        break
+      }
+      case 'summary':
+        await sendMessage('请总结当前对话的重点，并给出下一步建议。')
+        break
+      case 'ask':
+        await sendMessage('请先向我提出一个澄清问题，再继续。')
+        break
+      case 'learn':
+        await sendMessage('请从学习角度解释当前内容，并给出一个练习建议。')
+        break
+      case 'help':
+        toast('支持 /new /clear /forge /title /summary /ask /learn', {
+          duration: 3500,
+          style: { fontSize: '11px', background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)' },
+        })
+        break
+      default:
+        return false
+    }
+
+    setShowPalette(false)
+    setInputValue('')
+    return true
+  }, [autoTitleSession, clearMessages, createTalkSession, currentSession, selectedNode?.title, sendMessage])
+
   const handleSend = async (text?: string) => {
     const msg = (text ?? inputValue).trim()
     if (!msg || streaming) return
+    if (msg.startsWith('/') && await executeCommand(msg)) {
+      return
+    }
     setInputValue('')
     setShowPalette(false)
     await sendMessage(msg)
@@ -383,16 +519,6 @@ export default function ForgeChat() {
         toast('AI 正在后台分析对话，更新你的画像和知识卡片', { duration: 4000, style: { fontSize: '11px', background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.3)' } })
       }
     }
-  }
-
-  const handleCommand = (cmd: string) => {
-    if (cmd === '/clear') {
-      clearMessages()
-    } else if (cmd === '/new') {
-      createSession()
-    }
-    setShowPalette(false)
-    setInputValue('')
   }
 
   // Regenerate: re-send the last user message
@@ -426,24 +552,55 @@ export default function ForgeChat() {
   })()
 
   return (
-    <div className="flex-1 w-full h-full flex flex-col pointer-events-auto overflow-hidden">
-      <div className="glass-panel rounded-2xl flex-1 flex flex-col overflow-hidden" style={{ margin: 'var(--panel-py) 0' }}>
-        {/* Working context */}
-        <div className="px-5 py-2.5 border-b border-white/5 flex items-center gap-2 flex-shrink-0">
-          <span className={`w-1.5 h-1.5 rounded-full ${streaming ? 'bg-cyan-400 shadow-[0_0_6px_#22d3ee]' : 'bg-pink-400 shadow-[0_0_6px_#f472b6]'}`}></span>
-          <span className="mono opacity-40 uppercase tracking-widest" style={{ fontSize: 'var(--f8)' }}>Working_On:</span>
-          <span className="text-white/80 font-medium truncate" style={{ fontSize: 'var(--f9)' }}>{streaming ? PROGRESS_STEPS[progressStep] : messages.length > 0 ? '对话进行中' : '等待输入'}</span>
-          <span className={`mono ml-auto ${streaming ? 'text-cyan-400/80' : 'text-pink-400/60'}`} style={{ fontSize: 'var(--f7)' }}>
-            {streaming ? `● ${elapsedSec}s` : '○ 待机'}
-          </span>
+    <div className="flex-1 w-full h-full flex flex-col pointer-events-auto overflow-hidden forge-chat-shell">
+      <div className="glass-panel forge-console-panel flex-1 flex flex-col overflow-hidden" style={{ margin: 'var(--panel-py) 0' }}>
+        {/* Chat header */}
+        <div className="forge-console-header flex-shrink-0">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="forge-console-mark">
+              <Hammer className="h-4 w-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="mono text-pink-300/90 uppercase tracking-[0.26em]" style={{ fontSize: 'var(--f9)' }}>Forge Console</span>
+              <div className="mt-1 mono text-white/28" style={{ fontSize: 'var(--f7)' }}>
+                {streaming
+                  ? PROGRESS_STEPS[progressStep]
+                  : currentPath
+                    ? 'TASK GROUP AGENT'
+                    : isConversationSession
+                      ? 'TALK AGENT'
+                      : 'CARD THREAD AGENT'}
+              </div>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button className="forge-mini-btn" onClick={clearMessages}>CLEAR</button>
+            <button className="forge-mini-btn primary" onClick={() => useAppStore.getState().openModal('newcard')}>NEW CARD</button>
+          </div>
         </div>
 
-        {/* Chat header */}
-        <div className="flex justify-between items-center px-5 py-3 border-b border-white/5 flex-shrink-0">
-          <span className="mono text-pink-400/90 uppercase tracking-widest" style={{ fontSize: 'var(--f9)' }}>Forge_Console</span>
-          <div className="flex gap-3">
-            <button className="mono text-white/40 hover:text-white/70 transition-colors active:scale-95" style={{ fontSize: 'var(--f8)' }} onClick={clearMessages}>CLEAR</button>
-            <button className="mono text-white/40 hover:text-white/70 transition-colors active:scale-95" style={{ fontSize: 'var(--f8)' }} onClick={createSession}>+NEW</button>
+        <div className="forge-focus-card flex-shrink-0">
+          <div className="flex items-center gap-4">
+            <div className="forge-focus-icon">
+              <Crosshair className="h-5 w-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="mono text-pink-300/70 uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f8)' }}>Current Focus</div>
+              <div className="mt-1 truncate text-white/88" style={{ fontSize: 'var(--f10)' }}>
+                {currentPath
+                  ? (currentStep
+                    ? `处理「${currentPath.name}」任务组 · 当前步骤「${currentStep.name}」`
+                    : `处理「${currentPath.name}」任务组`)
+                  : isConversationSession
+                    ? `处理普通会话「${currentSession?.title || '新对话'}」`
+                    : selectedNode
+                      ? `处理「${selectedNode.title}」卡片线程`
+                      : '选择一条任务、卡片，或新建普通会话'}
+              </div>
+            </div>
+            <span className={`mono shrink-0 ${streaming ? 'text-cyan-300/80' : 'text-white/25'}`} style={{ fontSize: 'var(--f8)' }}>
+              {streaming ? `${elapsedSec}s` : 'READY'}
+            </span>
           </div>
         </div>
 
@@ -451,10 +608,19 @@ export default function ForgeChat() {
         <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-4 pb-2 space-y-4">
           {messages.length === 0 ? (
             /* Welcome screen */
-            <div className="text-center py-10">
-              <div className="serif text-2xl text-white/10 mb-4 tracking-widest">FORGE</div>
-              <div className="mono opacity-40 leading-relaxed px-4" style={{ fontSize: 'var(--f10)' }}>
-                AI Agent 控制台<br/>输入消息开始对话，构建你的认知星系
+            <div className="forge-empty-state">
+              <div className="forge-empty-symbol">
+                <Sparkles className="h-6 w-6" />
+              </div>
+              <div className="serif text-2xl text-white/18 mb-3 tracking-widest">FORGE</div>
+              <div className="mono text-white/38 leading-relaxed px-4" style={{ fontSize: 'var(--f10)' }}>
+                把灵感、文献和问题放进这里。Agent 会帮你澄清边界、补齐证据，并生成可沉淀的知识卡片。
+              </div>
+              <div className="forge-phase-strip">
+                <span>Capture</span>
+                <span>Clarify</span>
+                <span>Connect</span>
+                <span>Distill</span>
               </div>
               <div className="quick-chips justify-center mt-6">
                 <span className="quick-chip" onClick={() => handleSend('总结今日学习')}>总结今日学习</span>
@@ -506,10 +672,10 @@ export default function ForgeChat() {
         {/* Quick chips */}
         <div className="px-5 py-2 flex-shrink-0 border-t border-white/5">
           <div className="quick-chips">
-            <span className="quick-chip" onClick={() => handleSend('💡 解释这个概念')}>💡 解释</span>
-            <span className="quick-chip" onClick={() => handleSend('📋 举个例子')}>📋 举例</span>
-            <span className="quick-chip" onClick={() => handleSend('🔗 发现关联')}>🔗 关联</span>
-            <span className="quick-chip" onClick={() => handleSend('🎓 学习建议')}>🎓 学习</span>
+            <span className="quick-chip" onClick={() => handleSend('解释这个概念')}>解释</span>
+            <span className="quick-chip" onClick={() => handleSend('举个例子')}>举例</span>
+            <span className="quick-chip" onClick={() => handleSend('发现关联')}>关联</span>
+            <span className="quick-chip" onClick={() => handleSend('学习建议')}>学习</span>
           </div>
         </div>
 
@@ -517,11 +683,20 @@ export default function ForgeChat() {
         <div className="px-4 pb-4 pt-2 relative flex-shrink-0">
           {showPalette && (
             <div className="command-palette">
-              <div className="cmd-item selected" onClick={() => handleCommand('/clear')}><span className="cmd-icon">⌫</span><span className="cmd-name">/clear</span><span className="cmd-desc">清空对话</span></div>
-              <div className="cmd-item" onClick={() => handleCommand('/new')}><span className="cmd-icon">+</span><span className="cmd-name">/new</span><span className="cmd-desc">新会话</span></div>
-              <div className="cmd-item" onClick={() => { setShowPalette(false); setInputValue('/assess ') }}><span className="cmd-icon">📊</span><span className="cmd-name">/assess</span><span className="cmd-desc">学习评估</span></div>
-              <div className="cmd-item" onClick={() => { setShowPalette(false); setInputValue('/learn ') }}><span className="cmd-icon">🎓</span><span className="cmd-name">/learn</span><span className="cmd-desc">学习模式</span></div>
-              <div className="cmd-item" onClick={() => { setShowPalette(false); handleSend('/help') }}><span className="cmd-icon">?</span><span className="cmd-name">/help</span><span className="cmd-desc">帮助</span></div>
+              {filteredCommands.map((command, index) => {
+                const isActive = index === 0
+                return (
+                  <div
+                    key={command.id}
+                    className={`cmd-item ${isActive ? 'selected' : ''}`}
+                    onClick={() => void executeCommand(command.label)}
+                  >
+                    <span className="cmd-icon">{command.icon}</span>
+                    <span className="cmd-name">{command.label}</span>
+                    <span className="cmd-desc">{command.description}</span>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -530,12 +705,14 @@ export default function ForgeChat() {
               ref={textareaRef}
               className="forge-chat-input"
               rows={1}
-              placeholder="与 Agent 对话... (Enter 发送, Shift+Enter 换行, / 命令)"
+              placeholder={
+                chatPlaceholder
+              }
               value={inputValue}
               onChange={handleInputChange}
               onKeyDown={handleTextareaKeyDown}
               style={{ maxHeight: '120px', overflowY: 'auto' }}
-              disabled={streaming}
+              disabled={streaming || !canChat}
             />
             {streaming ? (
               /* Stop button during streaming */
@@ -553,7 +730,7 @@ export default function ForgeChat() {
                 className="self-end mb-1 mono bg-pink-500/20 text-pink-300 px-3 py-2 rounded-lg border border-pink-500/30 hover:bg-pink-500/30 transition-colors disabled:opacity-30 flex items-center gap-1.5"
                 style={{ fontSize: 'var(--f9)' }}
                 onClick={() => handleSend()}
-                disabled={!inputValue.trim()}
+                disabled={!inputValue.trim() || !canChat}
               >
                 <Send className="h-3 w-3" />
                 发送

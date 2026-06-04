@@ -12,13 +12,14 @@ function createPrismaClient() {
   // Promise cannot catch async rejections.  This version properly awaits the
   // transaction and uses Promise-based sleep to avoid blocking the event loop.
   const originalTransaction = client.$transaction.bind(client)
-  client.$transaction = (async (...args: any[]) => {
+  client.$transaction = (async (...args: unknown[]) => {
     const MAX_RETRIES = 3
     for (let i = 0; i < MAX_RETRIES; i++) {
       try {
-        return await (originalTransaction as any).apply(client, args)
-      } catch (err: any) {
-        if (err?.message?.includes('SQLITE_BUSY') && i < MAX_RETRIES - 1) {
+        return await (originalTransaction as (...args: unknown[]) => Promise<unknown>).apply(client, args)
+      } catch (err: unknown) {
+        const dbErr = err as { message?: string }
+        if (dbErr?.message?.includes('SQLITE_BUSY') && i < MAX_RETRIES - 1) {
           const waitMs = 100 * (i + 1)
           await new Promise((resolve) => setTimeout(resolve, waitMs))
           continue
@@ -26,7 +27,7 @@ function createPrismaClient() {
         throw err
       }
     }
-  }) as any
+  }) as unknown as typeof originalTransaction
 
   return client
 }

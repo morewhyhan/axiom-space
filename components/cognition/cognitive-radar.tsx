@@ -22,8 +22,8 @@ export default function CognitiveRadar() {
       className="side-slot visible flex-col pointer-events-auto no-scrollbar"
       style={{ width: 'var(--panel-sm)', justifyContent: 'flex-start', padding: 'var(--panel-py) 0' }}
     >
-      <div className="glass-panel rounded-2xl p-5 flex-shrink-0">
-        <span className="mono text-cyan-400/60 font-bold block mb-4" style={{ fontSize: 'var(--f9)' }}>
+      <div className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5 flex-shrink-0">
+        <span className="mono text-pink-200/75 font-bold block mb-4" style={{ fontSize: 'var(--f9)' }}>
           认知雷达
         </span>
 
@@ -38,7 +38,7 @@ export default function CognitiveRadar() {
             {/* Data polygon */}
             {!loading && data ? (
               <polygon points={polygonPoints}
-                fill="rgba(168,85,247,0.1)" stroke="rgba(168,85,247,0.5)" strokeWidth="1.5" />
+                fill="rgba(244,114,182,0.12)" stroke="rgba(34,211,238,0.62)" strokeWidth="1.5" />
             ) : (
               <circle cx="100" cy="100" r="55" fill="none"
                 stroke="rgba(255,255,255,0.06)" strokeWidth="1" strokeDasharray="4 4" />
@@ -60,22 +60,22 @@ export default function CognitiveRadar() {
         {/* Stats row */}
         <div className="grid grid-cols-4 gap-2">
           <div className="text-center">
-            <div className="font-bold text-purple-400" style={{ fontSize: 'var(--f10)' }}>
+            <div className="font-bold text-purple-300" style={{ fontSize: 'var(--f10)' }}>
               {loading ? '—' : stats.streakDays}
             </div>
             <div className="mono text-white/20 mt-0.5" style={{ fontSize: 'var(--f7)' }}>天连续</div>
           </div>
           <div className="text-center">
-            <div className="font-bold text-cyan-400" style={{ fontSize: 'var(--f10)' }}>
+            <div className="font-bold text-cyan-300" style={{ fontSize: 'var(--f10)' }}>
               {loading ? '—' : stats.mastered}
             </div>
-            <div className="mono text-white/20 mt-0.5" style={{ fontSize: 'var(--f7)' }}>已掌握</div>
+            <div className="mono text-white/20 mt-0.5" style={{ fontSize: 'var(--f7)' }}>永久</div>
           </div>
           <div className="text-center">
-            <div className="font-bold text-pink-400" style={{ fontSize: 'var(--f10)' }}>
+            <div className="font-bold text-pink-300" style={{ fontSize: 'var(--f10)' }}>
               {loading ? '—' : stats.pendingReview}
             </div>
-            <div className="mono text-white/20 mt-0.5" style={{ fontSize: 'var(--f7)' }}>待复习</div>
+            <div className="mono text-white/20 mt-0.5" style={{ fontSize: 'var(--f7)' }}>待整理</div>
           </div>
           <div className="text-center">
             <div className="font-bold text-white/50" style={{ fontSize: 'var(--f10)' }}>

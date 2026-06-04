@@ -7,7 +7,6 @@
  * 支持 denylist + 可选 sandbox root。
  */
 
-import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import type { ToolMiddleware } from '../tools';
 import { getVaultPath } from '@/lib/platform';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
@@ -41,6 +40,11 @@ const DANGEROUS_CONTENT_PATTERNS = [
   /wget\s+.*\|\s*(bash|sh)/i,
 ];
 
+function isWithinPath(rootPath: string, targetPath: string): boolean {
+  const relative = path.relative(rootPath, targetPath);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
 /**
  * 获取写入安全根目录
  *
@@ -66,7 +70,7 @@ export async function validateVaultPath(targetPath: string, vaultPath: string): 
     const realVault = await realpath(vaultPath);
     const realTarget = await realpath(targetPath);
 
-    if (!realTarget.startsWith(realVault + '/') && realTarget !== realVault) {
+    if (!isWithinPath(realVault, realTarget)) {
       return { valid: false, error: `路径超出 Vault 范围: ${targetPath}` };
     }
 
@@ -75,7 +79,7 @@ export async function validateVaultPath(targetPath: string, vaultPath: string): 
     // 路径可能不存在（新建文件等），回退到 path.resolve 检查
     const resolved = path.resolve(targetPath);
     const vaultResolved = path.resolve(vaultPath);
-    if (!resolved.startsWith(vaultResolved + '/') && resolved !== vaultResolved) {
+    if (!isWithinPath(vaultResolved, resolved)) {
       return { valid: false, error: `路径超出 Vault 范围: ${targetPath}` };
     }
     return { valid: true, resolved };
@@ -114,7 +118,7 @@ export class FileSafetyGuardrail implements ToolMiddleware {
 
       // Sandbox root 校验：路径必须在 safe root 内
       // if safe_root and not resolved.startswith(safe_root): return True
-      if (this.safeRoot && !filePath.startsWith(this.safeRoot)) {
+      if (this.safeRoot && !isWithinPath(this.safeRoot, filePath)) {
         console.warn(`[FileSafety] Blocked path outside sandbox: ${filePath}`);
         return { proceed: false, reason: `路径超出沙箱范围: ${filePath}（允许范围: ${this.safeRoot}）` };
       }
@@ -122,12 +126,12 @@ export class FileSafetyGuardrail implements ToolMiddleware {
       // Vault-scoped write zone check (对标 D-12)
       const vaultPath = getVaultPath() || getCurrentVaultId() || '';
       if (vaultPath && filePath) {
-        if (filePath.startsWith('/') || filePath.match(/^[A-Za-z]:\\/)) {
+        if (path.isAbsolute(filePath)) {
           // Absolute path — must be within vault (sync check using path.resolve,
           // avoids event-loop blocking fs.realpathSync since ToolMiddleware.beforeCall is sync)
           const resolved = path.resolve(filePath);
           const vaultResolved = path.resolve(vaultPath);
-          if (!resolved.startsWith(vaultResolved + '/') && resolved !== vaultResolved) {
+          if (!isWithinPath(vaultResolved, resolved)) {
             console.warn(`[FileSafety] Blocked path outside vault: ${filePath}`);
             return {
               proceed: false,

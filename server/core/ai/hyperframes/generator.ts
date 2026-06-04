@@ -151,7 +151,7 @@ export class HyperFramesHTMLBuilder {
     let currentTime = 0;
     const frameDuration = 1000 / config.fps;
 
-    function render() {
+    function showFrameAt(timeMs) {
       const videoContainer = document.querySelector('.video-container');
       const allScenes = Array.from(videoContainer.querySelectorAll('.scene'));
 
@@ -159,7 +159,7 @@ export class HyperFramesHTMLBuilder {
       for (let i = 0; i < config.scenes.length; i++) {
         const sceneEndTime = sceneStartTime + config.scenes[i].duration * 1000;
 
-        if (currentTime >= sceneStartTime && currentTime < sceneEndTime) {
+        if (timeMs >= sceneStartTime && timeMs < sceneEndTime) {
           allScenes.forEach((s, idx) => {
             s.classList.toggle('active', idx === i);
           });
@@ -170,6 +170,22 @@ export class HyperFramesHTMLBuilder {
         sceneStartTime = sceneEndTime;
       }
 
+      const totalDuration = config.scenes.reduce((sum, s) => sum + s.duration * 1000, 0);
+      if (timeMs >= totalDuration && allScenes.length > 0) {
+        allScenes.forEach((s, idx) => {
+          s.classList.toggle('active', idx === allScenes.length - 1);
+        });
+        currentSceneIndex = allScenes.length - 1;
+      }
+    }
+
+    window.__hyperframesSeek = function(timeSeconds) {
+      currentTime = Math.max(0, timeSeconds * 1000);
+      showFrameAt(currentTime);
+    };
+
+    function render() {
+      showFrameAt(currentTime);
       currentTime += frameDuration;
       const totalDuration = config.scenes.reduce((sum, s) => sum + s.duration * 1000, 0);
 

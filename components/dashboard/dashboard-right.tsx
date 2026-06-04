@@ -5,6 +5,7 @@ import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useCognition } from '@/hooks/use-cognition'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import { toast } from 'sonner'
+import type { GrowthPoint, RecentActivity } from '@/types/dashboard'
 
 type FocusMode = 'overview' | 'by-cluster' | 'zen' | 'recent'
 type MetricsMode = 'all' | 'perm' | 'fleet' | 'orphans'
@@ -108,7 +109,7 @@ export default function DashboardRight() {
   const dLit = all ? (s?.literature ?? 0) : 0
   const dTotal = (s?.totalNodes ?? 0)
   const pct = (n: number) => `${dTotal > 0 ? ((n / dTotal) * 100).toFixed(0) : 0}%`
-  const daily = (growth as any[])?.map((g: any) => g.count) || []
+  const daily = growth?.map((g: GrowthPoint) => g.count) || []
 
   return (
     <aside className="side-slot visible dashboard-panel flex-col pointer-events-auto no-scrollbar" style={{ width: 'var(--panel-xl)', justifyContent: 'flex-start', gap: 'var(--gap-zone)', padding: 'var(--panel-py) 0', overflowY: 'auto' }}>
@@ -245,7 +246,7 @@ export default function DashboardRight() {
           <div>
             <span className="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">NOTIFICATIONS</span>
             <div className="space-y-2">
-              {recentActivity && recentActivity.length > 0 ? recentActivity.slice(0, 3).map((a: any, i: number) => (
+              {recentActivity && recentActivity.length > 0 ? recentActivity.slice(0, 3).map((a: RecentActivity, i: number) => (
                 <div key={i} className="flex items-baseline" style={{ fontSize: 'var(--f10)' }}>
                   <span className="opacity-30 mono text-[var(--f7)] flex-shrink-0">{new Date(a.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
                   <span className="text-white/45 ml-2 truncate">{a.type === 'permanent' ? '知识已固化' : a.type === 'fleeting' ? '灵感已捕获' : '文献已导入'}</span>
@@ -259,7 +260,7 @@ export default function DashboardRight() {
           <div className="pb-8">
             <span className="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">OP LOG · EVENTS</span>
             <div className="space-y-2">
-              {recentActivity && recentActivity.length > 0 ? recentActivity.slice(0, 4).map((a: any, i: number) => (
+              {recentActivity && recentActivity.length > 0 ? recentActivity.slice(0, 4).map((a: RecentActivity, i: number) => (
                 <div key={i} className="flex items-baseline" style={{ fontSize: 'var(--f10)' }}>
                   <span className="opacity-30 mono text-[var(--f7)] flex-shrink-0">{new Date(a.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
                   <span className="text-white/45 ml-2 truncate">{a.type === 'permanent' ? 'Card handshake confirmed' : a.type === 'fleeting' ? 'Added fleeting note' : 'Literature imported'}</span>

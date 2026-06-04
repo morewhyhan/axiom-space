@@ -11,11 +11,19 @@ process.on('unhandledRejection', (reason) => {
   console.warn('[unhandledRejection]', reason)
 })
 
-import api from '@/server/api'
-// import api from '@/server/openapi'
 import { handle } from 'hono/vercel'
+import type { FetchEventLike } from 'hono/types'
 
-const handler = handle(api)
+async function handler(req: Request) {
+  const { default: api } = await import('@/server/api')
+  const event: FetchEventLike = {
+    request: req,
+    respondWith: () => {},
+    passThroughOnException: () => {},
+    waitUntil: () => {},
+  }
+  return handle(api)(req, event)
+}
 
 export {
   handler as GET,

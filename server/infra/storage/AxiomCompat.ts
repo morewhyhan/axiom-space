@@ -7,11 +7,9 @@
  */
 
 import type { IFileStorage } from "./IFileStorage"
-import { getFileStorage } from "./GlobalFileStorage"
 import { exec } from 'child_process'
 import { promisify } from 'node:util'
-import fs from 'fs'
-import path from 'path'
+import { homedir } from 'node:os'
 
 const asyncExec = promisify(exec)
 
@@ -193,7 +191,7 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
     },
 
     getEnvConfig() { return process.env as Record<string, string | undefined> },
-    getHomeDir() { return process.env.HOME || process.env.USERPROFILE || '' },
+    getHomeDir() { return homedir() },
     getCwd() { return process.cwd() },
     getCurrentVaultPath() { return vp },
   }

@@ -7,6 +7,7 @@ import { getVaultPath } from '@/lib/platform';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { homedir } from 'node:os'
 
 /**
  * Skill 定义（轻量级，只包含元信息）
@@ -195,7 +196,7 @@ export class SkillRegistry {
   /** 从 skills/index.yaml 快速加载技能元数据 */
   private async loadFromIndex(basePath: string, source: SkillSource): Promise<SkillEntry[] | null> {
     try {
-      const indexResult = await this._readFsFile(`${basePath}/index.yaml`);
+      const indexResult = await this._readFsFile(path.join(basePath, 'index.yaml'));
       if (!indexResult?.success || !indexResult.content) return null;
 
       // 简单 YAML 解析（skills 块下的 key-value）
@@ -239,9 +240,9 @@ export class SkillRegistry {
   private async indexEntryToSkill(
     basePath: string, name: string, data: Record<string, string>, source: SkillSource
   ): Promise<SkillEntry | null> {
-    const skillPath = data.path.startsWith('/')
+    const skillPath = path.isAbsolute(data.path)
       ? data.path
-      : `${basePath}/${data.path.replace(/^\.\/|^skills\//, '')}`;
+      : path.join(basePath, data.path.replace(/^\.\/|^skills\//, ''));
 
     return {
       name,
@@ -259,7 +260,7 @@ export class SkillRegistry {
   private async ensureEnvInfo(): Promise<{ homeDir: string; cwd: string }> {
     if (this._envInfo) return this._envInfo;
     try {
-      const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+      const homeDir = homedir();
       const cwd = process.cwd() || '';
       this._envInfo = { homeDir, cwd };
       return this._envInfo;
@@ -278,45 +279,45 @@ export class SkillRegistry {
       case SkillSource.OpenClawExtra:
         // 插件目录 — 从 ~/.axiom/plugins/skills 和项目根目录的 .axiom/plugins 加载
         if (homeDir) {
-          paths.push(`${homeDir}/.axiom/plugins/skills`);
+          paths.push(path.join(homeDir, '.axiom', 'plugins', 'skills'));
         }
         if (cwd) {
-          paths.push(`${cwd}/.axiom/plugins/skills`);
+          paths.push(path.join(cwd, '.axiom', 'plugins', 'skills'));
         }
         if (vaultPath) {
-          paths.push(`${vaultPath}/.axiom/plugins/skills`);
+          paths.push(path.join(vaultPath, '.axiom', 'plugins', 'skills'));
         }
         break;
       case SkillSource.OpenClawBundled:
         // 仓库内置 skills/（项目根目录）
         if (cwd) {
-          paths.push(`${cwd}/.trae/skills`);
-          paths.push(`${cwd}/skills`);
+          paths.push(path.join(cwd, '.trae', 'skills'));
+          paths.push(path.join(cwd, 'skills'));
         }
         // 也扫描 vault 内的 skills 目录
         if (vaultPath) {
-          paths.push(`${vaultPath}/.trae/skills`);
-          paths.push(`${vaultPath}/skills`);
+          paths.push(path.join(vaultPath, '.trae', 'skills'));
+          paths.push(path.join(vaultPath, 'skills'));
         }
         break;
       case SkillSource.OpenClawManaged:
         // ~/.openclaw/skills
-        paths.push(`${homeDir}/.openclaw/skills`);
+        paths.push(path.join(homeDir, '.openclaw', 'skills'));
         break;
       case SkillSource.AgentsSkillsPersonal:
         // ~/.agents/skills
-        paths.push(`${homeDir}/.agents/skills`);
+        paths.push(path.join(homeDir, '.agents', 'skills'));
         break;
       case SkillSource.AgentsSkillsProject:
         // <workspace>/.agents/skills
         if (vaultPath) {
-          paths.push(`${vaultPath}/.agents/skills`);
+          paths.push(path.join(vaultPath, '.agents', 'skills'));
         }
         break;
       case SkillSource.OpenClawWorkspace:
         // <workspace>/skills
         if (vaultPath) {
-          paths.push(`${vaultPath}/skills`);
+          paths.push(path.join(vaultPath, 'skills'));
         }
         break;
     }
@@ -343,7 +344,7 @@ export class SkillRegistry {
       for (const entry of result.entries || []) {
         if (entry.isDirectory) {
           // 检查子目录是否有 SKILL.md
-          const skillPath = `${basePath}/${entry.name}/SKILL.md`;
+          const skillPath = path.join(basePath, entry.name, 'SKILL.md');
           const _readResult = await this._readFsFile(skillPath);
           if (_readResult?.success) {
             const skill = await this.parseSkillEntry(skillPath, (_readResult.content || ""), source);
@@ -353,7 +354,7 @@ export class SkillRegistry {
           }
         } else if (entry.name === 'SKILL.md') {
           // 根目录的 SKILL.md
-          const skillPath = `${basePath}/SKILL.md`;
+          const skillPath = path.join(basePath, 'SKILL.md');
           const _readResult = await this._readFsFile(skillPath);
           if (_readResult?.success) {
             const skill = await this.parseSkillEntry(skillPath, (_readResult.content || ""), source);

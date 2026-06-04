@@ -22,6 +22,13 @@ export default function LearnList() {
 
   // Track evaluation results per step
   const [evalResults, setEvalResults] = useState<Record<string, { passed: boolean; feedback: string }>>({})
+  const [assessDialog, setAssessDialog] = useState<{
+    title: string
+    passed: boolean
+    feedback: string
+    mastery?: number
+    cardUpgraded?: boolean
+  } | null>(null)
 
   // Auto-select active path on first load
   useEffect(() => {
@@ -59,7 +66,7 @@ export default function LearnList() {
       if (currentPath.source === 'ai' || currentPath.source === 'graph') {
         const result = await executeStep.mutateAsync({ pathId: currentPath.id, stepId: step.id })
         // Use the cardId returned by the server (may be newly created)
-        if (result?.session?.cardId) cardId = result.session.cardId
+        if (result?.cardId) cardId = result.cardId
       }
       setSelectedNode({ id: cardId || step.id, title: step.name, type: 'fleeting' })
       setMode('forge')
@@ -81,6 +88,13 @@ export default function LearnList() {
       if (result.evaluation) {
         const ev = result.evaluation
         setEvalResults(prev => ({ ...prev, [step.id]: { passed: ev.passed, feedback: ev.feedback } }))
+        setAssessDialog({
+          title: step.name,
+          passed: ev.passed,
+          feedback: ev.feedback || (ev.passed ? 'AI 评估通过。' : 'AI 评估：尚未完全掌握，请继续学习。'),
+          mastery: ev.mastery,
+          cardUpgraded: result.cardUpgraded,
+        })
         if (ev.passed) {
           toast.success(`「${step.name}」已掌握！卡片已升级为永久知识。`)
         } else {
@@ -160,6 +174,63 @@ export default function LearnList() {
       className="side-slot visible flex-col pointer-events-auto"
       style={{ width: 'var(--panel-lg)', padding: 'var(--panel-py) 0' }}
     >
+      {assessDialog && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/55 px-4 backdrop-blur-sm"
+          onClick={() => setAssessDialog(null)}
+        >
+          <div
+            className="w-full max-w-[420px] rounded-2xl border border-white/10 bg-[#111018]/95 p-5 shadow-[0_24px_80px_rgba(0,0,0,0.45)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="mono text-white/30" style={{ fontSize: 'var(--f8)' }}>ASSESS RESULT</div>
+                <div className="mt-1 font-bold text-white/90" style={{ fontSize: 'var(--f11)' }}>{assessDialog.title}</div>
+              </div>
+              <span
+                className={`rounded-full border px-2.5 py-1 mono ${
+                  assessDialog.passed
+                    ? 'border-green-500/30 bg-green-500/10 text-green-300'
+                    : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                }`}
+                style={{ fontSize: 'var(--f8)' }}
+              >
+                {assessDialog.passed ? '已掌握' : '需复习'}
+              </span>
+            </div>
+            {typeof assessDialog.mastery === 'number' && (
+              <div className="mb-4">
+                <div className="mb-1 flex items-center justify-between mono text-white/25" style={{ fontSize: 'var(--f8)' }}>
+                  <span>掌握度</span>
+                  <span>{assessDialog.mastery}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-black/40">
+                  <div
+                    className={`h-full rounded-full ${assessDialog.passed ? 'bg-green-400' : 'bg-amber-400'}`}
+                    style={{ width: `${Math.max(0, Math.min(100, assessDialog.mastery))}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            <p className="leading-relaxed text-white/65" style={{ fontSize: 'var(--f10)' }}>
+              {assessDialog.feedback}
+            </p>
+            <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 text-white/35" style={{ fontSize: 'var(--f9)' }}>
+              {assessDialog.passed
+                ? assessDialog.cardUpgraded ? '卡片已升级为 Permanent，并会更新学习路径进度。' : '学习路径进度已更新。'
+                : '系统会保留当前步骤，并继续推送复习资源到学习资源区。'}
+            </div>
+            <button
+              className="mt-4 w-full rounded-lg border border-purple-500/30 bg-purple-500/15 py-2 mono text-purple-200 transition-colors hover:bg-purple-500/25"
+              style={{ fontSize: 'var(--f9)' }}
+              onClick={() => setAssessDialog(null)}
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
       <div
         className="glass-panel rounded-2xl flex flex-col overflow-hidden border-purple-500/20 shadow-[0_0_40px_rgba(168,85,247,0.1)]"
         style={{ height: '100%' }}

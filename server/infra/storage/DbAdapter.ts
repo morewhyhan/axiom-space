@@ -106,8 +106,8 @@ export class DbAdapter implements IFileStorage {
       if (!card) return { success: false, error: `File not found: ${filePath}` }
 
       return { success: true, content: card.content }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 
@@ -156,8 +156,8 @@ export class DbAdapter implements IFileStorage {
       })
 
       return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 
@@ -180,8 +180,8 @@ export class DbAdapter implements IFileStorage {
         ])
       }
       return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 
@@ -232,8 +232,8 @@ export class DbAdapter implements IFileStorage {
       }
 
       return { success: true, entries }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 
@@ -259,8 +259,8 @@ export class DbAdapter implements IFileStorage {
         data: { path: newPath, title: newPath.replace(/\.md$/, '').split('/').pop() },
       })
       return { success: true }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 
@@ -292,8 +292,8 @@ export class DbAdapter implements IFileStorage {
       }))
 
       return { success: true, results }
-    } catch (err: any) {
-      return { success: false, error: err.message }
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) }
     }
   }
 }

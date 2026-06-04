@@ -39,7 +39,7 @@ export type ToolResultMessage = PiToolResultMessage;
 
 export type AgentMessage = Message | {
   role: 'custom' | 'notification' | string;
-  content: any;
+  content: unknown;
   timestamp?: number;
 };
 
@@ -135,8 +135,8 @@ export interface StreamCallbacks {
   onStart?: () => void;
   onTextDelta?: (text: string) => void;
   onThinkingDelta?: (text: string) => void;
-  onToolStart?: (toolName: string, args: any) => void;
-  onToolEnd?: (toolName: string, result: any) => void;
+  onToolStart?: (toolName: string, args: unknown) => void;
+  onToolEnd?: (toolName: string, result: unknown) => void;
   onModelSwitch?: (oldModel: string, newModel: string) => void;
   onSessionSave?: (sessionId: string) => void;
   onEnd?: (result: AgentRunResult) => void;
@@ -147,11 +147,11 @@ export interface ToolDefinition {
   name: string;
   label: string;
   description: string;
-  parameters: any;
+  parameters: unknown;
   execute: (
     toolCallId: string,
-    params: any,
+    params: unknown,
     signal?: AbortSignal,
-    onUpdate?: (partial: any) => void
-  ) => Promise<any>;
+    onUpdate?: (partial: unknown) => void
+  ) => Promise<unknown>;
 }

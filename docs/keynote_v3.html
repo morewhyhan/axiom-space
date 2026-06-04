@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AXIOM · The Future of Learning</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300;400;600;800&family=Noto+Serif+SC:wght@200;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --apple-bg: #000000;
+            --accent-purple: #a855f7;
+            --accent-cyan: #22d3ee;
+            --text-main: #f5f5f7;
+            --text-dim: #86868b;
+        }
+
+        body {
+            background-color: var(--apple-bg);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, sans-serif;
+            margin: 0;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Typography */
+        .hero-text {
+            font-size: clamp(4rem, 15vw, 12rem);
+            font-weight: 800;
+            letter-spacing: -0.05em;
+            line-height: 0.9;
+        }
+
+        .serif-quote {
+            font-family: 'Noto Serif SC', serif;
+            font-weight: 200;
+            line-height: 1.6;
+        }
+
+        /* Layout */
+        .viewport-section {
+            height: 100vh;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+
+        .sticky-wrapper {
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        /* Cinema Video System */
+        .video-canvas-container {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80vw;
+            height: 45vw; /* 16:9 */
+            max-width: 1200px;
+            max-height: 675px;
+            z-index: 20;
+            border-radius: 2rem;
+            overflow: hidden;
+            background: #111;
+            box-shadow: 0 50px 100px -20px rgba(0,0,0,0.5);
+            transition: border-radius 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .video-canvas-container.fullscreen {
+            width: 100vw;
+            height: 100vh;
+            max-width: none;
+            max-height: none;
+            border-radius: 0;
+        }
+
+        .video-overlay {
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.4), transparent 30%);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .video-placeholder {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0.6;
+            filter: grayscale(0.2);
+        }
+
+        /* Scrubber / Progress */
+        .video-scrubber {
+            position: absolute;
+            bottom: 4rem;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 2px;
+            background: rgba(255,255,255,0.1);
+            z-index: 30;
+            overflow: hidden;
+        }
+
+        .scrubber-fill {
+            height: 100%;
+            background: #fff;
+            width: 0%;
+        }
+
+        /* Floating Text Labels */
+        .float-label {
+            position: absolute;
+            z-index: 40;
+            pointer-events: none;
+            opacity: 0;
+        }
+
+        /* Mask for smooth transitions */
+        .mask-overlay {
+            position: fixed;
+            inset: 0;
+            background: #000;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        /* Subtle noise for texture */
+        .noise {
+            position: fixed;
+            inset: 0;
+            z-index: 999;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3 Blackboard %3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+            opacity: 0.03;
+            pointer-events: none;
+        }
+
+        .gradient-blur {
+            position: absolute;
+            width: 60vw;
+            height: 60vw;
+            background: radial-gradient(circle, rgba(168,85,247,0.08) 0%, transparent 70%);
+            filter: blur(80px);
+            z-index: 1;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="noise"></div>
+    <div class="mask-overlay"></div>
+
+    <!-- Act 1: The Number -->
+    <div class="sticky-wrapper" id="act1-container">
+        <div class="viewport-section">
+            <div class="gradient-blur" style="top: -10%; right: -10%;"></div>
+            <h1 class="hero-text opacity-0" id="num98">98%</h1>
+            <p class="text-gray-500 mt-12 text-xl font-light tracking-widest opacity-0" id="num-desc">THE BLOOM EFFECT</p>
+        </div>
+    </div>
+
+    <!-- Act 2: The Question -->
+    <div class="viewport-section" style="height: 200vh;" id="act2-scroll">
+        <div class="sticky-wrapper">
+            <div class="flex flex-col items-center justify-center h-full text-center px-4">
+                <h2 class="text-5xl md:text-7xl font-light tracking-tight opacity-0" id="question-1">这个数字，来自 1984 年。</h2>
+                <h2 class="text-5xl md:text-7xl font-light tracking-tight text-gray-600 mt-8 opacity-0" id="question-2">四十年了。我们还在等。</h2>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cinema Section 1: Hermes -->
+    <div class="video-scroll-container" style="height: 400vh;" id="cinema-hermes">
+        <div class="sticky-wrapper">
+            <!-- Labels that appear during scroll -->
+            <div class="float-label top-20 left-20" id="hermes-label-1">
+                <span class="text-sm mono text-purple-400 tracking-widest block mb-2">INTERNAL_ARCHITECTURE</span>
+                <h3 class="text-4xl font-bold">Hermes Engine</h3>
+            </div>
+
+            <div class="float-label bottom-20 right-20 text-right" id="hermes-label-2">
+                <p class="text-gray-400 text-lg serif-quote">不基于任何开源框架。<br>为思考而生的操作系统。</p>
+            </div>
+
+            <div class="video-canvas-container" id="hermes-video-box">
+                <div class="video-overlay"></div>
+                <!-- DIY: REPLACE SRC WITH YOUR VIDEO -->
+                <div class="video-placeholder flex flex-col items-center justify-center text-white/20 uppercase tracking-[0.5em] font-bold">
+                    <span>Hermes Architecture Animation</span>
+                    <span class="text-[10px] mt-4 opacity-50">16:9 / 4K / CINEMATIC</span>
+                </div>
+                <!-- <video class="w-full h-full object-cover" loop muted playsinline src="your-video.mp4"></video> -->
+
+                <div class="video-scrubber">
+                    <div class="scrubber-fill" id="hermes-scrubber"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Act 3: Beliefs -->
+    <div class="viewport-section" id="beliefs">
+        <div class="max-w-4xl px-8 text-center">
+            <div class="w-24 h-[1px] bg-white/20 mb-16 mx-auto"></div>
+            <h2 class="text-4xl md:text-6xl font-light leading-tight">
+                AI 应当主动向你提问。<br>
+                学习必须由你自己输出。
+            </h2>
+        </div>
+    </div>
+
+    <!-- Cinema Section 2: Demo 1 & 2 -->
+    <div class="video-scroll-container" style="height: 500vh;" id="cinema-demo">
+        <div class="sticky-wrapper">
+            <div class="float-label top-20 right-20 text-right" id="demo-label-1">
+                <h3 class="text-4xl font-bold">Agent A & B</h3>
+                <p class="text-gray-400 mt-2">它教你。它听你。</p>
+            </div>
+
+            <div class="video-canvas-container" id="demo-video-box">
+                <div class="video-overlay"></div>
+                <!-- DIY: REPLACE SRC WITH YOUR VIDEO -->
+                <div class="video-placeholder flex flex-col items-center justify-center text-white/20 uppercase tracking-[0.5em] font-bold">
+                    <span>Multi-Agent Interaction Demo</span>
+                    <span class="text-[10px] mt-4 opacity-50">16:9 / REAL_TIME_RECORDING</span>
+                </div>
+
+                <div class="video-scrubber">
+                    <div class="scrubber-fill" id="demo-scrubber"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Act 4: Philosophy -->
+    <div class="viewport-section bg-white text-black" id="philosophy">
+        <div class="text-center px-8">
+            <h2 class="hero-text tracking-tighter" style="font-size: clamp(3rem, 10vw, 8rem);">It's yours.</h2>
+            <p class="mt-8 text-2xl serif-quote">资料，不是你的知识。<br>知识，必须由你自己产出。</p>
+        </div>
+    </div>
+
+    <!-- Cinema Section 3: Forge -->
+    <div class="video-scroll-container" style="height: 400vh;" id="cinema-forge">
+        <div class="sticky-wrapper">
+            <div class="video-canvas-container" id="forge-video-box">
+                <div class="video-overlay"></div>
+                <!-- DIY: REPLACE SRC WITH YOUR VIDEO -->
+                <div class="video-placeholder flex flex-col items-center justify-center text-white/20 uppercase tracking-[0.5em] font-bold">
+                    <span>Forge Editor & Card Upgrade</span>
+                    <span class="text-[10px] mt-4 opacity-50">16:9 / CINEMATIC_FINISH</span>
+                </div>
+
+                <div class="video-scrubber">
+                    <div class="scrubber-fill" id="forge-scrubber"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Finale -->
+    <div class="viewport-section" id="finale">
+        <div class="text-center space-y-12">
+            <div class="overflow-hidden">
+                <p class="text-gray-500 tracking-[0.3em] uppercase text-xs opacity-0" id="final-tag">A COGNITIVE OPERATING SYSTEM</p>
+            </div>
+            <h1 class="hero-text opacity-0" id="final-logo">AXIOM</h1>
+            <div class="pt-20">
+                <p class="text-gray-600 mono text-[10px] tracking-widest opacity-0" id="final-meta">
+                    让一对一导师，不再是少数人的特权。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        gsap.registerPlugin(ScrollTrigger);
+
+        // --- Entry Animation ---
+        window.addEventListener('load', () => {
+            gsap.to('.mask-overlay', { opacity: 0, duration: 1.5, ease: "power2.inOut" });
+
+            // Act 1 Initial
+            const act1Tl = gsap.timeline();
+            act1Tl.to('#num98', { opacity: 1, duration: 2, ease: "power3.out" })
+                  .to('#num-desc', { opacity: 1, y: -20, duration: 1 }, "-=1");
+        });
+
+        // --- Act 2 Sequence ---
+        const act2Tl = gsap.timeline({
+            scrollTrigger: {
+                trigger: "#act2-scroll",
+                start: "top top",
+                end: "bottom bottom",
+                scrub: 1
+            }
+        });
+        act2Tl.to('#question-1', { opacity: 1, y: -20, duration: 1 })
+              .to('#question-1', { opacity: 0.2, duration: 1 })
+              .to('#question-2', { opacity: 1, y: -20, duration: 1 }, "-=0.5");
+
+        // --- CINEMA ENGINE ---
+        function setupCinemaSection(id, videoBoxId, scrubberId, labels = []) {
+            const container = document.getElementById(id);
+            const box = document.getElementById(videoBoxId);
+            const scrubber = document.getElementById(scrubberId);
+
+            const tl = gsap.timeline({
+                scrollTrigger: {
+                    trigger: container,
+                    start: "top top",
+                    end: "bottom bottom",
+                    scrub: true,
+                    pin: false
+                }
+            });
+
+            // 1. Initial State -> Centered Small Box (Scale up slightly)
+            tl.fromTo(box,
+                { scale: 0.8, borderRadius: "2rem" },
+                { scale: 1, borderRadius: "2rem", duration: 0.5 }
+            );
+
+            // 2. Expansion -> Fullscreen
+            tl.to(box, {
+                width: "100vw",
+                height: "100vh",
+                borderRadius: "0rem",
+                duration: 1,
+                ease: "power2.inOut"
+            });
+
+            // 3. Playback simulation (Scrubber)
+            tl.to(scrubber, {
+                width: "100%",
+                duration: 2, // The "viewing" time
+                ease: "none"
+            });
+
+            // 4. Shrink back
+            tl.to(box, {
+                width: "80vw",
+                height: "45vw",
+                borderRadius: "2rem",
+                duration: 1,
+                ease: "power2.inOut"
+            });
+
+            // Fade in labels
+            labels.forEach(labelId => {
+                tl.to(`#${labelId}`, { opacity: 1, y: -20, duration: 0.5 }, "-=3.5");
+                tl.to(`#${labelId}`, { opacity: 0, y: -40, duration: 0.5 }, "-=1");
+            });
+
+            return tl;
+        }
+
+        // Setup the three cinema sections
+        setupCinemaSection('cinema-hermes', 'hermes-video-box', 'hermes-scrubber', ['hermes-label-1', 'hermes-label-2']);
+        setupCinemaSection('cinema-demo', 'demo-video-box', 'demo-scrubber', ['demo-label-1']);
+        setupCinemaSection('cinema-forge', 'forge-video-box', 'forge-scrubber');
+
+        // --- Beliefs Fade ---
+        gsap.from("#beliefs h2", {
+            opacity: 0,
+            y: 50,
+            scrollTrigger: {
+                trigger: "#beliefs",
+                start: "top 70%",
+                toggleActions: "play none none reverse"
+            }
+        });
+
+        // --- Finale ---
+        const finalTl = gsap.timeline({
+            scrollTrigger: {
+                trigger: "#finale",
+                start: "top 60%"
+            }
+        });
+        finalTl.to('#final-tag', { opacity: 0.4, y: -10, duration: 1 })
+               .to('#final-logo', { opacity: 1, scale: 1.05, duration: 2, ease: "power4.out" }, "-=0.5")
+               .to('#final-meta', { opacity: 0.3, duration: 1.5 }, "-=1");
+
+    </script>
+</body>
+</html>

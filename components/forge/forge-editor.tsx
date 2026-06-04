@@ -3,15 +3,42 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/mode-store'
+import { useAgentStore } from '@/stores/agent-store'
 import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
-import { VideoCard } from '@/components/resources/resource-cards'
+import { LearningResourcePanel, VideoCard, type GeneratedResourceItem } from '@/components/resources/resource-cards'
 
 interface WikiSuggestion {
   id: string
   title: string
   type: string
+}
+
+type ResourceManifestItem = {
+  type: string
+  title: string
+  path: string
+  mp4Path?: string
+  fileName: string
+}
+
+const CARD_TYPE_LABELS: Record<string, string> = {
+  fleeting: '◇ 灵感',
+  literature: '○ 文献',
+  permanent: '◆ 永久',
+}
+
+function cardTypeLabel(type: string | undefined) {
+  if (!type) return '◇ 灵感'
+  return CARD_TYPE_LABELS[type] ?? type
+}
+
+function cardTypeTone(type: string | undefined) {
+  if (type === 'permanent') return 'text-purple-400/70'
+  if (type === 'literature') return 'text-pink-400/70'
+  if (type === 'fleeting') return 'text-cyan-400/70'
+  return 'text-emerald-300/70'
 }
 
 export default function ForgeEditor() {
@@ -25,8 +52,11 @@ export default function ForgeEditor() {
 
   // Video detection: if card content has axiom-video marker, fetch and render video HTML
   const [videoHtml, setVideoHtml] = useState<string | null>(null)
+  const [videoUrl, setVideoUrl] = useState<string | null>(null)
   const [videoLoading, setVideoLoading] = useState(false)
   const [videoTopic, setVideoTopic] = useState<string>('')
+  const [resourceItems, setResourceItems] = useState<GeneratedResourceItem[]>([])
+  const [resourceLoading, setResourceLoading] = useState(false)
 
   // Undo stack: snapshots of content before each change
   const [undoStack, setUndoStack] = useState<string[]>([])
@@ -48,40 +78,129 @@ export default function ForgeEditor() {
   const queryClient = useQueryClient()
   const readContainerRef = useRef<HTMLDivElement>(null)
 
+  const parseResourceManifest = useCallback((content: string): ResourceManifestItem[] => {
+    const match = content.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
+    if (!match?.[1]) return []
+    try {
+      const parsed = JSON.parse(match[1]) as ResourceManifestItem[]
+      return Array.isArray(parsed)
+        ? parsed.filter((item) => item?.type && item?.path && item?.fileName)
+        : []
+    } catch (err) {
+      console.warn('[ForgeEditor] failed to parse resource manifest:', err)
+      return []
+    }
+  }, [])
+
   // Detect axiom-video marker in card content and fetch video HTML
   useEffect(() => {
     setVideoHtml(null)
+    setVideoUrl(null)
     setVideoTopic('')
 
-    if (!cardContent || editorMode !== 'read') return
+    if (!cardContent) return
 
-    const markerMatch = cardContent.match(/<!-- axiom-video:(.+?) -->/)
-    if (!markerMatch) return
+    const htmlMarker = cardContent.match(/<!--\s*axiom-video-html:(.+?)\s*-->/)
+    const mp4Marker = cardContent.match(/<!--\s*axiom-video-mp4:(.+?)\s*-->/)
+    const legacyMarker = cardContent.match(/<!--\s*axiom-video:(.+?)\s*-->/)
+    const htmlPath = (htmlMarker?.[1] || legacyMarker?.[1])?.trim()
+    const mp4Path = mp4Marker?.[1]?.trim()
+    if (!htmlPath && !mp4Path) return
 
-    const videoPath = markerMatch[1].trim()
     setVideoLoading(true)
 
     let cancelled = false
     ;(async () => {
       try {
-        const res = await (client as any).api.vault.read.$get({
-          query: { path: videoPath, vid: currentVaultId || undefined },
-        })
-        const data: { success: boolean; content?: string; error?: string } = await res.json()
-        if (cancelled) return
-        if (data.success && data.content) {
-          setVideoHtml(data.content)
-          setVideoTopic(cardTitle || '')
+        if (mp4Path) {
+          const res = await client.api.vault.read.$get({
+            query: { path: mp4Path, vid: currentVaultId || undefined },
+          })
+          const data: { success: boolean; content?: string; error?: string } = await res.json()
+          if (!cancelled && data.success && data.content?.startsWith('data:video/')) {
+            setVideoUrl(data.content)
+          }
         }
+        if (htmlPath) {
+          const res = await client.api.vault.read.$get({
+            query: { path: htmlPath, vid: currentVaultId || undefined },
+          })
+          const data: { success: boolean; content?: string; error?: string } = await res.json()
+          if (!cancelled && data.success && data.content) {
+            setVideoHtml(data.content)
+          }
+        }
+        if (cancelled) return
+        setVideoTopic(cardTitle || '')
       } catch (err) {
-        if (!cancelled) console.warn('[ForgeEditor] failed to fetch video HTML:', err)
+        if (!cancelled) console.warn('[ForgeEditor] failed to fetch video resource:', err)
       } finally {
         if (!cancelled) setVideoLoading(false)
       }
     })()
 
     return () => { cancelled = true }
-  }, [cardContent, editorMode, currentVaultId, cardTitle])
+  }, [cardContent, currentVaultId, cardTitle])
+
+  useEffect(() => {
+    setResourceItems([])
+    setResourceLoading(false)
+
+    if (!cardContent) return
+    const manifest = parseResourceManifest(cardContent)
+    if (manifest.length === 0) return
+
+    setResourceLoading(true)
+    let cancelled = false
+    ;(async () => {
+      try {
+        const loaded = await Promise.all(manifest.map(async (item) => {
+          const res = await client.api.vault.read.$get({
+            query: { path: item.path, vid: currentVaultId || undefined },
+          })
+          const data: { success: boolean; content?: string; error?: string } = await res.json()
+          let videoUrl: string | undefined
+          if (item.type === 'video' && item.mp4Path) {
+            const mp4Res = await client.api.vault.read.$get({
+              query: { path: item.mp4Path, vid: currentVaultId || undefined },
+            }).catch(() => null)
+            const mp4Data: { success: boolean; content?: string; error?: string } | null = mp4Res
+              ? await mp4Res.json().catch(() => null)
+              : null
+            if (mp4Data?.success && mp4Data.content?.startsWith('data:video/')) {
+              videoUrl = mp4Data.content
+            }
+          }
+          return {
+            type: item.type,
+            title: item.title,
+            path: item.path,
+            mp4Path: item.mp4Path,
+            fileName: item.fileName,
+            content: data.success ? data.content : undefined,
+            videoUrl,
+          } satisfies GeneratedResourceItem
+        }))
+        if (!cancelled) setResourceItems(loaded)
+      } catch (err) {
+        if (!cancelled) console.warn('[ForgeEditor] failed to fetch generated resources:', err)
+      } finally {
+        if (!cancelled) setResourceLoading(false)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [cardContent, currentVaultId, parseResourceManifest])
+
+  useEffect(() => {
+    if (
+      selectedNode?.type === 'literature' &&
+      /<!--\s*axiom-video(?:-html|-mp4)?:(.+?)\s*-->/.test(cardContent) &&
+      !dirty
+    ) {
+      setEditorMode('read')
+    }
+  }, [selectedNode?.type, cardContent, dirty])
 
   // Fetch card content when selected node changes
   useEffect(() => {
@@ -112,15 +231,14 @@ export default function ForgeEditor() {
 
     ;(async () => {
       try {
-        const res = await (client as any).api.vault['card'][':id'].$get({
+        const res = await client.api.vault.card[':id'].$get({
           param: { id: selectedNode.id },
-          query: currentVaultId ? { vid: currentVaultId } : undefined,
         })
-        const data: { success: boolean; card: { content: string; title: string }; error?: string } = await res.json()
+        const data = await res.json() as { success: boolean; card?: { content: string; title: string }; error?: string }
         if (cancelled) return
         if (data.success) {
-          setCardContent(data.card.content || '')
-          setCardTitle(data.card.title || selectedNode.title)
+          setCardContent((data.card?.content || ''))
+          setCardTitle((data.card?.title || selectedNode.title))
           setDirty(false)
         }
       } catch (err) {
@@ -163,9 +281,9 @@ export default function ForgeEditor() {
             const params: Record<string, string> = { q }
             if (currentVaultId) params.vid = currentVaultId
             const res = await client.api.vault['search-titles'].$get({ query: params })
-            const data = await res.json() as any
+            const data = await res.json() as { success: boolean; results: Array<{ id: string; title: string | null; type: string }> }
             setWikiSuggestions(
-              (data?.results ?? []).slice(0, 8).map((r: any) => ({
+              (data?.results ?? []).slice(0, 8).map((r) => ({
                 id: r.id || '',
                 title: r.title || '',
                 type: r.type || 'fleeting',
@@ -223,7 +341,9 @@ export default function ForgeEditor() {
     if (!selectedNode || !dirty) return
     setSaving(true)
     try {
-      const res = await (client as any).api.vault['card'][':id'].$put({
+      const res = await (client.api.vault['card'][':id'].$put as (args: {
+        param: { id: string }; json: { content: string; title?: string; type?: string }; query?: Record<string, string | undefined>
+      }) => Promise<Response>)({
         param: { id: selectedNode.id },
         json: { content: cardContent, title: cardTitle || undefined },
         query: currentVaultId ? { vid: currentVaultId } : undefined,
@@ -270,7 +390,9 @@ export default function ForgeEditor() {
     setSaving(true)
     try {
       // Upgrade fleeting card → permanent (PUT route handles type field directly)
-      const res = await (client as any).api.vault['card'][':id'].$put({
+      const res = await (client.api.vault['card'][':id'].$put as (args: {
+        param: { id: string }; json: { content: string; title?: string; type?: string }; query?: Record<string, string | undefined>
+      }) => Promise<Response>)({
         param: { id: selectedNode.id },
         json: { content: cardContent, title: cardTitle || undefined, type: 'permanent' },
         query: currentVaultId ? { vid: currentVaultId } : undefined,
@@ -286,6 +408,7 @@ export default function ForgeEditor() {
           ...selectedNode,
           type: 'permanent',
         })
+        useAgentStore.getState().loadSessions()
       }
     } catch (err) {
       toast.error(`升级失败: ${(err as Error)?.message || '网络异常'}`)
@@ -447,7 +570,7 @@ export default function ForgeEditor() {
                 onClick={async () => {
                   if (!selectedNode || !window.confirm('确定删除这张卡片？此操作不可撤销。')) return
                   try {
-                    const res = await (client as any).api.vault['card'][':id'].$delete({
+                    const res = await client.api.vault['card'][':id'].$delete({
                       param: { id: selectedNode.id },
                     })
                     const data: { success: boolean; error?: string } = await res.json()
@@ -525,8 +648,8 @@ export default function ForgeEditor() {
                 <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>
                   Type
                 </span>
-                <span className={`mono ${selectedNode?.type === 'permanent' ? 'text-purple-400' : selectedNode?.type === 'literature' ? 'text-pink-400' : 'text-cyan-400'}/70`} style={{ fontSize: 'var(--f8)' }}>
-                  {selectedNode?.type === 'permanent' ? '◆ 永久' : selectedNode?.type === 'literature' ? '○ 文献' : '◇ 灵感'}
+                <span className={`mono ${cardTypeTone(selectedNode?.type)}`} style={{ fontSize: 'var(--f8)' }}>
+                  {cardTypeLabel(selectedNode?.type)}
                 </span>
                 {/* Upgrade button: fleeting → permanent */}
                 {selectedNode?.type === 'fleeting' && (
@@ -605,7 +728,7 @@ export default function ForgeEditor() {
                         <span
                           className="w-2 h-2 rounded-full shrink-0"
                           style={{
-                            backgroundColor: s.type === 'permanent' ? '#a855f7' : s.type === 'literature' ? '#f472b6' : '#22d3ee',
+                            backgroundColor: s.type === 'permanent' ? '#a855f7' : s.type === 'literature' ? '#f472b6' : s.type === 'fleeting' ? '#22d3ee' : '#34d399',
                           }}
                         />
                         <span className="truncate">{s.title}</span>
@@ -642,16 +765,22 @@ export default function ForgeEditor() {
                       <div className="animate-pulse text-gray-400">加载教学视频...</div>
                     </div>
                   )}
-                  {videoHtml && !videoLoading && (
+                  {(videoHtml || videoUrl) && !videoLoading && (
                     <div className="mt-6">
                       <VideoCard
                         title={`${videoTopic || '教学视频'}`}
-                        htmlContent={videoHtml}
+                        videoUrl={videoUrl || undefined}
+                        htmlContent={videoHtml || undefined}
                         duration={90}
                         topic={videoTopic || ''}
                       />
                     </div>
                   )}
+
+                  <LearningResourcePanel
+                    resources={resourceItems}
+                    loading={resourceLoading}
+                  />
                 </div>
               </div>
             )}

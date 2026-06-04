@@ -1,13 +1,18 @@
-export type ResourceType = 'document' | 'mindmap' | 'quiz' | 'video';
+export type ResourceType = 'document' | 'mindmap' | 'quiz' | 'video' | 'svg' | 'diagram' | 'docx' | 'pdf' | 'ppt';
 export type GenerationStatus = 'idle' | 'generating' | 'completed' | 'failed';
 
-export const RESOURCE_TYPES: ResourceType[] = ['document', 'mindmap', 'quiz', 'video'];
+export const RESOURCE_TYPES: ResourceType[] = ['document', 'mindmap', 'quiz', 'video', 'svg', 'diagram', 'docx', 'pdf', 'ppt'];
 
 export const RESOURCE_FILE_MAP: Record<ResourceType, string> = {
   document: 'document.md',
   mindmap: 'mindmap.md',
   quiz: 'quiz.md',
   video: 'video.html',
+  svg: 'diagram.svg',
+  diagram: 'diagram.mmd',
+  docx: 'document.docx',
+  pdf: 'document.pdf',
+  ppt: 'presentation.pptx',
 };
 
 export interface ResourceGenerationEntry {

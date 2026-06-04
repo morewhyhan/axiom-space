@@ -1,16 +1,16 @@
-import 'dotenv/config'
+﻿import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
 import { hashPassword } from 'better-auth/crypto'
 import { syncEdgesFromContent } from '../lib/wiki-links'
 
 const prisma = new PrismaClient()
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 function randomPastDate(daysBack: number): Date { const d = new Date(); d.setDate(d.getDate() - Math.floor(Math.random() * daysBack)); d.setHours(Math.floor(Math.random() * 24), 0, 0, 0); return d; }
 
 function slugify(text: string): string {
-  return text.replace(/[《》()（）,，：、\s]+/g, '').trim()
+  return text.replace(/[銆娿€?)锛堬級,锛岋細銆乗s]+/g, '').trim()
 }
 
 function makePath(clusterName: string, cardTitle: string): string {
@@ -26,7 +26,7 @@ function getTags(subject: string, cardType: string, extra?: string[]): string[] 
   return base
 }
 
-// ─── Card & Subject Type Definitions ──────────────────────────────────────────
+// 鈹€鈹€鈹€ Card & Subject Type Definitions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 interface CardDef {
   title: string
@@ -49,528 +49,528 @@ interface EdgeDef {
   type: 'related' | 'prerequisite' | 'derived' | 'counter'
 }
 
-// ─── 数据结构 (Data Structures) ───────────────────────────────────────────────
+// 鈹€鈹€鈹€ 鏁版嵁缁撴瀯 (Data Structures) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const subjectDS: SubjectDef = {
-  name: '数据结构',
+  name: '鏁版嵁缁撴瀯',
   color: '#a855f7',
   permanent: [
-    { title: '线性表', tags: ['linear-list'] },
-    { title: '栈', tags: ['stack'] },
-    { title: '队列', tags: ['queue'] },
-    { title: '树', tags: ['tree'] },
-    { title: '二叉树', tags: ['binary-tree'] },
-    { title: '图', tags: ['graph'] },
-    { title: '排序算法', tags: ['sorting'] },
-    { title: '查找算法', tags: ['searching'] },
-    { title: '哈希表', tags: ['hash-table'] },
-    { title: '堆', tags: ['heap'] },
-    { title: '并查集', tags: ['union-find'] },
-    { title: '平衡二叉树', tags: ['balanced-tree', 'avl'] },
-    { title: 'B树', tags: ['b-tree'] },
-    { title: '关键路径', tags: ['critical-path'] },
-    { title: '最短路径', tags: ['shortest-path'] },
+    { title: '绾挎€ц〃', tags: ['linear-list'] },
+    { title: '鏍?, tags: ['stack'] },
+    { title: '闃熷垪', tags: ['queue'] },
+    { title: '鏍?, tags: ['tree'] },
+    { title: '浜屽弶鏍?, tags: ['binary-tree'] },
+    { title: '鍥?, tags: ['graph'] },
+    { title: '鎺掑簭绠楁硶', tags: ['sorting'] },
+    { title: '鏌ユ壘绠楁硶', tags: ['searching'] },
+    { title: '鍝堝笇琛?, tags: ['hash-table'] },
+    { title: '鍫?, tags: ['heap'] },
+    { title: '骞舵煡闆?, tags: ['union-find'] },
+    { title: '骞宠　浜屽弶鏍?, tags: ['balanced-tree', 'avl'] },
+    { title: 'B鏍?, tags: ['b-tree'] },
+    { title: '鍏抽敭璺緞', tags: ['critical-path'] },
+    { title: '鏈€鐭矾寰?, tags: ['shortest-path'] },
   ],
   fleeting: [
-    { title: '栈与递归的关系' },
-    { title: '循环队列实现' },
-    { title: '二叉树的遍历顺序' },
-    { title: '图的邻接矩阵vs邻接表' },
-    { title: '快速排序最坏情况' },
-    { title: '哈希冲突解决' },
-    { title: 'B树与B+树区别' },
-    { title: 'KMP算法思想' },
-    { title: 'Prim算法与Kruskal算法对比' },
-    { title: '动态规划vs贪心算法' },
-    { title: '栈的应用场景' },
-    { title: '队列的应用场景' },
-    { title: '链表的插入删除操作' },
-    { title: '双向链表与循环链表' },
-    { title: '稀疏矩阵存储' },
-    { title: '广义表结构' },
-    { title: '二叉树与森林转换' },
-    { title: 'Huffman编码' },
-    { title: 'AVL树旋转操作' },
-    { title: '红黑树性质' },
-    { title: '图的深度优先与广度优先' },
-    { title: '拓扑排序实现' },
-    { title: '最小生成树算法对比' },
-    { title: 'Dijkstra算法原理' },
-    { title: 'Floyd算法原理' },
-    { title: '归并排序过程' },
-    { title: '基数排序思想' },
-    { title: '外部排序与多路归并' },
-    { title: '二分查找决策树' },
-    { title: '散列函数设计' },
-    { title: '字符串匹配算法' },
-    { title: '大数据TopK问题' },
-    { title: '排序算法稳定性对比' },
-    { title: '时间复杂度的渐进分析' },
-    { title: '递归算法的计算模型' },
+    { title: '鏍堜笌閫掑綊鐨勫叧绯? },
+    { title: '寰幆闃熷垪瀹炵幇' },
+    { title: '浜屽弶鏍戠殑閬嶅巻椤哄簭' },
+    { title: '鍥剧殑閭绘帴鐭╅樀vs閭绘帴琛? },
+    { title: '蹇€熸帓搴忔渶鍧忔儏鍐? },
+    { title: '鍝堝笇鍐茬獊瑙ｅ喅' },
+    { title: 'B鏍戜笌B+鏍戝尯鍒? },
+    { title: 'KMP绠楁硶鎬濇兂' },
+    { title: 'Prim绠楁硶涓嶬ruskal绠楁硶瀵规瘮' },
+    { title: '鍔ㄦ€佽鍒抳s璐績绠楁硶' },
+    { title: '鏍堢殑搴旂敤鍦烘櫙' },
+    { title: '闃熷垪鐨勫簲鐢ㄥ満鏅? },
+    { title: '閾捐〃鐨勬彃鍏ュ垹闄ゆ搷浣? },
+    { title: '鍙屽悜閾捐〃涓庡惊鐜摼琛? },
+    { title: '绋€鐤忕煩闃靛瓨鍌? },
+    { title: '骞夸箟琛ㄧ粨鏋? },
+    { title: '浜屽弶鏍戜笌妫灄杞崲' },
+    { title: 'Huffman缂栫爜' },
+    { title: 'AVL鏍戞棆杞搷浣? },
+    { title: '绾㈤粦鏍戞€ц川' },
+    { title: '鍥剧殑娣卞害浼樺厛涓庡箍搴︿紭鍏? },
+    { title: '鎷撴墤鎺掑簭瀹炵幇' },
+    { title: '鏈€灏忕敓鎴愭爲绠楁硶瀵规瘮' },
+    { title: 'Dijkstra绠楁硶鍘熺悊' },
+    { title: 'Floyd绠楁硶鍘熺悊' },
+    { title: '褰掑苟鎺掑簭杩囩▼' },
+    { title: '鍩烘暟鎺掑簭鎬濇兂' },
+    { title: '澶栭儴鎺掑簭涓庡璺綊骞? },
+    { title: '浜屽垎鏌ユ壘鍐崇瓥鏍? },
+    { title: '鏁ｅ垪鍑芥暟璁捐' },
+    { title: '瀛楃涓插尮閰嶇畻娉? },
+    { title: '澶ф暟鎹甌opK闂' },
+    { title: '鎺掑簭绠楁硶绋冲畾鎬у姣? },
+    { title: '鏃堕棿澶嶆潅搴︾殑娓愯繘鍒嗘瀽' },
+    { title: '閫掑綊绠楁硶鐨勮绠楁ā鍨? },
   ],
   literature: [
-    { title: '严蔚敏《数据结构》', tags: ['textbook'] },
-    { title: '邓俊辉《数据结构与算法》', tags: ['textbook'] },
-    { title: '《算法导论》', tags: ['textbook'] },
-    { title: '《大话数据结构》', tags: ['textbook'] },
-    { title: '王道408数据结构篇', tags: ['exam-guide'] },
-    { title: '天勤数据结构高分笔记', tags: ['exam-guide'] },
+    { title: '涓ヨ敋鏁忋€婃暟鎹粨鏋勩€?, tags: ['textbook'] },
+    { title: '閭撲繆杈夈€婃暟鎹粨鏋勪笌绠楁硶銆?, tags: ['textbook'] },
+    { title: '銆婄畻娉曞璁恒€?, tags: ['textbook'] },
+    { title: '銆婂ぇ璇濇暟鎹粨鏋勩€?, tags: ['textbook'] },
+    { title: '鐜嬮亾408鏁版嵁缁撴瀯绡?, tags: ['exam-guide'] },
+    { title: '澶╁嫟鏁版嵁缁撴瀯楂樺垎绗旇', tags: ['exam-guide'] },
     { title: 'LeetCode HOT100', tags: ['practice'] },
-    { title: '《数据结构与算法分析》', tags: ['textbook'] },
+    { title: '銆婃暟鎹粨鏋勪笌绠楁硶鍒嗘瀽銆?, tags: ['textbook'] },
   ],
 }
 
-// ─── 计算机组成原理 (Computer Organization) ────────────────────────────────────
+// 鈹€鈹€鈹€ 璁＄畻鏈虹粍鎴愬師鐞?(Computer Organization) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const subjectCO: SubjectDef = {
-  name: '计算机组成原理',
+  name: '璁＄畻鏈虹粍鎴愬師鐞?,
   color: '#22d3ee',
   permanent: [
-    { title: '冯诺依曼结构', tags: ['von-neumann'] },
-    { title: '数据表示', tags: ['data-representation'] },
-    { title: '运算方法与ALU', tags: ['alu'] },
-    { title: '存储器层次', tags: ['memory-hierarchy'] },
+    { title: '鍐渚濇浖缁撴瀯', tags: ['von-neumann'] },
+    { title: '鏁版嵁琛ㄧず', tags: ['data-representation'] },
+    { title: '杩愮畻鏂规硶涓嶢LU', tags: ['alu'] },
+    { title: '瀛樺偍鍣ㄥ眰娆?, tags: ['memory-hierarchy'] },
     { title: 'Cache', tags: ['cache'] },
-    { title: '指令系统', tags: ['instruction-set'] },
-    { title: 'CPU流水线', tags: ['pipeline'] },
-    { title: '控制单元', tags: ['control-unit'] },
-    { title: '总线系统', tags: ['bus'] },
-    { title: '输入输出系统', tags: ['io-system'] },
-    { title: '中断系统', tags: ['interrupt'] },
+    { title: '鎸囦护绯荤粺', tags: ['instruction-set'] },
+    { title: 'CPU娴佹按绾?, tags: ['pipeline'] },
+    { title: '鎺у埗鍗曞厓', tags: ['control-unit'] },
+    { title: '鎬荤嚎绯荤粺', tags: ['bus'] },
+    { title: '杈撳叆杈撳嚭绯荤粺', tags: ['io-system'] },
+    { title: '涓柇绯荤粺', tags: ['interrupt'] },
     { title: 'DMA', tags: ['dma'] },
-    { title: '虚拟存储器', tags: ['virtual-memory'] },
-    { title: '浮点运算', tags: ['floating-point'] },
-    { title: '指令流水线冒险', tags: ['pipeline-hazard'] },
+    { title: '铏氭嫙瀛樺偍鍣?, tags: ['virtual-memory'] },
+    { title: '娴偣杩愮畻', tags: ['floating-point'] },
+    { title: '鎸囦护娴佹按绾垮啋闄?, tags: ['pipeline-hazard'] },
   ],
   fleeting: [
-    { title: '原码反码补码转换' },
-    { title: 'IEEE754浮点标准' },
-    { title: 'Cache映射方式' },
-    { title: '流水线冲突类型' },
-    { title: '中断处理流程' },
-    { title: 'DMA与程序中断对比' },
-    { title: '总线仲裁方式' },
-    { title: 'RAID等级区别' },
-    { title: '汉明码检错' },
-    { title: '页式虚拟存储器地址转换' },
-    { title: '微程序控制与硬布线控制' },
-    { title: '指令周期与机器周期' },
-    { title: '数据寻址方式' },
-    { title: 'CISC与RISC对比' },
-    { title: 'MIPS指令格式' },
-    { title: '乘法运算的硬件实现' },
-    { title: 'Booth算法' },
-    { title: '浮点加减运算步骤' },
-    { title: '存储器的扩展技术' },
-    { title: 'Cache写策略' },
-    { title: '多体交叉存储器' },
-    { title: '流水线性能指标' },
-    { title: '数据冒险与转发技术' },
-    { title: '控制冒险与分支预测' },
-    { title: '异常与中断的区别' },
-    { title: '中断优先级与屏蔽' },
-    { title: '通道控制方式' },
-    { title: 'IO接口的功能与结构' },
-    { title: '总线标准与接口' },
-    { title: 'USB协议概述' },
-    { title: 'PCIe总线' },
-    { title: '磁盘存储器结构' },
-    { title: '固态硬盘SSD技术' },
-    { title: '计算机性能评价指标' },
-    { title: 'Amdahl定律' },
+    { title: '鍘熺爜鍙嶇爜琛ョ爜杞崲' },
+    { title: 'IEEE754娴偣鏍囧噯' },
+    { title: 'Cache鏄犲皠鏂瑰紡' },
+    { title: '娴佹按绾垮啿绐佺被鍨? },
+    { title: '涓柇澶勭悊娴佺▼' },
+    { title: 'DMA涓庣▼搴忎腑鏂姣? },
+    { title: '鎬荤嚎浠茶鏂瑰紡' },
+    { title: 'RAID绛夌骇鍖哄埆' },
+    { title: '姹夋槑鐮佹閿? },
+    { title: '椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲' },
+    { title: '寰▼搴忔帶鍒朵笌纭竷绾挎帶鍒? },
+    { title: '鎸囦护鍛ㄦ湡涓庢満鍣ㄥ懆鏈? },
+    { title: '鏁版嵁瀵诲潃鏂瑰紡' },
+    { title: 'CISC涓嶳ISC瀵规瘮' },
+    { title: 'MIPS鎸囦护鏍煎紡' },
+    { title: '涔樻硶杩愮畻鐨勭‖浠跺疄鐜? },
+    { title: 'Booth绠楁硶' },
+    { title: '娴偣鍔犲噺杩愮畻姝ラ' },
+    { title: '瀛樺偍鍣ㄧ殑鎵╁睍鎶€鏈? },
+    { title: 'Cache鍐欑瓥鐣? },
+    { title: '澶氫綋浜ゅ弶瀛樺偍鍣? },
+    { title: '娴佹按绾挎€ц兘鎸囨爣' },
+    { title: '鏁版嵁鍐掗櫓涓庤浆鍙戞妧鏈? },
+    { title: '鎺у埗鍐掗櫓涓庡垎鏀娴? },
+    { title: '寮傚父涓庝腑鏂殑鍖哄埆' },
+    { title: '涓柇浼樺厛绾т笌灞忚斀' },
+    { title: '閫氶亾鎺у埗鏂瑰紡' },
+    { title: 'IO鎺ュ彛鐨勫姛鑳戒笌缁撴瀯' },
+    { title: '鎬荤嚎鏍囧噯涓庢帴鍙? },
+    { title: 'USB鍗忚姒傝堪' },
+    { title: 'PCIe鎬荤嚎' },
+    { title: '纾佺洏瀛樺偍鍣ㄧ粨鏋? },
+    { title: '鍥烘€佺‖鐩楽SD鎶€鏈? },
+    { title: '璁＄畻鏈烘€ц兘璇勪环鎸囨爣' },
+    { title: 'Amdahl瀹氬緥' },
   ],
   literature: [
-    { title: '唐朔飞《计算机组成原理》', tags: ['textbook'] },
-    { title: '袁春风《计算机组成与设计》', tags: ['textbook'] },
-    { title: 'Patterson《计算机组成与设计》', tags: ['textbook'] },
-    { title: '王道408计组篇', tags: ['exam-guide'] },
-    { title: '天勤计组高分笔记', tags: ['exam-guide'] },
-    { title: 'Stallings《计算机组成与体系结构》', tags: ['textbook'] },
-    { title: '《数字设计和计算机体系结构》', tags: ['textbook'] },
-    { title: '《计算机体系结构量化方法》', tags: ['textbook'] },
+    { title: '鍞愭湐椋炪€婅绠楁満缁勬垚鍘熺悊銆?, tags: ['textbook'] },
+    { title: '琚佹槬椋庛€婅绠楁満缁勬垚涓庤璁°€?, tags: ['textbook'] },
+    { title: 'Patterson銆婅绠楁満缁勬垚涓庤璁°€?, tags: ['textbook'] },
+    { title: '鐜嬮亾408璁＄粍绡?, tags: ['exam-guide'] },
+    { title: '澶╁嫟璁＄粍楂樺垎绗旇', tags: ['exam-guide'] },
+    { title: 'Stallings銆婅绠楁満缁勬垚涓庝綋绯荤粨鏋勩€?, tags: ['textbook'] },
+    { title: '銆婃暟瀛楄璁″拰璁＄畻鏈轰綋绯荤粨鏋勩€?, tags: ['textbook'] },
+    { title: '銆婅绠楁満浣撶郴缁撴瀯閲忓寲鏂规硶銆?, tags: ['textbook'] },
   ],
 }
 
-// ─── 操作系统 (Operating Systems) ─────────────────────────────────────────────
+// 鈹€鈹€鈹€ 鎿嶄綔绯荤粺 (Operating Systems) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const subjectOS: SubjectDef = {
-  name: '操作系统',
+  name: '鎿嶄綔绯荤粺',
   color: '#f472b6',
   permanent: [
-    { title: '进程与线程', tags: ['process-thread'] },
-    { title: '进程调度', tags: ['scheduling'] },
-    { title: '同步与互斥', tags: ['synchronization'] },
-    { title: '死锁', tags: ['deadlock'] },
-    { title: '内存管理', tags: ['memory-management'] },
-    { title: '分页与分段', tags: ['paging-segmentation'] },
-    { title: '虚拟内存', tags: ['virtual-memory'] },
-    { title: '文件系统', tags: ['file-system'] },
-    { title: '设备管理', tags: ['device-management'] },
-    { title: '磁盘调度', tags: ['disk-scheduling'] },
-    { title: 'IO管理', tags: ['io-management'] },
-    { title: '进程通信', tags: ['ipc'] },
-    { title: '信号量机制', tags: ['semaphore'] },
-    { title: '管程', tags: ['monitor'] },
-    { title: '页面置换算法', tags: ['page-replacement'] },
+    { title: '杩涚▼涓庣嚎绋?, tags: ['process-thread'] },
+    { title: '杩涚▼璋冨害', tags: ['scheduling'] },
+    { title: '鍚屾涓庝簰鏂?, tags: ['synchronization'] },
+    { title: '姝婚攣', tags: ['deadlock'] },
+    { title: '鍐呭瓨绠＄悊', tags: ['memory-management'] },
+    { title: '鍒嗛〉涓庡垎娈?, tags: ['paging-segmentation'] },
+    { title: '铏氭嫙鍐呭瓨', tags: ['virtual-memory'] },
+    { title: '鏂囦欢绯荤粺', tags: ['file-system'] },
+    { title: '璁惧绠＄悊', tags: ['device-management'] },
+    { title: '纾佺洏璋冨害', tags: ['disk-scheduling'] },
+    { title: 'IO绠＄悊', tags: ['io-management'] },
+    { title: '杩涚▼閫氫俊', tags: ['ipc'] },
+    { title: '淇″彿閲忔満鍒?, tags: ['semaphore'] },
+    { title: '绠＄▼', tags: ['monitor'] },
+    { title: '椤甸潰缃崲绠楁硶', tags: ['page-replacement'] },
   ],
   fleeting: [
-    { title: 'PCB与TCB区别' },
-    { title: '调度算法比较' },
-    { title: '生产者消费者问题' },
-    { title: '读者写者问题' },
-    { title: '哲学家就餐问题' },
-    { title: '死锁必要条件' },
-    { title: '银行家算法' },
-    { title: '段页式存储' },
-    { title: 'LRU与LFU区别' },
-    { title: '磁盘调度算法比较' },
-    { title: '用户态与核心态切换' },
-    { title: '系统调用实现' },
-    { title: '进程状态转换' },
-    { title: '线程的实现模型' },
-    { title: '协程与线程对比' },
-    { title: '互斥锁与自旋锁' },
-    { title: '读写锁实现' },
-    { title: '条件变量与信号量' },
-    { title: '死锁检测与恢复' },
-    { title: '内存分配算法对比' },
-    { title: '快表TLB原理' },
-    { title: '多级页表' },
-    { title: '缺页中断处理' },
-    { title: '页面分配策略' },
-    { title: '文件分配方式对比' },
-    { title: '目录结构实现' },
-    { title: '空闲空间管理' },
-    { title: '磁盘调度FCFS与SCAN' },
-    { title: 'SPOOLing系统' },
-    { title: '缓冲技术' },
-    { title: '设备驱动程序接口' },
-    { title: '共享文件与链接' },
-    { title: '文件保护机制' },
-    { title: '日志文件系统' },
-    { title: '实时操作系统特点' },
+    { title: 'PCB涓嶵CB鍖哄埆' },
+    { title: '璋冨害绠楁硶姣旇緝' },
+    { title: '鐢熶骇鑰呮秷璐硅€呴棶棰? },
+    { title: '璇昏€呭啓鑰呴棶棰? },
+    { title: '鍝插瀹跺氨椁愰棶棰? },
+    { title: '姝婚攣蹇呰鏉′欢' },
+    { title: '閾惰瀹剁畻娉? },
+    { title: '娈甸〉寮忓瓨鍌? },
+    { title: 'LRU涓嶭FU鍖哄埆' },
+    { title: '纾佺洏璋冨害绠楁硶姣旇緝' },
+    { title: '鐢ㄦ埛鎬佷笌鏍稿績鎬佸垏鎹? },
+    { title: '绯荤粺璋冪敤瀹炵幇' },
+    { title: '杩涚▼鐘舵€佽浆鎹? },
+    { title: '绾跨▼鐨勫疄鐜版ā鍨? },
+    { title: '鍗忕▼涓庣嚎绋嬪姣? },
+    { title: '浜掓枼閿佷笌鑷棆閿? },
+    { title: '璇诲啓閿佸疄鐜? },
+    { title: '鏉′欢鍙橀噺涓庝俊鍙烽噺' },
+    { title: '姝婚攣妫€娴嬩笌鎭㈠' },
+    { title: '鍐呭瓨鍒嗛厤绠楁硶瀵规瘮' },
+    { title: '蹇〃TLB鍘熺悊' },
+    { title: '澶氱骇椤佃〃' },
+    { title: '缂洪〉涓柇澶勭悊' },
+    { title: '椤甸潰鍒嗛厤绛栫暐' },
+    { title: '鏂囦欢鍒嗛厤鏂瑰紡瀵规瘮' },
+    { title: '鐩綍缁撴瀯瀹炵幇' },
+    { title: '绌洪棽绌洪棿绠＄悊' },
+    { title: '纾佺洏璋冨害FCFS涓嶴CAN' },
+    { title: 'SPOOLing绯荤粺' },
+    { title: '缂撳啿鎶€鏈? },
+    { title: '璁惧椹卞姩绋嬪簭鎺ュ彛' },
+    { title: '鍏变韩鏂囦欢涓庨摼鎺? },
+    { title: '鏂囦欢淇濇姢鏈哄埗' },
+    { title: '鏃ュ織鏂囦欢绯荤粺' },
+    { title: '瀹炴椂鎿嶄綔绯荤粺鐗圭偣' },
   ],
   literature: [
-    { title: '汤子瀛《计算机操作系统》', tags: ['textbook'] },
-    { title: '王道408操作系统篇', tags: ['exam-guide'] },
-    { title: '天勤操作系统高分笔记', tags: ['exam-guide'] },
-    { title: '《现代操作系统》', tags: ['textbook'] },
-    { title: '《深入理解Linux内核》', tags: ['textbook'] },
-    { title: '《操作系统概念》', tags: ['textbook'] },
-    { title: '《Linux内核设计与实现》', tags: ['textbook'] },
-    { title: '《操作系统真象还原》', tags: ['textbook'] },
+    { title: '姹ゅ瓙鐎涖€婅绠楁満鎿嶄綔绯荤粺銆?, tags: ['textbook'] },
+    { title: '鐜嬮亾408鎿嶄綔绯荤粺绡?, tags: ['exam-guide'] },
+    { title: '澶╁嫟鎿嶄綔绯荤粺楂樺垎绗旇', tags: ['exam-guide'] },
+    { title: '銆婄幇浠ｆ搷浣滅郴缁熴€?, tags: ['textbook'] },
+    { title: '銆婃繁鍏ョ悊瑙inux鍐呮牳銆?, tags: ['textbook'] },
+    { title: '銆婃搷浣滅郴缁熸蹇点€?, tags: ['textbook'] },
+    { title: '銆奓inux鍐呮牳璁捐涓庡疄鐜般€?, tags: ['textbook'] },
+    { title: '銆婃搷浣滅郴缁熺湡璞¤繕鍘熴€?, tags: ['textbook'] },
   ],
 }
 
-// ─── 计算机网络 (Computer Networks) ───────────────────────────────────────────
+// 鈹€鈹€鈹€ 璁＄畻鏈虹綉缁?(Computer Networks) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const subjectCN: SubjectDef = {
-  name: '计算机网络',
+  name: '璁＄畻鏈虹綉缁?,
   color: '#818cf8',
   permanent: [
-    { title: 'OSI七层模型', tags: ['osi'] },
-    { title: 'TCP/IP协议栈', tags: ['tcp-ip'] },
-    { title: '物理层', tags: ['physical-layer'] },
-    { title: '数据链路层', tags: ['data-link-layer'] },
-    { title: '网络层', tags: ['network-layer'] },
-    { title: '传输层', tags: ['transport-layer'] },
-    { title: '应用层', tags: ['application-layer'] },
-    { title: 'TCP可靠传输', tags: ['tcp-reliability'] },
-    { title: 'IP协议', tags: ['ip-protocol'] },
-    { title: '路由算法', tags: ['routing'] },
-    { title: '局域网技术', tags: ['lan'] },
-    { title: '网络安全', tags: ['security'] },
-    { title: 'HTTP协议', tags: ['http'] },
-    { title: 'DNS系统', tags: ['dns'] },
-    { title: '拥塞控制', tags: ['congestion-control'] },
+    { title: 'OSI涓冨眰妯″瀷', tags: ['osi'] },
+    { title: 'TCP/IP鍗忚鏍?, tags: ['tcp-ip'] },
+    { title: '鐗╃悊灞?, tags: ['physical-layer'] },
+    { title: '鏁版嵁閾捐矾灞?, tags: ['data-link-layer'] },
+    { title: '缃戠粶灞?, tags: ['network-layer'] },
+    { title: '浼犺緭灞?, tags: ['transport-layer'] },
+    { title: '搴旂敤灞?, tags: ['application-layer'] },
+    { title: 'TCP鍙潬浼犺緭', tags: ['tcp-reliability'] },
+    { title: 'IP鍗忚', tags: ['ip-protocol'] },
+    { title: '璺敱绠楁硶', tags: ['routing'] },
+    { title: '灞€鍩熺綉鎶€鏈?, tags: ['lan'] },
+    { title: '缃戠粶瀹夊叏', tags: ['security'] },
+    { title: 'HTTP鍗忚', tags: ['http'] },
+    { title: 'DNS绯荤粺', tags: ['dns'] },
+    { title: '鎷ュ鎺у埗', tags: ['congestion-control'] },
   ],
   fleeting: [
-    { title: '三次握手四次挥手' },
-    { title: 'TCP与UDP区别' },
-    { title: '滑动窗口机制' },
-    { title: '拥塞控制算法' },
-    { title: 'ARP协议工作流程' },
-    { title: 'DHCP原理' },
-    { title: '子网划分' },
-    { title: 'CIDR表示法' },
-    { title: 'NAT转换' },
-    { title: '路由选择协议对比' },
-    { title: '信道复用技术' },
-    { title: '编码与调制' },
-    { title: '传输介质分类' },
-    { title: 'CSMA/CD协议' },
-    { title: '以太网帧结构' },
-    { title: '交换机与集线器区别' },
-    { title: 'VLAN技术' },
-    { title: '生成树协议' },
-    { title: 'IP数据报格式' },
-    { title: '分片与重组' },
-    { title: 'IPv6协议' },
-    { title: 'ICMP协议应用' },
-    { title: '隧道技术' },
-    { title: '端口号分配' },
-    { title: '流量控制与拥塞控制区别' },
-    { title: '超时重传与快速重传' },
-    { title: '选择性确认SACK' },
-    { title: '连接管理状态转换' },
-    { title: 'WebSocket协议' },
-    { title: '电子邮件协议' },
-    { title: 'FTP协议工作原理' },
-    { title: '域名解析过程' },
-    { title: 'CDN技术原理' },
-    { title: 'VPN技术' },
-    { title: '网络安全攻击类型' },
+    { title: '涓夋鎻℃墜鍥涙鎸ユ墜' },
+    { title: 'TCP涓嶶DP鍖哄埆' },
+    { title: '婊戝姩绐楀彛鏈哄埗' },
+    { title: '鎷ュ鎺у埗绠楁硶' },
+    { title: 'ARP鍗忚宸ヤ綔娴佺▼' },
+    { title: 'DHCP鍘熺悊' },
+    { title: '瀛愮綉鍒掑垎' },
+    { title: 'CIDR琛ㄧず娉? },
+    { title: 'NAT杞崲' },
+    { title: '璺敱閫夋嫨鍗忚瀵规瘮' },
+    { title: '淇￠亾澶嶇敤鎶€鏈? },
+    { title: '缂栫爜涓庤皟鍒? },
+    { title: '浼犺緭浠嬭川鍒嗙被' },
+    { title: 'CSMA/CD鍗忚' },
+    { title: '浠ュお缃戝抚缁撴瀯' },
+    { title: '浜ゆ崲鏈轰笌闆嗙嚎鍣ㄥ尯鍒? },
+    { title: 'VLAN鎶€鏈? },
+    { title: '鐢熸垚鏍戝崗璁? },
+    { title: 'IP鏁版嵁鎶ユ牸寮? },
+    { title: '鍒嗙墖涓庨噸缁? },
+    { title: 'IPv6鍗忚' },
+    { title: 'ICMP鍗忚搴旂敤' },
+    { title: '闅ч亾鎶€鏈? },
+    { title: '绔彛鍙峰垎閰? },
+    { title: '娴侀噺鎺у埗涓庢嫢濉炴帶鍒跺尯鍒? },
+    { title: '瓒呮椂閲嶄紶涓庡揩閫熼噸浼? },
+    { title: '閫夋嫨鎬х‘璁ACK' },
+    { title: '杩炴帴绠＄悊鐘舵€佽浆鎹? },
+    { title: 'WebSocket鍗忚' },
+    { title: '鐢靛瓙閭欢鍗忚' },
+    { title: 'FTP鍗忚宸ヤ綔鍘熺悊' },
+    { title: '鍩熷悕瑙ｆ瀽杩囩▼' },
+    { title: 'CDN鎶€鏈師鐞? },
+    { title: 'VPN鎶€鏈? },
+    { title: '缃戠粶瀹夊叏鏀诲嚮绫诲瀷' },
   ],
   literature: [
-    { title: '谢希仁《计算机网络》', tags: ['textbook'] },
-    { title: '王道408计网篇', tags: ['exam-guide'] },
-    { title: '天勤计网高分笔记', tags: ['exam-guide'] },
-    { title: 'Kurose《计算机网络自顶向下》', tags: ['textbook'] },
-    { title: '《TCP/IP详解》', tags: ['textbook'] },
-    { title: '计算机网络(Andrew Tanenbaum)', tags: ['textbook'] },
-    { title: '《图解HTTP》', tags: ['textbook'] },
-    { title: '《网络是怎样连接的》', tags: ['textbook'] },
+    { title: '璋㈠笇浠併€婅绠楁満缃戠粶銆?, tags: ['textbook'] },
+    { title: '鐜嬮亾408璁＄綉绡?, tags: ['exam-guide'] },
+    { title: '澶╁嫟璁＄綉楂樺垎绗旇', tags: ['exam-guide'] },
+    { title: 'Kurose銆婅绠楁満缃戠粶鑷《鍚戜笅銆?, tags: ['textbook'] },
+    { title: '銆奣CP/IP璇﹁В銆?, tags: ['textbook'] },
+    { title: '璁＄畻鏈虹綉缁?Andrew Tanenbaum)', tags: ['textbook'] },
+    { title: '銆婂浘瑙TTP銆?, tags: ['textbook'] },
+    { title: '銆婄綉缁滄槸鎬庢牱杩炴帴鐨勩€?, tags: ['textbook'] },
   ],
 }
 
-// ─── Edges Definition ─────────────────────────────────────────────────────────
+// 鈹€鈹€鈹€ Edges Definition 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 const withinDSEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: '线性表', targetTitle: '栈', type: 'prerequisite' },
-  { sourceTitle: '线性表', targetTitle: '队列', type: 'prerequisite' },
-  { sourceTitle: '栈', targetTitle: '二叉树', type: 'related' },
-  { sourceTitle: '树', targetTitle: '二叉树', type: 'derived' },
-  { sourceTitle: '二叉树', targetTitle: '平衡二叉树', type: 'derived' },
-  { sourceTitle: '二叉树', targetTitle: '堆', type: 'related' },
-  { sourceTitle: '树', targetTitle: '图', type: 'related' },
-  { sourceTitle: '图', targetTitle: '最短路径', type: 'prerequisite' },
-  { sourceTitle: '图', targetTitle: '关键路径', type: 'prerequisite' },
-  { sourceTitle: '排序算法', targetTitle: '查找算法', type: 'related' },
-  { sourceTitle: '哈希表', targetTitle: '查找算法', type: 'related' },
-  { sourceTitle: '排序算法', targetTitle: '堆', type: 'related' },
-  { sourceTitle: '二叉树', targetTitle: 'B树', type: 'derived' },
-  { sourceTitle: '栈', targetTitle: '排序算法', type: 'related' },
-  { sourceTitle: '队列', targetTitle: '图', type: 'related' },
-  { sourceTitle: '栈', targetTitle: '图', type: 'related' },
-  { sourceTitle: '查找算法', targetTitle: '哈希表', type: 'related' },
-  { sourceTitle: '二叉树', targetTitle: '查找算法', type: 'related' },
-  { sourceTitle: '并查集', targetTitle: '图', type: 'related' },
-  { sourceTitle: '关键路径', targetTitle: '最短路径', type: 'related' },
-  { sourceTitle: 'B树', targetTitle: '查找算法', type: 'related' },
-  { sourceTitle: '排序算法', targetTitle: '关键路径', type: 'related' },
-  { sourceTitle: '平衡二叉树', targetTitle: '查找算法', type: 'related' },
-  { sourceTitle: '线性表', targetTitle: '排序算法', type: 'prerequisite' },
-  { sourceTitle: '堆', targetTitle: '排序算法', type: 'related' },
-  { sourceTitle: '线性表', targetTitle: '查找算法', type: 'prerequisite' },
-  { sourceTitle: '树', targetTitle: '并查集', type: 'related' },
-  { sourceTitle: '哈希表', targetTitle: '栈', type: 'related' },
-  { sourceTitle: '二叉树', targetTitle: '关键路径', type: 'related' },
-  { sourceTitle: '图', targetTitle: '排序算法', type: 'related' },
-  { sourceTitle: '队列', targetTitle: '排序算法', type: 'related' },
-  { sourceTitle: '栈', targetTitle: '队列', type: 'related' },
-  { sourceTitle: '树', targetTitle: '哈希表', type: 'related' },
-  { sourceTitle: '线性表', targetTitle: '哈希表', type: 'related' },
-  { sourceTitle: '堆', targetTitle: '队列', type: 'related' },
-  { sourceTitle: '二叉树', targetTitle: '图', type: 'related' },
-  { sourceTitle: '平衡二叉树', targetTitle: 'B树', type: 'related' },
-  { sourceTitle: '最短路径', targetTitle: '排序算法', type: 'related' },
-  { sourceTitle: '并查集', targetTitle: '最短路径', type: 'related' },
-  { sourceTitle: '哈希表', targetTitle: '队列', type: 'related' },
-  { sourceTitle: '线性表', targetTitle: '树', type: 'prerequisite' },
-  { sourceTitle: '栈', targetTitle: '关键路径', type: 'related' },
-  { sourceTitle: '队列', targetTitle: '最短路径', type: 'related' },
-  { sourceTitle: 'B树', targetTitle: '平衡二叉树', type: 'related' },
-  { sourceTitle: '哈希表', targetTitle: '并查集', type: 'related' },
-  { sourceTitle: '堆', targetTitle: '图', type: 'related' },
-  { sourceTitle: '栈', targetTitle: '平衡二叉树', type: 'related' },
-  { sourceTitle: '树', targetTitle: '排序算法', type: 'related' },
-  { sourceTitle: '队列', targetTitle: '哈希表', type: 'related' },
-  { sourceTitle: '线性表', targetTitle: '图', type: 'prerequisite' },
+  { sourceTitle: '绾挎€ц〃', targetTitle: '鏍?, type: 'prerequisite' },
+  { sourceTitle: '绾挎€ц〃', targetTitle: '闃熷垪', type: 'prerequisite' },
+  { sourceTitle: '鏍?, targetTitle: '浜屽弶鏍?, type: 'related' },
+  { sourceTitle: '鏍?, targetTitle: '浜屽弶鏍?, type: 'derived' },
+  { sourceTitle: '浜屽弶鏍?, targetTitle: '骞宠　浜屽弶鏍?, type: 'derived' },
+  { sourceTitle: '浜屽弶鏍?, targetTitle: '鍫?, type: 'related' },
+  { sourceTitle: '鏍?, targetTitle: '鍥?, type: 'related' },
+  { sourceTitle: '鍥?, targetTitle: '鏈€鐭矾寰?, type: 'prerequisite' },
+  { sourceTitle: '鍥?, targetTitle: '鍏抽敭璺緞', type: 'prerequisite' },
+  { sourceTitle: '鎺掑簭绠楁硶', targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
+  { sourceTitle: '鍝堝笇琛?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
+  { sourceTitle: '鎺掑簭绠楁硶', targetTitle: '鍫?, type: 'related' },
+  { sourceTitle: '浜屽弶鏍?, targetTitle: 'B鏍?, type: 'derived' },
+  { sourceTitle: '鏍?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
+  { sourceTitle: '闃熷垪', targetTitle: '鍥?, type: 'related' },
+  { sourceTitle: '鏍?, targetTitle: '鍥?, type: 'related' },
+  { sourceTitle: '鏌ユ壘绠楁硶', targetTitle: '鍝堝笇琛?, type: 'related' },
+  { sourceTitle: '浜屽弶鏍?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
+  { sourceTitle: '骞舵煡闆?, targetTitle: '鍥?, type: 'related' },
+  { sourceTitle: '鍏抽敭璺緞', targetTitle: '鏈€鐭矾寰?, type: 'related' },
+  { sourceTitle: 'B鏍?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
+  { sourceTitle: '鎺掑簭绠楁硶', targetTitle: '鍏抽敭璺緞', type: 'related' },
+  { sourceTitle: '骞宠　浜屽弶鏍?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
+  { sourceTitle: '绾挎€ц〃', targetTitle: '鎺掑簭绠楁硶', type: 'prerequisite' },
+  { sourceTitle: '鍫?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
+  { sourceTitle: '绾挎€ц〃', targetTitle: '鏌ユ壘绠楁硶', type: 'prerequisite' },
+  { sourceTitle: '鏍?, targetTitle: '骞舵煡闆?, type: 'related' },
+  { sourceTitle: '鍝堝笇琛?, targetTitle: '鏍?, type: 'related' },
+  { sourceTitle: '浜屽弶鏍?, targetTitle: '鍏抽敭璺緞', type: 'related' },
+  { sourceTitle: '鍥?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
+  { sourceTitle: '闃熷垪', targetTitle: '鎺掑簭绠楁硶', type: 'related' },
+  { sourceTitle: '鏍?, targetTitle: '闃熷垪', type: 'related' },
+  { sourceTitle: '鏍?, targetTitle: '鍝堝笇琛?, type: 'related' },
+  { sourceTitle: '绾挎€ц〃', targetTitle: '鍝堝笇琛?, type: 'related' },
+  { sourceTitle: '鍫?, targetTitle: '闃熷垪', type: 'related' },
+  { sourceTitle: '浜屽弶鏍?, targetTitle: '鍥?, type: 'related' },
+  { sourceTitle: '骞宠　浜屽弶鏍?, targetTitle: 'B鏍?, type: 'related' },
+  { sourceTitle: '鏈€鐭矾寰?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
+  { sourceTitle: '骞舵煡闆?, targetTitle: '鏈€鐭矾寰?, type: 'related' },
+  { sourceTitle: '鍝堝笇琛?, targetTitle: '闃熷垪', type: 'related' },
+  { sourceTitle: '绾挎€ц〃', targetTitle: '鏍?, type: 'prerequisite' },
+  { sourceTitle: '鏍?, targetTitle: '鍏抽敭璺緞', type: 'related' },
+  { sourceTitle: '闃熷垪', targetTitle: '鏈€鐭矾寰?, type: 'related' },
+  { sourceTitle: 'B鏍?, targetTitle: '骞宠　浜屽弶鏍?, type: 'related' },
+  { sourceTitle: '鍝堝笇琛?, targetTitle: '骞舵煡闆?, type: 'related' },
+  { sourceTitle: '鍫?, targetTitle: '鍥?, type: 'related' },
+  { sourceTitle: '鏍?, targetTitle: '骞宠　浜屽弶鏍?, type: 'related' },
+  { sourceTitle: '鏍?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
+  { sourceTitle: '闃熷垪', targetTitle: '鍝堝笇琛?, type: 'related' },
+  { sourceTitle: '绾挎€ц〃', targetTitle: '鍥?, type: 'prerequisite' },
 ]
 
 const withinCOEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: '冯诺依曼结构', targetTitle: '数据表示', type: 'prerequisite' },
-  { sourceTitle: '冯诺依曼结构', targetTitle: '指令系统', type: 'prerequisite' },
-  { sourceTitle: '数据表示', targetTitle: '运算方法与ALU', type: 'prerequisite' },
-  { sourceTitle: '运算方法与ALU', targetTitle: '浮点运算', type: 'related' },
-  { sourceTitle: '存储器层次', targetTitle: 'Cache', type: 'derived' },
-  { sourceTitle: '存储器层次', targetTitle: '虚拟存储器', type: 'derived' },
-  { sourceTitle: 'Cache', targetTitle: '虚拟存储器', type: 'related' },
-  { sourceTitle: '指令系统', targetTitle: 'CPU流水线', type: 'prerequisite' },
-  { sourceTitle: 'CPU流水线', targetTitle: '指令流水线冒险', type: 'related' },
-  { sourceTitle: '控制单元', targetTitle: 'CPU流水线', type: 'related' },
-  { sourceTitle: '总线系统', targetTitle: '输入输出系统', type: 'prerequisite' },
-  { sourceTitle: '输入输出系统', targetTitle: '中断系统', type: 'related' },
-  { sourceTitle: '输入输出系统', targetTitle: 'DMA', type: 'related' },
-  { sourceTitle: '中断系统', targetTitle: 'DMA', type: 'related' },
-  { sourceTitle: '总线系统', targetTitle: '中断系统', type: 'related' },
-  { sourceTitle: '运算方法与ALU', targetTitle: '数据表示', type: 'prerequisite' }, // reverse direction for "derived"
-  { sourceTitle: '浮点运算', targetTitle: '数据表示', type: 'related' },
-  { sourceTitle: 'CPU流水线', targetTitle: '控制单元', type: 'related' },
-  { sourceTitle: '指令流水线冒险', targetTitle: 'CPU流水线', type: 'derived' },
-  { sourceTitle: '指令系统', targetTitle: '控制单元', type: 'prerequisite' },
-  { sourceTitle: '冯诺依曼结构', targetTitle: '存储器层次', type: 'prerequisite' },
-  { sourceTitle: '冯诺依曼结构', targetTitle: '总线系统', type: 'prerequisite' },
-  { sourceTitle: 'Cache', targetTitle: '存储器层次', type: 'derived' },
-  { sourceTitle: '虚拟存储器', targetTitle: '存储器层次', type: 'derived' },
-  { sourceTitle: 'Cache', targetTitle: '运算方法与ALU', type: 'related' },
-  { sourceTitle: 'DMA', targetTitle: '总线系统', type: 'related' },
-  { sourceTitle: '中断系统', targetTitle: 'CPU流水线', type: 'related' },
-  { sourceTitle: '指令系统', targetTitle: '运算方法与ALU', type: 'related' },
-  { sourceTitle: '数据表示', targetTitle: 'Cache', type: 'related' },
-  { sourceTitle: '总线系统', targetTitle: 'CPU流水线', type: 'related' },
-  { sourceTitle: '冯诺依曼结构', targetTitle: '控制单元', type: 'prerequisite' },
-  { sourceTitle: '输入输出系统', targetTitle: '总线系统', type: 'prerequisite' },
-  { sourceTitle: '虚拟存储器', targetTitle: '指令系统', type: 'related' },
-  { sourceTitle: '浮点运算', targetTitle: '运算方法与ALU', type: 'derived' },
-  { sourceTitle: 'Cache', targetTitle: '指令系统', type: 'related' },
-  { sourceTitle: '中断系统', targetTitle: '输入输出系统', type: 'derived' },
-  { sourceTitle: 'DMA', targetTitle: '输入输出系统', type: 'derived' },
-  { sourceTitle: '指令流水线冒险', targetTitle: '控制单元', type: 'related' },
-  { sourceTitle: '浮点运算', targetTitle: '指令系统', type: 'related' },
-  { sourceTitle: '数据表示', targetTitle: '总线系统', type: 'related' },
-  { sourceTitle: '冯诺依曼结构', targetTitle: '输入输出系统', type: 'prerequisite' },
-  { sourceTitle: '存储器层次', targetTitle: '总线系统', type: 'related' },
-  { sourceTitle: 'Cache', targetTitle: '总线系统', type: 'related' },
-  { sourceTitle: '虚拟存储器', targetTitle: 'Cache', type: 'related' },
-  { sourceTitle: '控制单元', targetTitle: '指令系统', type: 'prerequisite' },
-  { sourceTitle: 'CPU流水线', targetTitle: '指令系统', type: 'derived' },
-  { sourceTitle: '运算方法与ALU', targetTitle: 'CPU流水线', type: 'related' },
-  { sourceTitle: '浮点运算', targetTitle: 'Cache', type: 'related' },
-  { sourceTitle: 'DMA', targetTitle: 'CPU流水线', type: 'related' },
-  { sourceTitle: '中断系统', targetTitle: '存储器层次', type: 'related' },
+  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鏁版嵁琛ㄧず', type: 'prerequisite' },
+  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鎸囦护绯荤粺', type: 'prerequisite' },
+  { sourceTitle: '鏁版嵁琛ㄧず', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'prerequisite' },
+  { sourceTitle: '杩愮畻鏂规硶涓嶢LU', targetTitle: '娴偣杩愮畻', type: 'related' },
+  { sourceTitle: '瀛樺偍鍣ㄥ眰娆?, targetTitle: 'Cache', type: 'derived' },
+  { sourceTitle: '瀛樺偍鍣ㄥ眰娆?, targetTitle: '铏氭嫙瀛樺偍鍣?, type: 'derived' },
+  { sourceTitle: 'Cache', targetTitle: '铏氭嫙瀛樺偍鍣?, type: 'related' },
+  { sourceTitle: '鎸囦护绯荤粺', targetTitle: 'CPU娴佹按绾?, type: 'prerequisite' },
+  { sourceTitle: 'CPU娴佹按绾?, targetTitle: '鎸囦护娴佹按绾垮啋闄?, type: 'related' },
+  { sourceTitle: '鎺у埗鍗曞厓', targetTitle: 'CPU娴佹按绾?, type: 'related' },
+  { sourceTitle: '鎬荤嚎绯荤粺', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'prerequisite' },
+  { sourceTitle: '杈撳叆杈撳嚭绯荤粺', targetTitle: '涓柇绯荤粺', type: 'related' },
+  { sourceTitle: '杈撳叆杈撳嚭绯荤粺', targetTitle: 'DMA', type: 'related' },
+  { sourceTitle: '涓柇绯荤粺', targetTitle: 'DMA', type: 'related' },
+  { sourceTitle: '鎬荤嚎绯荤粺', targetTitle: '涓柇绯荤粺', type: 'related' },
+  { sourceTitle: '杩愮畻鏂规硶涓嶢LU', targetTitle: '鏁版嵁琛ㄧず', type: 'prerequisite' }, // reverse direction for "derived"
+  { sourceTitle: '娴偣杩愮畻', targetTitle: '鏁版嵁琛ㄧず', type: 'related' },
+  { sourceTitle: 'CPU娴佹按绾?, targetTitle: '鎺у埗鍗曞厓', type: 'related' },
+  { sourceTitle: '鎸囦护娴佹按绾垮啋闄?, targetTitle: 'CPU娴佹按绾?, type: 'derived' },
+  { sourceTitle: '鎸囦护绯荤粺', targetTitle: '鎺у埗鍗曞厓', type: 'prerequisite' },
+  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'prerequisite' },
+  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鎬荤嚎绯荤粺', type: 'prerequisite' },
+  { sourceTitle: 'Cache', targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'derived' },
+  { sourceTitle: '铏氭嫙瀛樺偍鍣?, targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'derived' },
+  { sourceTitle: 'Cache', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'related' },
+  { sourceTitle: 'DMA', targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
+  { sourceTitle: '涓柇绯荤粺', targetTitle: 'CPU娴佹按绾?, type: 'related' },
+  { sourceTitle: '鎸囦护绯荤粺', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'related' },
+  { sourceTitle: '鏁版嵁琛ㄧず', targetTitle: 'Cache', type: 'related' },
+  { sourceTitle: '鎬荤嚎绯荤粺', targetTitle: 'CPU娴佹按绾?, type: 'related' },
+  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鎺у埗鍗曞厓', type: 'prerequisite' },
+  { sourceTitle: '杈撳叆杈撳嚭绯荤粺', targetTitle: '鎬荤嚎绯荤粺', type: 'prerequisite' },
+  { sourceTitle: '铏氭嫙瀛樺偍鍣?, targetTitle: '鎸囦护绯荤粺', type: 'related' },
+  { sourceTitle: '娴偣杩愮畻', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'derived' },
+  { sourceTitle: 'Cache', targetTitle: '鎸囦护绯荤粺', type: 'related' },
+  { sourceTitle: '涓柇绯荤粺', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'derived' },
+  { sourceTitle: 'DMA', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'derived' },
+  { sourceTitle: '鎸囦护娴佹按绾垮啋闄?, targetTitle: '鎺у埗鍗曞厓', type: 'related' },
+  { sourceTitle: '娴偣杩愮畻', targetTitle: '鎸囦护绯荤粺', type: 'related' },
+  { sourceTitle: '鏁版嵁琛ㄧず', targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
+  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'prerequisite' },
+  { sourceTitle: '瀛樺偍鍣ㄥ眰娆?, targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
+  { sourceTitle: 'Cache', targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
+  { sourceTitle: '铏氭嫙瀛樺偍鍣?, targetTitle: 'Cache', type: 'related' },
+  { sourceTitle: '鎺у埗鍗曞厓', targetTitle: '鎸囦护绯荤粺', type: 'prerequisite' },
+  { sourceTitle: 'CPU娴佹按绾?, targetTitle: '鎸囦护绯荤粺', type: 'derived' },
+  { sourceTitle: '杩愮畻鏂规硶涓嶢LU', targetTitle: 'CPU娴佹按绾?, type: 'related' },
+  { sourceTitle: '娴偣杩愮畻', targetTitle: 'Cache', type: 'related' },
+  { sourceTitle: 'DMA', targetTitle: 'CPU娴佹按绾?, type: 'related' },
+  { sourceTitle: '涓柇绯荤粺', targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'related' },
 ]
 
 const withinOSEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: '进程与线程', targetTitle: '进程调度', type: 'prerequisite' },
-  { sourceTitle: '进程与线程', targetTitle: '同步与互斥', type: 'prerequisite' },
-  { sourceTitle: '进程与线程', targetTitle: '进程通信', type: 'prerequisite' },
-  { sourceTitle: '进程调度', targetTitle: '同步与互斥', type: 'related' },
-  { sourceTitle: '同步与互斥', targetTitle: '信号量机制', type: 'derived' },
-  { sourceTitle: '同步与互斥', targetTitle: '管程', type: 'derived' },
-  { sourceTitle: '同步与互斥', targetTitle: '死锁', type: 'related' },
-  { sourceTitle: '死锁', targetTitle: '进程调度', type: 'related' },
-  { sourceTitle: '内存管理', targetTitle: '分页与分段', type: 'derived' },
-  { sourceTitle: '内存管理', targetTitle: '虚拟内存', type: 'derived' },
-  { sourceTitle: '分页与分段', targetTitle: '虚拟内存', type: 'related' },
-  { sourceTitle: '虚拟内存', targetTitle: '页面置换算法', type: 'related' },
-  { sourceTitle: '文件系统', targetTitle: '设备管理', type: 'related' },
-  { sourceTitle: '设备管理', targetTitle: 'IO管理', type: 'related' },
-  { sourceTitle: '设备管理', targetTitle: '磁盘调度', type: 'related' },
-  { sourceTitle: '磁盘调度', targetTitle: 'IO管理', type: 'related' },
-  { sourceTitle: '进程通信', targetTitle: '信号量机制', type: 'related' },
-  { sourceTitle: '进程通信', targetTitle: '同步与互斥', type: 'related' },
-  { sourceTitle: '进程调度', targetTitle: '页面置换算法', type: 'related' },
-  { sourceTitle: '内存管理', targetTitle: '进程调度', type: 'related' },
-  { sourceTitle: '文件系统', targetTitle: '内存管理', type: 'related' },
-  { sourceTitle: '信号量机制', targetTitle: '管程', type: 'related' },
-  { sourceTitle: '进程与线程', targetTitle: '内存管理', type: 'related' },
-  { sourceTitle: '进程调度', targetTitle: '进程通信', type: 'related' },
-  { sourceTitle: '死锁', targetTitle: '同步与互斥', type: 'derived' },
-  { sourceTitle: '分页与分段', targetTitle: '内存管理', type: 'derived' },
-  { sourceTitle: '虚拟内存', targetTitle: '内存管理', type: 'derived' },
-  { sourceTitle: '页面置换算法', targetTitle: '虚拟内存', type: 'derived' },
-  { sourceTitle: 'IO管理', targetTitle: '设备管理', type: 'derived' },
-  { sourceTitle: '磁盘调度', targetTitle: '设备管理', type: 'derived' },
-  { sourceTitle: '文件系统', targetTitle: 'IO管理', type: 'related' },
-  { sourceTitle: '信号量机制', targetTitle: '进程与线程', type: 'related' },
-  { sourceTitle: '管程', targetTitle: '信号量机制', type: 'related' },
-  { sourceTitle: '进程通信', targetTitle: '进程与线程', type: 'derived' },
-  { sourceTitle: '进程调度', targetTitle: '内存管理', type: 'related' },
-  { sourceTitle: '死锁', targetTitle: '内存管理', type: 'related' },
-  { sourceTitle: '分页与分段', targetTitle: '进程调度', type: 'related' },
-  { sourceTitle: '虚拟内存', targetTitle: '进程调度', type: 'related' },
-  { sourceTitle: '页面置换算法', targetTitle: '内存管理', type: 'related' },
-  { sourceTitle: '文件系统', targetTitle: '分页与分段', type: 'related' },
-  { sourceTitle: 'IO管理', targetTitle: '文件系统', type: 'related' },
-  { sourceTitle: '磁盘调度', targetTitle: '文件系统', type: 'related' },
-  { sourceTitle: '进程与线程', targetTitle: '死锁', type: 'related' },
-  { sourceTitle: '同步与互斥', targetTitle: '内存管理', type: 'related' },
-  { sourceTitle: '信号量机制', targetTitle: '死锁', type: 'related' },
-  { sourceTitle: '管程', targetTitle: '同步与互斥', type: 'derived' },
-  { sourceTitle: '进程通信', targetTitle: '管程', type: 'related' },
-  { sourceTitle: '进程调度', targetTitle: '管程', type: 'related' },
-  { sourceTitle: '文件系统', targetTitle: '进程与线程', type: 'related' },
-  { sourceTitle: 'IO管理', targetTitle: '进程与线程', type: 'related' },
+  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '杩涚▼璋冨害', type: 'prerequisite' },
+  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '鍚屾涓庝簰鏂?, type: 'prerequisite' },
+  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '杩涚▼閫氫俊', type: 'prerequisite' },
+  { sourceTitle: '杩涚▼璋冨害', targetTitle: '鍚屾涓庝簰鏂?, type: 'related' },
+  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '淇″彿閲忔満鍒?, type: 'derived' },
+  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '绠＄▼', type: 'derived' },
+  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '姝婚攣', type: 'related' },
+  { sourceTitle: '姝婚攣', targetTitle: '杩涚▼璋冨害', type: 'related' },
+  { sourceTitle: '鍐呭瓨绠＄悊', targetTitle: '鍒嗛〉涓庡垎娈?, type: 'derived' },
+  { sourceTitle: '鍐呭瓨绠＄悊', targetTitle: '铏氭嫙鍐呭瓨', type: 'derived' },
+  { sourceTitle: '鍒嗛〉涓庡垎娈?, targetTitle: '铏氭嫙鍐呭瓨', type: 'related' },
+  { sourceTitle: '铏氭嫙鍐呭瓨', targetTitle: '椤甸潰缃崲绠楁硶', type: 'related' },
+  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '璁惧绠＄悊', type: 'related' },
+  { sourceTitle: '璁惧绠＄悊', targetTitle: 'IO绠＄悊', type: 'related' },
+  { sourceTitle: '璁惧绠＄悊', targetTitle: '纾佺洏璋冨害', type: 'related' },
+  { sourceTitle: '纾佺洏璋冨害', targetTitle: 'IO绠＄悊', type: 'related' },
+  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '淇″彿閲忔満鍒?, type: 'related' },
+  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '鍚屾涓庝簰鏂?, type: 'related' },
+  { sourceTitle: '杩涚▼璋冨害', targetTitle: '椤甸潰缃崲绠楁硶', type: 'related' },
+  { sourceTitle: '鍐呭瓨绠＄悊', targetTitle: '杩涚▼璋冨害', type: 'related' },
+  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
+  { sourceTitle: '淇″彿閲忔満鍒?, targetTitle: '绠＄▼', type: 'related' },
+  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
+  { sourceTitle: '杩涚▼璋冨害', targetTitle: '杩涚▼閫氫俊', type: 'related' },
+  { sourceTitle: '姝婚攣', targetTitle: '鍚屾涓庝簰鏂?, type: 'derived' },
+  { sourceTitle: '鍒嗛〉涓庡垎娈?, targetTitle: '鍐呭瓨绠＄悊', type: 'derived' },
+  { sourceTitle: '铏氭嫙鍐呭瓨', targetTitle: '鍐呭瓨绠＄悊', type: 'derived' },
+  { sourceTitle: '椤甸潰缃崲绠楁硶', targetTitle: '铏氭嫙鍐呭瓨', type: 'derived' },
+  { sourceTitle: 'IO绠＄悊', targetTitle: '璁惧绠＄悊', type: 'derived' },
+  { sourceTitle: '纾佺洏璋冨害', targetTitle: '璁惧绠＄悊', type: 'derived' },
+  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: 'IO绠＄悊', type: 'related' },
+  { sourceTitle: '淇″彿閲忔満鍒?, targetTitle: '杩涚▼涓庣嚎绋?, type: 'related' },
+  { sourceTitle: '绠＄▼', targetTitle: '淇″彿閲忔満鍒?, type: 'related' },
+  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '杩涚▼涓庣嚎绋?, type: 'derived' },
+  { sourceTitle: '杩涚▼璋冨害', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
+  { sourceTitle: '姝婚攣', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
+  { sourceTitle: '鍒嗛〉涓庡垎娈?, targetTitle: '杩涚▼璋冨害', type: 'related' },
+  { sourceTitle: '铏氭嫙鍐呭瓨', targetTitle: '杩涚▼璋冨害', type: 'related' },
+  { sourceTitle: '椤甸潰缃崲绠楁硶', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
+  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '鍒嗛〉涓庡垎娈?, type: 'related' },
+  { sourceTitle: 'IO绠＄悊', targetTitle: '鏂囦欢绯荤粺', type: 'related' },
+  { sourceTitle: '纾佺洏璋冨害', targetTitle: '鏂囦欢绯荤粺', type: 'related' },
+  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '姝婚攣', type: 'related' },
+  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
+  { sourceTitle: '淇″彿閲忔満鍒?, targetTitle: '姝婚攣', type: 'related' },
+  { sourceTitle: '绠＄▼', targetTitle: '鍚屾涓庝簰鏂?, type: 'derived' },
+  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '绠＄▼', type: 'related' },
+  { sourceTitle: '杩涚▼璋冨害', targetTitle: '绠＄▼', type: 'related' },
+  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '杩涚▼涓庣嚎绋?, type: 'related' },
+  { sourceTitle: 'IO绠＄悊', targetTitle: '杩涚▼涓庣嚎绋?, type: 'related' },
 ]
 
 const withinCNEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: 'OSI七层模型', targetTitle: 'TCP/IP协议栈', type: 'related' },
-  { sourceTitle: '物理层', targetTitle: '数据链路层', type: 'prerequisite' },
-  { sourceTitle: '数据链路层', targetTitle: '网络层', type: 'prerequisite' },
-  { sourceTitle: '网络层', targetTitle: '传输层', type: 'prerequisite' },
-  { sourceTitle: '传输层', targetTitle: '应用层', type: 'prerequisite' },
-  { sourceTitle: '传输层', targetTitle: 'TCP可靠传输', type: 'derived' },
-  { sourceTitle: '传输层', targetTitle: '拥塞控制', type: 'related' },
-  { sourceTitle: '网络层', targetTitle: 'IP协议', type: 'derived' },
-  { sourceTitle: '网络层', targetTitle: '路由算法', type: 'related' },
-  { sourceTitle: '数据链路层', targetTitle: '局域网技术', type: 'related' },
-  { sourceTitle: '应用层', targetTitle: 'HTTP协议', type: 'derived' },
-  { sourceTitle: '应用层', targetTitle: 'DNS系统', type: 'derived' },
-  { sourceTitle: '物理层', targetTitle: '局域网技术', type: 'prerequisite' },
-  { sourceTitle: '网络安全', targetTitle: '应用层', type: 'related' },
-  { sourceTitle: 'TCP可靠传输', targetTitle: '拥塞控制', type: 'related' },
-  { sourceTitle: 'IP协议', targetTitle: '路由算法', type: 'related' },
-  { sourceTitle: 'OSI七层模型', targetTitle: '物理层', type: 'prerequisite' },
-  { sourceTitle: 'TCP/IP协议栈', targetTitle: '网络层', type: 'related' },
-  { sourceTitle: 'TCP/IP协议栈', targetTitle: '传输层', type: 'related' },
-  { sourceTitle: 'OSI七层模型', targetTitle: 'TCP/IP协议栈', type: 'related' },
-  { sourceTitle: '数据链路层', targetTitle: '网络安全', type: 'related' },
-  { sourceTitle: '网络层', targetTitle: '网络安全', type: 'related' },
-  { sourceTitle: '传输层', targetTitle: '网络安全', type: 'related' },
-  { sourceTitle: '应用层', targetTitle: 'TCP/IP协议栈', type: 'related' },
-  { sourceTitle: 'HTTP协议', targetTitle: 'DNS系统', type: 'related' },
-  { sourceTitle: '路由算法', targetTitle: 'IP协议', type: 'related' },
-  { sourceTitle: '拥塞控制', targetTitle: 'TCP可靠传输', type: 'derived' },
-  { sourceTitle: '局域网技术', targetTitle: '数据链路层', type: 'derived' },
-  { sourceTitle: 'OSI七层模型', targetTitle: '数据链路层', type: 'prerequisite' },
-  { sourceTitle: 'TCP/IP协议栈', targetTitle: '应用层', type: 'related' },
-  { sourceTitle: '物理层', targetTitle: '网络安全', type: 'related' },
-  { sourceTitle: 'DNS系统', targetTitle: 'HTTP协议', type: 'related' },
-  { sourceTitle: 'IP协议', targetTitle: '传输层', type: 'prerequisite' },
-  { sourceTitle: '路由算法', targetTitle: '传输层', type: 'related' },
-  { sourceTitle: '拥塞控制', targetTitle: '网络层', type: 'related' },
-  { sourceTitle: 'TCP可靠传输', targetTitle: '网络层', type: 'related' },
-  { sourceTitle: '局域网技术', targetTitle: '网络层', type: 'related' },
-  { sourceTitle: 'OSI七层模型', targetTitle: '网络层', type: 'prerequisite' },
-  { sourceTitle: 'TCP/IP协议栈', targetTitle: '数据链路层', type: 'related' },
-  { sourceTitle: '物理层', targetTitle: 'OSI七层模型', type: 'prerequisite' },
-  { sourceTitle: 'HTTP协议', targetTitle: '传输层', type: 'prerequisite' },
-  { sourceTitle: 'DNS系统', targetTitle: '网络层', type: 'related' },
-  { sourceTitle: '网络安全', targetTitle: 'IP协议', type: 'related' },
-  { sourceTitle: '路由算法', targetTitle: '数据链路层', type: 'related' },
-  { sourceTitle: '拥塞控制', targetTitle: '数据链路层', type: 'related' },
-  { sourceTitle: 'TCP可靠传输', targetTitle: '数据链路层', type: 'related' },
-  { sourceTitle: '物理层', targetTitle: '传输层', type: 'related' },
-  { sourceTitle: '局域网技术', targetTitle: '物理层', type: 'derived' },
-  { sourceTitle: 'OSI七层模型', targetTitle: '应用层', type: 'prerequisite' },
+  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: 'TCP/IP鍗忚鏍?, type: 'related' },
+  { sourceTitle: '鐗╃悊灞?, targetTitle: '鏁版嵁閾捐矾灞?, type: 'prerequisite' },
+  { sourceTitle: '鏁版嵁閾捐矾灞?, targetTitle: '缃戠粶灞?, type: 'prerequisite' },
+  { sourceTitle: '缃戠粶灞?, targetTitle: '浼犺緭灞?, type: 'prerequisite' },
+  { sourceTitle: '浼犺緭灞?, targetTitle: '搴旂敤灞?, type: 'prerequisite' },
+  { sourceTitle: '浼犺緭灞?, targetTitle: 'TCP鍙潬浼犺緭', type: 'derived' },
+  { sourceTitle: '浼犺緭灞?, targetTitle: '鎷ュ鎺у埗', type: 'related' },
+  { sourceTitle: '缃戠粶灞?, targetTitle: 'IP鍗忚', type: 'derived' },
+  { sourceTitle: '缃戠粶灞?, targetTitle: '璺敱绠楁硶', type: 'related' },
+  { sourceTitle: '鏁版嵁閾捐矾灞?, targetTitle: '灞€鍩熺綉鎶€鏈?, type: 'related' },
+  { sourceTitle: '搴旂敤灞?, targetTitle: 'HTTP鍗忚', type: 'derived' },
+  { sourceTitle: '搴旂敤灞?, targetTitle: 'DNS绯荤粺', type: 'derived' },
+  { sourceTitle: '鐗╃悊灞?, targetTitle: '灞€鍩熺綉鎶€鏈?, type: 'prerequisite' },
+  { sourceTitle: '缃戠粶瀹夊叏', targetTitle: '搴旂敤灞?, type: 'related' },
+  { sourceTitle: 'TCP鍙潬浼犺緭', targetTitle: '鎷ュ鎺у埗', type: 'related' },
+  { sourceTitle: 'IP鍗忚', targetTitle: '璺敱绠楁硶', type: 'related' },
+  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '鐗╃悊灞?, type: 'prerequisite' },
+  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '缃戠粶灞?, type: 'related' },
+  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '浼犺緭灞?, type: 'related' },
+  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: 'TCP/IP鍗忚鏍?, type: 'related' },
+  { sourceTitle: '鏁版嵁閾捐矾灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
+  { sourceTitle: '缃戠粶灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
+  { sourceTitle: '浼犺緭灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
+  { sourceTitle: '搴旂敤灞?, targetTitle: 'TCP/IP鍗忚鏍?, type: 'related' },
+  { sourceTitle: 'HTTP鍗忚', targetTitle: 'DNS绯荤粺', type: 'related' },
+  { sourceTitle: '璺敱绠楁硶', targetTitle: 'IP鍗忚', type: 'related' },
+  { sourceTitle: '鎷ュ鎺у埗', targetTitle: 'TCP鍙潬浼犺緭', type: 'derived' },
+  { sourceTitle: '灞€鍩熺綉鎶€鏈?, targetTitle: '鏁版嵁閾捐矾灞?, type: 'derived' },
+  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '鏁版嵁閾捐矾灞?, type: 'prerequisite' },
+  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '搴旂敤灞?, type: 'related' },
+  { sourceTitle: '鐗╃悊灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
+  { sourceTitle: 'DNS绯荤粺', targetTitle: 'HTTP鍗忚', type: 'related' },
+  { sourceTitle: 'IP鍗忚', targetTitle: '浼犺緭灞?, type: 'prerequisite' },
+  { sourceTitle: '璺敱绠楁硶', targetTitle: '浼犺緭灞?, type: 'related' },
+  { sourceTitle: '鎷ュ鎺у埗', targetTitle: '缃戠粶灞?, type: 'related' },
+  { sourceTitle: 'TCP鍙潬浼犺緭', targetTitle: '缃戠粶灞?, type: 'related' },
+  { sourceTitle: '灞€鍩熺綉鎶€鏈?, targetTitle: '缃戠粶灞?, type: 'related' },
+  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '缃戠粶灞?, type: 'prerequisite' },
+  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
+  { sourceTitle: '鐗╃悊灞?, targetTitle: 'OSI涓冨眰妯″瀷', type: 'prerequisite' },
+  { sourceTitle: 'HTTP鍗忚', targetTitle: '浼犺緭灞?, type: 'prerequisite' },
+  { sourceTitle: 'DNS绯荤粺', targetTitle: '缃戠粶灞?, type: 'related' },
+  { sourceTitle: '缃戠粶瀹夊叏', targetTitle: 'IP鍗忚', type: 'related' },
+  { sourceTitle: '璺敱绠楁硶', targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
+  { sourceTitle: '鎷ュ鎺у埗', targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
+  { sourceTitle: 'TCP鍙潬浼犺緭', targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
+  { sourceTitle: '鐗╃悊灞?, targetTitle: '浼犺緭灞?, type: 'related' },
+  { sourceTitle: '灞€鍩熺綉鎶€鏈?, targetTitle: '鐗╃悊灞?, type: 'derived' },
+  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '搴旂敤灞?, type: 'prerequisite' },
 ]
 
 // Cross-cluster edges
 const crossEdges: EdgeDef[] = [
-  { sourceSubject: '操作系统', sourceTitle: '进程调度', targetSubject: '计算机组成原理', targetTitle: 'CPU流水线', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '内存管理', targetSubject: '计算机组成原理', targetTitle: '虚拟存储器', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '虚拟内存', targetSubject: '计算机组成原理', targetTitle: 'Cache', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '同步与互斥', targetSubject: '计算机组成原理', targetTitle: '中断系统', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '设备管理', targetSubject: '计算机组成原理', targetTitle: 'DMA', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '进程通信', targetSubject: '计算机组成原理', targetTitle: '总线系统', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '文件系统', targetSubject: '数据结构', targetTitle: '树', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '页面置换算法', targetSubject: '数据结构', targetTitle: '队列', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '死锁', targetSubject: '数据结构', targetTitle: '图', type: 'related' },
-  { sourceSubject: '操作系统', sourceTitle: '进程调度', targetSubject: '数据结构', targetTitle: '排序算法', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: 'TCP可靠传输', targetSubject: '数据结构', targetTitle: '队列', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: '路由算法', targetSubject: '数据结构', targetTitle: '最短路径', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: '路由算法', targetSubject: '数据结构', targetTitle: '图', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: 'DNS系统', targetSubject: '数据结构', targetTitle: '哈希表', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: '网络安全', targetSubject: '操作系统', targetTitle: '文件系统', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: '拥塞控制', targetSubject: '操作系统', targetTitle: '进程调度', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: 'TCP/IP协议栈', targetSubject: '操作系统', targetTitle: '进程通信', type: 'related' },
-  { sourceSubject: '计算机网络', sourceTitle: '传输层', targetSubject: '操作系统', targetTitle: '进程通信', type: 'related' },
-  { sourceSubject: '计算机组成原理', sourceTitle: 'Cache', targetSubject: '数据结构', targetTitle: '哈希表', type: 'related' },
-  { sourceSubject: '计算机组成原理', sourceTitle: '数据表示', targetSubject: '数据结构', targetTitle: '栈', type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '杩涚▼璋冨害', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: 'CPU娴佹按绾?, type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '鍐呭瓨绠＄悊', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: '铏氭嫙瀛樺偍鍣?, type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '铏氭嫙鍐呭瓨', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: 'Cache', type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '鍚屾涓庝簰鏂?, targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: '涓柇绯荤粺', type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '璁惧绠＄悊', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: 'DMA', type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '杩涚▼閫氫俊', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '鏂囦欢绯荤粺', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鏍?, type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '椤甸潰缃崲绠楁硶', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '闃熷垪', type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '姝婚攣', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍥?, type: 'related' },
+  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '杩涚▼璋冨害', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鎺掑簭绠楁硶', type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: 'TCP鍙潬浼犺緭', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '闃熷垪', type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '璺敱绠楁硶', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鏈€鐭矾寰?, type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '璺敱绠楁硶', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍥?, type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: 'DNS绯荤粺', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍝堝笇琛?, type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '缃戠粶瀹夊叏', targetSubject: '鎿嶄綔绯荤粺', targetTitle: '鏂囦欢绯荤粺', type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '鎷ュ鎺у埗', targetSubject: '鎿嶄綔绯荤粺', targetTitle: '杩涚▼璋冨害', type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: 'TCP/IP鍗忚鏍?, targetSubject: '鎿嶄綔绯荤粺', targetTitle: '杩涚▼閫氫俊', type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '浼犺緭灞?, targetSubject: '鎿嶄綔绯荤粺', targetTitle: '杩涚▼閫氫俊', type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹粍鎴愬師鐞?, sourceTitle: 'Cache', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍝堝笇琛?, type: 'related' },
+  { sourceSubject: '璁＄畻鏈虹粍鎴愬師鐞?, sourceTitle: '鏁版嵁琛ㄧず', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鏍?, type: 'related' },
 ]
 
-// ─── Helper: Build related-titles map from edge definitions ─────────────────
+// 鈹€鈹€鈹€ Helper: Build related-titles map from edge definitions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 function buildRelatedTitlesMap(): Map<string, { prerequisite: string[]; related: string[]; derived: string[] }> {
   const map = new Map<string, { prerequisite: string[]; related: string[]; derived: string[] }>()
@@ -587,9 +587,8 @@ function buildRelatedTitlesMap(): Map<string, { prerequisite: string[]; related:
     else if (type === 'derived') entry.derived.push(targetTitle)
     else entry.related.push(targetTitle)
 
-    // 反向链接：如果 A prerequisite B，则 B derived_from A
-    // related 是对称的，直接反转
-    const reverseType = type === 'prerequisite' ? 'derived' : type === 'derived' ? 'prerequisite' : 'related'
+    // 鍙嶅悜閾炬帴锛氬鏋?A prerequisite B锛屽垯 B derived_from A
+    // related 鏄绉扮殑锛岀洿鎺ュ弽杞?    const reverseType = type === 'prerequisite' ? 'derived' : type === 'derived' ? 'prerequisite' : 'related'
     ensure(targetTitle)
     const revEntry = map.get(targetTitle)!
     if (reverseType === 'prerequisite') revEntry.prerequisite.push(sourceTitle)
@@ -597,7 +596,7 @@ function buildRelatedTitlesMap(): Map<string, { prerequisite: string[]; related:
     else revEntry.related.push(sourceTitle)
   }
 
-  // Within-subject edges (subject info not needed — all titles are unique)
+  // Within-subject edges (subject info not needed 鈥?all titles are unique)
   for (const e of withinDSEdges) add(e.sourceTitle, e.targetTitle, e.type)
   for (const e of withinCOEdges) add(e.sourceTitle, e.targetTitle, e.type)
   for (const e of withinOSEdges) add(e.sourceTitle, e.targetTitle, e.type)
@@ -621,224 +620,216 @@ function buildContent(title: string, related: { prerequisite: string[]; related:
     lines.push('', '**Derived from / leads to:** ' + related.derived.map(t => `[[${t}]]`).join(', '))
   }
 
-  lines.push('', '---', '_CS408 Knowledge Graph — auto-generated seed content_')
+  lines.push('', '---', '_CS408 Knowledge Graph 鈥?auto-generated seed content_')
   return lines.join('\n')
 }
 
 /** Auto-discover WikiLinks for cards that have no manual EdgeDef entries.
  *  Scans all card titles in the same vault and links to any card whose title
  *  appears as a substring of this card's title. This catches cases like
- *  "二叉树的遍历顺序" → [[二叉树]] and "栈与递归的关系" → [[栈]].
+ *  "浜屽弶鏍戠殑閬嶅巻椤哄簭" 鈫?[[浜屽弶鏍慮] and "鏍堜笌閫掑綊鐨勫叧绯? 鈫?[[鏍圿].
  *  Subject-scoped to avoid cross-subject false positives from short names.
  *  Falls back to anchor titles (permanent cards of the subject) so every
  *  card has at least some connections for galaxy visual density. */
 
 /**
- * Manually curated fleeting → permanent card associations.
+ * Manually curated fleeting 鈫?permanent card associations.
  * Every fleeting card below is explicitly linked to 1-3 permanent cards
  * that represent the core concepts it discusses. No automatic matching.
  */
 const fleetingToPermanent: Record<string, string[]> = {
-  // ═══ 数据结构 ═══
-  '快速排序最坏情况':     ['排序算法'],
-  '哈希冲突解决':         ['哈希表'],
-  'KMP算法思想':          ['查找算法'],
-  '动态规划vs贪心算法':   ['图'],
-  '稀疏矩阵存储':         ['线性表'],
-  '广义表结构':           ['线性表'],
-  '外部排序与多路归并':   ['排序算法'],
-  '二分查找决策树':       ['查找算法', '二叉树'],
-  '散列函数设计':         ['哈希表'],
-  '字符串匹配算法':       ['查找算法'],
-  '大数据TopK问题':       ['堆', '排序算法'],
-  '排序算法稳定性对比':   ['排序算法'],
-  '时间复杂度的渐进分析': ['排序算法', '查找算法'],
-  '递归算法的计算模型':   ['栈'],
-  '最小生成树算法对比':   ['图'],
-  '链表的插入删除操作':   ['线性表'],
-  '双向链表与循环链表':   ['线性表'],
-  '二叉树与森林转换':     ['二叉树', '树'],
-  'Huffman编码':          ['二叉树'],
-  'AVL树旋转操作':        ['平衡二叉树'],
-  '红黑树性质':           ['平衡二叉树'],
-  '拓扑排序实现':         ['图'],
-  'Dijkstra算法原理':     ['最短路径', '图'],
-  'Floyd算法原理':        ['最短路径', '图'],
-  '归并排序过程':         ['排序算法'],
-  '基数排序思想':         ['排序算法'],
+  // 鈺愨晲鈺?鏁版嵁缁撴瀯 鈺愨晲鈺?  '蹇€熸帓搴忔渶鍧忔儏鍐?:     ['鎺掑簭绠楁硶'],
+  '鍝堝笇鍐茬獊瑙ｅ喅':         ['鍝堝笇琛?],
+  'KMP绠楁硶鎬濇兂':          ['鏌ユ壘绠楁硶'],
+  '鍔ㄦ€佽鍒抳s璐績绠楁硶':   ['鍥?],
+  '绋€鐤忕煩闃靛瓨鍌?:         ['绾挎€ц〃'],
+  '骞夸箟琛ㄧ粨鏋?:           ['绾挎€ц〃'],
+  '澶栭儴鎺掑簭涓庡璺綊骞?:   ['鎺掑簭绠楁硶'],
+  '浜屽垎鏌ユ壘鍐崇瓥鏍?:       ['鏌ユ壘绠楁硶', '浜屽弶鏍?],
+  '鏁ｅ垪鍑芥暟璁捐':         ['鍝堝笇琛?],
+  '瀛楃涓插尮閰嶇畻娉?:       ['鏌ユ壘绠楁硶'],
+  '澶ф暟鎹甌opK闂':       ['鍫?, '鎺掑簭绠楁硶'],
+  '鎺掑簭绠楁硶绋冲畾鎬у姣?:   ['鎺掑簭绠楁硶'],
+  '鏃堕棿澶嶆潅搴︾殑娓愯繘鍒嗘瀽': ['鎺掑簭绠楁硶', '鏌ユ壘绠楁硶'],
+  '閫掑綊绠楁硶鐨勮绠楁ā鍨?:   ['鏍?],
+  '鏈€灏忕敓鎴愭爲绠楁硶瀵规瘮':   ['鍥?],
+  '閾捐〃鐨勬彃鍏ュ垹闄ゆ搷浣?:   ['绾挎€ц〃'],
+  '鍙屽悜閾捐〃涓庡惊鐜摼琛?:   ['绾挎€ц〃'],
+  '浜屽弶鏍戜笌妫灄杞崲':     ['浜屽弶鏍?, '鏍?],
+  'Huffman缂栫爜':          ['浜屽弶鏍?],
+  'AVL鏍戞棆杞搷浣?:        ['骞宠　浜屽弶鏍?],
+  '绾㈤粦鏍戞€ц川':           ['骞宠　浜屽弶鏍?],
+  '鎷撴墤鎺掑簭瀹炵幇':         ['鍥?],
+  'Dijkstra绠楁硶鍘熺悊':     ['鏈€鐭矾寰?, '鍥?],
+  'Floyd绠楁硶鍘熺悊':        ['鏈€鐭矾寰?, '鍥?],
+  '褰掑苟鎺掑簭杩囩▼':         ['鎺掑簭绠楁硶'],
+  '鍩烘暟鎺掑簭鎬濇兂':         ['鎺掑簭绠楁硶'],
 
-  // Remaining 数据结构 fleeting cards
-  'B树与B+树区别':       ['B树'],
-  'Prim算法与Kruskal算法对比': ['图'],
-  '二叉树的遍历顺序':     ['二叉树', '树'],
-  '图的深度优先与广度优先': ['图'],
-  '图的邻接矩阵vs邻接表': ['图'],
-  '循环队列实现':         ['队列'],
-  '栈与递归的关系':       ['栈'],
-  '栈的应用场景':         ['栈'],
-  '队列的应用场景':       ['队列'],
+  // Remaining 鏁版嵁缁撴瀯 fleeting cards
+  'B鏍戜笌B+鏍戝尯鍒?:       ['B鏍?],
+  'Prim绠楁硶涓嶬ruskal绠楁硶瀵规瘮': ['鍥?],
+  '浜屽弶鏍戠殑閬嶅巻椤哄簭':     ['浜屽弶鏍?, '鏍?],
+  '鍥剧殑娣卞害浼樺厛涓庡箍搴︿紭鍏?: ['鍥?],
+  '鍥剧殑閭绘帴鐭╅樀vs閭绘帴琛?: ['鍥?],
+  '寰幆闃熷垪瀹炵幇':         ['闃熷垪'],
+  '鏍堜笌閫掑綊鐨勫叧绯?:       ['鏍?],
+  '鏍堢殑搴旂敤鍦烘櫙':         ['鏍?],
+  '闃熷垪鐨勫簲鐢ㄥ満鏅?:       ['闃熷垪'],
 
-  // ═══ 计算机组成原理 ═══
-  '原码反码补码转换':     ['数据表示'],
-  'IEEE754浮点标准':      ['浮点运算', '数据表示'],
-  'Cache映射方式':        ['Cache'],
-  '流水线冲突类型':       ['指令流水线冒险', 'CPU流水线'],
-  '中断处理流程':         ['中断系统'],
-  'DMA与程序中断对比':    ['DMA', '中断系统'],
-  '总线仲裁方式':         ['总线系统'],
-  'RAID等级区别':         ['输入输出系统'],
-  '汉明码检错':           ['数据表示'],
-  '页式虚拟存储器地址转换': ['虚拟存储器'],
-  '微程序控制与硬布线控制': ['控制单元'],
-  '指令周期与机器周期':   ['控制单元', 'CPU流水线'],
-  '数据寻址方式':         ['指令系统'],
-  'CISC与RISC对比':      ['指令系统'],
-  'MIPS指令格式':        ['指令系统'],
-  '乘法运算的硬件实现':   ['运算方法与ALU'],
-  'Booth算法':            ['运算方法与ALU'],
-  '浮点加减运算步骤':     ['浮点运算'],
-  '存储器的扩展技术':     ['存储器层次'],
-  'Cache写策略':          ['Cache'],
-  '多体交叉存储器':       ['存储器层次'],
-  '流水线性能指标':       ['CPU流水线'],
-  '数据冒险与转发技术':   ['指令流水线冒险'],
-  '控制冒险与分支预测':   ['指令流水线冒险'],
-  '异常与中断的区别':     ['中断系统'],
-  '中断优先级与屏蔽':     ['中断系统'],
-  '通道控制方式':         ['输入输出系统'],
-  'IO接口的功能与结构':   ['输入输出系统'],
-  '总线标准与接口':       ['总线系统'],
-  'USB协议概述':          ['总线系统', '输入输出系统'],
-  'PCIe总线':             ['总线系统'],
-  '磁盘存储器结构':       ['输入输出系统'],
-  '固态硬盘SSD技术':      ['输入输出系统'],
-  '计算机性能评价指标':   ['CPU流水线'],
-  'Amdahl定律':           ['CPU流水线'],
+  // 鈺愨晲鈺?璁＄畻鏈虹粍鎴愬師鐞?鈺愨晲鈺?  '鍘熺爜鍙嶇爜琛ョ爜杞崲':     ['鏁版嵁琛ㄧず'],
+  'IEEE754娴偣鏍囧噯':      ['娴偣杩愮畻', '鏁版嵁琛ㄧず'],
+  'Cache鏄犲皠鏂瑰紡':        ['Cache'],
+  '娴佹按绾垮啿绐佺被鍨?:       ['鎸囦护娴佹按绾垮啋闄?, 'CPU娴佹按绾?],
+  '涓柇澶勭悊娴佺▼':         ['涓柇绯荤粺'],
+  'DMA涓庣▼搴忎腑鏂姣?:    ['DMA', '涓柇绯荤粺'],
+  '鎬荤嚎浠茶鏂瑰紡':         ['鎬荤嚎绯荤粺'],
+  'RAID绛夌骇鍖哄埆':         ['杈撳叆杈撳嚭绯荤粺'],
+  '姹夋槑鐮佹閿?:           ['鏁版嵁琛ㄧず'],
+  '椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲': ['铏氭嫙瀛樺偍鍣?],
+  '寰▼搴忔帶鍒朵笌纭竷绾挎帶鍒?: ['鎺у埗鍗曞厓'],
+  '鎸囦护鍛ㄦ湡涓庢満鍣ㄥ懆鏈?:   ['鎺у埗鍗曞厓', 'CPU娴佹按绾?],
+  '鏁版嵁瀵诲潃鏂瑰紡':         ['鎸囦护绯荤粺'],
+  'CISC涓嶳ISC瀵规瘮':      ['鎸囦护绯荤粺'],
+  'MIPS鎸囦护鏍煎紡':        ['鎸囦护绯荤粺'],
+  '涔樻硶杩愮畻鐨勭‖浠跺疄鐜?:   ['杩愮畻鏂规硶涓嶢LU'],
+  'Booth绠楁硶':            ['杩愮畻鏂规硶涓嶢LU'],
+  '娴偣鍔犲噺杩愮畻姝ラ':     ['娴偣杩愮畻'],
+  '瀛樺偍鍣ㄧ殑鎵╁睍鎶€鏈?:     ['瀛樺偍鍣ㄥ眰娆?],
+  'Cache鍐欑瓥鐣?:          ['Cache'],
+  '澶氫綋浜ゅ弶瀛樺偍鍣?:       ['瀛樺偍鍣ㄥ眰娆?],
+  '娴佹按绾挎€ц兘鎸囨爣':       ['CPU娴佹按绾?],
+  '鏁版嵁鍐掗櫓涓庤浆鍙戞妧鏈?:   ['鎸囦护娴佹按绾垮啋闄?],
+  '鎺у埗鍐掗櫓涓庡垎鏀娴?:   ['鎸囦护娴佹按绾垮啋闄?],
+  '寮傚父涓庝腑鏂殑鍖哄埆':     ['涓柇绯荤粺'],
+  '涓柇浼樺厛绾т笌灞忚斀':     ['涓柇绯荤粺'],
+  '閫氶亾鎺у埗鏂瑰紡':         ['杈撳叆杈撳嚭绯荤粺'],
+  'IO鎺ュ彛鐨勫姛鑳戒笌缁撴瀯':   ['杈撳叆杈撳嚭绯荤粺'],
+  '鎬荤嚎鏍囧噯涓庢帴鍙?:       ['鎬荤嚎绯荤粺'],
+  'USB鍗忚姒傝堪':          ['鎬荤嚎绯荤粺', '杈撳叆杈撳嚭绯荤粺'],
+  'PCIe鎬荤嚎':             ['鎬荤嚎绯荤粺'],
+  '纾佺洏瀛樺偍鍣ㄧ粨鏋?:       ['杈撳叆杈撳嚭绯荤粺'],
+  '鍥烘€佺‖鐩楽SD鎶€鏈?:      ['杈撳叆杈撳嚭绯荤粺'],
+  '璁＄畻鏈烘€ц兘璇勪环鎸囨爣':   ['CPU娴佹按绾?],
+  'Amdahl瀹氬緥':           ['CPU娴佹按绾?],
 
-  // ═══ 操作系统 ═══
-  'PCB与TCB区别':         ['进程与线程'],
-  '调度算法比较':         ['进程调度'],
-  '生产者消费者问题':     ['同步与互斥', '信号量机制'],
-  '读者写者问题':         ['同步与互斥'],
-  '哲学家就餐问题':       ['同步与互斥', '信号量机制'],
-  '死锁必要条件':         ['死锁'],
-  '银行家算法':           ['死锁'],
-  '段页式存储':           ['分页与分段', '内存管理'],
-  'LRU与LFU区别':        ['页面置换算法'],
-  '磁盘调度算法比较':     ['磁盘调度'],
-  '用户态与核心态切换':   ['进程与线程'],
-  '系统调用实现':         ['进程与线程'],
-  '进程状态转换':         ['进程与线程'],
-  '线程的实现模型':       ['进程与线程'],
-  '协程与线程对比':       ['进程与线程'],
-  '互斥锁与自旋锁':       ['同步与互斥'],
-  '读写锁实现':           ['同步与互斥'],
-  '条件变量与信号量':     ['信号量机制', '同步与互斥'],
-  '死锁检测与恢复':       ['死锁'],
-  '内存分配算法对比':     ['内存管理'],
-  '快表TLB原理':          ['分页与分段', '虚拟内存'],
-  '多级页表':             ['分页与分段', '内存管理'],
-  '缺页中断处理':         ['虚拟内存', '页面置换算法'],
-  '页面分配策略':         ['页面置换算法', '内存管理'],
-  '文件分配方式对比':     ['文件系统'],
-  '目录结构实现':         ['文件系统'],
-  '空闲空间管理':         ['文件系统'],
-  '磁盘调度FCFS与SCAN':  ['磁盘调度'],
-  'SPOOLing系统':         ['设备管理', 'IO管理'],
-  '缓冲技术':             ['IO管理', '设备管理'],
-  '设备驱动程序接口':     ['设备管理'],
-  '共享文件与链接':       ['文件系统'],
-  '文件保护机制':         ['文件系统'],
-  '日志文件系统':         ['文件系统'],
-  '实时操作系统特点':     ['进程调度'],
+  // 鈺愨晲鈺?鎿嶄綔绯荤粺 鈺愨晲鈺?  'PCB涓嶵CB鍖哄埆':         ['杩涚▼涓庣嚎绋?],
+  '璋冨害绠楁硶姣旇緝':         ['杩涚▼璋冨害'],
+  '鐢熶骇鑰呮秷璐硅€呴棶棰?:     ['鍚屾涓庝簰鏂?, '淇″彿閲忔満鍒?],
+  '璇昏€呭啓鑰呴棶棰?:         ['鍚屾涓庝簰鏂?],
+  '鍝插瀹跺氨椁愰棶棰?:       ['鍚屾涓庝簰鏂?, '淇″彿閲忔満鍒?],
+  '姝婚攣蹇呰鏉′欢':         ['姝婚攣'],
+  '閾惰瀹剁畻娉?:           ['姝婚攣'],
+  '娈甸〉寮忓瓨鍌?:           ['鍒嗛〉涓庡垎娈?, '鍐呭瓨绠＄悊'],
+  'LRU涓嶭FU鍖哄埆':        ['椤甸潰缃崲绠楁硶'],
+  '纾佺洏璋冨害绠楁硶姣旇緝':     ['纾佺洏璋冨害'],
+  '鐢ㄦ埛鎬佷笌鏍稿績鎬佸垏鎹?:   ['杩涚▼涓庣嚎绋?],
+  '绯荤粺璋冪敤瀹炵幇':         ['杩涚▼涓庣嚎绋?],
+  '杩涚▼鐘舵€佽浆鎹?:         ['杩涚▼涓庣嚎绋?],
+  '绾跨▼鐨勫疄鐜版ā鍨?:       ['杩涚▼涓庣嚎绋?],
+  '鍗忕▼涓庣嚎绋嬪姣?:       ['杩涚▼涓庣嚎绋?],
+  '浜掓枼閿佷笌鑷棆閿?:       ['鍚屾涓庝簰鏂?],
+  '璇诲啓閿佸疄鐜?:           ['鍚屾涓庝簰鏂?],
+  '鏉′欢鍙橀噺涓庝俊鍙烽噺':     ['淇″彿閲忔満鍒?, '鍚屾涓庝簰鏂?],
+  '姝婚攣妫€娴嬩笌鎭㈠':       ['姝婚攣'],
+  '鍐呭瓨鍒嗛厤绠楁硶瀵规瘮':     ['鍐呭瓨绠＄悊'],
+  '蹇〃TLB鍘熺悊':          ['鍒嗛〉涓庡垎娈?, '铏氭嫙鍐呭瓨'],
+  '澶氱骇椤佃〃':             ['鍒嗛〉涓庡垎娈?, '鍐呭瓨绠＄悊'],
+  '缂洪〉涓柇澶勭悊':         ['铏氭嫙鍐呭瓨', '椤甸潰缃崲绠楁硶'],
+  '椤甸潰鍒嗛厤绛栫暐':         ['椤甸潰缃崲绠楁硶', '鍐呭瓨绠＄悊'],
+  '鏂囦欢鍒嗛厤鏂瑰紡瀵规瘮':     ['鏂囦欢绯荤粺'],
+  '鐩綍缁撴瀯瀹炵幇':         ['鏂囦欢绯荤粺'],
+  '绌洪棽绌洪棿绠＄悊':         ['鏂囦欢绯荤粺'],
+  '纾佺洏璋冨害FCFS涓嶴CAN':  ['纾佺洏璋冨害'],
+  'SPOOLing绯荤粺':         ['璁惧绠＄悊', 'IO绠＄悊'],
+  '缂撳啿鎶€鏈?:             ['IO绠＄悊', '璁惧绠＄悊'],
+  '璁惧椹卞姩绋嬪簭鎺ュ彛':     ['璁惧绠＄悊'],
+  '鍏变韩鏂囦欢涓庨摼鎺?:       ['鏂囦欢绯荤粺'],
+  '鏂囦欢淇濇姢鏈哄埗':         ['鏂囦欢绯荤粺'],
+  '鏃ュ織鏂囦欢绯荤粺':         ['鏂囦欢绯荤粺'],
+  '瀹炴椂鎿嶄綔绯荤粺鐗圭偣':     ['杩涚▼璋冨害'],
 
-  // ═══ 计算机网络 ═══
-  '三次握手四次挥手':     ['传输层', 'TCP可靠传输'],
-  'TCP与UDP区别':        ['传输层'],
-  '滑动窗口机制':         ['TCP可靠传输'],
-  '拥塞控制算法':         ['拥塞控制'],
-  'ARP协议工作流程':      ['网络层', 'IP协议'],
-  'DHCP原理':             ['应用层', '网络层'],
-  '子网划分':             ['网络层', 'IP协议'],
-  'CIDR表示法':           ['网络层', 'IP协议'],
-  'NAT转换':              ['网络层', 'IP协议'],
-  '路由选择协议对比':     ['路由算法', '网络层'],
-  '信道复用技术':         ['物理层'],
-  '编码与调制':           ['物理层'],
-  '传输介质分类':         ['物理层'],
-  'CSMA/CD协议':          ['数据链路层', '局域网技术'],
-  '以太网帧结构':         ['数据链路层'],
-  '交换机与集线器区别':   ['数据链路层', '局域网技术'],
-  'VLAN技术':             ['数据链路层', '局域网技术'],
-  '生成树协议':           ['数据链路层', '局域网技术'],
-  'IP数据报格式':         ['IP协议', '网络层'],
-  '分片与重组':           ['IP协议', '网络层'],
-  'IPv6协议':             ['IP协议', '网络层'],
-  'ICMP协议应用':         ['IP协议', '网络层'],
-  '隧道技术':             ['网络层'],
-  '端口号分配':           ['传输层'],
-  '流量控制与拥塞控制区别': ['拥塞控制', 'TCP可靠传输'],
-  '超时重传与快速重传':   ['TCP可靠传输'],
-  '选择性确认SACK':       ['TCP可靠传输'],
-  '连接管理状态转换':     ['传输层', 'TCP可靠传输'],
-  'WebSocket协议':        ['应用层', 'HTTP协议'],
-  '电子邮件协议':         ['应用层'],
-  'FTP协议工作原理':      ['应用层'],
-  '域名解析过程':         ['DNS系统', '应用层'],
-  'CDN技术原理':          ['应用层', 'DNS系统'],
-  'VPN技术':              ['网络安全', '网络层'],
-  '网络安全攻击类型':     ['网络安全'],
+  // 鈺愨晲鈺?璁＄畻鏈虹綉缁?鈺愨晲鈺?  '涓夋鎻℃墜鍥涙鎸ユ墜':     ['浼犺緭灞?, 'TCP鍙潬浼犺緭'],
+  'TCP涓嶶DP鍖哄埆':        ['浼犺緭灞?],
+  '婊戝姩绐楀彛鏈哄埗':         ['TCP鍙潬浼犺緭'],
+  '鎷ュ鎺у埗绠楁硶':         ['鎷ュ鎺у埗'],
+  'ARP鍗忚宸ヤ綔娴佺▼':      ['缃戠粶灞?, 'IP鍗忚'],
+  'DHCP鍘熺悊':             ['搴旂敤灞?, '缃戠粶灞?],
+  '瀛愮綉鍒掑垎':             ['缃戠粶灞?, 'IP鍗忚'],
+  'CIDR琛ㄧず娉?:           ['缃戠粶灞?, 'IP鍗忚'],
+  'NAT杞崲':              ['缃戠粶灞?, 'IP鍗忚'],
+  '璺敱閫夋嫨鍗忚瀵规瘮':     ['璺敱绠楁硶', '缃戠粶灞?],
+  '淇￠亾澶嶇敤鎶€鏈?:         ['鐗╃悊灞?],
+  '缂栫爜涓庤皟鍒?:           ['鐗╃悊灞?],
+  '浼犺緭浠嬭川鍒嗙被':         ['鐗╃悊灞?],
+  'CSMA/CD鍗忚':          ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
+  '浠ュお缃戝抚缁撴瀯':         ['鏁版嵁閾捐矾灞?],
+  '浜ゆ崲鏈轰笌闆嗙嚎鍣ㄥ尯鍒?:   ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
+  'VLAN鎶€鏈?:             ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
+  '鐢熸垚鏍戝崗璁?:           ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
+  'IP鏁版嵁鎶ユ牸寮?:         ['IP鍗忚', '缃戠粶灞?],
+  '鍒嗙墖涓庨噸缁?:           ['IP鍗忚', '缃戠粶灞?],
+  'IPv6鍗忚':             ['IP鍗忚', '缃戠粶灞?],
+  'ICMP鍗忚搴旂敤':         ['IP鍗忚', '缃戠粶灞?],
+  '闅ч亾鎶€鏈?:             ['缃戠粶灞?],
+  '绔彛鍙峰垎閰?:           ['浼犺緭灞?],
+  '娴侀噺鎺у埗涓庢嫢濉炴帶鍒跺尯鍒?: ['鎷ュ鎺у埗', 'TCP鍙潬浼犺緭'],
+  '瓒呮椂閲嶄紶涓庡揩閫熼噸浼?:   ['TCP鍙潬浼犺緭'],
+  '閫夋嫨鎬х‘璁ACK':       ['TCP鍙潬浼犺緭'],
+  '杩炴帴绠＄悊鐘舵€佽浆鎹?:     ['浼犺緭灞?, 'TCP鍙潬浼犺緭'],
+  'WebSocket鍗忚':        ['搴旂敤灞?, 'HTTP鍗忚'],
+  '鐢靛瓙閭欢鍗忚':         ['搴旂敤灞?],
+  'FTP鍗忚宸ヤ綔鍘熺悊':      ['搴旂敤灞?],
+  '鍩熷悕瑙ｆ瀽杩囩▼':         ['DNS绯荤粺', '搴旂敤灞?],
+  'CDN鎶€鏈師鐞?:          ['搴旂敤灞?, 'DNS绯荤粺'],
+  'VPN鎶€鏈?:              ['缃戠粶瀹夊叏', '缃戠粶灞?],
+  '缃戠粶瀹夊叏鏀诲嚮绫诲瀷':     ['缃戠粶瀹夊叏'],
 
-  // ═══ 数据结构 — 文献卡片 → 核心概念 ═══
-  '严蔚敏《数据结构》':     ['线性表', '栈', '树', '图', '排序算法'],
-  '邓俊辉《数据结构与算法》': ['线性表', '二叉树', '查找算法', '排序算法', '哈希表'],
-  '《算法导论》':           ['排序算法', '图', '哈希表', '堆', '树'],
-  '《大话数据结构》':       ['线性表', '栈', '队列', '树', '图'],
-  '王道408数据结构篇':      ['线性表', '栈', '树', '图', '排序算法'],
-  '天勤数据结构高分笔记':   ['线性表', '二叉树', '排序算法', '栈', '队列'],
-  'LeetCode HOT100':        ['线性表', '树', '哈希表', '堆', '图'],
-  '《数据结构与算法分析》': ['树', '排序算法', '哈希表', '堆', '二叉树'],
+  // 鈺愨晲鈺?鏁版嵁缁撴瀯 鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '涓ヨ敋鏁忋€婃暟鎹粨鏋勩€?:     ['绾挎€ц〃', '鏍?, '鏍?, '鍥?, '鎺掑簭绠楁硶'],
+  '閭撲繆杈夈€婃暟鎹粨鏋勪笌绠楁硶銆?: ['绾挎€ц〃', '浜屽弶鏍?, '鏌ユ壘绠楁硶', '鎺掑簭绠楁硶', '鍝堝笇琛?],
+  '銆婄畻娉曞璁恒€?:           ['鎺掑簭绠楁硶', '鍥?, '鍝堝笇琛?, '鍫?, '鏍?],
+  '銆婂ぇ璇濇暟鎹粨鏋勩€?:       ['绾挎€ц〃', '鏍?, '闃熷垪', '鏍?, '鍥?],
+  '鐜嬮亾408鏁版嵁缁撴瀯绡?:      ['绾挎€ц〃', '鏍?, '鏍?, '鍥?, '鎺掑簭绠楁硶'],
+  '澶╁嫟鏁版嵁缁撴瀯楂樺垎绗旇':   ['绾挎€ц〃', '浜屽弶鏍?, '鎺掑簭绠楁硶', '鏍?, '闃熷垪'],
+  'LeetCode HOT100':        ['绾挎€ц〃', '鏍?, '鍝堝笇琛?, '鍫?, '鍥?],
+  '銆婃暟鎹粨鏋勪笌绠楁硶鍒嗘瀽銆?: ['鏍?, '鎺掑簭绠楁硶', '鍝堝笇琛?, '鍫?, '浜屽弶鏍?],
 
-  // ═══ 计算机组成原理 — 文献卡片 → 核心概念 ═══
-  '唐朔飞《计算机组成原理》':       ['冯诺依曼结构', 'CPU流水线', '存储器层次', 'Cache', '指令系统'],
-  '袁春风《计算机组成与设计》':     ['冯诺依曼结构', 'CPU流水线', '数据表示', '控制单元', '总线系统'],
-  'Patterson《计算机组成与设计》':   ['冯诺依曼结构', 'CPU流水线', '存储器层次', 'Cache', '指令系统'],
-  '王道408计组篇':                  ['冯诺依曼结构', '数据表示', 'CPU流水线', 'Cache', '中断系统'],
-  '天勤计组高分笔记':               ['冯诺依曼结构', '数据表示', 'CPU流水线', '存储器层次', '输入输出系统'],
-  'Stallings《计算机组成与体系结构》': ['冯诺依曼结构', 'CPU流水线', 'Cache', '指令系统', '总线系统'],
-  '《数字设计和计算机体系结构》':    ['冯诺依曼结构', '数据表示', '控制单元', 'CPU流水线', '指令系统'],
-  '《计算机体系结构量化方法》':      ['CPU流水线', 'Cache', '虚拟存储器', '指令流水线冒险', '存储器层次'],
+  // 鈺愨晲鈺?璁＄畻鏈虹粍鎴愬師鐞?鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '鍞愭湐椋炪€婅绠楁満缁勬垚鍘熺悊銆?:       ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, '瀛樺偍鍣ㄥ眰娆?, 'Cache', '鎸囦护绯荤粺'],
+  '琚佹槬椋庛€婅绠楁満缁勬垚涓庤璁°€?:     ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, '鏁版嵁琛ㄧず', '鎺у埗鍗曞厓', '鎬荤嚎绯荤粺'],
+  'Patterson銆婅绠楁満缁勬垚涓庤璁°€?:   ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, '瀛樺偍鍣ㄥ眰娆?, 'Cache', '鎸囦护绯荤粺'],
+  '鐜嬮亾408璁＄粍绡?:                  ['鍐渚濇浖缁撴瀯', '鏁版嵁琛ㄧず', 'CPU娴佹按绾?, 'Cache', '涓柇绯荤粺'],
+  '澶╁嫟璁＄粍楂樺垎绗旇':               ['鍐渚濇浖缁撴瀯', '鏁版嵁琛ㄧず', 'CPU娴佹按绾?, '瀛樺偍鍣ㄥ眰娆?, '杈撳叆杈撳嚭绯荤粺'],
+  'Stallings銆婅绠楁満缁勬垚涓庝綋绯荤粨鏋勩€?: ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, 'Cache', '鎸囦护绯荤粺', '鎬荤嚎绯荤粺'],
+  '銆婃暟瀛楄璁″拰璁＄畻鏈轰綋绯荤粨鏋勩€?:    ['鍐渚濇浖缁撴瀯', '鏁版嵁琛ㄧず', '鎺у埗鍗曞厓', 'CPU娴佹按绾?, '鎸囦护绯荤粺'],
+  '銆婅绠楁満浣撶郴缁撴瀯閲忓寲鏂规硶銆?:      ['CPU娴佹按绾?, 'Cache', '铏氭嫙瀛樺偍鍣?, '鎸囦护娴佹按绾垮啋闄?, '瀛樺偍鍣ㄥ眰娆?],
 
-  // ═══ 操作系统 — 文献卡片 → 核心概念 ═══
-  '汤子瀛《计算机操作系统》':   ['进程与线程', '内存管理', '文件系统', '死锁', '同步与互斥'],
-  '王道408操作系统篇':          ['进程与线程', '内存管理', '文件系统', '死锁', '进程调度'],
-  '天勤操作系统高分笔记':       ['进程与线程', '内存管理', '进程调度', '同步与互斥', '信号量机制'],
-  '《现代操作系统》':           ['进程与线程', '内存管理', '文件系统', '死锁', '虚拟内存'],
-  '《深入理解Linux内核》':      ['进程与线程', '进程调度', '内存管理', '文件系统', '设备管理'],
-  '《操作系统概念》':           ['进程与线程', '内存管理', '文件系统', '死锁', '同步与互斥'],
-  '《Linux内核设计与实现》':    ['进程与线程', '进程调度', '虚拟内存', '进程通信', '文件系统'],
-  '《操作系统真象还原》':       ['进程与线程', '内存管理', '文件系统', '分页与分段', '设备管理'],
+  // 鈺愨晲鈺?鎿嶄綔绯荤粺 鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '姹ゅ瓙鐎涖€婅绠楁満鎿嶄綔绯荤粺銆?:   ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '鍚屾涓庝簰鏂?],
+  '鐜嬮亾408鎿嶄綔绯荤粺绡?:          ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '杩涚▼璋冨害'],
+  '澶╁嫟鎿嶄綔绯荤粺楂樺垎绗旇':       ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '杩涚▼璋冨害', '鍚屾涓庝簰鏂?, '淇″彿閲忔満鍒?],
+  '銆婄幇浠ｆ搷浣滅郴缁熴€?:           ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '铏氭嫙鍐呭瓨'],
+  '銆婃繁鍏ョ悊瑙inux鍐呮牳銆?:      ['杩涚▼涓庣嚎绋?, '杩涚▼璋冨害', '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '璁惧绠＄悊'],
+  '銆婃搷浣滅郴缁熸蹇点€?:           ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '鍚屾涓庝簰鏂?],
+  '銆奓inux鍐呮牳璁捐涓庡疄鐜般€?:    ['杩涚▼涓庣嚎绋?, '杩涚▼璋冨害', '铏氭嫙鍐呭瓨', '杩涚▼閫氫俊', '鏂囦欢绯荤粺'],
+  '銆婃搷浣滅郴缁熺湡璞¤繕鍘熴€?:       ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '鍒嗛〉涓庡垎娈?, '璁惧绠＄悊'],
 
-  // ═══ 计算机网络 — 文献卡片 → 核心概念 ═══
-  '谢希仁《计算机网络》':                ['TCP/IP协议栈', '传输层', '网络层', '应用层', '数据链路层'],
-  '王道408计网篇':                       ['TCP/IP协议栈', '传输层', '网络层', '数据链路层', '应用层'],
-  '天勤计网高分笔记':                    ['TCP/IP协议栈', '传输层', '网络层', '物理层', '应用层'],
-  'Kurose《计算机网络自顶向下》':         ['应用层', '传输层', '网络层', '数据链路层', 'TCP可靠传输'],
-  '《TCP/IP详解》':                      ['TCP/IP协议栈', '传输层', 'TCP可靠传输', 'IP协议', '拥塞控制'],
-  '计算机网络(Andrew Tanenbaum)':        ['物理层', '数据链路层', '网络层', '传输层', '网络安全'],
-  '《图解HTTP》':                        ['应用层', 'HTTP协议', '传输层', 'DNS系统', '网络安全'],
-  '《网络是怎样连接的》':                ['DNS系统', 'HTTP协议', 'IP协议', '传输层', 'TCP可靠传输'],
+  // 鈺愨晲鈺?璁＄畻鏈虹綉缁?鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '璋㈠笇浠併€婅绠楁満缃戠粶銆?:                ['TCP/IP鍗忚鏍?, '浼犺緭灞?, '缃戠粶灞?, '搴旂敤灞?, '鏁版嵁閾捐矾灞?],
+  '鐜嬮亾408璁＄綉绡?:                       ['TCP/IP鍗忚鏍?, '浼犺緭灞?, '缃戠粶灞?, '鏁版嵁閾捐矾灞?, '搴旂敤灞?],
+  '澶╁嫟璁＄綉楂樺垎绗旇':                    ['TCP/IP鍗忚鏍?, '浼犺緭灞?, '缃戠粶灞?, '鐗╃悊灞?, '搴旂敤灞?],
+  'Kurose銆婅绠楁満缃戠粶鑷《鍚戜笅銆?:         ['搴旂敤灞?, '浼犺緭灞?, '缃戠粶灞?, '鏁版嵁閾捐矾灞?, 'TCP鍙潬浼犺緭'],
+  '銆奣CP/IP璇﹁В銆?:                      ['TCP/IP鍗忚鏍?, '浼犺緭灞?, 'TCP鍙潬浼犺緭', 'IP鍗忚', '鎷ュ鎺у埗'],
+  '璁＄畻鏈虹綉缁?Andrew Tanenbaum)':        ['鐗╃悊灞?, '鏁版嵁閾捐矾灞?, '缃戠粶灞?, '浼犺緭灞?, '缃戠粶瀹夊叏'],
+  '銆婂浘瑙TTP銆?:                        ['搴旂敤灞?, 'HTTP鍗忚', '浼犺緭灞?, 'DNS绯荤粺', '缃戠粶瀹夊叏'],
+  '銆婄綉缁滄槸鎬庢牱杩炴帴鐨勩€?:                ['DNS绯荤粺', 'HTTP鍗忚', 'IP鍗忚', '浼犺緭灞?, 'TCP鍙潬浼犺緭'],
 
 }
 function linkContent(title: string): string {
   const targets = fleetingToPermanent[title]
   if (!targets || targets.length === 0) {
-    return '## ' + title + '\n\n---\n_CS408 Knowledge Graph — auto-generated seed content_\n'
+    return '## ' + title + '\n\n---\n_CS408 Knowledge Graph 鈥?auto-generated seed content_\n'
   }
-  return '## ' + title + '\n\n**Related:** ' + [...new Set(targets)].map(t => '[[' + t + ']]').join(', ') + '\n\n---\n_CS408 Knowledge Graph — auto-generated seed content_\n'
+  return '## ' + title + '\n\n**Related:** ' + [...new Set(targets)].map(t => '[[' + t + ']]').join(', ') + '\n\n---\n_CS408 Knowledge Graph 鈥?auto-generated seed content_\n'
 }
 
-// ─── Auto-generate fleeting↔fleeting edges ───────────────────────────────────
+// 鈹€鈹€鈹€ Auto-generate fleeting鈫攆leeting edges 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 // Two fleeting cards that share a common permanent card target should be
 // linked to each other, creating a dense web instead of a star topology.
 function buildFleetingToFleeting(): Record<string, string[]> {
@@ -869,41 +860,38 @@ function buildFleetingToFleeting(): Record<string, string[]> {
 
   // Hand-picked cross-cutting connections not covered by shared permanent card
   const manualConnections: [string, string][] = [
-    // 数据结构 — 算法分析相关
-    ['动态规划vs贪心算法', '时间复杂度的渐进分析'],
-    ['动态规划vs贪心算法', '递归算法的计算模型'],
-    ['稀疏矩阵存储', '广义表结构'],
-    ['外部排序与多路归并', '大数据TopK问题'],
-    ['基数排序思想', '外部排序与多路归并'],
+    // 鏁版嵁缁撴瀯 鈥?绠楁硶鍒嗘瀽鐩稿叧
+    ['鍔ㄦ€佽鍒抳s璐績绠楁硶', '鏃堕棿澶嶆潅搴︾殑娓愯繘鍒嗘瀽'],
+    ['鍔ㄦ€佽鍒抳s璐績绠楁硶', '閫掑綊绠楁硶鐨勮绠楁ā鍨?],
+    ['绋€鐤忕煩闃靛瓨鍌?, '骞夸箟琛ㄧ粨鏋?],
+    ['澶栭儴鎺掑簭涓庡璺綊骞?, '澶ф暟鎹甌opK闂'],
+    ['鍩烘暟鎺掑簭鎬濇兂', '澶栭儴鎺掑簭涓庡璺綊骞?],
 
-    // 计算机组成原理 — 性能与并行
-    ['流水线性能指标', '计算机性能评价指标'],
-    ['Amdahl定律', '计算机性能评价指标'],
-    ['多体交叉存储器', '存储器的扩展技术'],
-    ['磁盘存储器结构', '固态硬盘SSD技术'],
-    ['RAID等级区别', '磁盘存储器结构'],
+    // 璁＄畻鏈虹粍鎴愬師鐞?鈥?鎬ц兘涓庡苟琛?    ['娴佹按绾挎€ц兘鎸囨爣', '璁＄畻鏈烘€ц兘璇勪环鎸囨爣'],
+    ['Amdahl瀹氬緥', '璁＄畻鏈烘€ц兘璇勪环鎸囨爣'],
+    ['澶氫綋浜ゅ弶瀛樺偍鍣?, '瀛樺偍鍣ㄧ殑鎵╁睍鎶€鏈?],
+    ['纾佺洏瀛樺偍鍣ㄧ粨鏋?, '鍥烘€佺‖鐩楽SD鎶€鏈?],
+    ['RAID绛夌骇鍖哄埆', '纾佺洏瀛樺偍鍣ㄧ粨鏋?],
 
-    // 操作系统 — 内存与并发
-    ['条件变量与信号量', '互斥锁与自旋锁'],
-    ['用户态与核心态切换', '系统调用实现'],
-    ['缺页中断处理', '页面分配策略'],
-    ['文件分配方式对比', '空闲空间管理'],
-    ['日志文件系统', '文件保护机制'],
-    ['SPOOLing系统', '缓冲技术'],
+    // 鎿嶄綔绯荤粺 鈥?鍐呭瓨涓庡苟鍙?    ['鏉′欢鍙橀噺涓庝俊鍙烽噺', '浜掓枼閿佷笌鑷棆閿?],
+    ['鐢ㄦ埛鎬佷笌鏍稿績鎬佸垏鎹?, '绯荤粺璋冪敤瀹炵幇'],
+    ['缂洪〉涓柇澶勭悊', '椤甸潰鍒嗛厤绛栫暐'],
+    ['鏂囦欢鍒嗛厤鏂瑰紡瀵规瘮', '绌洪棽绌洪棿绠＄悊'],
+    ['鏃ュ織鏂囦欢绯荤粺', '鏂囦欢淇濇姢鏈哄埗'],
+    ['SPOOLing绯荤粺', '缂撳啿鎶€鏈?],
 
-    // 计算机网络 — 协议与安全
-    ['隧道技术', 'VPN技术'],
-    ['网络安全攻击类型', 'VPN技术'],
-    ['WebSocket协议', 'TCP与UDP区别'],
-    ['电子邮件协议', 'FTP协议工作原理'],
-    ['NAT转换', '隧道技术'],
-    ['CDN技术原理', '域名解析过程'],
-    ['CSMA/CD协议', '以太网帧结构'],
+    // 璁＄畻鏈虹綉缁?鈥?鍗忚涓庡畨鍏?    ['闅ч亾鎶€鏈?, 'VPN鎶€鏈?],
+    ['缃戠粶瀹夊叏鏀诲嚮绫诲瀷', 'VPN鎶€鏈?],
+    ['WebSocket鍗忚', 'TCP涓嶶DP鍖哄埆'],
+    ['鐢靛瓙閭欢鍗忚', 'FTP鍗忚宸ヤ綔鍘熺悊'],
+    ['NAT杞崲', '闅ч亾鎶€鏈?],
+    ['CDN鎶€鏈師鐞?, '鍩熷悕瑙ｆ瀽杩囩▼'],
+    ['CSMA/CD鍗忚', '浠ュお缃戝抚缁撴瀯'],
 
-    // 跨域 — 数据结构在OS/网络中的应用
-    ['页式虚拟存储器地址转换', '快表TLB原理'],
-    ['多级页表', '页式虚拟存储器地址转换'],
-    ['拥塞控制算法', '流量控制与拥塞控制区别'],
+    // 璺ㄥ煙 鈥?鏁版嵁缁撴瀯鍦∣S/缃戠粶涓殑搴旂敤
+    ['椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲', '蹇〃TLB鍘熺悊'],
+    ['澶氱骇椤佃〃', '椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲'],
+    ['鎷ュ鎺у埗绠楁硶', '娴侀噺鎺у埗涓庢嫢濉炴帶鍒跺尯鍒?],
   ]
 
   for (const [a, b] of manualConnections) {
@@ -918,7 +906,7 @@ function buildFleetingToFleeting(): Record<string, string[]> {
 
 const fleetingToFleeting = buildFleetingToFleeting()
 
-// Update linkContent to include fleeting↔fleeting links
+// Update linkContent to include fleeting鈫攆leeting links
 function linkContentV2(title: string): string {
   const permLinks = fleetingToPermanent[title] || []
   const fleetingLinks = fleetingToFleeting[title] || []
@@ -929,10 +917,360 @@ function linkContentV2(title: string): string {
   if (fleetingLinks.length > 0) {
     lines.push('', '**Related Ideas:** ' + [...new Set(fleetingLinks)].map(t => '[[' + t + ']]').join(', '))
   }
-  lines.push('', '---', '_CS408 Knowledge Graph — auto-generated seed content_')
+  lines.push('', '---', '_CS408 Knowledge Graph 鈥?auto-generated seed content_')
   return lines.join('\n')
 }
-// ─── End fleeting↔fleeting auto-linking ─────────────────────────────────────
+// 鈹€鈹€鈹€ End fleeting鈫攆leeting auto-linking 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+function randomRecentDate(daysBack: number, minHour = 8, maxHour = 22): Date {
+  const d = randomPastDate(daysBack)
+  const hour = Math.floor(Math.random() * (maxHour - minHour + 1)) + minHour
+  d.setHours(hour, Math.floor(Math.random() * 60), 0, 0)
+  return d
+}
+
+function uniqueByTitle<T extends { title: string | null }>(cards: T[]): T[] {
+  const seen = new Set<string>()
+  return cards.filter((card) => {
+    const key = card.title || ''
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+async function seedSupportingUiData(userId: string, vaultId: string) {
+  const allCards = await prisma.card.findMany({
+    where: { vaultId },
+    select: { id: true, title: true, type: true },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  if (allCards.length === 0) return
+
+  const permanentCards = uniqueByTitle(allCards.filter((card) => card.type === 'permanent'))
+  const fleetingCards = uniqueByTitle(allCards.filter((card) => card.type === 'fleeting'))
+  const literatureCards = uniqueByTitle(allCards.filter((card) => card.type === 'literature'))
+  const titleToCard = new Map(allCards.map((card) => [card.title || '', card]))
+
+  await prisma.([
+    prisma.learningSession.deleteMany({ where: { userId } }),
+    prisma.learningPath.deleteMany({ where: { vaultId } }),
+    prisma.vaultCapability.deleteMany({ where: { vaultId } }),
+    prisma.agentSession.deleteMany({ where: { vaultId } }),
+    prisma.educationProfileHistory.deleteMany({ where: { vaultId } }),
+    prisma.pushRecord.deleteMany({ where: { userId } }),
+    prisma.vaultMemory.deleteMany({ where: { vaultId, category: 'observation' } }),
+  ])
+
+  const capabilitySeeds = [
+    { concept: 'Arrays and Lists', masteryLevel: 84, status: 'mastered', strongAreas: ['implementation', 'time complexity'], weakAreas: [] },
+    { concept: 'Graphs', masteryLevel: 58, status: 'learning', strongAreas: ['traversal'], weakAreas: ['shortest path', 'topological sort'] },
+    { concept: 'CPU Pipeline', masteryLevel: 66, status: 'learning', strongAreas: ['core model'], weakAreas: ['hazard handling'] },
+    { concept: 'Virtual Memory', masteryLevel: 47, status: 'learning', strongAreas: ['page replacement'], weakAreas: ['address translation'] },
+    { concept: 'TCP Reliability', masteryLevel: 73, status: 'known', strongAreas: ['handshake'], weakAreas: ['congestion control'] },
+    { concept: 'DNS', masteryLevel: 41, status: 'learning', strongAreas: ['lookup flow'], weakAreas: ['caching', 'recursive resolution'] },
+  ]
+
+  for (const seed of capabilitySeeds) {
+    await prisma.vaultCapability.create({
+      data: {
+        vaultId,
+        concept: seed.concept,
+        masteryLevel: seed.masteryLevel,
+        status: seed.status,
+        accessCount: 3 + Math.floor(Math.random() * 8),
+        lastAccessed: randomRecentDate(6),
+        weakAreas: JSON.stringify(seed.weakAreas),
+        strongAreas: JSON.stringify(seed.strongAreas),
+      },
+    })
+  }
+
+  const learningSessions = [
+    { domain: 'Data Structures', concept: 'Graph representations', status: 'completed', phase: 'reflect', outcome: 'understood', minutes: 48 },
+    { domain: 'Operating Systems', concept: 'Virtual Memory', status: 'completed', phase: 'practice', outcome: 'needs_review', minutes: 36 },
+    { domain: 'Computer Networks', concept: 'TCP Reliability', status: 'active', phase: 'explore', outcome: null, minutes: 22 },
+  ]
+
+  for (const session of learningSessions) {
+    const createdAt = randomRecentDate(9)
+    const updatedAt = new Date(createdAt.getTime() + session.minutes * 60 * 1000)
+    await prisma.learningSession.create({
+      data: {
+        userId,
+        domain: session.domain,
+        concept: session.concept,
+        status: session.status,
+        phase: session.phase,
+        outcome: session.outcome,
+        metadata: JSON.stringify({ durationMinutes: session.minutes, source: 'seed-cs408-ui' }),
+        createdAt,
+        updatedAt,
+      },
+    })
+  }
+
+  const pathSeeds = [
+    {
+      name: 'CS408 Core Graph',
+      topic: 'CS408',
+      description: 'Primary demo path for Learn with mixed step states and graph-backed cards.',
+      difficulty: 'intermediate',
+      source: 'graph',
+      steps: [
+        { title: 'linked-list', status: 'mastered', mastery: 96, chapter: 'DS Foundations', estimatedMinutes: 20 },
+        { title: 'stack', status: 'completed', mastery: 82, chapter: 'DS Foundations', estimatedMinutes: 18 },
+        { title: 'graph', status: 'learning', mastery: 54, chapter: 'Graph Focus', estimatedMinutes: 32 },
+        { title: 'shortest-path', status: 'available', mastery: 12, chapter: 'Graph Focus', estimatedMinutes: 28 },
+        { title: 'topological-sort', status: 'locked', mastery: 0, chapter: 'Graph Focus', estimatedMinutes: 24 },
+      ],
+    },
+    {
+      name: 'Systems Review Track',
+      topic: 'Systems Review',
+      description: 'Cross-domain path spanning architecture, OS, and networking for UI demos.',
+      difficulty: 'advanced',
+      source: 'ai',
+      steps: [
+        { title: 'pipeline', status: 'completed', mastery: 78, chapter: 'Architecture', estimatedMinutes: 25 },
+        { title: 'virtual-memory', status: 'available', mastery: 38, chapter: 'Operating Systems', estimatedMinutes: 26 },
+        { title: 'tcp-reliability', status: 'learning', mastery: 61, chapter: 'Networking', estimatedMinutes: 30 },
+        { title: 'dns', status: 'locked', mastery: 0, chapter: 'Networking', estimatedMinutes: 18 },
+      ],
+    },
+  ]
+
+  const createdPaths: { id: string; name: string }[] = []
+  for (const pathSeed of pathSeeds) {
+    const doneSteps = pathSeed.steps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
+    const path = await prisma.learningPath.create({
+      data: {
+        userId,
+        vaultId,
+        name: pathSeed.name,
+        topic: pathSeed.topic,
+        description: pathSeed.description,
+        difficulty: pathSeed.difficulty,
+        source: pathSeed.source,
+        status: 'active',
+        totalSteps: pathSeed.steps.length,
+        doneSteps,
+      },
+    })
+    createdPaths.push({ id: path.id, name: path.name })
+
+    let previousStepId: string | null = null
+    for (let index = 0; index < pathSeed.steps.length; index++) {
+      const stepSeed = pathSeed.steps[index]
+      const linkedCard = titleToCard.get(stepSeed.title)
+      const step = await prisma.learningPathStep.create({
+        data: {
+          pathId: path.id,
+          cardId: linkedCard?.id || null,
+          order: index + 1,
+          title: stepSeed.title,
+          description: ${stepSeed.chapter} / ,
+          concept: stepSeed.title,
+          chapter: stepSeed.chapter,
+          status: stepSeed.status,
+          mastery: stepSeed.mastery,
+          estimatedMinutes: stepSeed.estimatedMinutes,
+          prerequisites: previousStepId ? JSON.stringify([previousStepId]) : JSON.stringify([]),
+        },
+      })
+      previousStepId = step.id
+    }
+  }
+
+  if (createdPaths[0]) {
+    const adjustmentHistory = [
+      {
+        trigger: 'assessment_failed',
+        adjustment: {
+          type: 'add_review',
+          concept: 'Graphs',
+          description: 'Insert a focused review step after weak performance on shortest-path comparisons.',
+        },
+        assessmentRef: { toolName: 'Feynman Test', score: 58, threshold: 60 },
+        feedbackText: 'Need one more pass on shortest path tradeoffs.',
+      },
+      {
+        trigger: 'assessment_excellent',
+        adjustment: {
+          type: 'skip_ahead',
+          concept: 'Arrays and Lists',
+          description: 'Skip repetitive foundation content and move directly into graph topics.',
+        },
+        assessmentRef: { toolName: 'MCQ', score: 97, threshold: 95 },
+        feedbackText: 'Foundations feel stable, so the path can move faster.',
+      },
+    ]
+
+    for (const item of adjustmentHistory) {
+      await prisma.pathAdjustmentHistory.create({
+        data: {
+          pathId: createdPaths[0].id,
+          trigger: item.trigger,
+          adjustment: JSON.stringify(item.adjustment),
+          feedback: JSON.stringify({
+            feedbackText: item.feedbackText,
+            assessmentRef: item.assessmentRef,
+          }),
+          appliedAt: randomRecentDate(7),
+        },
+      })
+    }
+  }
+
+  const profileSnapshot = {
+    userId,
+    dimensions: {
+      depth: { score: 76, confidence: 0.82, evidence: ['High permanent-card ratio', 'Can explain shortest-path tradeoffs in Forge'] },
+      breadth: { score: 68, confidence: 0.77, evidence: ['Coverage spans 4 core topics', 'Cross-cluster links are already present'] },
+      connection: { score: 71, confidence: 0.79, evidence: ['Galaxy shows multi-cluster edges', 'Links memory management to architecture naturally'] },
+      expression: { score: 74, confidence: 0.7, evidence: ['Observation stream mentions clear explanations', 'Recent sessions include concrete examples'] },
+      application: { score: 62, confidence: 0.66, evidence: ['Practice is improving but still uneven', 'Push records still target reinforcement'] },
+      learning_pace: { score: 69, confidence: 0.74, evidence: ['Recent activity exists across the week', 'Cadence is steady with small dips'] },
+    },
+    updateHistory: [
+      {
+        timestamp: Date.now() - 5 * 24 * 60 * 60 * 1000,
+        trigger: 'manual',
+        dimensionsUpdated: ['depth', 'expression'],
+        changes: { depth: { before: 69, after: 73 }, expression: { before: 67, after: 71 } },
+      },
+      {
+        timestamp: Date.now() - 2 * 24 * 60 * 60 * 1000,
+        trigger: 'assessment',
+        dimensionsUpdated: ['application', 'connection'],
+        changes: { application: { before: 56, after: 62 }, connection: { before: 66, after: 71 } },
+      },
+      {
+        timestamp: Date.now() - 8 * 60 * 60 * 1000,
+        trigger: 'session_end',
+        dimensionsUpdated: ['learning_pace'],
+        changes: { learning_pace: { before: 64, after: 69 } },
+      },
+    ],
+    sessionCount: learningSessions.length,
+    totalLearningMinutes: learningSessions.reduce((sum, session) => sum + session.minutes, 0),
+    createdAt: Date.now() - 21 * 24 * 60 * 60 * 1000,
+    updatedAt: Date.now() - 8 * 60 * 60 * 1000,
+  }
+
+  await prisma.educationProfileHistory.create({
+    data: {
+      vaultId,
+      profile: JSON.stringify(profileSnapshot),
+      snapshot: JSON.stringify({
+        averageScore: 70,
+        strongest: ['depth', 'expression'],
+        weakest: ['application'],
+      }),
+      createdAt: randomRecentDate(2),
+    },
+  })
+
+  const pushRecords = [
+    {
+      trigger: 'assessment_failed',
+      reason: 'Weak shortest-path performance triggered extra review resources.',
+      viewedAt: null,
+      engagedCount: 0,
+      feedback: null,
+      resources: [
+        { resourceId: 'push-review-graph', type: 'quiz', title: 'Shortest Path Drill Set', content: 'Compare Dijkstra, Floyd, and Bellman-Ford across common scenarios.' },
+        { resourceId: 'push-review-note', type: 'document', title: 'Graph Algorithms Quick Notes', content: 'A compact review sheet for prerequisites, use cases, and common mistakes.' },
+      ],
+    },
+    {
+      trigger: 'stage_completion',
+      reason: 'Strong fundamentals unlocked a more integrated systems practice bundle.',
+      viewedAt: randomRecentDate(1),
+      engagedCount: 2,
+      feedback: {
+        engagedResourceIds: ['push-advance-systems'],
+        feedbackText: 'Integrated systems tasks were useful and connected multiple areas well.',
+      },
+      resources: [
+        { resourceId: 'push-advance-systems', type: 'code', title: 'OS / Memory / Cache Mixed Practice', content: 'A more engineering-flavored exercise bundle for Forge sessions.' },
+        { resourceId: 'push-advance-diagram', type: 'diagram', title: 'Virtual-to-Physical Address Flow', content: 'Pairs nicely with Galaxy and Cognition for a cross-domain demo.' },
+      ],
+    },
+  ]
+
+  for (const record of pushRecords) {
+    await prisma.pushRecord.create({
+      data: {
+        userId,
+        resources: JSON.stringify(record.resources),
+        trigger: record.trigger,
+        reason: record.reason,
+        sentAt: randomRecentDate(5),
+        expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        viewedAt: record.viewedAt,
+        engagedCount: record.engagedCount,
+        feedback: record.feedback ? JSON.stringify(record.feedback) : null,
+      },
+    })
+  }
+
+  const observations = [
+    'The user is strongest when comparing related concepts rather than recalling isolated facts.',
+    'Recent sessions show growing interest in systems topics, especially memory and cache behavior.',
+    'Graph ideas are mostly in place, but shortest-path tradeoffs still benefit from repetition.',
+    'Learn mode works better when the path exposes explicit next steps instead of broad suggestions.',
+    'The study cadence is steady enough to make the dashboard and cognition surfaces feel active.',
+    'Recent practice has been good, but post-task reflection is still thinner than the raw activity volume.',
+  ]
+
+  for (const text of observations) {
+    await prisma.vaultMemory.create({
+      data: {
+        vaultId,
+        key: seed_obs_,
+        value: JSON.stringify({ text, category: 'general' }),
+        category: 'observation',
+        createdAt: randomRecentDate(12),
+      },
+    })
+  }
+
+  const primaryCards = [permanentCards[0], permanentCards[1], fleetingCards[0], literatureCards[0]].filter(Boolean)
+
+  await prisma.agentSession.create({
+    data: {
+      id: seed-agent-,
+      vaultId,
+      name: 'CS408 Review Thread',
+      messages: JSON.stringify([
+        {
+          id: 'm1',
+          role: 'system',
+          content: 'You are helping the user review CS408 topics inside the current vault.',
+          timestamp: randomRecentDate(2).toISOString(),
+        },
+        {
+          id: 'm2',
+          role: 'user',
+          content: 'Help me connect OS memory management with cache behavior and address translation.',
+          timestamp: randomRecentDate(2).toISOString(),
+        },
+        {
+          id: 'm3',
+          role: 'assistant',
+          content: 'We can look at it in four layers: translation, cache locality, page replacement, and process access patterns.',
+          timestamp: randomRecentDate(2).toISOString(),
+          references: primaryCards.map((card) => ({ title: card?.title, id: card?.id })),
+        },
+      ]),
+      createdAt: randomRecentDate(2),
+      updatedAt: randomRecentDate(1),
+    },
+  })
+
+  console.log(  UI data:  learning paths,  sessions,  pushes)
+}
 main()
   .catch((e) => {
     console.error(e)
@@ -943,7 +1281,7 @@ main()
   })
 
 async function seedUser(email: string, name: string) {
-  console.log(`\n━━━ Seeding: ${email} ━━━\n`)
+  console.log(`\n鈹佲攣鈹?Seeding: ${email} 鈹佲攣鈹乗n`)
 
   const user = await prisma.user.upsert({
     where: { email },
@@ -993,7 +1331,7 @@ async function seedUser(email: string, name: string) {
       })
       console.log('  + Created cluster: "' + subject.name + '" (' + subject.color + ')')
     } else {
-      console.log('  ✓ Found cluster: "' + subject.name + '"')
+      console.log('  鉁?Found cluster: "' + subject.name + '"')
     }
     clusterMap.set(subject.name, cluster.id)
   }
@@ -1013,7 +1351,7 @@ async function seedUser(email: string, name: string) {
     for (const card of allCardDefs) {
       const path = makePath(subject.name, card.title)
       if (pathSet.has(path)) {
-        console.warn('  ⚠ Duplicate path: "' + path + '" — skipping')
+        console.warn('  鈿?Duplicate path: "' + path + '" 鈥?skipping')
         continue
       }
       pathSet.add(path)
@@ -1056,19 +1394,20 @@ async function seedUser(email: string, name: string) {
 
   const dbEdgeCount = await prisma.edge.count({ where: { vaultId: vault.id } })
   console.log('  Edges: ' + dbEdgeCount + ' (auto-generated from [[WikiLink]])')
+  await seedSupportingUiData(user.id, vault.id)
 
-  // ── Seed AI observations ──
+  // 鈹€鈹€ Seed AI observations 鈹€鈹€
   const obsCount = await prisma.vaultMemory.count({ where: { vaultId: vault.id, category: 'observation' } })
   if (obsCount === 0) {
     const observations = [
-      '用户在数据结构方面进展较快，排序算法的理解和表达能力突出',
-      '在递归问题上经常犹豫，建议加强函数调用栈的练习',
-      '用户偏好通过代码示例理解概念，抽象定义后配合具体例子效果更好',
-      '最近学习强度有所下降，上周平均每天 2.5 小时，本周降至 1.2 小时',
-      '用户的关联能力很强，经常自发地把新概念和已有知识类比',
-      '在计算机网络 OSI 模型的理解上还不够系统化，建议从物理层开始逐层深入',
-      '用户对编译原理表现出浓厚兴趣，可以推荐相关学习路径',
-      '代码书写规范，注释清晰，表达能力强，但项目实战经验不足',
+      '鐢ㄦ埛鍦ㄦ暟鎹粨鏋勬柟闈㈣繘灞曡緝蹇紝鎺掑簭绠楁硶鐨勭悊瑙ｅ拰琛ㄨ揪鑳藉姏绐佸嚭',
+      '鍦ㄩ€掑綊闂涓婄粡甯哥姽璞紝寤鸿鍔犲己鍑芥暟璋冪敤鏍堢殑缁冧範',
+      '鐢ㄦ埛鍋忓ソ閫氳繃浠ｇ爜绀轰緥鐞嗚В姒傚康锛屾娊璞″畾涔夊悗閰嶅悎鍏蜂綋渚嬪瓙鏁堟灉鏇村ソ',
+      '鏈€杩戝涔犲己搴︽湁鎵€涓嬮檷锛屼笂鍛ㄥ钩鍧囨瘡澶?2.5 灏忔椂锛屾湰鍛ㄩ檷鑷?1.2 灏忔椂',
+      '鐢ㄦ埛鐨勫叧鑱旇兘鍔涘緢寮猴紝缁忓父鑷彂鍦版妸鏂版蹇靛拰宸叉湁鐭ヨ瘑绫绘瘮',
+      '鍦ㄨ绠楁満缃戠粶 OSI 妯″瀷鐨勭悊瑙ｄ笂杩樹笉澶熺郴缁熷寲锛屽缓璁粠鐗╃悊灞傚紑濮嬮€愬眰娣卞叆',
+      '鐢ㄦ埛瀵圭紪璇戝師鐞嗚〃鐜板嚭娴撳帤鍏磋叮锛屽彲浠ユ帹鑽愮浉鍏冲涔犺矾寰?,
+      '浠ｇ爜涔﹀啓瑙勮寖锛屾敞閲婃竻鏅帮紝琛ㄨ揪鑳藉姏寮猴紝浣嗛」鐩疄鎴樼粡楠屼笉瓒?,
     ]
     for (const text of observations) {
       await prisma.vaultMemory.create({
@@ -1092,3 +1431,4 @@ async function main() {
   console.log()
   console.log('=== Seed Complete ===')
 }
+

@@ -4,8 +4,9 @@
  */
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/db'
+import type { Context } from 'hono'
 
-export async function getUserId(c: any): Promise<string | null> {
+export async function getUserId(c: Context): Promise<string | null> {
   const session = await auth.api.getSession({ headers: c.req.raw.headers })
   if (session?.user?.id) return session.user.id
   // 仅在非生产环境且明确配置了 DEV_MODE 时回退
@@ -16,7 +17,7 @@ export async function getUserId(c: any): Promise<string | null> {
   return null
 }
 
-export async function resolveVault(c: any, userId: string): Promise<{ id: string; profileCache?: string | null; name?: string; createdAt?: Date; updatedAt?: Date } | null> {
+export async function resolveVault(c: Context, userId: string): Promise<{ id: string; profileCache?: string | null; name?: string; createdAt?: Date; updatedAt?: Date } | null> {
   const vid = c.req.query('vid')
   if (vid) {
     const vault = await prisma.vault.findUnique({ where: { id: vid } })

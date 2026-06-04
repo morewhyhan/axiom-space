@@ -39,6 +39,7 @@
   "exclude": [
     "node_modules",
     "对标工程",
-    "e2e"
+    "e2e",
+    "scripts"
   ]
 }

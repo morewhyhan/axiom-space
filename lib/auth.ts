@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth"
+import type { User } from "better-auth"
 import { prismaAdapter } from "better-auth/adapters/prisma"
 import { prisma } from "./db"
 import { getAuthUrl } from "./site-url"
@@ -40,10 +41,10 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
-    sendResetPassword: async ({ user, url }: any) => {
+    sendResetPassword: async ({ user, url }: { user: User; url: string }) => {
       console.log("Send reset password email to", user.email, url)
     },
-    sendVerificationEmail: async ({ user, url }: any) => {
+    sendVerificationEmail: async ({ user, url }: { user: User; url: string }) => {
       console.log("Send verification email to", user.email, url)
     },
   },

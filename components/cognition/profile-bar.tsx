@@ -50,13 +50,13 @@ export default function ProfileBar() {
             <div className="serif font-bold text-cyan-400" style={{ fontSize: 'var(--t-sub)' }}>
               {loading ? '—' : stats.mastered}
             </div>
-            <div className="mono opacity-30" style={{ fontSize: 'var(--f7)' }}>掌握</div>
+            <div className="mono opacity-30" style={{ fontSize: 'var(--f7)' }}>永久</div>
           </div>
           <div className="text-center">
             <div className="serif font-bold text-pink-400" style={{ fontSize: 'var(--t-sub)' }}>
               {loading ? '—' : stats.pendingReview}
             </div>
-            <div className="mono opacity-30" style={{ fontSize: 'var(--f7)' }}>待复习</div>
+            <div className="mono opacity-30" style={{ fontSize: 'var(--f7)' }}>待整理</div>
           </div>
         </div>
       </div>

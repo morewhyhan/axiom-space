@@ -20,7 +20,10 @@ export interface CognitionSkill {
 
 export interface TimeDistribution {
   domain: string
-  hours: number
+  weight: number
+  cardCount: number
+  contentChars: number
+  hours?: number
   color: string
 }
 
@@ -40,7 +43,16 @@ export interface ThinkingPattern {
 export interface CognitionData {
   user: { name: string; joinedAt: string }
   dimensions: CognitiveDimensions
-  stats: { streakDays: number; mastered: number; pendingReview: number; chatRounds: number }
+  stats: {
+    streakDays: number
+    mastered: number
+    pendingReview: number
+    chatRounds: number
+    totalCards?: number
+    permanentCards?: number
+    fleetingCards?: number
+    literatureCards?: number
+  }
   skills: CognitionSkill[]
   thinkingPattern: ThinkingPattern
   strengths: string[]
@@ -60,17 +72,27 @@ export interface Observation {
 async function fetchCognition(vaultId?: string | null): Promise<CognitionData | null> {
   const params = vaultId ? { query: { vid: vaultId } } : {}
   const res = await client.api.cognition.stats.$get(params)
-  const data: any = await res.json()
+  const data = await res.json() as { success: boolean; error?: string; [key: string]: unknown }
   if (!data.success) {
     throw new Error(data.error || '获取认知数据失败')
   }
-  const { user, dimensions, stats, skills, thinkingPattern, strengths, growthEdges, timeDistribution, knowledgeStructure, nextActions } = data
-  return { user: user ?? { name: '学习者', joinedAt: '' }, dimensions: dimensions ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0 }, stats: stats ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 }, skills: skills ?? [], thinkingPattern: thinkingPattern ?? { text: '', highlights: [], detail: '' }, strengths: strengths ?? [], growthEdges: growthEdges ?? [], timeDistribution: timeDistribution ?? [], knowledgeStructure: knowledgeStructure ?? [], nextActions: nextActions ?? [] }
+  return {
+    user: data.user as CognitionData['user'] ?? { name: '学习者', joinedAt: '' },
+    dimensions: data.dimensions as CognitionData['dimensions'] ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0 },
+    stats: data.stats as CognitionData['stats'] ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 },
+    skills: data.skills as CognitionData['skills'] ?? [],
+    thinkingPattern: data.thinkingPattern as CognitionData['thinkingPattern'] ?? { text: '', highlights: [], detail: '' },
+    strengths: data.strengths as CognitionData['strengths'] ?? [],
+    growthEdges: data.growthEdges as CognitionData['growthEdges'] ?? [],
+    timeDistribution: data.timeDistribution as CognitionData['timeDistribution'] ?? [],
+    knowledgeStructure: data.knowledgeStructure as CognitionData['knowledgeStructure'] ?? [],
+    nextActions: data.nextActions as CognitionData['nextActions'] ?? [],
+  }
 }
 
 async function fetchObservations(vaultId?: string | null): Promise<Observation[]> {
   if (!vaultId) return []
-  const res = await (client.api.cognition as any).observations.$get({ query: { vid: vaultId } })
+  const res = await fetch(`/api/cognition/observations?vid=${vaultId}`)
   const data: { success: boolean; observations?: Observation[]; error?: string } = await res.json()
   if (!data.success) {
     throw new Error(data.error || '获取观察数据失败')
@@ -84,11 +106,14 @@ export function useCognition() {
     queryKey: ['cognition', currentVaultId],
     queryFn: () => fetchCognition(currentVaultId),
     enabled: !!currentVaultId,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
   return {
     data: query.data ?? null,
     loading: query.isLoading,
-    error: (query.error as any)?.error ?? query.error?.message ?? null,
+    error: query.error?.message ?? null,
     refetch: query.refetch,
   }
 }
@@ -99,11 +124,14 @@ export function useObservations() {
     queryKey: ['observations', currentVaultId],
     queryFn: () => fetchObservations(currentVaultId),
     enabled: !!currentVaultId,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
   })
   return {
     observations: query.data ?? [],
     loading: query.isLoading,
-    error: (query.error as any)?.error ?? query.error?.message ?? null,
+    error: query.error?.message ?? null,
     refetch: query.refetch,
   }
 }

@@ -7,10 +7,10 @@
     --deep-space: #030305;
     --glass-border: rgba(255, 255, 255, 0.1);
     --glass-bg: rgba(10, 10, 15, 0.7);
-
     /* ── Fixed values matching prototype exactly ── */
     --panel-xs: 300px;
     --panel-sm: 340px;
+    --galaxy-panel-w: 260px;
     --panel-md: 400px;
     --panel-lg: 420px;
     --panel-xl: 500px;
@@ -236,19 +236,53 @@ body {
 .main-grid.no-bottom-pad {
     padding-bottom: 0;
 }
+.main-grid.mode-dashboard {
+    --panel-xl: min(640px, 34vw);
+    --dashboard-bottom-gap: 18px;
+}
+.main-grid.mode-galaxy {
+    --panel-sm: var(--galaxy-panel-w);
+    --pad-x: clamp(12px, 1.4vw, 22px);
+    --gap-grid: 10px;
+    --gap-zone: 8px;
+}
+@media (max-width: 1500px) {
+    .main-grid.mode-dashboard {
+        --panel-xl: min(580px, 36vw);
+    }
+}
+@media (max-height: 850px) {
+    .main-grid.mode-dashboard {
+        padding-bottom: calc(var(--bottom-h) + 24px);
+    }
+}
 /* Cognition mode: panels are direct flex children, fill equally */
 .main-grid:has(> .cognition-panel) > .cognition-panel {
     flex: 1;
     width: auto !important;
     max-width: none !important;
-}.bottom-bar {
+}
+.bottom-bar {
     position: absolute;
     bottom: 0;
     left: var(--pad-x);
-    right: calc(var(--panel-xl) + var(--pad-x));
+    right: calc(var(--pad-x) + var(--panel-xl) + var(--gap-grid));
     border-top: 1px solid rgba(255,255,255,0.05);
     padding: 10px 0;
     pointer-events: auto;
+}
+.main-grid.mode-dashboard .mode-stage.active > .left-zone,
+.main-grid.mode-dashboard .mode-stage.active > section {
+    height: calc(100% - var(--bottom-h) - var(--dashboard-bottom-gap));
+    align-self: flex-start;
+}
+.main-grid.mode-dashboard .mode-stage.active > .right-zone {
+    height: 100%;
+    align-self: stretch;
+}
+.main-grid.mode-dashboard .mode-stage.active > section,
+.main-grid.mode-galaxy .mode-stage.active > section {
+    pointer-events: none;
 }
 .left-zone, .right-zone {
     display: flex;
@@ -264,9 +298,165 @@ body {
     min-height: 0;
 }
 
+.mode-stage {
+    position: absolute;
+    inset: 0;
+    display: none;
+    gap: var(--gap-grid);
+    min-width: 0;
+    min-height: 0;
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.992);
+    pointer-events: none;
+    will-change: opacity, transform;
+}
+
+.mode-stage.active {
+    display: flex;
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+    pointer-events: none;
+    animation: modeStageIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes modeStageIn {
+    from {
+        opacity: 0;
+        transform: translate3d(0, 6px, 0) scale(0.996);
+    }
+    to {
+        opacity: 1;
+        transform: translate3d(0, 0, 0) scale(1);
+    }
+}
+
+.mode-stage > section {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+}
+
+.mode-stage.cognition-stage {
+    gap: var(--gap-grid);
+}
+
 .side-slot.visible > .glass-panel:last-child {
     flex: 1;
     min-height: 0;
+}
+
+.forge-console-panel {
+    position: relative;
+    border-radius: 18px;
+    background:
+        linear-gradient(180deg, rgba(17, 18, 27, 0.82), rgba(7, 8, 13, 0.76)),
+        rgba(10, 10, 15, 0.72);
+    border-color: rgba(255,255,255,0.12);
+    box-shadow:
+        0 22px 70px rgba(0,0,0,0.48),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.forge-console-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+        linear-gradient(90deg, rgba(244,114,182,0.12), transparent 22%, transparent 78%, rgba(34,211,238,0.09)),
+        linear-gradient(180deg, rgba(255,255,255,0.04), transparent 180px);
+}
+.forge-console-header {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 16px 18px;
+    border-bottom: 1px solid rgba(255,255,255,0.07);
+}
+.forge-console-mark,
+.forge-focus-icon,
+.forge-empty-symbol {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(244,114,182,0.86);
+    border: 1px solid rgba(244,114,182,0.22);
+    background: rgba(244,114,182,0.09);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05);
+}
+.forge-console-mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+}
+.forge-mini-btn {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    border: 1px solid rgba(255,255,255,0.09);
+    background: rgba(255,255,255,0.035);
+    color: rgba(255,255,255,0.42);
+    font-family: var(--font-jetbrains-mono), monospace;
+    font-size: var(--f8);
+    letter-spacing: 0.08em;
+    transition: all 0.2s ease;
+}
+.forge-mini-btn:hover {
+    color: rgba(255,255,255,0.72);
+    border-color: rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.07);
+}
+.forge-mini-btn.primary {
+    color: rgba(244,114,182,0.82);
+    border-color: rgba(244,114,182,0.24);
+    background: rgba(244,114,182,0.08);
+}
+.forge-focus-card {
+    position: relative;
+    z-index: 1;
+    margin: 14px 18px 0;
+    padding: 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(244,114,182,0.16);
+    background:
+        linear-gradient(135deg, rgba(244,114,182,0.075), rgba(34,211,238,0.035)),
+        rgba(255,255,255,0.025);
+}
+.forge-focus-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+}
+.forge-empty-state {
+    position: relative;
+    margin: 18px auto;
+    max-width: 520px;
+    padding: 34px 24px 28px;
+    text-align: center;
+}
+.forge-empty-symbol {
+    width: 54px;
+    height: 54px;
+    border-radius: 16px;
+    margin: 0 auto 18px;
+}
+.forge-phase-strip {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    margin: 22px auto 0;
+    max-width: 420px;
+}
+.forge-phase-strip span {
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.035);
+    color: rgba(255,255,255,0.34);
+    font-family: var(--font-jetbrains-mono), monospace;
+    font-size: var(--f8);
+    padding: 7px 4px;
 }
 
 .forge-editor {
@@ -1340,6 +1530,7 @@ body {
   :root {
     --panel-xl: 400px;
     --panel-sm: 280px;
+    --galaxy-panel-w: 220px;
     --pad-x: 20px;
     --gap-grid: 12px;
   }
@@ -1852,4 +2043,3 @@ body {
   font-size: 11px !important;
   opacity: 0.7 !important;
 }
-

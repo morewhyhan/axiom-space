@@ -60,7 +60,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     prisma.card.findMany({ where: { vaultId: vid, tags: { not: null } }, select: { tags: true } }),
     prisma.card.findMany({ where: { vaultId: vid }, orderBy: { createdAt: 'desc' }, take: 20, select: { createdAt: true } }),
     prisma.user.findUnique({ where: { id: userId }, select: { name: true, createdAt: true } }),
-    prisma.learningSession.findMany({ where: { userId }, select: { id: true, status: true, createdAt: true } }),
+    prisma.learningSession.findMany({ where: { userId, vaultId: vid }, select: { id: true, status: true, createdAt: true } }),
   ])
 
   const n = totalCards.length
@@ -109,7 +109,16 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const pendingReview = fleetCount
   const chatRounds = learningSessions.length
 
-  const stats = { streakDays, mastered, pendingReview, chatRounds }
+  const stats = {
+    streakDays,
+    mastered,
+    pendingReview,
+    chatRounds,
+    totalCards: n,
+    permanentCards: permCount,
+    fleetingCards: fleetCount,
+    literatureCards: litCount,
+  }
 
   // ── Skills from tags ──
   const tagCounts = new Map<string, number>()
@@ -152,12 +161,16 @@ const app = new Hono<{ Variables: { userId: string } }>()
   if (expression < 0.5) growthEdges.push('表达深化')
   if (growthEdges.length === 0) growthEdges.push('探索新领域')
 
-  // ── Time distribution per cluster ──
+  // ── Domain distribution per cluster ──
+  // This is a visible-content weight, not time spent. Avoid presenting inferred
+  // reading/writing time as a measured hour count.
   const timeDistribution = clusters.map(cl => ({
     domain: cl.name,
-    hours: Math.round(cl.cards.reduce((s, c) => s + Math.max(1, Math.floor((c.content?.length ?? 0) / 50)), 0) * 0.5),
+    weight: cl.cards.reduce((s, c) => s + Math.max(1, Math.ceil((c.content?.length ?? 0) / 400)), 0),
+    cardCount: cl.cards.length,
+    contentChars: cl.cards.reduce((s, c) => s + (c.content?.length ?? 0), 0),
     color: cl.color,
-  })).sort((a, b) => b.hours - a.hours)
+  })).sort((a, b) => b.weight - a.weight)
 
   // ── Knowledge structure ──
   const knowledgeStructure = clusters.map(cl => {
@@ -183,7 +196,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     nextActions.push(`提升「${dimLabels[weakestDim[0][0]] ?? weakestDim[0][0]}」— 当前 ${Math.round(weakestDim[0][1] * 100)}%`)
   }
   if (pendingReview > 0) {
-    nextActions.push(`审核 ${pendingReview} 张 Fleeting 卡片 — 转化为永久知识`)
+    nextActions.push(`整理 ${pendingReview} 张 Fleeting 卡片 — 判断是否值得沉淀`)
   }
   if (n > 0 && e < n * 0.5) {
     nextActions.push('发现更多节点间的关联 — 丰富知识网络')
@@ -217,8 +230,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
         }),
       },
     })
-  } catch (err: any) {
-    console.warn('[Cognition] Failed to save profile cache:', err?.message)
+  } catch (err: unknown) {
+    console.warn('[Cognition] Failed to save profile cache:', err instanceof Error ? err.message : String(err))
   }
 
   return c.json(responseBody)

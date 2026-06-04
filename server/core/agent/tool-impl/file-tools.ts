@@ -2,6 +2,7 @@
  * AXIOM 内置工具 - 文件操作
  */
 
+import path from 'node:path'
 import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { Type } from "@mariozechner/pi-ai";
@@ -324,9 +325,7 @@ const deleteFileTool = createTool(
         };
       }
 
-      const resolvedPath = params.filePath.startsWith('/')
-        ? params.filePath
-        : `${vaultPath}/${params.filePath}`;
+      const resolvedPath = resolvePath(params.filePath);
 
       // Delete confirmation gate (对标 D-14)
       if (!params.force && params.needConfirm !== false) {
@@ -340,9 +339,9 @@ const deleteFileTool = createTool(
       // Soft-delete by default (对标 D-13)
       if (!params.force) {
         const fileStorage = getFileStorage()
-        const trashDir = `${vaultPath}/.axiom/trash`;
-        const fileName = resolvedPath.split('/').pop() || 'deleted';
-        const trashPath = `${trashDir}/${fileName}`;
+        const trashDir = resolvePath('.axiom/trash');
+        const fileName = path.basename(resolvedPath) || 'deleted';
+        const trashPath = path.posix.join(trashDir, fileName);
         try {
           await fileStorage.ensureDir(trashDir);
           const renameResult = await fileStorage.rename(resolvedPath, trashPath);
@@ -411,9 +410,10 @@ const renameFileTool = createTool(
       }
 
       const fileStorage = getFileStorage()
-      const dirPath = params.sourcePath.includes('/') ? params.sourcePath.substring(0, params.sourcePath.lastIndexOf('/')) : '';
-      const newPath = dirPath ? `${vaultPath}/${dirPath}/${params.name}` : `${vaultPath}/${params.name}`;
-      const oldPath = params.sourcePath.startsWith('/') ? params.sourcePath : `${vaultPath}/${params.sourcePath}`;
+      const normalizedSourcePath = params.sourcePath.replace(/\\/g, '/');
+      const dirPath = normalizedSourcePath.includes('/') ? normalizedSourcePath.substring(0, normalizedSourcePath.lastIndexOf('/')) : '';
+      const newPath = resolvePath(dirPath ? `${dirPath}/${params.name}` : params.name);
+      const oldPath = resolvePath(params.sourcePath);
 
       const result = await fileStorage.rename(oldPath, newPath);
       if (!result?.success) {
@@ -431,7 +431,7 @@ const renameFileTool = createTool(
         if (vId) {
           const newCardPath = dirPath ? `${dirPath}/${params.name}` : params.name;
           await prisma.card.updateMany({
-            where: { vaultId: vId, path: params.sourcePath },
+            where: { vaultId: vId, path: normalizedSourcePath },
             data: { path: newCardPath },
           });
         }
