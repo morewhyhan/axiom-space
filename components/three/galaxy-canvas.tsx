@@ -623,6 +623,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       setNodeOpacity(node, opacity, duration);
     }
 
+    function restoreNodeColor(node: THREE.Group): void {
+      const color = node.userData.trueColor || node.userData.clusterColor || node.userData.color;
+      if (color) setNodeColor(node, color);
+    }
+
     function setLinkOpacity(line: THREE.Line, opacity: number, duration = 0.22): void {
       if (line.userData._filtered) return;
       const mat = line.material as THREE.LineBasicMaterial;
@@ -635,7 +640,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         allNodes.forEach((n) => {
           if (!n.visible) return;
           setNodePresence(n, 1, 1, 0.26);
-          if (n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
+          restoreNodeColor(n);
         });
         allLinks.forEach((l) => {
           if (l.userData._filtered) return;
@@ -653,13 +658,18 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       }
 
       const neighbors = getInteractionNeighbors(node);
-      const primary = new Set<THREE.Group>([node, ...neighbors]);
       allNodes.forEach((n) => {
         if (!n.visible) return;
-        if (n === node) setNodePresence(n, locked ? 1.34 : 1.2, 1, 0.24);
-        else if (neighbors.has(n)) setNodePresence(n, 1.02, locked ? 0.9 : 0.82, 0.24);
-        else setNodePresence(n, locked ? 0.58 : 0.78, locked ? 0.12 : 0.32, 0.24);
-        if (primary.has(n) && n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
+        if (n === node) {
+          setNodePresence(n, locked ? 1.34 : 1.2, 1, 0.24);
+          restoreNodeColor(n);
+        } else if (neighbors.has(n)) {
+          setNodePresence(n, 1.02, locked ? 0.92 : 0.82, 0.24);
+          restoreNodeColor(n);
+        } else {
+          setNodePresence(n, locked ? 0.42 : 0.78, locked ? 0.035 : 0.32, 0.24);
+          if (locked) setNodeColor(n, 0x111119);
+        }
       });
 
       allLinks.forEach((l) => {
@@ -699,7 +709,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         gsap.to(node.userData.ring.material, { opacity: 0.8, duration: 0.5 });
       }
       if (node.userData.isSun) currentClusterId = node.userData.clusterId;
-      applyNodeModeVisual(useAppStore.getState().mode);
       applyGraphAttention(node, true);
     }
 
@@ -1289,7 +1298,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     controls.autoRotateSpeed = 0.2;
     applyNodeModeVisual(useAppStore.getState().mode, true);
     const unsubscribeModeVisual = useAppStore.subscribe((state, prevState) => {
-      if (state.mode !== prevState.mode) applyNodeModeVisual(state.mode);
+      if (state.mode !== prevState.mode) {
+        applyNodeModeVisual(state.mode);
+        requestAnimationFrame(() => {
+          if (lockedNode) applyGraphAttention(lockedNode, true);
+          else if (hoveredNode) applyGraphAttention(hoveredNode, false);
+        });
+      }
     });
 
     // --- Far stars (10000 points) ---
