@@ -127,7 +127,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let cometSpeedMultiplier = 1.0;
     let autoRotateBeforeFocus: boolean | null = null;
     let lastFocusSelection: THREE.Group[] = [];
-    let spreadNodes = new Set<THREE.Group>();
     const dimNodeModes = new Set(['forge', 'cognition', 'learn']);
 
     const { register, unregister } = useGalaxyActions.getState()
@@ -598,128 +597,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
-    function updateCurveGeometry(line: THREE.Line): void {
-      const sourceNode = line.userData.source as THREE.Group | undefined;
-      const targetNode = line.userData.target as THREE.Group | undefined;
-      if (!sourceNode || !targetNode) return;
-
-      const start = sourceNode.position;
-      const end = targetNode.position;
-      const dist = start.distanceTo(end);
-      const mid = new THREE.Vector3().lerpVectors(start, end, 0.5);
-      const curveSeed = hashId(String(sourceNode.userData.id || '') + String(targetNode.userData.id || ''));
-      const direction = new THREE.Vector3().subVectors(end, start).normalize();
-      const centerOut = mid.lengthSq() > 1 ? mid.clone().normalize() : new THREE.Vector3(0, 1, 0);
-      const side = new THREE.Vector3().crossVectors(direction, centerOut);
-      if (side.lengthSq() < 0.01) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
-      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
-      side.normalize().multiplyScalar(seededRandom(curveSeed) > 0.5 ? 1 : -1);
-      const arcStrength = line.userData.semantic ? 0.28 : 0.36;
-      const offsetMag = Math.min(180, Math.max(34, dist * arcStrength));
-      mid
-        .add(side.multiplyScalar(offsetMag))
-        .add(centerOut.multiplyScalar(Math.min(90, dist * 0.16)));
-
-      const curve = new THREE.QuadraticBezierCurve3(start.clone(), mid, end.clone());
-      const points = curve.getPoints(28);
-      const position = line.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
-      if (position && position.count === points.length) {
-        for (let i = 0; i < points.length; i++) position.setXYZ(i, points[i].x, points[i].y, points[i].z);
-        position.needsUpdate = true;
-        line.geometry.computeBoundingSphere();
-      } else {
-        line.geometry.setFromPoints(points);
-      }
-      line.userData.curve = curve;
-      if (line.userData.flowMesh) {
-        const flow = flows.find(f => f.mesh === line.userData.flowMesh);
-        if (flow) flow.points = points;
-      }
-    }
-
-    function updateLinksForNodes(nodes: Set<THREE.Group>): void {
-      allLinks.forEach((line) => {
-        const s = line.userData.source as THREE.Group | undefined;
-        const t = line.userData.target as THREE.Group | undefined;
-        if ((s && nodes.has(s)) || (t && nodes.has(t))) updateCurveGeometry(line);
-      });
-    }
-
-    function restoreSpreadNodes(duration = 0.35): void {
-      if (spreadNodes.size === 0) return;
-      const touched = new Set(spreadNodes);
-      spreadNodes.forEach((n) => {
-        const base = n.userData.focusBasePosition as THREE.Vector3 | undefined;
-        if (!base) return;
-        gsap.killTweensOf(n.position);
-        gsap.to(n.position, {
-          x: base.x,
-          y: base.y,
-          z: base.z,
-          duration,
-          ease: 'power2.out',
-          onUpdate: () => updateLinksForNodes(touched),
-        });
-      });
-      spreadNodes = new Set();
-    }
-
-    function spreadFocusNeighborhood(node: THREE.Group): void {
-      if (node.userData.isSun) return;
-      const neighbors = Array.from(adjMap.get(node) || []).filter(n => n.visible !== false).slice(0, 28);
-      if (neighbors.length === 0) return;
-
-      const touched = new Set<THREE.Group>([node]);
-      const viewDir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
-      if (viewDir.lengthSq() < 0.01) viewDir.set(0.45, 0.25, 0.85).normalize();
-      const right = new THREE.Vector3().crossVectors(camera.up, viewDir).normalize();
-      if (right.lengthSq() < 0.01) right.set(1, 0, 0);
-      const up = new THREE.Vector3().crossVectors(viewDir, right).normalize();
-      const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-      const firstRingCount = Math.min(10, neighbors.length);
-
-      neighbors.forEach((neighbor, index) => {
-        if (!neighbor.userData.focusBasePosition) neighbor.userData.focusBasePosition = neighbor.position.clone();
-        spreadNodes.add(neighbor);
-        touched.add(neighbor);
-
-        const ring = index < firstRingCount ? 0 : index < 20 ? 1 : 2;
-        const ringIndex = ring === 0 ? index : ring === 1 ? index - firstRingCount : index - 20;
-        const ringCount = ring === 0 ? firstRingCount : ring === 1 ? Math.max(1, Math.min(10, neighbors.length - firstRingCount)) : Math.max(1, neighbors.length - 20);
-        const angle = ring === 0
-          ? (ringIndex / Math.max(1, ringCount)) * Math.PI * 2
-          : ringIndex * goldenAngle + ring * 0.55;
-        const radius = neighbors.length <= 6 ? 150 : neighbors.length <= 14 ? 182 + ring * 60 : 205 + ring * 72;
-        const verticalSquash = ring === 0 ? 0.72 : 0.86;
-        const depth = ring === 0
-          ? (index % 2 === 0 ? 22 : -22)
-          : (ring % 2 === 0 ? 1 : -1) * (42 + (ringIndex % 3) * 18);
-        const target = node.position.clone()
-          .add(right.clone().multiplyScalar(Math.cos(angle) * radius))
-          .add(up.clone().multiplyScalar(Math.sin(angle) * radius * verticalSquash))
-          .add(viewDir.clone().multiplyScalar(depth));
-
-        gsap.killTweensOf(neighbor.position);
-        gsap.to(neighbor.position, {
-          x: target.x,
-          y: target.y,
-          z: target.z,
-          duration: 0.86,
-          delay: Math.min(0.18, index * 0.012),
-          ease: 'back.out(1.35)',
-          onUpdate: () => updateLinksForNodes(touched),
-          onComplete: () => updateLinksForNodes(touched),
-        });
-      });
-    }
-
     function focusNode(node: THREE.Group): void {
       const resetBtn = document.getElementById('reset-view-btn');
       if (resetBtn) resetBtn.classList.add('visible');
       if (autoRotateBeforeFocus === null) autoRotateBeforeFocus = controls.autoRotate;
       controls.autoRotate = false;
-      restoreSpreadNodes(0.22);
-      spreadFocusNeighborhood(node);
       const focusSelection = getFocusSelection(node);
       lastFocusSelection = focusSelection;
       frameSelection(focusSelection, node);
@@ -832,14 +714,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       // Show card name labels for focused node + neighbors
       setNodeLabelsFromNode(node);
       applyNodeModeVisual(useAppStore.getState().mode);
-      if (!node.userData.isSun) {
-        gsap.delayedCall(0.18, () => {
-          const expandedSelection = getFocusSelection(node);
-          lastFocusSelection = expandedSelection;
-          frameSelection(expandedSelection, node, 0.9);
-          setNodeLabelsFromNode(node);
-        });
-      }
     }
 
     // --- Learning Path ---
@@ -1187,7 +1061,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         controls.autoRotate = autoRotateBeforeFocus;
         autoRotateBeforeFocus = null;
       }
-      restoreSpreadNodes(0.45);
       lastFocusSelection = [];
       clearNodeLabels();
       gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.2 });
@@ -1711,7 +1584,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       adjMap.clear();
       clusterNodes.clear();
       clusterSuns.clear();
-      spreadNodes = new Set();
       clusterLabelData.length = 0;
       nodeLabelItems.length = 0;
       clearNodeLabels();
