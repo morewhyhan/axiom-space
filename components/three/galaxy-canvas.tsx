@@ -139,6 +139,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let linkUpdateCursor = 0;
     let motionFrame = 0;
     let lastHoverRaycastAt = 0;
+    let lastDragLinkUpdateAt = 0;
+    let lastLabelRenderAt = 0;
     const dimNodeModes = new Set(['forge', 'cognition', 'learn']);
 
     const { register, unregister } = useGalaxyActions.getState()
@@ -429,7 +431,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         .add(centerOut.multiplyScalar(Math.min(90, dist * 0.16)));
 
       const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
-      const points = curve.getPoints(56);
+      const points = curve.getPoints(16);
       const geo = new THREE.BufferGeometry().setFromPoints(points);
 
       const line = new THREE.Line(
@@ -467,7 +469,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         adjMap.get(targetNode)!.add(sourceNode);
 
         // Add energy flow for semantic links
-        const pCount = Math.floor(dist / 20) + 2;
+        const pCount = Math.min(12, Math.floor(dist / 42) + 2);
         const pGeo = new THREE.BufferGeometry();
         const pPos = new Float32Array(pCount * 3);
         pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
@@ -1336,7 +1338,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     renderer.toneMapping = THREE.ReinhardToneMapping;
     containerRef.current.appendChild(renderer.domElement);
 
@@ -1708,7 +1710,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         .add(centerOut.multiplyScalar(Math.min(90, dist * 0.16)));
 
       const curve = new THREE.QuadraticBezierCurve3(start.clone(), mid, end.clone());
-      const points = curve.getPoints(56);
+      const points = curve.getPoints(16);
       const position = line.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
       if (position && position.count === points.length) {
         for (let i = 0; i < points.length; i++) position.setXYZ(i, points[i].x, points[i].y, points[i].z);
@@ -1742,11 +1744,16 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
 
     function updateLinksForNode(node: THREE.Group): void {
+      let updated = 0;
       allLinks.forEach((line) => {
+        if (updated >= 36) return;
         if (!line.visible && !line.userData.flowMesh?.visible) return;
         const s = line.userData.source as THREE.Group | undefined;
         const t = line.userData.target as THREE.Group | undefined;
-        if (s === node || t === node) updateCurveGeometry(line);
+        if (s === node || t === node) {
+          updateCurveGeometry(line);
+          updated++;
+        }
       });
     }
 
@@ -2042,6 +2049,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
           draggingNode.position.lerp(dragIntersection, 0.55);
           draggingNode.userData.pinnedUntil = performance.now() + 5000;
+          const now = performance.now();
+          if (now - lastDragLinkUpdateAt > 120) {
+            lastDragLinkUpdateAt = now;
+            updateLinksForNode(draggingNode);
+          }
         }
         return;
       }
@@ -2056,7 +2068,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
       if (pointerDown) return;
       const now = performance.now();
-      if (now - lastHoverRaycastAt < 70) return;
+      if (now - lastHoverRaycastAt < 140) return;
       lastHoverRaycastAt = now;
       const node = findNodeAt(e);
       renderer.domElement.style.cursor = node ? 'pointer' : '';
@@ -2117,12 +2129,18 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const arranging = !!draggingNode;
       controls.update();
       motionFrame++;
-      if (!arranging && motionFrame % 4 === 0) applyOrganicMotion(time);
-      if (draggingNode) updateLinksForNode(draggingNode);
-      else if (motionFrame % 3 === 0) updateDynamicLinks();
-      if (!lockedNode && !hoveredNode && motionFrame % 45 === 0) refreshOverviewEdgeDensity(0.35);
-      composer.render();
-      if (!arranging && motionFrame % 2 === 0) renderLabels();
+      if (!arranging && lockedNode && motionFrame % 12 === 0) {
+        applyOrganicMotion(time);
+        updateDynamicLinks();
+      }
+      if (!lockedNode && !hoveredNode && motionFrame % 120 === 0) refreshOverviewEdgeDensity(0.35);
+      if (arranging) renderer.render(scene, camera);
+      else composer.render();
+      const labelNow = performance.now();
+      if (!arranging && labelNow - lastLabelRenderAt > 250) {
+        lastLabelRenderAt = labelNow;
+        renderLabels();
+      }
 
       // Dynamic Nebula Rotation
       if (!arranging && nebulaGroup) {
@@ -2151,7 +2169,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       }
 
       // Gentle breathing & Ring Rotation
-      if (!arranging && (lockedNode || hoveredNode || motionFrame % 4 === 0)) {
+      if (!arranging && (lockedNode || hoveredNode)) {
         allNodes.forEach(n => {
           if (!n.visible) return;
           if (n.userData.ring) {
@@ -2164,7 +2182,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       nodesGroup.position.y = 0;
       linksGroup.position.y = 0;
 
-      if (!arranging) scene.children.forEach((child) => {
+      if (!arranging && motionFrame % 2 === 0) scene.children.forEach((child) => {
         if (child.userData && child.userData.isComet) {
           const d = child.userData;
           d.startAngle += d.speed * cometSpeedMultiplier;
