@@ -135,8 +135,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let dragStartNode: THREE.Group | null = null;
     let dragStarted = false;
     let dragAutoRotateBefore: boolean | null = null;
+    let bloomStrengthBeforeDrag: number | null = null;
     let linkUpdateCursor = 0;
     let motionFrame = 0;
+    let lastHoverRaycastAt = 0;
     const dimNodeModes = new Set(['forge', 'cognition', 'learn']);
 
     const { register, unregister } = useGalaxyActions.getState()
@@ -653,10 +655,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const sampleSeed = hashId(String(s?.userData.id || '') + String(t?.userData.id || ''));
       const sample = seededRandom(sampleSeed);
 
-      if (distance > 1350) return weight >= 0.8 || sample < 0.1 ? 0.045 : 0;
-      if (distance > 950) return weight >= 0.62 || sample < 0.24 ? 0.055 : 0;
-      if (distance > 650) return weight >= 0.45 || sample < 0.48 ? 0.07 : 0;
-      return 0.085;
+      if (distance > 1350) return weight >= 0.92 || sample < 0.035 ? 0.035 : 0;
+      if (distance > 950) return weight >= 0.78 || sample < 0.08 ? 0.045 : 0;
+      if (distance > 650) return weight >= 0.62 || sample < 0.16 ? 0.055 : 0;
+      return weight >= 0.4 || sample < 0.32 ? 0.07 : 0;
     }
 
     function getNeighborSet(node: THREE.Group): Set<THREE.Group> {
@@ -741,7 +743,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         } else if (touchesSecondRing) {
           setLineOpacity(l, 0.12, 0.24);
         } else if (l.userData.semantic) {
-          setLineOpacity(l, locked ? 0.035 : 0.055, 0.24);
+          setLineOpacity(l, 0, 0.18);
         } else if (l.userData.isInternal) {
           setLineOpacity(l, 0, 0.18);
         } else {
@@ -1723,6 +1725,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
 
     function updateDynamicLinks(force = false): void {
+      if (!force && !lockedNode && !hoveredNode) return;
       const candidates = allLinks.filter(l => l.visible || l.userData.flowMesh?.visible);
       if (force || candidates.length <= 90) {
         candidates.forEach(updateCurveGeometry);
@@ -1747,16 +1750,59 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
+    function enterArrangePerformanceMode(node: THREE.Group): void {
+      if (bloomStrengthBeforeDrag === null) bloomStrengthBeforeDrag = bloomPass?.strength ?? null;
+      if (bloomPass) bloomPass.strength = Math.min(bloomPass.strength, 0.65);
+
+      const neighbors = getNeighborSet(node);
+      const visibleSet = new Set<THREE.Group>([node, ...neighbors]);
+      allNodes.forEach((n) => {
+        if (!n.visible) return;
+        if (n === node) setNodeVisual(n, 1.28, 1, 0.12);
+        else if (neighbors.has(n)) setNodeVisual(n, 1, 0.78, 0.12);
+        else setNodeVisual(n, 0.86, 0.08, 0.12);
+      });
+
+      allLinks.forEach((line) => {
+        if (line.userData._filtered) return;
+        const s = line.userData.source as THREE.Group;
+        const t = line.userData.target as THREE.Group;
+        const directlyRelated = s === node || t === node;
+        const inLocal = visibleSet.has(s) && visibleSet.has(t);
+        if (line.userData.flowMesh) line.userData.flowMesh.visible = false;
+        if (directlyRelated) setLineOpacity(line, 0.72, 0.08);
+        else if (inLocal && !line.userData.semantic) setLineOpacity(line, 0.16, 0.08);
+        else setLineOpacity(line, 0, 0.08);
+      });
+    }
+
+    function exitArrangePerformanceMode(): void {
+      if (bloomStrengthBeforeDrag !== null && bloomPass) {
+        gsap.to(bloomPass, { strength: bloomStrengthBeforeDrag, duration: 0.28, ease: 'power2.out' });
+      }
+      bloomStrengthBeforeDrag = null;
+      if (lockedNode) applyAttention(lockedNode, true);
+      else if (hoveredNode) applyAttention(hoveredNode, false);
+      else applyAttention(null);
+    }
+
+    function getActiveInteractionNodes(): THREE.Group[] {
+      const focus = lockedNode || hoveredNode;
+      if (!focus) return [];
+      const neighbors = getNeighborSet(focus);
+      return [focus, ...Array.from(neighbors).slice(0, lockedNode ? 40 : 24)];
+    }
+
     function applyOrganicMotion(time: number): void {
-      const nodes = allNodes.filter(n => n.visible !== false && n.userData.name !== 'CENTRAL_INTELLIGENCE');
+      const nodes = getActiveInteractionNodes().filter(n => n.visible !== false && n.userData.name !== 'CENTRAL_INTELLIGENCE');
       if (nodes.length === 0) return;
       if (draggingNode) return;
 
       const now = performance.now();
-      const interactionActive = !!draggingNode || !!lockedNode;
-      const anchorStrength = interactionActive ? 0.018 : 0.012;
-      const springStrength = 0.0009;
-      const repulseStrength = nodes.length > 220 ? 0.55 : 0.95;
+      const activeSet = new Set(nodes);
+      const anchorStrength = 0.018;
+      const springStrength = 0.0007;
+      const repulseStrength = 0.72;
 
       nodes.forEach((node) => {
         if (!node.userData.velocity) node.userData.velocity = new THREE.Vector3();
@@ -1779,6 +1825,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         if (!line.userData.semantic) return;
         const s = line.userData.source as THREE.Group;
         const t = line.userData.target as THREE.Group;
+        if (!activeSet.has(s) || !activeSet.has(t)) return;
         if (!s.visible || !t.visible || s === draggingNode || t === draggingNode) return;
         const delta = new THREE.Vector3().subVectors(t.position, s.position);
         const dist = Math.max(delta.length(), 1);
@@ -1789,7 +1836,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         (t.userData.velocity as THREE.Vector3 | undefined)?.sub(delta);
       });
 
-      const pairLimit = nodes.length > 160 ? 160 : nodes.length;
+      const pairLimit = nodes.length > 48 ? 48 : nodes.length;
       for (let i = 0; i < pairLimit; i++) {
         const a = nodes[i];
         for (let j = i + 1; j < pairLimit; j++) {
@@ -1957,6 +2004,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       raycaster.setFromCamera(mouse, camera);
       raycaster.ray.intersectPlane(dragPlane, dragIntersection);
       node.userData.pinnedUntil = performance.now() + 5000;
+      enterArrangePerformanceMode(node);
       renderer.domElement.style.cursor = 'grabbing';
     }
 
@@ -1972,6 +2020,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       controls.enabled = true;
       if (dragAutoRotateBefore !== null && !lockedNode) controls.autoRotate = dragAutoRotateBefore;
       dragAutoRotateBefore = null;
+      exitArrangePerformanceMode();
       renderer.domElement.style.cursor = hoveredNode ? 'pointer' : '';
     }
 
@@ -1993,7 +2042,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         if (raycaster.ray.intersectPlane(dragPlane, dragIntersection)) {
           draggingNode.position.lerp(dragIntersection, 0.55);
           draggingNode.userData.pinnedUntil = performance.now() + 5000;
-          updateLinksForNode(draggingNode);
         }
         return;
       }
@@ -2007,6 +2055,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       }
 
       if (pointerDown) return;
+      const now = performance.now();
+      if (now - lastHoverRaycastAt < 70) return;
+      lastHoverRaycastAt = now;
       const node = findNodeAt(e);
       renderer.domElement.style.cursor = node ? 'pointer' : '';
       if (node === hoveredNode) return;
@@ -2063,52 +2114,57 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     function animate() {
       animationId = requestAnimationFrame(animate);
       const time = performance.now() * 0.001;
+      const arranging = !!draggingNode;
       controls.update();
       motionFrame++;
-      if (motionFrame % 2 === 0) applyOrganicMotion(time);
+      if (!arranging && motionFrame % 4 === 0) applyOrganicMotion(time);
       if (draggingNode) updateLinksForNode(draggingNode);
-      else updateDynamicLinks();
+      else if (motionFrame % 3 === 0) updateDynamicLinks();
       if (!lockedNode && !hoveredNode && motionFrame % 45 === 0) refreshOverviewEdgeDensity(0.35);
       composer.render();
-      renderLabels();
+      if (!arranging && motionFrame % 2 === 0) renderLabels();
 
       // Dynamic Nebula Rotation
-      if (nebulaGroup) {
+      if (!arranging && nebulaGroup) {
         nebulaGroup.children.forEach(c => {
           c.rotation.z += (c.userData.rotationSpeed || 0.0002);
         });
       }
 
       // Energy Flows animation
-      flows.forEach(f => {
-        if (!f.mesh.visible) return;
-        f.offset += f.speed;
-        const pos = f.mesh.geometry.attributes.position.array as Float32Array;
-        const pCount = pos.length / 3;
-        for (let i = 0; i < pCount; i++) {
-          const t = (f.offset + i / pCount) % 1;
-          const idx = Math.floor(t * (f.points.length - 1));
-          const p = f.points[idx];
-          pos[i * 3] = p.x;
-          pos[i * 3 + 1] = p.y;
-          pos[i * 3 + 2] = p.z;
-        }
-        f.mesh.geometry.attributes.position.needsUpdate = true;
-      });
+      if (!arranging) {
+        flows.forEach(f => {
+          if (!f.mesh.visible) return;
+          f.offset += f.speed;
+          const pos = f.mesh.geometry.attributes.position.array as Float32Array;
+          const pCount = pos.length / 3;
+          for (let i = 0; i < pCount; i++) {
+            const t = (f.offset + i / pCount) % 1;
+            const idx = Math.floor(t * (f.points.length - 1));
+            const p = f.points[idx];
+            pos[i * 3] = p.x;
+            pos[i * 3 + 1] = p.y;
+            pos[i * 3 + 2] = p.z;
+          }
+          f.mesh.geometry.attributes.position.needsUpdate = true;
+        });
+      }
 
       // Gentle breathing & Ring Rotation
-      allNodes.forEach(n => {
-        if (!n.visible) return;
-        if (n.userData.ring) {
-          n.userData.ring.rotation.z += 0.01;
-          n.userData.ring.material.opacity = 0.2 + Math.sin(time * 3) * 0.1;
-        }
-      });
+      if (!arranging && (lockedNode || hoveredNode || motionFrame % 4 === 0)) {
+        allNodes.forEach(n => {
+          if (!n.visible) return;
+          if (n.userData.ring) {
+            n.userData.ring.rotation.z += 0.01;
+            n.userData.ring.material.opacity = 0.2 + Math.sin(time * 3) * 0.1;
+          }
+        });
+      }
 
       nodesGroup.position.y = 0;
       linksGroup.position.y = 0;
 
-      scene.children.forEach((child) => {
+      if (!arranging) scene.children.forEach((child) => {
         if (child.userData && child.userData.isComet) {
           const d = child.userData;
           d.startAngle += d.speed * cometSpeedMultiplier;
@@ -2140,7 +2196,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
 
       // Learning path flow animation
-      if (learningPath.visible && learningPath.curve && learningPath.flowParticles) {
+      if (!arranging && learningPath.visible && learningPath.curve && learningPath.flowParticles) {
         learningPath.flowOffset += 0.002;
         if (learningPath.flowOffset > 1) learningPath.flowOffset -= 1;
         const fpArr = (
