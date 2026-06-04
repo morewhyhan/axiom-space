@@ -127,6 +127,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let cometSpeedMultiplier = 1.0;
     let autoRotateBeforeFocus: boolean | null = null;
     let lastFocusSelection: THREE.Group[] = [];
+    let hoveredNode: THREE.Group | null = null;
+    let lockedNode: THREE.Group | null = null;
+    let lastHoverRaycastAt = 0;
     const dimNodeModes = new Set(['forge', 'cognition', 'learn']);
 
     const { register, unregister } = useGalaxyActions.getState()
@@ -597,6 +600,82 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
+    function getInteractionNeighbors(node: THREE.Group): Set<THREE.Group> {
+      if (node.userData.isSun) {
+        const cid = node.userData.clusterId;
+        return new Set((clusterNodes.get(cid) || []).filter(n => n.visible !== false));
+      }
+      return new Set(Array.from(adjMap.get(node) || []).filter(n => n.visible !== false));
+    }
+
+    function setNodeScale(node: THREE.Group, scale: number, duration = 0.24): void {
+      if (!node.visible) return;
+      gsap.to(node.scale, { x: scale, y: scale, z: scale, duration, ease: 'power2.out' });
+    }
+
+    function setLinkOpacity(line: THREE.Line, opacity: number, duration = 0.22): void {
+      if (line.userData._filtered) return;
+      const mat = line.material as THREE.LineBasicMaterial;
+      line.visible = opacity > 0.012;
+      gsap.to(mat, { opacity, duration, ease: 'power2.out' });
+    }
+
+    function applyGraphAttention(node: THREE.Group | null, locked = false): void {
+      if (!node) {
+        allNodes.forEach((n) => {
+          if (!n.visible) return;
+          setNodeScale(n, 1, 0.26);
+          if (n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
+        });
+        allLinks.forEach((l) => {
+          if (l.userData._filtered) return;
+          if (l.userData.isInternal || l.userData.semantic) {
+            l.visible = false;
+            if (l.userData.flowMesh) l.userData.flowMesh.visible = false;
+            return;
+          }
+          l.visible = true;
+          (l.material as THREE.LineBasicMaterial).color.set(l.userData.clusterColor);
+          setLinkOpacity(l, l.userData.baseOpacity, 0.24);
+        });
+        clearNodeLabels();
+        return;
+      }
+
+      const neighbors = getInteractionNeighbors(node);
+      const primary = new Set<THREE.Group>([node, ...neighbors]);
+      allNodes.forEach((n) => {
+        if (!n.visible) return;
+        if (n === node) setNodeScale(n, locked ? 1.34 : 1.2, 0.24);
+        else if (neighbors.has(n)) setNodeScale(n, 1.02, 0.24);
+        else setNodeScale(n, locked ? 0.72 : 0.82, 0.24);
+        if (primary.has(n) && n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
+      });
+
+      allLinks.forEach((l) => {
+        if (l.userData._filtered) return;
+        const s = l.userData.source as THREE.Group;
+        const t = l.userData.target as THREE.Group;
+        const directlyRelated = (s === node && neighbors.has(t)) || (t === node && neighbors.has(s));
+        const localContext = primary.has(s) && primary.has(t);
+        if (l.userData.flowMesh) l.userData.flowMesh.visible = directlyRelated && locked;
+
+        if (directlyRelated) {
+          (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor || l.userData.clusterColor || 0xffffff);
+          setLinkOpacity(l, locked ? 0.88 : 0.72, 0.18);
+        } else if (localContext && (l.userData.semantic || l.userData.isInternal)) {
+          (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor || l.userData.clusterColor || 0xffffff);
+          setLinkOpacity(l, 0.2, 0.18);
+        } else if (l.userData.semantic || l.userData.isInternal) {
+          setLinkOpacity(l, 0, 0.18);
+        } else {
+          setLinkOpacity(l, locked ? 0.035 : 0.055, 0.18);
+        }
+      });
+
+      setNodeLabelsFromNode(node);
+    }
+
     function focusNode(node: THREE.Group): void {
       const resetBtn = document.getElementById('reset-view-btn');
       if (resetBtn) resetBtn.classList.add('visible');
@@ -604,115 +683,17 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       controls.autoRotate = false;
       const focusSelection = getFocusSelection(node);
       lastFocusSelection = focusSelection;
-      frameSelection(focusSelection, node);
+      frameSelection(focusSelection, node, node.userData.isSun ? 1.15 : 0.75);
+      lockedNode = node;
+      hoveredNode = null;
 
       // Special highlight for focused node
       if (node.userData.ring) {
         gsap.to(node.userData.ring.scale, { x: 1.5, y: 1.5, z: 1.5, duration: 0.5 });
         gsap.to(node.userData.ring.material, { opacity: 0.8, duration: 0.5 });
       }
-
-      if (node.userData.isSun) {
-        currentClusterId = node.userData.clusterId;
-        const cid = node.userData.clusterId;
-        const mySubNodes = clusterNodes.get(cid) || [];
-        const myClusterSet = new Set<THREE.Group>([node, ...mySubNodes]);
-        allNodes.forEach((n) => {
-          if (!n.visible) return;
-          const inCluster = myClusterSet.has(n);
-          gsap.to(n.scale, {
-            x: inCluster ? 1 : 0.15,
-            y: inCluster ? 1 : 0.15,
-            z: inCluster ? 1 : 0.15,
-            duration: 0.5,
-          });
-          if (inCluster && n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
-        });
-        allLinks.forEach((l) => {
-          if (l.userData._filtered) return;
-          const s = l.userData.source as THREE.Group;
-          const t = l.userData.target as THREE.Group;
-          const inCluster = myClusterSet.has(s) && myClusterSet.has(t);
-
-          if (l.userData.flowMesh) l.userData.flowMesh.visible = inCluster;
-
-          if (l.userData.isInternal) {
-            l.visible = inCluster;
-            if (inCluster) {
-              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
-              gsap.to(l.material, { opacity: 0.5, duration: 0.5 });
-            }
-          } else if (l.userData.semantic) {
-            // Semantic (WikiLink) edges: show only within this cluster
-            l.visible = inCluster;
-            if (inCluster) {
-              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
-              gsap.to(l.material, { opacity: 0.74, duration: 0.5 });
-            }
-          } else {
-            if (
-              inCluster &&
-              l.userData.trueColor !== l.userData.clusterColor
-            )
-              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
-            if (inCluster) {
-              gsap.to(l.material, { opacity: 0.52, duration: 0.5 });
-            } else {
-              l.visible = false;
-              gsap.to(l.material, { opacity: 0, duration: 0.2 });
-            }
-          }
-        });
-      } else {
-        const neighbors = adjMap.get(node) || new Set<THREE.Group>();
-        // Only include visible neighbors
-        const visibleNeighbors = new Set(Array.from(neighbors).filter(n => n.visible));
-        const visibleSet = new Set<THREE.Group>([node, ...visibleNeighbors]);
-        allNodes.forEach((n) => {
-          if (!n.visible) return;
-          const isVisible = visibleSet.has(n);
-          gsap.to(n.scale, {
-            x: isVisible ? (n === node ? 1.5 : 1) : 0.1,
-            y: isVisible ? (n === node ? 1.5 : 1) : 0.1,
-            z: isVisible ? (n === node ? 1.5 : 1) : 0.1,
-            duration: 0.5,
-          });
-          if (isVisible && n.userData.trueColor)
-            setNodeColor(n, n.userData.trueColor);
-        });
-        allLinks.forEach((l) => {
-          if (l.userData._filtered) return;
-          const s = l.userData.source as THREE.Group;
-          const t = l.userData.target as THREE.Group;
-          const isRelated = s === node || t === node;
-
-          if (l.userData.flowMesh) l.userData.flowMesh.visible = isRelated;
-
-          if (l.userData.isInternal) {
-            l.visible = isRelated;
-            if (isRelated) {
-              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
-              gsap.to(l.material, { opacity: 0.82, duration: 0.5 });
-            }
-          } else if (l.userData.semantic) {
-            // Semantic edges: show only when directly connected to focused node
-            l.visible = isRelated;
-            if (isRelated) {
-              (l.material as THREE.LineBasicMaterial).color.set(l.userData.trueColor);
-              gsap.to(l.material, { opacity: 0.92, duration: 0.5 });
-            }
-          } else {
-            // Visual-only curves (sun→subnode, core→sun): hidden completely in leaf focus
-            l.visible = false;
-            gsap.to(l.material, {
-              opacity: 0,
-              duration: 0.2,
-            });
-          }
-        });
-      }
-      // Show card name labels for focused node + neighbors
-      setNodeLabelsFromNode(node);
+      if (node.userData.isSun) currentClusterId = node.userData.clusterId;
+      applyGraphAttention(node, true);
       applyNodeModeVisual(useAppStore.getState().mode);
     }
 
@@ -1061,6 +1042,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         controls.autoRotate = autoRotateBeforeFocus;
         autoRotateBeforeFocus = null;
       }
+      lockedNode = null;
+      hoveredNode = null;
       lastFocusSelection = [];
       clearNodeLabels();
       gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.2 });
@@ -1714,10 +1697,25 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     };
     renderer.domElement.addEventListener('contextmenu', onContextMenu);
 
-    // Click to focus
+    // Hover previews relationships; click locks the same neighborhood.
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     let pointerDown: { x: number; y: number } | null = null;
+    function setMouseFromEvent(e: MouseEvent): void {
+      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    }
+    function findNodeAt(e: MouseEvent): THREE.Group | null {
+      setMouseFromEvent(e);
+      raycaster.setFromCamera(mouse, camera);
+      const hits = raycaster.intersectObjects(nodesGroup.children, true);
+      for (const hit of hits) {
+        let obj = hit.object as THREE.Object3D;
+        while (obj.parent && obj.parent !== nodesGroup && obj.parent !== scene) obj = obj.parent;
+        if (obj.userData && obj.userData.name) return obj as THREE.Group;
+      }
+      return null;
+    }
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
       pointerDown = { x: e.clientX, y: e.clientY };
@@ -1726,33 +1724,40 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const existing = document.getElementById('galaxy-edge-panel');
       if (existing) existing.remove();
     };
+    const onMouseMove = (e: MouseEvent) => {
+      if (pointerDown || lockedNode) return;
+      const now = performance.now();
+      if (now - lastHoverRaycastAt < 90) return;
+      lastHoverRaycastAt = now;
+      const node = findNodeAt(e);
+      renderer.domElement.style.cursor = node ? 'pointer' : '';
+      if (node === hoveredNode) return;
+      hoveredNode = node;
+      applyGraphAttention(node, false);
+    };
     const onMouseUp = (e: MouseEvent) => {
       if (e.button !== 0 || !pointerDown) return;
       const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
       pointerDown = null;
       if (moved > 5) return;
 
-      mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-      raycaster.setFromCamera(mouse, camera);
-
-      // Check node clicks first
-      const nodeHits = raycaster.intersectObjects(nodesGroup.children, true);
-      if (nodeHits.length > 0) {
-        let obj = nodeHits[0].object as THREE.Object3D;
-        while (
-          obj.parent &&
-          obj.parent !== nodesGroup &&
-          obj.parent !== scene
-        )
-          obj = obj.parent;
-        if (obj.userData && obj.userData.name) focusNode(obj as THREE.Group);
+      const node = findNodeAt(e);
+      if (node) {
+        focusNode(node);
         return;
       }
 
     };
+    const onMouseLeave = () => {
+      if (lockedNode) return;
+      hoveredNode = null;
+      renderer.domElement.style.cursor = '';
+      applyGraphAttention(null);
+    };
     renderer.domElement.addEventListener('mousedown', onMouseDown);
+    renderer.domElement.addEventListener('mousemove', onMouseMove);
     renderer.domElement.addEventListener('mouseup', onMouseUp);
+    renderer.domElement.addEventListener('mouseleave', onMouseLeave);
 
     // Resize handler
     const onResize = () => {
@@ -1902,7 +1907,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       window.removeEventListener('resize', onResize);
       renderer.domElement.removeEventListener('contextmenu', onContextMenu);
       renderer.domElement.removeEventListener('mousedown', onMouseDown);
+      renderer.domElement.removeEventListener('mousemove', onMouseMove);
       renderer.domElement.removeEventListener('mouseup', onMouseUp);
+      renderer.domElement.removeEventListener('mouseleave', onMouseLeave);
       unsubscribeModeVisual();
 
       // Kill any active gsap tweens
