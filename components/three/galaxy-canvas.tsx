@@ -651,6 +651,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       spreadNodes.forEach((n) => {
         const base = n.userData.focusBasePosition as THREE.Vector3 | undefined;
         if (!base) return;
+        gsap.killTweensOf(n.position);
         gsap.to(n.position, {
           x: base.x,
           y: base.y,
@@ -665,31 +666,49 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     function spreadFocusNeighborhood(node: THREE.Group): void {
       if (node.userData.isSun) return;
-      const neighbors = Array.from(adjMap.get(node) || []).filter(n => n.visible !== false).slice(0, 18);
+      const neighbors = Array.from(adjMap.get(node) || []).filter(n => n.visible !== false).slice(0, 28);
       if (neighbors.length === 0) return;
 
       const touched = new Set<THREE.Group>([node]);
-      const spreadDistance = THREE.MathUtils.clamp(110 - neighbors.length * 3, 52, 92);
+      const viewDir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+      if (viewDir.lengthSq() < 0.01) viewDir.set(0.45, 0.25, 0.85).normalize();
+      const right = new THREE.Vector3().crossVectors(camera.up, viewDir).normalize();
+      if (right.lengthSq() < 0.01) right.set(1, 0, 0);
+      const up = new THREE.Vector3().crossVectors(viewDir, right).normalize();
+      const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+      const firstRingCount = Math.min(10, neighbors.length);
+
       neighbors.forEach((neighbor, index) => {
         if (!neighbor.userData.focusBasePosition) neighbor.userData.focusBasePosition = neighbor.position.clone();
         spreadNodes.add(neighbor);
         touched.add(neighbor);
 
-        const base = neighbor.userData.focusBasePosition as THREE.Vector3;
-        const fromFocus = new THREE.Vector3().subVectors(base, node.position);
-        if (fromFocus.lengthSq() < 1) {
-          const angle = (index / Math.max(1, neighbors.length)) * Math.PI * 2;
-          fromFocus.set(Math.cos(angle), Math.sin(angle) * 0.35, Math.sin(angle));
-        }
-        fromFocus.normalize();
-        const target = base.clone().add(fromFocus.multiplyScalar(spreadDistance));
+        const ring = index < firstRingCount ? 0 : index < 20 ? 1 : 2;
+        const ringIndex = ring === 0 ? index : ring === 1 ? index - firstRingCount : index - 20;
+        const ringCount = ring === 0 ? firstRingCount : ring === 1 ? Math.max(1, Math.min(10, neighbors.length - firstRingCount)) : Math.max(1, neighbors.length - 20);
+        const angle = ring === 0
+          ? (ringIndex / Math.max(1, ringCount)) * Math.PI * 2
+          : ringIndex * goldenAngle + ring * 0.55;
+        const radius = neighbors.length <= 6 ? 150 : neighbors.length <= 14 ? 182 + ring * 60 : 205 + ring * 72;
+        const verticalSquash = ring === 0 ? 0.72 : 0.86;
+        const depth = ring === 0
+          ? (index % 2 === 0 ? 22 : -22)
+          : (ring % 2 === 0 ? 1 : -1) * (42 + (ringIndex % 3) * 18);
+        const target = node.position.clone()
+          .add(right.clone().multiplyScalar(Math.cos(angle) * radius))
+          .add(up.clone().multiplyScalar(Math.sin(angle) * radius * verticalSquash))
+          .add(viewDir.clone().multiplyScalar(depth));
+
+        gsap.killTweensOf(neighbor.position);
         gsap.to(neighbor.position, {
           x: target.x,
           y: target.y,
           z: target.z,
-          duration: 0.62,
-          ease: 'expo.out',
+          duration: 0.86,
+          delay: Math.min(0.18, index * 0.012),
+          ease: 'back.out(1.35)',
           onUpdate: () => updateLinksForNodes(touched),
+          onComplete: () => updateLinksForNodes(touched),
         });
       });
     }
@@ -813,6 +832,14 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       // Show card name labels for focused node + neighbors
       setNodeLabelsFromNode(node);
       applyNodeModeVisual(useAppStore.getState().mode);
+      if (!node.userData.isSun) {
+        gsap.delayedCall(0.18, () => {
+          const expandedSelection = getFocusSelection(node);
+          lastFocusSelection = expandedSelection;
+          frameSelection(expandedSelection, node, 0.9);
+          setNodeLabelsFromNode(node);
+        });
+      }
     }
 
     // --- Learning Path ---
