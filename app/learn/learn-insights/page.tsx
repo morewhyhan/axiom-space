@@ -57,41 +57,33 @@ export default function LearnInsightsPage() {
         {/* 主内容区（桌面端显示所有，移动端根据选中标签显示） */}
 
         {/* 概览面板（桌面端显示，移动端在 overview 标签显示） */}
-        {(activeTab === 'overview' || window.innerWidth >= 1024) && (
-          <div className={`lg:col-span-3 ${activeTab !== 'overview' && activeTab !== 'profile' ? 'hidden md:block' : ''}`}>
-            <OverviewPanel />
-          </div>
-        )}
+        <div className={`lg:col-span-3 ${activeTab === 'overview' ? '' : 'hidden lg:block'}`}>
+          <OverviewPanel />
+        </div>
 
         {/* 能力画像（桌面端占 1 列，移动端独占） */}
-        {(activeTab === 'profile' || activeTab === 'overview' || window.innerWidth >= 1024) && (
-          <div className={`${activeTab === 'profile' ? '' : activeTab === 'overview' ? '' : 'hidden lg:block'}`}>
-            <h3 className="text-lg font-semibold mb-4 hidden lg:block">能力画像</h3>
-            <Suspense fallback={<LoadingPanel />}>
-              <EducationProfileView />
-            </Suspense>
-          </div>
-        )}
+        <div className={`${activeTab === 'profile' || activeTab === 'overview' ? '' : 'hidden'} lg:block`}>
+          <h3 className="text-lg font-semibold mb-4 hidden lg:block">能力画像</h3>
+          <Suspense fallback={<LoadingPanel />}>
+            <EducationProfileView />
+          </Suspense>
+        </div>
 
         {/* 任务路径（桌面端占 1 列，移动端独占） */}
-        {(activeTab === 'path' || activeTab === 'overview' || window.innerWidth >= 1024) && (
-          <div className={`${activeTab === 'path' ? '' : activeTab === 'overview' ? '' : 'hidden lg:block'}`}>
-            <h3 className="text-lg font-semibold mb-4 hidden lg:block">任务路径</h3>
-            <Suspense fallback={<LoadingPanel />}>
-              <PathAdjustmentView />
-            </Suspense>
-          </div>
-        )}
+        <div className={`${activeTab === 'path' || activeTab === 'overview' ? '' : 'hidden'} lg:block`}>
+          <h3 className="text-lg font-semibold mb-4 hidden lg:block">任务路径</h3>
+          <Suspense fallback={<LoadingPanel />}>
+            <PathAdjustmentView />
+          </Suspense>
+        </div>
 
         {/* 推送资源（桌面端占 1 列，移动端独占） */}
-        {(activeTab === 'resources' || activeTab === 'overview' || window.innerWidth >= 1024) && (
-          <div className={`${activeTab === 'resources' ? '' : activeTab === 'overview' ? '' : 'hidden lg:block'}`}>
-            <h3 className="text-lg font-semibold mb-4 hidden lg:block">推荐资源</h3>
-            <Suspense fallback={<LoadingPanel />}>
-              <PushResourceCard />
-            </Suspense>
-          </div>
-        )}
+        <div className={`${activeTab === 'resources' || activeTab === 'overview' ? '' : 'hidden'} lg:block`}>
+          <h3 className="text-lg font-semibold mb-4 hidden lg:block">推荐资源</h3>
+          <Suspense fallback={<LoadingPanel />}>
+            <PushResourceCard />
+          </Suspense>
+        </div>
       </div>
 
       {/* 底部提示 */}

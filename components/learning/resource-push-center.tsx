@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState } from 'react'
-import { usePushResources } from '@/hooks/use-learning'
+import { useMarkPushRead, usePushResources, useRecordPushFeedback } from '@/hooks/use-learning'
 
 const PUSH_TRIGGER_ICONS: Record<string, string> = {
   assessment_failed: '❌',
@@ -51,6 +51,8 @@ interface PushRecord {
 
 export default function ResourcePushCenter() {
   const { data: pushRecords, loading, refetch } = usePushResources()
+  const recordFeedback = useRecordPushFeedback()
+  const markRead = useMarkPushRead()
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null)
   const [feedbackText, setFeedbackText] = useState('')
@@ -68,12 +70,20 @@ export default function ResourcePushCenter() {
   const records = parsePushRecords(pushRecords?.records)
   const unreadCount = records.filter((r) => !r.viewedAt).length
 
-  const handleSubmitFeedback = async (pushId: string) => {
-    // 这里可以调用 API 提交反馈
-    console.log(`Feedback for ${pushId}: ${feedbackText}`)
+  const handleSubmitFeedback = async (push: PushRecord) => {
+    await recordFeedback.mutateAsync({
+      pushId: push.id,
+      engagedResourceIds: push.parsedResources?.map((res) => res.resourceId).filter(Boolean) as string[] | undefined,
+      feedbackText,
+    })
     setFeedbackOpen(null)
     setFeedbackText('')
-    // 可以调用 refetch 来刷新数据
+    await refetch()
+  }
+
+  const handleMarkRead = async (pushId: string) => {
+    await markRead.mutateAsync(pushId)
+    await refetch()
   }
 
   if (loading) {
@@ -208,7 +218,7 @@ export default function ResourcePushCenter() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                handleSubmitFeedback(push.id)
+                                void handleSubmitFeedback(push)
                               }}
                               className="flex-1 px-3 py-2 bg-purple-500/30 hover:bg-purple-500/40 rounded text-purple-300 text-sm font-semibold transition"
                             >
@@ -240,8 +250,7 @@ export default function ResourcePushCenter() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation()
-                                // 标记为已读
-                                console.log(`Mark ${push.id} as read`)
+                                void handleMarkRead(push.id)
                               }}
                               className="flex-1 px-3 py-2 bg-green-500/20 hover:bg-green-500/30 rounded text-green-300 text-sm font-semibold transition"
                             >

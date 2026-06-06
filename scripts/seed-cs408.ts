@@ -1,1434 +1,642 @@
-﻿import 'dotenv/config'
+import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
 import { hashPassword } from 'better-auth/crypto'
-import { syncEdgesFromContent } from '../lib/wiki-links'
+import crypto from 'node:crypto'
 
 const prisma = new PrismaClient()
 
-// 鈹€鈹€鈹€ Helpers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+const DEMO_EMAIL = 'demo@axiom.space'
+const DEMO_PASSWORD = 'demo123456'
+const VAULT_NAME = 'CS408 Knowledge Graph'
 
-function randomPastDate(daysBack: number): Date { const d = new Date(); d.setDate(d.getDate() - Math.floor(Math.random() * daysBack)); d.setHours(Math.floor(Math.random() * 24), 0, 0, 0); return d; }
-
-function slugify(text: string): string {
-  return text.replace(/[銆娿€?)锛堬級,锛岋細銆乗s]+/g, '').trim()
-}
-
-function makePath(clusterName: string, cardTitle: string): string {
-  return `${clusterName}/${slugify(cardTitle)}.md`
-}
-
-function getTags(subject: string, cardType: string, extra?: string[]): string[] {
-  const base: string[] = [subject]
-  if (cardType === 'permanent') base.push('core')
-  else if (cardType === 'fleeting') base.push('idea')
-  else if (cardType === 'literature') base.push('reference')
-  if (extra) base.push(...extra)
-  return base
-}
-
-// 鈹€鈹€鈹€ Card & Subject Type Definitions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+type CardType = 'permanent' | 'fleeting' | 'literature'
+type EdgeType = 'related' | 'prerequisite' | 'derived' | 'counter'
 
 interface CardDef {
+  cluster: string
   title: string
-  tags?: string[]
-}
-
-interface SubjectDef {
-  name: string
-  color: string
-  permanent: CardDef[]
-  fleeting: CardDef[]
-  literature: CardDef[]
+  type: CardType
+  tags: string[]
+  summary: string
+  why: string
+  mistakes: string[]
+  related: string[]
 }
 
 interface EdgeDef {
-  sourceSubject: string
-  sourceTitle: string
-  targetSubject: string
-  targetTitle: string
-  type: 'related' | 'prerequisite' | 'derived' | 'counter'
+  from: string
+  to: string
+  type: EdgeType
+  weight?: number
 }
 
-// 鈹€鈹€鈹€ 鏁版嵁缁撴瀯 (Data Structures) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
-const subjectDS: SubjectDef = {
-  name: '鏁版嵁缁撴瀯',
-  color: '#a855f7',
-  permanent: [
-    { title: '绾挎€ц〃', tags: ['linear-list'] },
-    { title: '鏍?, tags: ['stack'] },
-    { title: '闃熷垪', tags: ['queue'] },
-    { title: '鏍?, tags: ['tree'] },
-    { title: '浜屽弶鏍?, tags: ['binary-tree'] },
-    { title: '鍥?, tags: ['graph'] },
-    { title: '鎺掑簭绠楁硶', tags: ['sorting'] },
-    { title: '鏌ユ壘绠楁硶', tags: ['searching'] },
-    { title: '鍝堝笇琛?, tags: ['hash-table'] },
-    { title: '鍫?, tags: ['heap'] },
-    { title: '骞舵煡闆?, tags: ['union-find'] },
-    { title: '骞宠　浜屽弶鏍?, tags: ['balanced-tree', 'avl'] },
-    { title: 'B鏍?, tags: ['b-tree'] },
-    { title: '鍏抽敭璺緞', tags: ['critical-path'] },
-    { title: '鏈€鐭矾寰?, tags: ['shortest-path'] },
-  ],
-  fleeting: [
-    { title: '鏍堜笌閫掑綊鐨勫叧绯? },
-    { title: '寰幆闃熷垪瀹炵幇' },
-    { title: '浜屽弶鏍戠殑閬嶅巻椤哄簭' },
-    { title: '鍥剧殑閭绘帴鐭╅樀vs閭绘帴琛? },
-    { title: '蹇€熸帓搴忔渶鍧忔儏鍐? },
-    { title: '鍝堝笇鍐茬獊瑙ｅ喅' },
-    { title: 'B鏍戜笌B+鏍戝尯鍒? },
-    { title: 'KMP绠楁硶鎬濇兂' },
-    { title: 'Prim绠楁硶涓嶬ruskal绠楁硶瀵规瘮' },
-    { title: '鍔ㄦ€佽鍒抳s璐績绠楁硶' },
-    { title: '鏍堢殑搴旂敤鍦烘櫙' },
-    { title: '闃熷垪鐨勫簲鐢ㄥ満鏅? },
-    { title: '閾捐〃鐨勬彃鍏ュ垹闄ゆ搷浣? },
-    { title: '鍙屽悜閾捐〃涓庡惊鐜摼琛? },
-    { title: '绋€鐤忕煩闃靛瓨鍌? },
-    { title: '骞夸箟琛ㄧ粨鏋? },
-    { title: '浜屽弶鏍戜笌妫灄杞崲' },
-    { title: 'Huffman缂栫爜' },
-    { title: 'AVL鏍戞棆杞搷浣? },
-    { title: '绾㈤粦鏍戞€ц川' },
-    { title: '鍥剧殑娣卞害浼樺厛涓庡箍搴︿紭鍏? },
-    { title: '鎷撴墤鎺掑簭瀹炵幇' },
-    { title: '鏈€灏忕敓鎴愭爲绠楁硶瀵规瘮' },
-    { title: 'Dijkstra绠楁硶鍘熺悊' },
-    { title: 'Floyd绠楁硶鍘熺悊' },
-    { title: '褰掑苟鎺掑簭杩囩▼' },
-    { title: '鍩烘暟鎺掑簭鎬濇兂' },
-    { title: '澶栭儴鎺掑簭涓庡璺綊骞? },
-    { title: '浜屽垎鏌ユ壘鍐崇瓥鏍? },
-    { title: '鏁ｅ垪鍑芥暟璁捐' },
-    { title: '瀛楃涓插尮閰嶇畻娉? },
-    { title: '澶ф暟鎹甌opK闂' },
-    { title: '鎺掑簭绠楁硶绋冲畾鎬у姣? },
-    { title: '鏃堕棿澶嶆潅搴︾殑娓愯繘鍒嗘瀽' },
-    { title: '閫掑綊绠楁硶鐨勮绠楁ā鍨? },
-  ],
-  literature: [
-    { title: '涓ヨ敋鏁忋€婃暟鎹粨鏋勩€?, tags: ['textbook'] },
-    { title: '閭撲繆杈夈€婃暟鎹粨鏋勪笌绠楁硶銆?, tags: ['textbook'] },
-    { title: '銆婄畻娉曞璁恒€?, tags: ['textbook'] },
-    { title: '銆婂ぇ璇濇暟鎹粨鏋勩€?, tags: ['textbook'] },
-    { title: '鐜嬮亾408鏁版嵁缁撴瀯绡?, tags: ['exam-guide'] },
-    { title: '澶╁嫟鏁版嵁缁撴瀯楂樺垎绗旇', tags: ['exam-guide'] },
-    { title: 'LeetCode HOT100', tags: ['practice'] },
-    { title: '銆婃暟鎹粨鏋勪笌绠楁硶鍒嗘瀽銆?, tags: ['textbook'] },
-  ],
+function daysAgo(days: number): Date {
+  const date = new Date()
+  date.setDate(date.getDate() - days)
+  date.setHours(9 + (days % 9), (days * 17) % 60, 0, 0)
+  return date
 }
 
-// 鈹€鈹€鈹€ 璁＄畻鏈虹粍鎴愬師鐞?(Computer Organization) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
-const subjectCO: SubjectDef = {
-  name: '璁＄畻鏈虹粍鎴愬師鐞?,
-  color: '#22d3ee',
-  permanent: [
-    { title: '鍐渚濇浖缁撴瀯', tags: ['von-neumann'] },
-    { title: '鏁版嵁琛ㄧず', tags: ['data-representation'] },
-    { title: '杩愮畻鏂规硶涓嶢LU', tags: ['alu'] },
-    { title: '瀛樺偍鍣ㄥ眰娆?, tags: ['memory-hierarchy'] },
-    { title: 'Cache', tags: ['cache'] },
-    { title: '鎸囦护绯荤粺', tags: ['instruction-set'] },
-    { title: 'CPU娴佹按绾?, tags: ['pipeline'] },
-    { title: '鎺у埗鍗曞厓', tags: ['control-unit'] },
-    { title: '鎬荤嚎绯荤粺', tags: ['bus'] },
-    { title: '杈撳叆杈撳嚭绯荤粺', tags: ['io-system'] },
-    { title: '涓柇绯荤粺', tags: ['interrupt'] },
-    { title: 'DMA', tags: ['dma'] },
-    { title: '铏氭嫙瀛樺偍鍣?, tags: ['virtual-memory'] },
-    { title: '娴偣杩愮畻', tags: ['floating-point'] },
-    { title: '鎸囦护娴佹按绾垮啋闄?, tags: ['pipeline-hazard'] },
-  ],
-  fleeting: [
-    { title: '鍘熺爜鍙嶇爜琛ョ爜杞崲' },
-    { title: 'IEEE754娴偣鏍囧噯' },
-    { title: 'Cache鏄犲皠鏂瑰紡' },
-    { title: '娴佹按绾垮啿绐佺被鍨? },
-    { title: '涓柇澶勭悊娴佺▼' },
-    { title: 'DMA涓庣▼搴忎腑鏂姣? },
-    { title: '鎬荤嚎浠茶鏂瑰紡' },
-    { title: 'RAID绛夌骇鍖哄埆' },
-    { title: '姹夋槑鐮佹閿? },
-    { title: '椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲' },
-    { title: '寰▼搴忔帶鍒朵笌纭竷绾挎帶鍒? },
-    { title: '鎸囦护鍛ㄦ湡涓庢満鍣ㄥ懆鏈? },
-    { title: '鏁版嵁瀵诲潃鏂瑰紡' },
-    { title: 'CISC涓嶳ISC瀵规瘮' },
-    { title: 'MIPS鎸囦护鏍煎紡' },
-    { title: '涔樻硶杩愮畻鐨勭‖浠跺疄鐜? },
-    { title: 'Booth绠楁硶' },
-    { title: '娴偣鍔犲噺杩愮畻姝ラ' },
-    { title: '瀛樺偍鍣ㄧ殑鎵╁睍鎶€鏈? },
-    { title: 'Cache鍐欑瓥鐣? },
-    { title: '澶氫綋浜ゅ弶瀛樺偍鍣? },
-    { title: '娴佹按绾挎€ц兘鎸囨爣' },
-    { title: '鏁版嵁鍐掗櫓涓庤浆鍙戞妧鏈? },
-    { title: '鎺у埗鍐掗櫓涓庡垎鏀娴? },
-    { title: '寮傚父涓庝腑鏂殑鍖哄埆' },
-    { title: '涓柇浼樺厛绾т笌灞忚斀' },
-    { title: '閫氶亾鎺у埗鏂瑰紡' },
-    { title: 'IO鎺ュ彛鐨勫姛鑳戒笌缁撴瀯' },
-    { title: '鎬荤嚎鏍囧噯涓庢帴鍙? },
-    { title: 'USB鍗忚姒傝堪' },
-    { title: 'PCIe鎬荤嚎' },
-    { title: '纾佺洏瀛樺偍鍣ㄧ粨鏋? },
-    { title: '鍥烘€佺‖鐩楽SD鎶€鏈? },
-    { title: '璁＄畻鏈烘€ц兘璇勪环鎸囨爣' },
-    { title: 'Amdahl瀹氬緥' },
-  ],
-  literature: [
-    { title: '鍞愭湐椋炪€婅绠楁満缁勬垚鍘熺悊銆?, tags: ['textbook'] },
-    { title: '琚佹槬椋庛€婅绠楁満缁勬垚涓庤璁°€?, tags: ['textbook'] },
-    { title: 'Patterson銆婅绠楁満缁勬垚涓庤璁°€?, tags: ['textbook'] },
-    { title: '鐜嬮亾408璁＄粍绡?, tags: ['exam-guide'] },
-    { title: '澶╁嫟璁＄粍楂樺垎绗旇', tags: ['exam-guide'] },
-    { title: 'Stallings銆婅绠楁満缁勬垚涓庝綋绯荤粨鏋勩€?, tags: ['textbook'] },
-    { title: '銆婃暟瀛楄璁″拰璁＄畻鏈轰綋绯荤粨鏋勩€?, tags: ['textbook'] },
-    { title: '銆婅绠楁満浣撶郴缁撴瀯閲忓寲鏂规硶銆?, tags: ['textbook'] },
-  ],
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
 }
 
-// 鈹€鈹€鈹€ 鎿嶄綔绯荤粺 (Operating Systems) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
-const subjectOS: SubjectDef = {
-  name: '鎿嶄綔绯荤粺',
-  color: '#f472b6',
-  permanent: [
-    { title: '杩涚▼涓庣嚎绋?, tags: ['process-thread'] },
-    { title: '杩涚▼璋冨害', tags: ['scheduling'] },
-    { title: '鍚屾涓庝簰鏂?, tags: ['synchronization'] },
-    { title: '姝婚攣', tags: ['deadlock'] },
-    { title: '鍐呭瓨绠＄悊', tags: ['memory-management'] },
-    { title: '鍒嗛〉涓庡垎娈?, tags: ['paging-segmentation'] },
-    { title: '铏氭嫙鍐呭瓨', tags: ['virtual-memory'] },
-    { title: '鏂囦欢绯荤粺', tags: ['file-system'] },
-    { title: '璁惧绠＄悊', tags: ['device-management'] },
-    { title: '纾佺洏璋冨害', tags: ['disk-scheduling'] },
-    { title: 'IO绠＄悊', tags: ['io-management'] },
-    { title: '杩涚▼閫氫俊', tags: ['ipc'] },
-    { title: '淇″彿閲忔満鍒?, tags: ['semaphore'] },
-    { title: '绠＄▼', tags: ['monitor'] },
-    { title: '椤甸潰缃崲绠楁硶', tags: ['page-replacement'] },
-  ],
-  fleeting: [
-    { title: 'PCB涓嶵CB鍖哄埆' },
-    { title: '璋冨害绠楁硶姣旇緝' },
-    { title: '鐢熶骇鑰呮秷璐硅€呴棶棰? },
-    { title: '璇昏€呭啓鑰呴棶棰? },
-    { title: '鍝插瀹跺氨椁愰棶棰? },
-    { title: '姝婚攣蹇呰鏉′欢' },
-    { title: '閾惰瀹剁畻娉? },
-    { title: '娈甸〉寮忓瓨鍌? },
-    { title: 'LRU涓嶭FU鍖哄埆' },
-    { title: '纾佺洏璋冨害绠楁硶姣旇緝' },
-    { title: '鐢ㄦ埛鎬佷笌鏍稿績鎬佸垏鎹? },
-    { title: '绯荤粺璋冪敤瀹炵幇' },
-    { title: '杩涚▼鐘舵€佽浆鎹? },
-    { title: '绾跨▼鐨勫疄鐜版ā鍨? },
-    { title: '鍗忕▼涓庣嚎绋嬪姣? },
-    { title: '浜掓枼閿佷笌鑷棆閿? },
-    { title: '璇诲啓閿佸疄鐜? },
-    { title: '鏉′欢鍙橀噺涓庝俊鍙烽噺' },
-    { title: '姝婚攣妫€娴嬩笌鎭㈠' },
-    { title: '鍐呭瓨鍒嗛厤绠楁硶瀵规瘮' },
-    { title: '蹇〃TLB鍘熺悊' },
-    { title: '澶氱骇椤佃〃' },
-    { title: '缂洪〉涓柇澶勭悊' },
-    { title: '椤甸潰鍒嗛厤绛栫暐' },
-    { title: '鏂囦欢鍒嗛厤鏂瑰紡瀵规瘮' },
-    { title: '鐩綍缁撴瀯瀹炵幇' },
-    { title: '绌洪棽绌洪棿绠＄悊' },
-    { title: '纾佺洏璋冨害FCFS涓嶴CAN' },
-    { title: 'SPOOLing绯荤粺' },
-    { title: '缂撳啿鎶€鏈? },
-    { title: '璁惧椹卞姩绋嬪簭鎺ュ彛' },
-    { title: '鍏变韩鏂囦欢涓庨摼鎺? },
-    { title: '鏂囦欢淇濇姢鏈哄埗' },
-    { title: '鏃ュ織鏂囦欢绯荤粺' },
-    { title: '瀹炴椂鎿嶄綔绯荤粺鐗圭偣' },
-  ],
-  literature: [
-    { title: '姹ゅ瓙鐎涖€婅绠楁満鎿嶄綔绯荤粺銆?, tags: ['textbook'] },
-    { title: '鐜嬮亾408鎿嶄綔绯荤粺绡?, tags: ['exam-guide'] },
-    { title: '澶╁嫟鎿嶄綔绯荤粺楂樺垎绗旇', tags: ['exam-guide'] },
-    { title: '銆婄幇浠ｆ搷浣滅郴缁熴€?, tags: ['textbook'] },
-    { title: '銆婃繁鍏ョ悊瑙inux鍐呮牳銆?, tags: ['textbook'] },
-    { title: '銆婃搷浣滅郴缁熸蹇点€?, tags: ['textbook'] },
-    { title: '銆奓inux鍐呮牳璁捐涓庡疄鐜般€?, tags: ['textbook'] },
-    { title: '銆婃搷浣滅郴缁熺湡璞¤繕鍘熴€?, tags: ['textbook'] },
-  ],
+function stableId(input: string): string {
+  return crypto.createHash('sha1').update(input).digest('hex').slice(0, 16)
 }
 
-// 鈹€鈹€鈹€ 璁＄畻鏈虹綉缁?(Computer Networks) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
-const subjectCN: SubjectDef = {
-  name: '璁＄畻鏈虹綉缁?,
-  color: '#818cf8',
-  permanent: [
-    { title: 'OSI涓冨眰妯″瀷', tags: ['osi'] },
-    { title: 'TCP/IP鍗忚鏍?, tags: ['tcp-ip'] },
-    { title: '鐗╃悊灞?, tags: ['physical-layer'] },
-    { title: '鏁版嵁閾捐矾灞?, tags: ['data-link-layer'] },
-    { title: '缃戠粶灞?, tags: ['network-layer'] },
-    { title: '浼犺緭灞?, tags: ['transport-layer'] },
-    { title: '搴旂敤灞?, tags: ['application-layer'] },
-    { title: 'TCP鍙潬浼犺緭', tags: ['tcp-reliability'] },
-    { title: 'IP鍗忚', tags: ['ip-protocol'] },
-    { title: '璺敱绠楁硶', tags: ['routing'] },
-    { title: '灞€鍩熺綉鎶€鏈?, tags: ['lan'] },
-    { title: '缃戠粶瀹夊叏', tags: ['security'] },
-    { title: 'HTTP鍗忚', tags: ['http'] },
-    { title: 'DNS绯荤粺', tags: ['dns'] },
-    { title: '鎷ュ鎺у埗', tags: ['congestion-control'] },
-  ],
-  fleeting: [
-    { title: '涓夋鎻℃墜鍥涙鎸ユ墜' },
-    { title: 'TCP涓嶶DP鍖哄埆' },
-    { title: '婊戝姩绐楀彛鏈哄埗' },
-    { title: '鎷ュ鎺у埗绠楁硶' },
-    { title: 'ARP鍗忚宸ヤ綔娴佺▼' },
-    { title: 'DHCP鍘熺悊' },
-    { title: '瀛愮綉鍒掑垎' },
-    { title: 'CIDR琛ㄧず娉? },
-    { title: 'NAT杞崲' },
-    { title: '璺敱閫夋嫨鍗忚瀵规瘮' },
-    { title: '淇￠亾澶嶇敤鎶€鏈? },
-    { title: '缂栫爜涓庤皟鍒? },
-    { title: '浼犺緭浠嬭川鍒嗙被' },
-    { title: 'CSMA/CD鍗忚' },
-    { title: '浠ュお缃戝抚缁撴瀯' },
-    { title: '浜ゆ崲鏈轰笌闆嗙嚎鍣ㄥ尯鍒? },
-    { title: 'VLAN鎶€鏈? },
-    { title: '鐢熸垚鏍戝崗璁? },
-    { title: 'IP鏁版嵁鎶ユ牸寮? },
-    { title: '鍒嗙墖涓庨噸缁? },
-    { title: 'IPv6鍗忚' },
-    { title: 'ICMP鍗忚搴旂敤' },
-    { title: '闅ч亾鎶€鏈? },
-    { title: '绔彛鍙峰垎閰? },
-    { title: '娴侀噺鎺у埗涓庢嫢濉炴帶鍒跺尯鍒? },
-    { title: '瓒呮椂閲嶄紶涓庡揩閫熼噸浼? },
-    { title: '閫夋嫨鎬х‘璁ACK' },
-    { title: '杩炴帴绠＄悊鐘舵€佽浆鎹? },
-    { title: 'WebSocket鍗忚' },
-    { title: '鐢靛瓙閭欢鍗忚' },
-    { title: 'FTP鍗忚宸ヤ綔鍘熺悊' },
-    { title: '鍩熷悕瑙ｆ瀽杩囩▼' },
-    { title: 'CDN鎶€鏈師鐞? },
-    { title: 'VPN鎶€鏈? },
-    { title: '缃戠粶瀹夊叏鏀诲嚮绫诲瀷' },
-  ],
-  literature: [
-    { title: '璋㈠笇浠併€婅绠楁満缃戠粶銆?, tags: ['textbook'] },
-    { title: '鐜嬮亾408璁＄綉绡?, tags: ['exam-guide'] },
-    { title: '澶╁嫟璁＄綉楂樺垎绗旇', tags: ['exam-guide'] },
-    { title: 'Kurose銆婅绠楁満缃戠粶鑷《鍚戜笅銆?, tags: ['textbook'] },
-    { title: '銆奣CP/IP璇﹁В銆?, tags: ['textbook'] },
-    { title: '璁＄畻鏈虹綉缁?Andrew Tanenbaum)', tags: ['textbook'] },
-    { title: '銆婂浘瑙TTP銆?, tags: ['textbook'] },
-    { title: '銆婄綉缁滄槸鎬庢牱杩炴帴鐨勩€?, tags: ['textbook'] },
-  ],
-}
-
-// 鈹€鈹€鈹€ Edges Definition 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
-const withinDSEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: '绾挎€ц〃', targetTitle: '鏍?, type: 'prerequisite' },
-  { sourceTitle: '绾挎€ц〃', targetTitle: '闃熷垪', type: 'prerequisite' },
-  { sourceTitle: '鏍?, targetTitle: '浜屽弶鏍?, type: 'related' },
-  { sourceTitle: '鏍?, targetTitle: '浜屽弶鏍?, type: 'derived' },
-  { sourceTitle: '浜屽弶鏍?, targetTitle: '骞宠　浜屽弶鏍?, type: 'derived' },
-  { sourceTitle: '浜屽弶鏍?, targetTitle: '鍫?, type: 'related' },
-  { sourceTitle: '鏍?, targetTitle: '鍥?, type: 'related' },
-  { sourceTitle: '鍥?, targetTitle: '鏈€鐭矾寰?, type: 'prerequisite' },
-  { sourceTitle: '鍥?, targetTitle: '鍏抽敭璺緞', type: 'prerequisite' },
-  { sourceTitle: '鎺掑簭绠楁硶', targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
-  { sourceTitle: '鍝堝笇琛?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
-  { sourceTitle: '鎺掑簭绠楁硶', targetTitle: '鍫?, type: 'related' },
-  { sourceTitle: '浜屽弶鏍?, targetTitle: 'B鏍?, type: 'derived' },
-  { sourceTitle: '鏍?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
-  { sourceTitle: '闃熷垪', targetTitle: '鍥?, type: 'related' },
-  { sourceTitle: '鏍?, targetTitle: '鍥?, type: 'related' },
-  { sourceTitle: '鏌ユ壘绠楁硶', targetTitle: '鍝堝笇琛?, type: 'related' },
-  { sourceTitle: '浜屽弶鏍?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
-  { sourceTitle: '骞舵煡闆?, targetTitle: '鍥?, type: 'related' },
-  { sourceTitle: '鍏抽敭璺緞', targetTitle: '鏈€鐭矾寰?, type: 'related' },
-  { sourceTitle: 'B鏍?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
-  { sourceTitle: '鎺掑簭绠楁硶', targetTitle: '鍏抽敭璺緞', type: 'related' },
-  { sourceTitle: '骞宠　浜屽弶鏍?, targetTitle: '鏌ユ壘绠楁硶', type: 'related' },
-  { sourceTitle: '绾挎€ц〃', targetTitle: '鎺掑簭绠楁硶', type: 'prerequisite' },
-  { sourceTitle: '鍫?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
-  { sourceTitle: '绾挎€ц〃', targetTitle: '鏌ユ壘绠楁硶', type: 'prerequisite' },
-  { sourceTitle: '鏍?, targetTitle: '骞舵煡闆?, type: 'related' },
-  { sourceTitle: '鍝堝笇琛?, targetTitle: '鏍?, type: 'related' },
-  { sourceTitle: '浜屽弶鏍?, targetTitle: '鍏抽敭璺緞', type: 'related' },
-  { sourceTitle: '鍥?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
-  { sourceTitle: '闃熷垪', targetTitle: '鎺掑簭绠楁硶', type: 'related' },
-  { sourceTitle: '鏍?, targetTitle: '闃熷垪', type: 'related' },
-  { sourceTitle: '鏍?, targetTitle: '鍝堝笇琛?, type: 'related' },
-  { sourceTitle: '绾挎€ц〃', targetTitle: '鍝堝笇琛?, type: 'related' },
-  { sourceTitle: '鍫?, targetTitle: '闃熷垪', type: 'related' },
-  { sourceTitle: '浜屽弶鏍?, targetTitle: '鍥?, type: 'related' },
-  { sourceTitle: '骞宠　浜屽弶鏍?, targetTitle: 'B鏍?, type: 'related' },
-  { sourceTitle: '鏈€鐭矾寰?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
-  { sourceTitle: '骞舵煡闆?, targetTitle: '鏈€鐭矾寰?, type: 'related' },
-  { sourceTitle: '鍝堝笇琛?, targetTitle: '闃熷垪', type: 'related' },
-  { sourceTitle: '绾挎€ц〃', targetTitle: '鏍?, type: 'prerequisite' },
-  { sourceTitle: '鏍?, targetTitle: '鍏抽敭璺緞', type: 'related' },
-  { sourceTitle: '闃熷垪', targetTitle: '鏈€鐭矾寰?, type: 'related' },
-  { sourceTitle: 'B鏍?, targetTitle: '骞宠　浜屽弶鏍?, type: 'related' },
-  { sourceTitle: '鍝堝笇琛?, targetTitle: '骞舵煡闆?, type: 'related' },
-  { sourceTitle: '鍫?, targetTitle: '鍥?, type: 'related' },
-  { sourceTitle: '鏍?, targetTitle: '骞宠　浜屽弶鏍?, type: 'related' },
-  { sourceTitle: '鏍?, targetTitle: '鎺掑簭绠楁硶', type: 'related' },
-  { sourceTitle: '闃熷垪', targetTitle: '鍝堝笇琛?, type: 'related' },
-  { sourceTitle: '绾挎€ц〃', targetTitle: '鍥?, type: 'prerequisite' },
-]
-
-const withinCOEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鏁版嵁琛ㄧず', type: 'prerequisite' },
-  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鎸囦护绯荤粺', type: 'prerequisite' },
-  { sourceTitle: '鏁版嵁琛ㄧず', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'prerequisite' },
-  { sourceTitle: '杩愮畻鏂规硶涓嶢LU', targetTitle: '娴偣杩愮畻', type: 'related' },
-  { sourceTitle: '瀛樺偍鍣ㄥ眰娆?, targetTitle: 'Cache', type: 'derived' },
-  { sourceTitle: '瀛樺偍鍣ㄥ眰娆?, targetTitle: '铏氭嫙瀛樺偍鍣?, type: 'derived' },
-  { sourceTitle: 'Cache', targetTitle: '铏氭嫙瀛樺偍鍣?, type: 'related' },
-  { sourceTitle: '鎸囦护绯荤粺', targetTitle: 'CPU娴佹按绾?, type: 'prerequisite' },
-  { sourceTitle: 'CPU娴佹按绾?, targetTitle: '鎸囦护娴佹按绾垮啋闄?, type: 'related' },
-  { sourceTitle: '鎺у埗鍗曞厓', targetTitle: 'CPU娴佹按绾?, type: 'related' },
-  { sourceTitle: '鎬荤嚎绯荤粺', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'prerequisite' },
-  { sourceTitle: '杈撳叆杈撳嚭绯荤粺', targetTitle: '涓柇绯荤粺', type: 'related' },
-  { sourceTitle: '杈撳叆杈撳嚭绯荤粺', targetTitle: 'DMA', type: 'related' },
-  { sourceTitle: '涓柇绯荤粺', targetTitle: 'DMA', type: 'related' },
-  { sourceTitle: '鎬荤嚎绯荤粺', targetTitle: '涓柇绯荤粺', type: 'related' },
-  { sourceTitle: '杩愮畻鏂规硶涓嶢LU', targetTitle: '鏁版嵁琛ㄧず', type: 'prerequisite' }, // reverse direction for "derived"
-  { sourceTitle: '娴偣杩愮畻', targetTitle: '鏁版嵁琛ㄧず', type: 'related' },
-  { sourceTitle: 'CPU娴佹按绾?, targetTitle: '鎺у埗鍗曞厓', type: 'related' },
-  { sourceTitle: '鎸囦护娴佹按绾垮啋闄?, targetTitle: 'CPU娴佹按绾?, type: 'derived' },
-  { sourceTitle: '鎸囦护绯荤粺', targetTitle: '鎺у埗鍗曞厓', type: 'prerequisite' },
-  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'prerequisite' },
-  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鎬荤嚎绯荤粺', type: 'prerequisite' },
-  { sourceTitle: 'Cache', targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'derived' },
-  { sourceTitle: '铏氭嫙瀛樺偍鍣?, targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'derived' },
-  { sourceTitle: 'Cache', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'related' },
-  { sourceTitle: 'DMA', targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
-  { sourceTitle: '涓柇绯荤粺', targetTitle: 'CPU娴佹按绾?, type: 'related' },
-  { sourceTitle: '鎸囦护绯荤粺', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'related' },
-  { sourceTitle: '鏁版嵁琛ㄧず', targetTitle: 'Cache', type: 'related' },
-  { sourceTitle: '鎬荤嚎绯荤粺', targetTitle: 'CPU娴佹按绾?, type: 'related' },
-  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '鎺у埗鍗曞厓', type: 'prerequisite' },
-  { sourceTitle: '杈撳叆杈撳嚭绯荤粺', targetTitle: '鎬荤嚎绯荤粺', type: 'prerequisite' },
-  { sourceTitle: '铏氭嫙瀛樺偍鍣?, targetTitle: '鎸囦护绯荤粺', type: 'related' },
-  { sourceTitle: '娴偣杩愮畻', targetTitle: '杩愮畻鏂规硶涓嶢LU', type: 'derived' },
-  { sourceTitle: 'Cache', targetTitle: '鎸囦护绯荤粺', type: 'related' },
-  { sourceTitle: '涓柇绯荤粺', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'derived' },
-  { sourceTitle: 'DMA', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'derived' },
-  { sourceTitle: '鎸囦护娴佹按绾垮啋闄?, targetTitle: '鎺у埗鍗曞厓', type: 'related' },
-  { sourceTitle: '娴偣杩愮畻', targetTitle: '鎸囦护绯荤粺', type: 'related' },
-  { sourceTitle: '鏁版嵁琛ㄧず', targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
-  { sourceTitle: '鍐渚濇浖缁撴瀯', targetTitle: '杈撳叆杈撳嚭绯荤粺', type: 'prerequisite' },
-  { sourceTitle: '瀛樺偍鍣ㄥ眰娆?, targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
-  { sourceTitle: 'Cache', targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
-  { sourceTitle: '铏氭嫙瀛樺偍鍣?, targetTitle: 'Cache', type: 'related' },
-  { sourceTitle: '鎺у埗鍗曞厓', targetTitle: '鎸囦护绯荤粺', type: 'prerequisite' },
-  { sourceTitle: 'CPU娴佹按绾?, targetTitle: '鎸囦护绯荤粺', type: 'derived' },
-  { sourceTitle: '杩愮畻鏂规硶涓嶢LU', targetTitle: 'CPU娴佹按绾?, type: 'related' },
-  { sourceTitle: '娴偣杩愮畻', targetTitle: 'Cache', type: 'related' },
-  { sourceTitle: 'DMA', targetTitle: 'CPU娴佹按绾?, type: 'related' },
-  { sourceTitle: '涓柇绯荤粺', targetTitle: '瀛樺偍鍣ㄥ眰娆?, type: 'related' },
-]
-
-const withinOSEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '杩涚▼璋冨害', type: 'prerequisite' },
-  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '鍚屾涓庝簰鏂?, type: 'prerequisite' },
-  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '杩涚▼閫氫俊', type: 'prerequisite' },
-  { sourceTitle: '杩涚▼璋冨害', targetTitle: '鍚屾涓庝簰鏂?, type: 'related' },
-  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '淇″彿閲忔満鍒?, type: 'derived' },
-  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '绠＄▼', type: 'derived' },
-  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '姝婚攣', type: 'related' },
-  { sourceTitle: '姝婚攣', targetTitle: '杩涚▼璋冨害', type: 'related' },
-  { sourceTitle: '鍐呭瓨绠＄悊', targetTitle: '鍒嗛〉涓庡垎娈?, type: 'derived' },
-  { sourceTitle: '鍐呭瓨绠＄悊', targetTitle: '铏氭嫙鍐呭瓨', type: 'derived' },
-  { sourceTitle: '鍒嗛〉涓庡垎娈?, targetTitle: '铏氭嫙鍐呭瓨', type: 'related' },
-  { sourceTitle: '铏氭嫙鍐呭瓨', targetTitle: '椤甸潰缃崲绠楁硶', type: 'related' },
-  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '璁惧绠＄悊', type: 'related' },
-  { sourceTitle: '璁惧绠＄悊', targetTitle: 'IO绠＄悊', type: 'related' },
-  { sourceTitle: '璁惧绠＄悊', targetTitle: '纾佺洏璋冨害', type: 'related' },
-  { sourceTitle: '纾佺洏璋冨害', targetTitle: 'IO绠＄悊', type: 'related' },
-  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '淇″彿閲忔満鍒?, type: 'related' },
-  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '鍚屾涓庝簰鏂?, type: 'related' },
-  { sourceTitle: '杩涚▼璋冨害', targetTitle: '椤甸潰缃崲绠楁硶', type: 'related' },
-  { sourceTitle: '鍐呭瓨绠＄悊', targetTitle: '杩涚▼璋冨害', type: 'related' },
-  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
-  { sourceTitle: '淇″彿閲忔満鍒?, targetTitle: '绠＄▼', type: 'related' },
-  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
-  { sourceTitle: '杩涚▼璋冨害', targetTitle: '杩涚▼閫氫俊', type: 'related' },
-  { sourceTitle: '姝婚攣', targetTitle: '鍚屾涓庝簰鏂?, type: 'derived' },
-  { sourceTitle: '鍒嗛〉涓庡垎娈?, targetTitle: '鍐呭瓨绠＄悊', type: 'derived' },
-  { sourceTitle: '铏氭嫙鍐呭瓨', targetTitle: '鍐呭瓨绠＄悊', type: 'derived' },
-  { sourceTitle: '椤甸潰缃崲绠楁硶', targetTitle: '铏氭嫙鍐呭瓨', type: 'derived' },
-  { sourceTitle: 'IO绠＄悊', targetTitle: '璁惧绠＄悊', type: 'derived' },
-  { sourceTitle: '纾佺洏璋冨害', targetTitle: '璁惧绠＄悊', type: 'derived' },
-  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: 'IO绠＄悊', type: 'related' },
-  { sourceTitle: '淇″彿閲忔満鍒?, targetTitle: '杩涚▼涓庣嚎绋?, type: 'related' },
-  { sourceTitle: '绠＄▼', targetTitle: '淇″彿閲忔満鍒?, type: 'related' },
-  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '杩涚▼涓庣嚎绋?, type: 'derived' },
-  { sourceTitle: '杩涚▼璋冨害', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
-  { sourceTitle: '姝婚攣', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
-  { sourceTitle: '鍒嗛〉涓庡垎娈?, targetTitle: '杩涚▼璋冨害', type: 'related' },
-  { sourceTitle: '铏氭嫙鍐呭瓨', targetTitle: '杩涚▼璋冨害', type: 'related' },
-  { sourceTitle: '椤甸潰缃崲绠楁硶', targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
-  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '鍒嗛〉涓庡垎娈?, type: 'related' },
-  { sourceTitle: 'IO绠＄悊', targetTitle: '鏂囦欢绯荤粺', type: 'related' },
-  { sourceTitle: '纾佺洏璋冨害', targetTitle: '鏂囦欢绯荤粺', type: 'related' },
-  { sourceTitle: '杩涚▼涓庣嚎绋?, targetTitle: '姝婚攣', type: 'related' },
-  { sourceTitle: '鍚屾涓庝簰鏂?, targetTitle: '鍐呭瓨绠＄悊', type: 'related' },
-  { sourceTitle: '淇″彿閲忔満鍒?, targetTitle: '姝婚攣', type: 'related' },
-  { sourceTitle: '绠＄▼', targetTitle: '鍚屾涓庝簰鏂?, type: 'derived' },
-  { sourceTitle: '杩涚▼閫氫俊', targetTitle: '绠＄▼', type: 'related' },
-  { sourceTitle: '杩涚▼璋冨害', targetTitle: '绠＄▼', type: 'related' },
-  { sourceTitle: '鏂囦欢绯荤粺', targetTitle: '杩涚▼涓庣嚎绋?, type: 'related' },
-  { sourceTitle: 'IO绠＄悊', targetTitle: '杩涚▼涓庣嚎绋?, type: 'related' },
-]
-
-const withinCNEdges: Omit<EdgeDef, 'sourceSubject' | 'targetSubject'>[] = [
-  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: 'TCP/IP鍗忚鏍?, type: 'related' },
-  { sourceTitle: '鐗╃悊灞?, targetTitle: '鏁版嵁閾捐矾灞?, type: 'prerequisite' },
-  { sourceTitle: '鏁版嵁閾捐矾灞?, targetTitle: '缃戠粶灞?, type: 'prerequisite' },
-  { sourceTitle: '缃戠粶灞?, targetTitle: '浼犺緭灞?, type: 'prerequisite' },
-  { sourceTitle: '浼犺緭灞?, targetTitle: '搴旂敤灞?, type: 'prerequisite' },
-  { sourceTitle: '浼犺緭灞?, targetTitle: 'TCP鍙潬浼犺緭', type: 'derived' },
-  { sourceTitle: '浼犺緭灞?, targetTitle: '鎷ュ鎺у埗', type: 'related' },
-  { sourceTitle: '缃戠粶灞?, targetTitle: 'IP鍗忚', type: 'derived' },
-  { sourceTitle: '缃戠粶灞?, targetTitle: '璺敱绠楁硶', type: 'related' },
-  { sourceTitle: '鏁版嵁閾捐矾灞?, targetTitle: '灞€鍩熺綉鎶€鏈?, type: 'related' },
-  { sourceTitle: '搴旂敤灞?, targetTitle: 'HTTP鍗忚', type: 'derived' },
-  { sourceTitle: '搴旂敤灞?, targetTitle: 'DNS绯荤粺', type: 'derived' },
-  { sourceTitle: '鐗╃悊灞?, targetTitle: '灞€鍩熺綉鎶€鏈?, type: 'prerequisite' },
-  { sourceTitle: '缃戠粶瀹夊叏', targetTitle: '搴旂敤灞?, type: 'related' },
-  { sourceTitle: 'TCP鍙潬浼犺緭', targetTitle: '鎷ュ鎺у埗', type: 'related' },
-  { sourceTitle: 'IP鍗忚', targetTitle: '璺敱绠楁硶', type: 'related' },
-  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '鐗╃悊灞?, type: 'prerequisite' },
-  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '缃戠粶灞?, type: 'related' },
-  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '浼犺緭灞?, type: 'related' },
-  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: 'TCP/IP鍗忚鏍?, type: 'related' },
-  { sourceTitle: '鏁版嵁閾捐矾灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
-  { sourceTitle: '缃戠粶灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
-  { sourceTitle: '浼犺緭灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
-  { sourceTitle: '搴旂敤灞?, targetTitle: 'TCP/IP鍗忚鏍?, type: 'related' },
-  { sourceTitle: 'HTTP鍗忚', targetTitle: 'DNS绯荤粺', type: 'related' },
-  { sourceTitle: '璺敱绠楁硶', targetTitle: 'IP鍗忚', type: 'related' },
-  { sourceTitle: '鎷ュ鎺у埗', targetTitle: 'TCP鍙潬浼犺緭', type: 'derived' },
-  { sourceTitle: '灞€鍩熺綉鎶€鏈?, targetTitle: '鏁版嵁閾捐矾灞?, type: 'derived' },
-  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '鏁版嵁閾捐矾灞?, type: 'prerequisite' },
-  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '搴旂敤灞?, type: 'related' },
-  { sourceTitle: '鐗╃悊灞?, targetTitle: '缃戠粶瀹夊叏', type: 'related' },
-  { sourceTitle: 'DNS绯荤粺', targetTitle: 'HTTP鍗忚', type: 'related' },
-  { sourceTitle: 'IP鍗忚', targetTitle: '浼犺緭灞?, type: 'prerequisite' },
-  { sourceTitle: '璺敱绠楁硶', targetTitle: '浼犺緭灞?, type: 'related' },
-  { sourceTitle: '鎷ュ鎺у埗', targetTitle: '缃戠粶灞?, type: 'related' },
-  { sourceTitle: 'TCP鍙潬浼犺緭', targetTitle: '缃戠粶灞?, type: 'related' },
-  { sourceTitle: '灞€鍩熺綉鎶€鏈?, targetTitle: '缃戠粶灞?, type: 'related' },
-  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '缃戠粶灞?, type: 'prerequisite' },
-  { sourceTitle: 'TCP/IP鍗忚鏍?, targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
-  { sourceTitle: '鐗╃悊灞?, targetTitle: 'OSI涓冨眰妯″瀷', type: 'prerequisite' },
-  { sourceTitle: 'HTTP鍗忚', targetTitle: '浼犺緭灞?, type: 'prerequisite' },
-  { sourceTitle: 'DNS绯荤粺', targetTitle: '缃戠粶灞?, type: 'related' },
-  { sourceTitle: '缃戠粶瀹夊叏', targetTitle: 'IP鍗忚', type: 'related' },
-  { sourceTitle: '璺敱绠楁硶', targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
-  { sourceTitle: '鎷ュ鎺у埗', targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
-  { sourceTitle: 'TCP鍙潬浼犺緭', targetTitle: '鏁版嵁閾捐矾灞?, type: 'related' },
-  { sourceTitle: '鐗╃悊灞?, targetTitle: '浼犺緭灞?, type: 'related' },
-  { sourceTitle: '灞€鍩熺綉鎶€鏈?, targetTitle: '鐗╃悊灞?, type: 'derived' },
-  { sourceTitle: 'OSI涓冨眰妯″瀷', targetTitle: '搴旂敤灞?, type: 'prerequisite' },
-]
-
-// Cross-cluster edges
-const crossEdges: EdgeDef[] = [
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '杩涚▼璋冨害', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: 'CPU娴佹按绾?, type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '鍐呭瓨绠＄悊', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: '铏氭嫙瀛樺偍鍣?, type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '铏氭嫙鍐呭瓨', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: 'Cache', type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '鍚屾涓庝簰鏂?, targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: '涓柇绯荤粺', type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '璁惧绠＄悊', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: 'DMA', type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '杩涚▼閫氫俊', targetSubject: '璁＄畻鏈虹粍鎴愬師鐞?, targetTitle: '鎬荤嚎绯荤粺', type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '鏂囦欢绯荤粺', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鏍?, type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '椤甸潰缃崲绠楁硶', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '闃熷垪', type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '姝婚攣', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍥?, type: 'related' },
-  { sourceSubject: '鎿嶄綔绯荤粺', sourceTitle: '杩涚▼璋冨害', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鎺掑簭绠楁硶', type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: 'TCP鍙潬浼犺緭', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '闃熷垪', type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '璺敱绠楁硶', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鏈€鐭矾寰?, type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '璺敱绠楁硶', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍥?, type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: 'DNS绯荤粺', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍝堝笇琛?, type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '缃戠粶瀹夊叏', targetSubject: '鎿嶄綔绯荤粺', targetTitle: '鏂囦欢绯荤粺', type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '鎷ュ鎺у埗', targetSubject: '鎿嶄綔绯荤粺', targetTitle: '杩涚▼璋冨害', type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: 'TCP/IP鍗忚鏍?, targetSubject: '鎿嶄綔绯荤粺', targetTitle: '杩涚▼閫氫俊', type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹綉缁?, sourceTitle: '浼犺緭灞?, targetSubject: '鎿嶄綔绯荤粺', targetTitle: '杩涚▼閫氫俊', type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹粍鎴愬師鐞?, sourceTitle: 'Cache', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鍝堝笇琛?, type: 'related' },
-  { sourceSubject: '璁＄畻鏈虹粍鎴愬師鐞?, sourceTitle: '鏁版嵁琛ㄧず', targetSubject: '鏁版嵁缁撴瀯', targetTitle: '鏍?, type: 'related' },
-]
-
-// 鈹€鈹€鈹€ Helper: Build related-titles map from edge definitions 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-
-function buildRelatedTitlesMap(): Map<string, { prerequisite: string[]; related: string[]; derived: string[] }> {
-  const map = new Map<string, { prerequisite: string[]; related: string[]; derived: string[] }>()
-
-  function ensure(title: string) {
-    if (!map.has(title)) map.set(title, { prerequisite: [], related: [], derived: [] })
-    return map.get(title)!
-  }
-
-  function add(sourceTitle: string, targetTitle: string, type: string) {
-    ensure(sourceTitle)
-    const entry = map.get(sourceTitle)!
-    if (type === 'prerequisite') entry.prerequisite.push(targetTitle)
-    else if (type === 'derived') entry.derived.push(targetTitle)
-    else entry.related.push(targetTitle)
-
-    // 鍙嶅悜閾炬帴锛氬鏋?A prerequisite B锛屽垯 B derived_from A
-    // related 鏄绉扮殑锛岀洿鎺ュ弽杞?    const reverseType = type === 'prerequisite' ? 'derived' : type === 'derived' ? 'prerequisite' : 'related'
-    ensure(targetTitle)
-    const revEntry = map.get(targetTitle)!
-    if (reverseType === 'prerequisite') revEntry.prerequisite.push(sourceTitle)
-    else if (reverseType === 'derived') revEntry.derived.push(sourceTitle)
-    else revEntry.related.push(sourceTitle)
-  }
-
-  // Within-subject edges (subject info not needed 鈥?all titles are unique)
-  for (const e of withinDSEdges) add(e.sourceTitle, e.targetTitle, e.type)
-  for (const e of withinCOEdges) add(e.sourceTitle, e.targetTitle, e.type)
-  for (const e of withinOSEdges) add(e.sourceTitle, e.targetTitle, e.type)
-  for (const e of withinCNEdges) add(e.sourceTitle, e.targetTitle, e.type)
-  // Cross-subject edges
-  for (const e of crossEdges) add(e.sourceTitle, e.targetTitle, e.type)
-
-  return map
-}
-
-function buildContent(title: string, related: { prerequisite: string[]; related: string[]; derived: string[] }): string {
-  const lines: string[] = [`## ${title}`]
-
-  if (related.prerequisite.length > 0) {
-    lines.push('', '**Prerequisites:** ' + related.prerequisite.map(t => `[[${t}]]`).join(', '))
-  }
-  if (related.related.length > 0) {
-    lines.push('', '**Related:** ' + related.related.map(t => `[[${t}]]`).join(', '))
-  }
-  if (related.derived.length > 0) {
-    lines.push('', '**Derived from / leads to:** ' + related.derived.map(t => `[[${t}]]`).join(', '))
-  }
-
-  lines.push('', '---', '_CS408 Knowledge Graph 鈥?auto-generated seed content_')
-  return lines.join('\n')
-}
-
-/** Auto-discover WikiLinks for cards that have no manual EdgeDef entries.
- *  Scans all card titles in the same vault and links to any card whose title
- *  appears as a substring of this card's title. This catches cases like
- *  "浜屽弶鏍戠殑閬嶅巻椤哄簭" 鈫?[[浜屽弶鏍慮] and "鏍堜笌閫掑綊鐨勫叧绯? 鈫?[[鏍圿].
- *  Subject-scoped to avoid cross-subject false positives from short names.
- *  Falls back to anchor titles (permanent cards of the subject) so every
- *  card has at least some connections for galaxy visual density. */
-
-/**
- * Manually curated fleeting 鈫?permanent card associations.
- * Every fleeting card below is explicitly linked to 1-3 permanent cards
- * that represent the core concepts it discusses. No automatic matching.
- */
-const fleetingToPermanent: Record<string, string[]> = {
-  // 鈺愨晲鈺?鏁版嵁缁撴瀯 鈺愨晲鈺?  '蹇€熸帓搴忔渶鍧忔儏鍐?:     ['鎺掑簭绠楁硶'],
-  '鍝堝笇鍐茬獊瑙ｅ喅':         ['鍝堝笇琛?],
-  'KMP绠楁硶鎬濇兂':          ['鏌ユ壘绠楁硶'],
-  '鍔ㄦ€佽鍒抳s璐績绠楁硶':   ['鍥?],
-  '绋€鐤忕煩闃靛瓨鍌?:         ['绾挎€ц〃'],
-  '骞夸箟琛ㄧ粨鏋?:           ['绾挎€ц〃'],
-  '澶栭儴鎺掑簭涓庡璺綊骞?:   ['鎺掑簭绠楁硶'],
-  '浜屽垎鏌ユ壘鍐崇瓥鏍?:       ['鏌ユ壘绠楁硶', '浜屽弶鏍?],
-  '鏁ｅ垪鍑芥暟璁捐':         ['鍝堝笇琛?],
-  '瀛楃涓插尮閰嶇畻娉?:       ['鏌ユ壘绠楁硶'],
-  '澶ф暟鎹甌opK闂':       ['鍫?, '鎺掑簭绠楁硶'],
-  '鎺掑簭绠楁硶绋冲畾鎬у姣?:   ['鎺掑簭绠楁硶'],
-  '鏃堕棿澶嶆潅搴︾殑娓愯繘鍒嗘瀽': ['鎺掑簭绠楁硶', '鏌ユ壘绠楁硶'],
-  '閫掑綊绠楁硶鐨勮绠楁ā鍨?:   ['鏍?],
-  '鏈€灏忕敓鎴愭爲绠楁硶瀵规瘮':   ['鍥?],
-  '閾捐〃鐨勬彃鍏ュ垹闄ゆ搷浣?:   ['绾挎€ц〃'],
-  '鍙屽悜閾捐〃涓庡惊鐜摼琛?:   ['绾挎€ц〃'],
-  '浜屽弶鏍戜笌妫灄杞崲':     ['浜屽弶鏍?, '鏍?],
-  'Huffman缂栫爜':          ['浜屽弶鏍?],
-  'AVL鏍戞棆杞搷浣?:        ['骞宠　浜屽弶鏍?],
-  '绾㈤粦鏍戞€ц川':           ['骞宠　浜屽弶鏍?],
-  '鎷撴墤鎺掑簭瀹炵幇':         ['鍥?],
-  'Dijkstra绠楁硶鍘熺悊':     ['鏈€鐭矾寰?, '鍥?],
-  'Floyd绠楁硶鍘熺悊':        ['鏈€鐭矾寰?, '鍥?],
-  '褰掑苟鎺掑簭杩囩▼':         ['鎺掑簭绠楁硶'],
-  '鍩烘暟鎺掑簭鎬濇兂':         ['鎺掑簭绠楁硶'],
-
-  // Remaining 鏁版嵁缁撴瀯 fleeting cards
-  'B鏍戜笌B+鏍戝尯鍒?:       ['B鏍?],
-  'Prim绠楁硶涓嶬ruskal绠楁硶瀵规瘮': ['鍥?],
-  '浜屽弶鏍戠殑閬嶅巻椤哄簭':     ['浜屽弶鏍?, '鏍?],
-  '鍥剧殑娣卞害浼樺厛涓庡箍搴︿紭鍏?: ['鍥?],
-  '鍥剧殑閭绘帴鐭╅樀vs閭绘帴琛?: ['鍥?],
-  '寰幆闃熷垪瀹炵幇':         ['闃熷垪'],
-  '鏍堜笌閫掑綊鐨勫叧绯?:       ['鏍?],
-  '鏍堢殑搴旂敤鍦烘櫙':         ['鏍?],
-  '闃熷垪鐨勫簲鐢ㄥ満鏅?:       ['闃熷垪'],
-
-  // 鈺愨晲鈺?璁＄畻鏈虹粍鎴愬師鐞?鈺愨晲鈺?  '鍘熺爜鍙嶇爜琛ョ爜杞崲':     ['鏁版嵁琛ㄧず'],
-  'IEEE754娴偣鏍囧噯':      ['娴偣杩愮畻', '鏁版嵁琛ㄧず'],
-  'Cache鏄犲皠鏂瑰紡':        ['Cache'],
-  '娴佹按绾垮啿绐佺被鍨?:       ['鎸囦护娴佹按绾垮啋闄?, 'CPU娴佹按绾?],
-  '涓柇澶勭悊娴佺▼':         ['涓柇绯荤粺'],
-  'DMA涓庣▼搴忎腑鏂姣?:    ['DMA', '涓柇绯荤粺'],
-  '鎬荤嚎浠茶鏂瑰紡':         ['鎬荤嚎绯荤粺'],
-  'RAID绛夌骇鍖哄埆':         ['杈撳叆杈撳嚭绯荤粺'],
-  '姹夋槑鐮佹閿?:           ['鏁版嵁琛ㄧず'],
-  '椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲': ['铏氭嫙瀛樺偍鍣?],
-  '寰▼搴忔帶鍒朵笌纭竷绾挎帶鍒?: ['鎺у埗鍗曞厓'],
-  '鎸囦护鍛ㄦ湡涓庢満鍣ㄥ懆鏈?:   ['鎺у埗鍗曞厓', 'CPU娴佹按绾?],
-  '鏁版嵁瀵诲潃鏂瑰紡':         ['鎸囦护绯荤粺'],
-  'CISC涓嶳ISC瀵规瘮':      ['鎸囦护绯荤粺'],
-  'MIPS鎸囦护鏍煎紡':        ['鎸囦护绯荤粺'],
-  '涔樻硶杩愮畻鐨勭‖浠跺疄鐜?:   ['杩愮畻鏂规硶涓嶢LU'],
-  'Booth绠楁硶':            ['杩愮畻鏂规硶涓嶢LU'],
-  '娴偣鍔犲噺杩愮畻姝ラ':     ['娴偣杩愮畻'],
-  '瀛樺偍鍣ㄧ殑鎵╁睍鎶€鏈?:     ['瀛樺偍鍣ㄥ眰娆?],
-  'Cache鍐欑瓥鐣?:          ['Cache'],
-  '澶氫綋浜ゅ弶瀛樺偍鍣?:       ['瀛樺偍鍣ㄥ眰娆?],
-  '娴佹按绾挎€ц兘鎸囨爣':       ['CPU娴佹按绾?],
-  '鏁版嵁鍐掗櫓涓庤浆鍙戞妧鏈?:   ['鎸囦护娴佹按绾垮啋闄?],
-  '鎺у埗鍐掗櫓涓庡垎鏀娴?:   ['鎸囦护娴佹按绾垮啋闄?],
-  '寮傚父涓庝腑鏂殑鍖哄埆':     ['涓柇绯荤粺'],
-  '涓柇浼樺厛绾т笌灞忚斀':     ['涓柇绯荤粺'],
-  '閫氶亾鎺у埗鏂瑰紡':         ['杈撳叆杈撳嚭绯荤粺'],
-  'IO鎺ュ彛鐨勫姛鑳戒笌缁撴瀯':   ['杈撳叆杈撳嚭绯荤粺'],
-  '鎬荤嚎鏍囧噯涓庢帴鍙?:       ['鎬荤嚎绯荤粺'],
-  'USB鍗忚姒傝堪':          ['鎬荤嚎绯荤粺', '杈撳叆杈撳嚭绯荤粺'],
-  'PCIe鎬荤嚎':             ['鎬荤嚎绯荤粺'],
-  '纾佺洏瀛樺偍鍣ㄧ粨鏋?:       ['杈撳叆杈撳嚭绯荤粺'],
-  '鍥烘€佺‖鐩楽SD鎶€鏈?:      ['杈撳叆杈撳嚭绯荤粺'],
-  '璁＄畻鏈烘€ц兘璇勪环鎸囨爣':   ['CPU娴佹按绾?],
-  'Amdahl瀹氬緥':           ['CPU娴佹按绾?],
-
-  // 鈺愨晲鈺?鎿嶄綔绯荤粺 鈺愨晲鈺?  'PCB涓嶵CB鍖哄埆':         ['杩涚▼涓庣嚎绋?],
-  '璋冨害绠楁硶姣旇緝':         ['杩涚▼璋冨害'],
-  '鐢熶骇鑰呮秷璐硅€呴棶棰?:     ['鍚屾涓庝簰鏂?, '淇″彿閲忔満鍒?],
-  '璇昏€呭啓鑰呴棶棰?:         ['鍚屾涓庝簰鏂?],
-  '鍝插瀹跺氨椁愰棶棰?:       ['鍚屾涓庝簰鏂?, '淇″彿閲忔満鍒?],
-  '姝婚攣蹇呰鏉′欢':         ['姝婚攣'],
-  '閾惰瀹剁畻娉?:           ['姝婚攣'],
-  '娈甸〉寮忓瓨鍌?:           ['鍒嗛〉涓庡垎娈?, '鍐呭瓨绠＄悊'],
-  'LRU涓嶭FU鍖哄埆':        ['椤甸潰缃崲绠楁硶'],
-  '纾佺洏璋冨害绠楁硶姣旇緝':     ['纾佺洏璋冨害'],
-  '鐢ㄦ埛鎬佷笌鏍稿績鎬佸垏鎹?:   ['杩涚▼涓庣嚎绋?],
-  '绯荤粺璋冪敤瀹炵幇':         ['杩涚▼涓庣嚎绋?],
-  '杩涚▼鐘舵€佽浆鎹?:         ['杩涚▼涓庣嚎绋?],
-  '绾跨▼鐨勫疄鐜版ā鍨?:       ['杩涚▼涓庣嚎绋?],
-  '鍗忕▼涓庣嚎绋嬪姣?:       ['杩涚▼涓庣嚎绋?],
-  '浜掓枼閿佷笌鑷棆閿?:       ['鍚屾涓庝簰鏂?],
-  '璇诲啓閿佸疄鐜?:           ['鍚屾涓庝簰鏂?],
-  '鏉′欢鍙橀噺涓庝俊鍙烽噺':     ['淇″彿閲忔満鍒?, '鍚屾涓庝簰鏂?],
-  '姝婚攣妫€娴嬩笌鎭㈠':       ['姝婚攣'],
-  '鍐呭瓨鍒嗛厤绠楁硶瀵规瘮':     ['鍐呭瓨绠＄悊'],
-  '蹇〃TLB鍘熺悊':          ['鍒嗛〉涓庡垎娈?, '铏氭嫙鍐呭瓨'],
-  '澶氱骇椤佃〃':             ['鍒嗛〉涓庡垎娈?, '鍐呭瓨绠＄悊'],
-  '缂洪〉涓柇澶勭悊':         ['铏氭嫙鍐呭瓨', '椤甸潰缃崲绠楁硶'],
-  '椤甸潰鍒嗛厤绛栫暐':         ['椤甸潰缃崲绠楁硶', '鍐呭瓨绠＄悊'],
-  '鏂囦欢鍒嗛厤鏂瑰紡瀵规瘮':     ['鏂囦欢绯荤粺'],
-  '鐩綍缁撴瀯瀹炵幇':         ['鏂囦欢绯荤粺'],
-  '绌洪棽绌洪棿绠＄悊':         ['鏂囦欢绯荤粺'],
-  '纾佺洏璋冨害FCFS涓嶴CAN':  ['纾佺洏璋冨害'],
-  'SPOOLing绯荤粺':         ['璁惧绠＄悊', 'IO绠＄悊'],
-  '缂撳啿鎶€鏈?:             ['IO绠＄悊', '璁惧绠＄悊'],
-  '璁惧椹卞姩绋嬪簭鎺ュ彛':     ['璁惧绠＄悊'],
-  '鍏变韩鏂囦欢涓庨摼鎺?:       ['鏂囦欢绯荤粺'],
-  '鏂囦欢淇濇姢鏈哄埗':         ['鏂囦欢绯荤粺'],
-  '鏃ュ織鏂囦欢绯荤粺':         ['鏂囦欢绯荤粺'],
-  '瀹炴椂鎿嶄綔绯荤粺鐗圭偣':     ['杩涚▼璋冨害'],
-
-  // 鈺愨晲鈺?璁＄畻鏈虹綉缁?鈺愨晲鈺?  '涓夋鎻℃墜鍥涙鎸ユ墜':     ['浼犺緭灞?, 'TCP鍙潬浼犺緭'],
-  'TCP涓嶶DP鍖哄埆':        ['浼犺緭灞?],
-  '婊戝姩绐楀彛鏈哄埗':         ['TCP鍙潬浼犺緭'],
-  '鎷ュ鎺у埗绠楁硶':         ['鎷ュ鎺у埗'],
-  'ARP鍗忚宸ヤ綔娴佺▼':      ['缃戠粶灞?, 'IP鍗忚'],
-  'DHCP鍘熺悊':             ['搴旂敤灞?, '缃戠粶灞?],
-  '瀛愮綉鍒掑垎':             ['缃戠粶灞?, 'IP鍗忚'],
-  'CIDR琛ㄧず娉?:           ['缃戠粶灞?, 'IP鍗忚'],
-  'NAT杞崲':              ['缃戠粶灞?, 'IP鍗忚'],
-  '璺敱閫夋嫨鍗忚瀵规瘮':     ['璺敱绠楁硶', '缃戠粶灞?],
-  '淇￠亾澶嶇敤鎶€鏈?:         ['鐗╃悊灞?],
-  '缂栫爜涓庤皟鍒?:           ['鐗╃悊灞?],
-  '浼犺緭浠嬭川鍒嗙被':         ['鐗╃悊灞?],
-  'CSMA/CD鍗忚':          ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
-  '浠ュお缃戝抚缁撴瀯':         ['鏁版嵁閾捐矾灞?],
-  '浜ゆ崲鏈轰笌闆嗙嚎鍣ㄥ尯鍒?:   ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
-  'VLAN鎶€鏈?:             ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
-  '鐢熸垚鏍戝崗璁?:           ['鏁版嵁閾捐矾灞?, '灞€鍩熺綉鎶€鏈?],
-  'IP鏁版嵁鎶ユ牸寮?:         ['IP鍗忚', '缃戠粶灞?],
-  '鍒嗙墖涓庨噸缁?:           ['IP鍗忚', '缃戠粶灞?],
-  'IPv6鍗忚':             ['IP鍗忚', '缃戠粶灞?],
-  'ICMP鍗忚搴旂敤':         ['IP鍗忚', '缃戠粶灞?],
-  '闅ч亾鎶€鏈?:             ['缃戠粶灞?],
-  '绔彛鍙峰垎閰?:           ['浼犺緭灞?],
-  '娴侀噺鎺у埗涓庢嫢濉炴帶鍒跺尯鍒?: ['鎷ュ鎺у埗', 'TCP鍙潬浼犺緭'],
-  '瓒呮椂閲嶄紶涓庡揩閫熼噸浼?:   ['TCP鍙潬浼犺緭'],
-  '閫夋嫨鎬х‘璁ACK':       ['TCP鍙潬浼犺緭'],
-  '杩炴帴绠＄悊鐘舵€佽浆鎹?:     ['浼犺緭灞?, 'TCP鍙潬浼犺緭'],
-  'WebSocket鍗忚':        ['搴旂敤灞?, 'HTTP鍗忚'],
-  '鐢靛瓙閭欢鍗忚':         ['搴旂敤灞?],
-  'FTP鍗忚宸ヤ綔鍘熺悊':      ['搴旂敤灞?],
-  '鍩熷悕瑙ｆ瀽杩囩▼':         ['DNS绯荤粺', '搴旂敤灞?],
-  'CDN鎶€鏈師鐞?:          ['搴旂敤灞?, 'DNS绯荤粺'],
-  'VPN鎶€鏈?:              ['缃戠粶瀹夊叏', '缃戠粶灞?],
-  '缃戠粶瀹夊叏鏀诲嚮绫诲瀷':     ['缃戠粶瀹夊叏'],
-
-  // 鈺愨晲鈺?鏁版嵁缁撴瀯 鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '涓ヨ敋鏁忋€婃暟鎹粨鏋勩€?:     ['绾挎€ц〃', '鏍?, '鏍?, '鍥?, '鎺掑簭绠楁硶'],
-  '閭撲繆杈夈€婃暟鎹粨鏋勪笌绠楁硶銆?: ['绾挎€ц〃', '浜屽弶鏍?, '鏌ユ壘绠楁硶', '鎺掑簭绠楁硶', '鍝堝笇琛?],
-  '銆婄畻娉曞璁恒€?:           ['鎺掑簭绠楁硶', '鍥?, '鍝堝笇琛?, '鍫?, '鏍?],
-  '銆婂ぇ璇濇暟鎹粨鏋勩€?:       ['绾挎€ц〃', '鏍?, '闃熷垪', '鏍?, '鍥?],
-  '鐜嬮亾408鏁版嵁缁撴瀯绡?:      ['绾挎€ц〃', '鏍?, '鏍?, '鍥?, '鎺掑簭绠楁硶'],
-  '澶╁嫟鏁版嵁缁撴瀯楂樺垎绗旇':   ['绾挎€ц〃', '浜屽弶鏍?, '鎺掑簭绠楁硶', '鏍?, '闃熷垪'],
-  'LeetCode HOT100':        ['绾挎€ц〃', '鏍?, '鍝堝笇琛?, '鍫?, '鍥?],
-  '銆婃暟鎹粨鏋勪笌绠楁硶鍒嗘瀽銆?: ['鏍?, '鎺掑簭绠楁硶', '鍝堝笇琛?, '鍫?, '浜屽弶鏍?],
-
-  // 鈺愨晲鈺?璁＄畻鏈虹粍鎴愬師鐞?鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '鍞愭湐椋炪€婅绠楁満缁勬垚鍘熺悊銆?:       ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, '瀛樺偍鍣ㄥ眰娆?, 'Cache', '鎸囦护绯荤粺'],
-  '琚佹槬椋庛€婅绠楁満缁勬垚涓庤璁°€?:     ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, '鏁版嵁琛ㄧず', '鎺у埗鍗曞厓', '鎬荤嚎绯荤粺'],
-  'Patterson銆婅绠楁満缁勬垚涓庤璁°€?:   ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, '瀛樺偍鍣ㄥ眰娆?, 'Cache', '鎸囦护绯荤粺'],
-  '鐜嬮亾408璁＄粍绡?:                  ['鍐渚濇浖缁撴瀯', '鏁版嵁琛ㄧず', 'CPU娴佹按绾?, 'Cache', '涓柇绯荤粺'],
-  '澶╁嫟璁＄粍楂樺垎绗旇':               ['鍐渚濇浖缁撴瀯', '鏁版嵁琛ㄧず', 'CPU娴佹按绾?, '瀛樺偍鍣ㄥ眰娆?, '杈撳叆杈撳嚭绯荤粺'],
-  'Stallings銆婅绠楁満缁勬垚涓庝綋绯荤粨鏋勩€?: ['鍐渚濇浖缁撴瀯', 'CPU娴佹按绾?, 'Cache', '鎸囦护绯荤粺', '鎬荤嚎绯荤粺'],
-  '銆婃暟瀛楄璁″拰璁＄畻鏈轰綋绯荤粨鏋勩€?:    ['鍐渚濇浖缁撴瀯', '鏁版嵁琛ㄧず', '鎺у埗鍗曞厓', 'CPU娴佹按绾?, '鎸囦护绯荤粺'],
-  '銆婅绠楁満浣撶郴缁撴瀯閲忓寲鏂规硶銆?:      ['CPU娴佹按绾?, 'Cache', '铏氭嫙瀛樺偍鍣?, '鎸囦护娴佹按绾垮啋闄?, '瀛樺偍鍣ㄥ眰娆?],
-
-  // 鈺愨晲鈺?鎿嶄綔绯荤粺 鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '姹ゅ瓙鐎涖€婅绠楁満鎿嶄綔绯荤粺銆?:   ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '鍚屾涓庝簰鏂?],
-  '鐜嬮亾408鎿嶄綔绯荤粺绡?:          ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '杩涚▼璋冨害'],
-  '澶╁嫟鎿嶄綔绯荤粺楂樺垎绗旇':       ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '杩涚▼璋冨害', '鍚屾涓庝簰鏂?, '淇″彿閲忔満鍒?],
-  '銆婄幇浠ｆ搷浣滅郴缁熴€?:           ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '铏氭嫙鍐呭瓨'],
-  '銆婃繁鍏ョ悊瑙inux鍐呮牳銆?:      ['杩涚▼涓庣嚎绋?, '杩涚▼璋冨害', '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '璁惧绠＄悊'],
-  '銆婃搷浣滅郴缁熸蹇点€?:           ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '姝婚攣', '鍚屾涓庝簰鏂?],
-  '銆奓inux鍐呮牳璁捐涓庡疄鐜般€?:    ['杩涚▼涓庣嚎绋?, '杩涚▼璋冨害', '铏氭嫙鍐呭瓨', '杩涚▼閫氫俊', '鏂囦欢绯荤粺'],
-  '銆婃搷浣滅郴缁熺湡璞¤繕鍘熴€?:       ['杩涚▼涓庣嚎绋?, '鍐呭瓨绠＄悊', '鏂囦欢绯荤粺', '鍒嗛〉涓庡垎娈?, '璁惧绠＄悊'],
-
-  // 鈺愨晲鈺?璁＄畻鏈虹綉缁?鈥?鏂囩尞鍗＄墖 鈫?鏍稿績姒傚康 鈺愨晲鈺?  '璋㈠笇浠併€婅绠楁満缃戠粶銆?:                ['TCP/IP鍗忚鏍?, '浼犺緭灞?, '缃戠粶灞?, '搴旂敤灞?, '鏁版嵁閾捐矾灞?],
-  '鐜嬮亾408璁＄綉绡?:                       ['TCP/IP鍗忚鏍?, '浼犺緭灞?, '缃戠粶灞?, '鏁版嵁閾捐矾灞?, '搴旂敤灞?],
-  '澶╁嫟璁＄綉楂樺垎绗旇':                    ['TCP/IP鍗忚鏍?, '浼犺緭灞?, '缃戠粶灞?, '鐗╃悊灞?, '搴旂敤灞?],
-  'Kurose銆婅绠楁満缃戠粶鑷《鍚戜笅銆?:         ['搴旂敤灞?, '浼犺緭灞?, '缃戠粶灞?, '鏁版嵁閾捐矾灞?, 'TCP鍙潬浼犺緭'],
-  '銆奣CP/IP璇﹁В銆?:                      ['TCP/IP鍗忚鏍?, '浼犺緭灞?, 'TCP鍙潬浼犺緭', 'IP鍗忚', '鎷ュ鎺у埗'],
-  '璁＄畻鏈虹綉缁?Andrew Tanenbaum)':        ['鐗╃悊灞?, '鏁版嵁閾捐矾灞?, '缃戠粶灞?, '浼犺緭灞?, '缃戠粶瀹夊叏'],
-  '銆婂浘瑙TTP銆?:                        ['搴旂敤灞?, 'HTTP鍗忚', '浼犺緭灞?, 'DNS绯荤粺', '缃戠粶瀹夊叏'],
-  '銆婄綉缁滄槸鎬庢牱杩炴帴鐨勩€?:                ['DNS绯荤粺', 'HTTP鍗忚', 'IP鍗忚', '浼犺緭灞?, 'TCP鍙潬浼犺緭'],
-
-}
-function linkContent(title: string): string {
-  const targets = fleetingToPermanent[title]
-  if (!targets || targets.length === 0) {
-    return '## ' + title + '\n\n---\n_CS408 Knowledge Graph 鈥?auto-generated seed content_\n'
-  }
-  return '## ' + title + '\n\n**Related:** ' + [...new Set(targets)].map(t => '[[' + t + ']]').join(', ') + '\n\n---\n_CS408 Knowledge Graph 鈥?auto-generated seed content_\n'
-}
-
-// 鈹€鈹€鈹€ Auto-generate fleeting鈫攆leeting edges 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-// Two fleeting cards that share a common permanent card target should be
-// linked to each other, creating a dense web instead of a star topology.
-function buildFleetingToFleeting(): Record<string, string[]> {
-  // Invert: for each permanent card, list all fleeting cards that reference it
-  const permToFleeting = new Map<string, string[]>()
-  for (const [fleeting, targets] of Object.entries(fleetingToPermanent)) {
-    for (const perm of targets) {
-      if (!permToFleeting.has(perm)) permToFleeting.set(perm, [])
-      permToFleeting.get(perm)!.push(fleeting)
-    }
-  }
-
-  // For each pair of fleeting cards sharing a permanent card, add mutual link
-  const result: Record<string, string[]> = {}
-  for (const [, fleetingList] of permToFleeting) {
-    if (fleetingList.length < 2) continue
-    for (let i = 0; i < fleetingList.length; i++) {
-      for (let j = i + 1; j < fleetingList.length; j++) {
-        const a = fleetingList[i]
-        const b = fleetingList[j]
-        if (!result[a]) result[a] = []
-        if (!result[b]) result[b] = []
-        if (!result[a].includes(b)) result[a].push(b)
-        if (!result[b].includes(a)) result[b].push(a)
-      }
-    }
-  }
-
-  // Hand-picked cross-cutting connections not covered by shared permanent card
-  const manualConnections: [string, string][] = [
-    // 鏁版嵁缁撴瀯 鈥?绠楁硶鍒嗘瀽鐩稿叧
-    ['鍔ㄦ€佽鍒抳s璐績绠楁硶', '鏃堕棿澶嶆潅搴︾殑娓愯繘鍒嗘瀽'],
-    ['鍔ㄦ€佽鍒抳s璐績绠楁硶', '閫掑綊绠楁硶鐨勮绠楁ā鍨?],
-    ['绋€鐤忕煩闃靛瓨鍌?, '骞夸箟琛ㄧ粨鏋?],
-    ['澶栭儴鎺掑簭涓庡璺綊骞?, '澶ф暟鎹甌opK闂'],
-    ['鍩烘暟鎺掑簭鎬濇兂', '澶栭儴鎺掑簭涓庡璺綊骞?],
-
-    // 璁＄畻鏈虹粍鎴愬師鐞?鈥?鎬ц兘涓庡苟琛?    ['娴佹按绾挎€ц兘鎸囨爣', '璁＄畻鏈烘€ц兘璇勪环鎸囨爣'],
-    ['Amdahl瀹氬緥', '璁＄畻鏈烘€ц兘璇勪环鎸囨爣'],
-    ['澶氫綋浜ゅ弶瀛樺偍鍣?, '瀛樺偍鍣ㄧ殑鎵╁睍鎶€鏈?],
-    ['纾佺洏瀛樺偍鍣ㄧ粨鏋?, '鍥烘€佺‖鐩楽SD鎶€鏈?],
-    ['RAID绛夌骇鍖哄埆', '纾佺洏瀛樺偍鍣ㄧ粨鏋?],
-
-    // 鎿嶄綔绯荤粺 鈥?鍐呭瓨涓庡苟鍙?    ['鏉′欢鍙橀噺涓庝俊鍙烽噺', '浜掓枼閿佷笌鑷棆閿?],
-    ['鐢ㄦ埛鎬佷笌鏍稿績鎬佸垏鎹?, '绯荤粺璋冪敤瀹炵幇'],
-    ['缂洪〉涓柇澶勭悊', '椤甸潰鍒嗛厤绛栫暐'],
-    ['鏂囦欢鍒嗛厤鏂瑰紡瀵规瘮', '绌洪棽绌洪棿绠＄悊'],
-    ['鏃ュ織鏂囦欢绯荤粺', '鏂囦欢淇濇姢鏈哄埗'],
-    ['SPOOLing绯荤粺', '缂撳啿鎶€鏈?],
-
-    // 璁＄畻鏈虹綉缁?鈥?鍗忚涓庡畨鍏?    ['闅ч亾鎶€鏈?, 'VPN鎶€鏈?],
-    ['缃戠粶瀹夊叏鏀诲嚮绫诲瀷', 'VPN鎶€鏈?],
-    ['WebSocket鍗忚', 'TCP涓嶶DP鍖哄埆'],
-    ['鐢靛瓙閭欢鍗忚', 'FTP鍗忚宸ヤ綔鍘熺悊'],
-    ['NAT杞崲', '闅ч亾鎶€鏈?],
-    ['CDN鎶€鏈師鐞?, '鍩熷悕瑙ｆ瀽杩囩▼'],
-    ['CSMA/CD鍗忚', '浠ュお缃戝抚缁撴瀯'],
-
-    // 璺ㄥ煙 鈥?鏁版嵁缁撴瀯鍦∣S/缃戠粶涓殑搴旂敤
-    ['椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲', '蹇〃TLB鍘熺悊'],
-    ['澶氱骇椤佃〃', '椤靛紡铏氭嫙瀛樺偍鍣ㄥ湴鍧€杞崲'],
-    ['鎷ュ鎺у埗绠楁硶', '娴侀噺鎺у埗涓庢嫢濉炴帶鍒跺尯鍒?],
-  ]
-
-  for (const [a, b] of manualConnections) {
-    if (!result[a]) result[a] = []
-    if (!result[b]) result[b] = []
-    if (!result[a].includes(b)) result[a].push(b)
-    if (!result[b].includes(a)) result[b].push(a)
-  }
-
-  return result
-}
-
-const fleetingToFleeting = buildFleetingToFleeting()
-
-// Update linkContent to include fleeting鈫攆leeting links
-function linkContentV2(title: string): string {
-  const permLinks = fleetingToPermanent[title] || []
-  const fleetingLinks = fleetingToFleeting[title] || []
-  const lines: string[] = ['## ' + title]
-  if (permLinks.length > 0) {
-    lines.push('', '**Core Concepts:** ' + [...new Set(permLinks)].map(t => '[[' + t + ']]').join(', '))
-  }
-  if (fleetingLinks.length > 0) {
-    lines.push('', '**Related Ideas:** ' + [...new Set(fleetingLinks)].map(t => '[[' + t + ']]').join(', '))
-  }
-  lines.push('', '---', '_CS408 Knowledge Graph 鈥?auto-generated seed content_')
-  return lines.join('\n')
-}
-// 鈹€鈹€鈹€ End fleeting鈫攆leeting auto-linking 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
-function randomRecentDate(daysBack: number, minHour = 8, maxHour = 22): Date {
-  const d = randomPastDate(daysBack)
-  const hour = Math.floor(Math.random() * (maxHour - minHour + 1)) + minHour
-  d.setHours(hour, Math.floor(Math.random() * 60), 0, 0)
-  return d
-}
-
-function uniqueByTitle<T extends { title: string | null }>(cards: T[]): T[] {
-  const seen = new Set<string>()
-  return cards.filter((card) => {
-    const key = card.title || ''
-    if (!key || seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-async function seedSupportingUiData(userId: string, vaultId: string) {
-  const allCards = await prisma.card.findMany({
-    where: { vaultId },
-    select: { id: true, title: true, type: true },
-    orderBy: { createdAt: 'asc' },
+async function upsertDemoUser() {
+  const user = await prisma.user.upsert({
+    where: { email: DEMO_EMAIL },
+    update: { name: 'CS408 Demo Student', emailVerified: true },
+    create: { email: DEMO_EMAIL, name: 'CS408 Demo Student', emailVerified: true },
   })
 
-  if (allCards.length === 0) return
+  const password = await hashPassword(DEMO_PASSWORD)
+  const account = await prisma.account.findFirst({
+    where: { userId: user.id, providerId: 'credential' },
+  })
 
-  const permanentCards = uniqueByTitle(allCards.filter((card) => card.type === 'permanent'))
-  const fleetingCards = uniqueByTitle(allCards.filter((card) => card.type === 'fleeting'))
-  const literatureCards = uniqueByTitle(allCards.filter((card) => card.type === 'literature'))
-  const titleToCard = new Map(allCards.map((card) => [card.title || '', card]))
+  if (account) {
+    await prisma.account.update({ where: { id: account.id }, data: { password } })
+  } else {
+    await prisma.account.create({
+      data: {
+        userId: user.id,
+        accountId: DEMO_EMAIL,
+        providerId: 'credential',
+        password,
+      },
+    })
+  }
 
-  await prisma.([
-    prisma.learningSession.deleteMany({ where: { userId } }),
+  return user
+}
+
+async function resetVault(vaultId: string) {
+  await prisma.$transaction([
+    prisma.ragDocumentIndex.deleteMany({ where: { vaultId } }),
+    prisma.pushRecord.deleteMany({ where: { vaultId } }),
+    prisma.pathAdjustmentHistory.deleteMany({ where: { path: { vaultId } } }),
+    prisma.learningPathStep.deleteMany({ where: { path: { vaultId } } }),
     prisma.learningPath.deleteMany({ where: { vaultId } }),
-    prisma.vaultCapability.deleteMany({ where: { vaultId } }),
+    prisma.learningSession.deleteMany({ where: { vaultId } }),
     prisma.agentSession.deleteMany({ where: { vaultId } }),
+    prisma.vaultMemory.deleteMany({ where: { vaultId } }),
+    prisma.vaultCapability.deleteMany({ where: { vaultId } }),
+    prisma.vaultSkill.deleteMany({ where: { vaultId } }),
     prisma.educationProfileHistory.deleteMany({ where: { vaultId } }),
-    prisma.pushRecord.deleteMany({ where: { userId } }),
-    prisma.vaultMemory.deleteMany({ where: { vaultId, category: 'observation' } }),
+    prisma.edge.deleteMany({ where: { vaultId } }),
+    prisma.card.deleteMany({ where: { vaultId } }),
+    prisma.cluster.deleteMany({ where: { vaultId } }),
   ])
+}
 
-  const capabilitySeeds = [
-    { concept: 'Arrays and Lists', masteryLevel: 84, status: 'mastered', strongAreas: ['implementation', 'time complexity'], weakAreas: [] },
-    { concept: 'Graphs', masteryLevel: 58, status: 'learning', strongAreas: ['traversal'], weakAreas: ['shortest path', 'topological sort'] },
-    { concept: 'CPU Pipeline', masteryLevel: 66, status: 'learning', strongAreas: ['core model'], weakAreas: ['hazard handling'] },
-    { concept: 'Virtual Memory', masteryLevel: 47, status: 'learning', strongAreas: ['page replacement'], weakAreas: ['address translation'] },
-    { concept: 'TCP Reliability', masteryLevel: 73, status: 'known', strongAreas: ['handshake'], weakAreas: ['congestion control'] },
-    { concept: 'DNS', masteryLevel: 41, status: 'learning', strongAreas: ['lookup flow'], weakAreas: ['caching', 'recursive resolution'] },
-  ]
+const clusters = [
+  { name: '数据结构', color: '#8b5cf6', position: 0 },
+  { name: '计算机组成原理', color: '#06b6d4', position: 1 },
+  { name: '操作系统', color: '#f43f5e', position: 2 },
+  { name: '计算机网络', color: '#22c55e', position: 3 },
+  { name: '跨域综合', color: '#f59e0b', position: 4 },
+  { name: '资源与评估', color: '#64748b', position: 5 },
+]
 
-  for (const seed of capabilitySeeds) {
-    await prisma.vaultCapability.create({
+const cards: CardDef[] = [
+  { cluster: '数据结构', title: '线性表', type: 'permanent', tags: ['linear-list', 'foundation'], summary: '线性表是一组有先后关系的数据元素，是数组、链表、栈和队列的共同抽象。', why: '它决定了很多题目里“顺序访问”和“随机访问”的成本边界。', mistakes: ['只记操作名称，不分析时间复杂度', '把顺序表和链表的插入删除成本混为一谈'], related: ['数组', '链表', '栈', '队列'] },
+  { cluster: '数据结构', title: '数组', type: 'permanent', tags: ['array'], summary: '数组用连续内存保存同类型元素，支持 O(1) 下标访问。', why: '它让缓存局部性、顺序扫描和空间分配同时进入一道题。', mistakes: ['忽略扩容成本', '把逻辑下标和物理地址混淆'], related: ['线性表', 'Cache 局部性', '地址映射'] },
+  { cluster: '数据结构', title: '链表', type: 'permanent', tags: ['linked-list'], summary: '链表用指针连接节点，牺牲随机访问换取灵活插入删除。', why: '它是理解空指针、哨兵节点和内存碎片的基础例子。', mistakes: ['忘记维护前驱节点', '删除节点时遗漏边界条件'], related: ['线性表', '栈', '队列'] },
+  { cluster: '数据结构', title: '栈', type: 'permanent', tags: ['stack'], summary: '栈是一种后进先出的受限线性表，适合保存嵌套结构和回退现场。', why: '递归、表达式求值和函数调用栈都依赖这个模型。', mistakes: ['只会背 LIFO，不知道为什么能处理括号匹配', '递归深度与栈溢出的关系不清楚'], related: ['递归', '函数调用栈', '链表'] },
+  { cluster: '数据结构', title: '队列', type: 'permanent', tags: ['queue'], summary: '队列是一种先进先出的受限线性表，常用于调度、缓冲和广度优先搜索。', why: '它把数据结构和 OS 调度、网络缓冲自然连接起来。', mistakes: ['循环队列空满条件写错', '把队列和优先队列混为一谈'], related: ['BFS', '进程调度', '滑动窗口'] },
+  { cluster: '数据结构', title: '二叉树', type: 'permanent', tags: ['tree'], summary: '二叉树让递归结构和分治思想变得可视化。', why: '遍历顺序、递归边界和搜索树性质是常见综合题入口。', mistakes: ['前中后序只背顺序，不会还原树', '把完全二叉树和满二叉树混淆'], related: ['递归', '堆', 'B 树'] },
+  { cluster: '数据结构', title: '图', type: 'permanent', tags: ['graph'], summary: '图用顶点和边表达任意关系，适合描述依赖、网络、路径和状态转移。', why: '它是 CS408 里最能体现跨域建模能力的结构。', mistakes: ['邻接矩阵和邻接表适用场景不分', '有向图和无向图度数概念混用'], related: ['BFS', 'DFS', '最短路径', '拓扑排序'] },
+  { cluster: '数据结构', title: 'BFS', type: 'permanent', tags: ['graph', 'search'], summary: 'BFS 按层扩展节点，天然适合无权最短路径和层级问题。', why: '它把队列、图遍历和网络跳数联系在一起。', mistakes: ['入队时机错误导致重复访问', '误用于带权最短路径'], related: ['队列', '图', '最短路径'] },
+  { cluster: '数据结构', title: 'DFS', type: 'permanent', tags: ['graph', 'search'], summary: 'DFS 沿一条路径深入再回溯，适合连通性、拓扑序和状态空间搜索。', why: '它暴露了递归栈、访问状态和回溯剪枝的统一结构。', mistakes: ['visited 状态恢复时机不清楚', '递归出口漏写'], related: ['递归', '图', '拓扑排序'] },
+  { cluster: '数据结构', title: '最短路径', type: 'fleeting', tags: ['graph', 'weak-spot'], summary: '最短路径问题关注从源点到其他节点的最小代价，算法选择取决于边权和图规模。', why: 'Dijkstra、Floyd 和 Bellman-Ford 的适用条件很适合检验真实理解。', mistakes: ['负权边仍套 Dijkstra', 'Floyd 的三层循环语义不清楚'], related: ['图', 'Dijkstra 算法', '动态规划'] },
+  { cluster: '数据结构', title: '拓扑排序', type: 'fleeting', tags: ['dag'], summary: '拓扑排序把有向无环图中的依赖关系排成可执行顺序。', why: '它能连接课程先修关系、编译依赖和项目任务调度。', mistakes: ['忽略环检测', '入度更新顺序错误'], related: ['图', 'DFS', '学习路径规划'] },
+  { cluster: '数据结构', title: '排序算法稳定性', type: 'permanent', tags: ['sorting'], summary: '稳定性描述相等关键字元素排序后相对顺序是否保持。', why: '它让算法性质不只停留在时间复杂度。', mistakes: ['把稳定性和原地排序混淆', '只背结论不会构造反例'], related: ['归并排序', '快速排序', '堆'] },
+
+  { cluster: '计算机组成原理', title: '冯诺依曼结构', type: 'permanent', tags: ['architecture'], summary: '冯诺依曼结构用存储程序思想统一指令和数据。', why: '它是理解 CPU、内存、指令周期和总线的共同底座。', mistakes: ['只背五大部件，不理解取指执行循环'], related: ['指令周期', '总线', '主存'] },
+  { cluster: '计算机组成原理', title: '数据表示', type: 'permanent', tags: ['representation'], summary: '数据表示讨论整数、浮点数和字符如何在机器中编码。', why: '它决定溢出、舍入误差和类型转换题的本质。', mistakes: ['补码范围背错', '把浮点精度和范围混淆'], related: ['补码', '浮点数', 'ALU'] },
+  { cluster: '计算机组成原理', title: '补码', type: 'permanent', tags: ['integer'], summary: '补码把减法转化为加法，并让 0 的表示唯一。', why: '它是 ALU 设计、溢出判断和机器数计算的关键。', mistakes: ['符号位参与运算理解不清', '溢出和进位混淆'], related: ['数据表示', 'ALU'] },
+  { cluster: '计算机组成原理', title: '浮点数', type: 'permanent', tags: ['float'], summary: '浮点数用符号、阶码和尾数表示近似实数。', why: '它解释为什么计算机里的小数不是普通数学实数。', mistakes: ['规格化过程漏掉隐藏位', '把机器 epsilon 当作固定误差'], related: ['数据表示', 'Cache 局部性'] },
+  { cluster: '计算机组成原理', title: 'ALU', type: 'permanent', tags: ['cpu'], summary: 'ALU 负责算术和逻辑运算，是执行部件的核心。', why: '它把补码、标志位和指令执行连接起来。', mistakes: ['只看功能，不看标志位更新', '不了解溢出检测条件'], related: ['补码', '指令周期'] },
+  { cluster: '计算机组成原理', title: '指令周期', type: 'permanent', tags: ['cpu'], summary: '指令周期描述取指、译码、执行、访存、写回等阶段。', why: '流水线和中断都建立在指令周期的细分之上。', mistakes: ['机器周期和时钟周期混用', '忽略访存阶段'], related: ['CPU 流水线', '中断', '冯诺依曼结构'] },
+  { cluster: '计算机组成原理', title: 'CPU 流水线', type: 'permanent', tags: ['pipeline'], summary: 'CPU 流水线通过阶段并行提高指令吞吐率。', why: '它让结构冒险、数据冒险、控制冒险成为性能分析核心。', mistakes: ['把吞吐率提升等同于单条指令变快', '冒险处理方式背不全'], related: ['指令周期', 'Cache 局部性', 'Amdahl 定律'] },
+  { cluster: '计算机组成原理', title: 'Cache 局部性', type: 'permanent', tags: ['cache'], summary: 'Cache 利用时间局部性和空间局部性减少平均访存时间。', why: '它把数组访问、分页、TLB 和性能优化串起来。', mistakes: ['命中率和平均访存时间不会互推', '直接映射冲突理解薄弱'], related: ['数组', '虚拟内存', 'TLB', 'CPU 流水线'] },
+  { cluster: '计算机组成原理', title: '总线', type: 'permanent', tags: ['bus'], summary: '总线是一组共享通信线路，连接 CPU、主存和 I/O 设备。', why: '它解释带宽、仲裁和设备通信为什么会成为瓶颈。', mistakes: ['地址总线和数据总线作用混淆', '不了解总线周期'], related: ['冯诺依曼结构', 'I/O 系统'] },
+  { cluster: '计算机组成原理', title: 'Amdahl 定律', type: 'fleeting', tags: ['performance'], summary: 'Amdahl 定律说明整体加速受不可并行部分限制。', why: '它能解释为什么局部优化不一定带来整体性能跃迁。', mistakes: ['忽略串行比例', '把加速比线性外推'], related: ['CPU 流水线', '吞吐率与延迟'] },
+
+  { cluster: '操作系统', title: '进程', type: 'permanent', tags: ['process'], summary: '进程是资源分配和独立运行的基本单位，拥有自己的地址空间和 PCB。', why: '它是调度、同步、通信和内存管理的起点。', mistakes: ['进程和程序混淆', 'PCB 中保存的信息背不全'], related: ['线程', '进程调度', '虚拟内存'] },
+  { cluster: '操作系统', title: '线程', type: 'permanent', tags: ['thread'], summary: '线程是 CPU 调度的基本单位，同一进程内线程共享资源。', why: '它让并发执行与资源共享的边界清晰起来。', mistakes: ['共享和私有资源划分不清', '用户级线程和内核级线程区别模糊'], related: ['进程', '同步互斥'] },
+  { cluster: '操作系统', title: '进程调度', type: 'permanent', tags: ['scheduling'], summary: '进程调度决定就绪队列中哪个进程获得 CPU。', why: '它把队列、优先级、响应时间和吞吐量连接在一起。', mistakes: ['周转时间和响应时间混淆', '抢占式和非抢占式判断错误'], related: ['队列', '进程', '时间片轮转'] },
+  { cluster: '操作系统', title: '同步互斥', type: 'permanent', tags: ['sync'], summary: '同步互斥处理并发访问共享资源时的顺序和排他问题。', why: '它是信号量、管程和死锁的共同入口。', mistakes: ['P/V 操作顺序写反', '互斥和同步需求不分'], related: ['线程', '信号量', '死锁'] },
+  { cluster: '操作系统', title: '死锁', type: 'permanent', tags: ['deadlock'], summary: '死锁是多个进程因互相等待资源而无法推进的状态。', why: '四个必要条件、银行家算法和资源分配图都是典型考点。', mistakes: ['必要条件当作充分条件', '安全状态和非死锁状态混淆'], related: ['同步互斥', '资源分配图'] },
+  { cluster: '操作系统', title: '虚拟内存', type: 'permanent', tags: ['memory'], summary: '虚拟内存为进程提供连续地址空间，并通过页表映射到物理内存。', why: '它是 OS 与组成原理交叉最强的概念。', mistakes: ['虚拟地址和物理地址混淆', '以为虚拟内存只是在硬盘上扩容'], related: ['页表', 'TLB', '缺页中断', 'Cache 局部性'] },
+  { cluster: '操作系统', title: '页表', type: 'permanent', tags: ['paging'], summary: '页表保存虚拟页到物理页框的映射关系。', why: '它让地址转换、权限控制和缺页处理可落地。', mistakes: ['页号和页内偏移切分错误', '多级页表节省空间的原因不清'], related: ['虚拟内存', 'TLB', '地址映射'] },
+  { cluster: '操作系统', title: 'TLB', type: 'permanent', tags: ['tlb'], summary: 'TLB 缓存近期页表项以加速地址转换。', why: '它把 Cache 思想直接用于虚拟内存系统。', mistakes: ['TLB 命中后仍查页表', '忽略上下文切换导致 TLB 失效'], related: ['页表', 'Cache 局部性', '地址映射'] },
+  { cluster: '操作系统', title: '缺页中断', type: 'fleeting', tags: ['page-fault'], summary: '缺页中断在访问页不在内存时触发，由 OS 负责调入页面。', why: '它把硬件异常、页表状态位和页面置换连起来。', mistakes: ['缺页和越界访问混淆', '缺页处理流程顺序不清'], related: ['虚拟内存', '页面置换'] },
+  { cluster: '操作系统', title: '页面置换', type: 'permanent', tags: ['replacement'], summary: '页面置换决定内存满时淘汰哪个页面。', why: 'FIFO、LRU、Clock 体现了局部性假设与实现成本的权衡。', mistakes: ['Belady 异常适用算法记错', 'LRU 实现成本忽略'], related: ['缺页中断', 'Cache 局部性'] },
+  { cluster: '操作系统', title: '文件系统', type: 'permanent', tags: ['file-system'], summary: '文件系统管理文件、目录、空间分配和访问控制。', why: '它让磁盘结构和用户抽象连接起来。', mistakes: ['索引分配和链接分配优缺点混淆', '目录项和 FCB 概念混淆'], related: ['磁盘调度', 'I/O 系统'] },
+
+  { cluster: '计算机网络', title: 'OSI 与 TCP/IP', type: 'permanent', tags: ['network'], summary: '分层模型把复杂网络通信拆成职责清晰的层。', why: '它帮助定位协议、设备和故障发生的位置。', mistakes: ['OSI 七层和 TCP/IP 四层对应不清', '协议和服务概念混淆'], related: ['IP 地址', 'TCP 可靠传输', 'HTTP'] },
+  { cluster: '计算机网络', title: 'IP 地址', type: 'permanent', tags: ['ip'], summary: 'IP 地址标识网络层主机接口，并支撑路由转发。', why: '子网划分、路由聚合和 ARP 都围绕它展开。', mistakes: ['网络号和主机号切分错误', '广播地址可用性判断错'], related: ['子网划分', '路由选择', 'ARP'] },
+  { cluster: '计算机网络', title: '子网划分', type: 'permanent', tags: ['subnet'], summary: '子网划分用掩码把地址空间拆成多个逻辑网络。', why: '它是网络层计算题最常见的入口。', mistakes: ['可用主机数忘减 2', 'CIDR 聚合方向错误'], related: ['IP 地址', '路由选择'] },
+  { cluster: '计算机网络', title: 'ARP', type: 'permanent', tags: ['arp'], summary: 'ARP 将同一链路内的 IP 地址解析为 MAC 地址。', why: '它解释了网络层地址如何落到数据链路层传输。', mistakes: ['跨网段仍 ARP 目标主机', 'ARP 缓存更新理解薄弱'], related: ['IP 地址', '以太网帧'] },
+  { cluster: '计算机网络', title: 'TCP 可靠传输', type: 'permanent', tags: ['tcp'], summary: 'TCP 通过序号、确认、重传和窗口机制提供可靠字节流。', why: '它把队列、滑动窗口、拥塞控制和应用协议连在一起。', mistakes: ['确认号含义错误', '超时重传和快速重传混淆'], related: ['滑动窗口', '拥塞控制', 'HTTP'] },
+  { cluster: '计算机网络', title: '滑动窗口', type: 'permanent', tags: ['window'], summary: '滑动窗口允许发送方在未收到全部确认前连续发送多个报文段。', why: '它统一解释可靠传输、流量控制和吞吐率。', mistakes: ['发送窗口和接收窗口混淆', '窗口滑动时机不清'], related: ['TCP 可靠传输', '队列'] },
+  { cluster: '计算机网络', title: '拥塞控制', type: 'fleeting', tags: ['tcp', 'weak-spot'], summary: '拥塞控制根据网络拥塞程度调节发送速率。', why: '慢开始、拥塞避免、快重传和快恢复是高频综合点。', mistakes: ['ssthresh 更新规则记错', '拥塞控制和流量控制混淆'], related: ['TCP 可靠传输', '滑动窗口'] },
+  { cluster: '计算机网络', title: 'DNS', type: 'permanent', tags: ['dns'], summary: 'DNS 把域名解析为 IP 地址，采用分布式层次结构。', why: '它把应用层、缓存和递归/迭代查询连接起来。', mistakes: ['递归查询和迭代查询混淆', 'TTL 作用忽略'], related: ['IP 地址', 'HTTP'] },
+  { cluster: '计算机网络', title: 'HTTP', type: 'permanent', tags: ['http'], summary: 'HTTP 是 Web 应用层协议，定义请求、响应和资源语义。', why: '它能把 TCP 连接、DNS 和缓存策略串成完整访问链路。', mistakes: ['状态码类别记混', '长连接和持久连接理解不清'], related: ['DNS', 'TCP 可靠传输'] },
+
+  { cluster: '跨域综合', title: '地址映射', type: 'permanent', tags: ['bridge'], summary: '地址映射描述从程序地址到实际访问位置的转换过程。', why: '它是虚拟内存、TLB、Cache 和总线访问的桥接节点。', mistakes: ['把所有映射都归到操作系统', '缺少从虚拟页到缓存行的完整路径'], related: ['虚拟内存', '页表', 'TLB', 'Cache 局部性'] },
+  { cluster: '跨域综合', title: '吞吐率与延迟', type: 'permanent', tags: ['performance'], summary: '吞吐率关注单位时间完成多少工作，延迟关注单个任务需要多久。', why: '它统一解释流水线、网络传输和 I/O 等待。', mistakes: ['吞吐提升误认为延迟下降', '不区分平均值和尾延迟'], related: ['CPU 流水线', 'TCP 可靠传输', 'Amdahl 定律'] },
+  { cluster: '跨域综合', title: '学习路径规划', type: 'literature', tags: ['learning-path'], summary: '学习路径规划把概念依赖图转化为可执行的学习顺序。', why: '这是系统向评委证明“图谱服务学习”的核心样例。', mistakes: ['只按教材章节排序，不考虑学生薄弱点', '忽略评估反馈'], related: ['拓扑排序', '最短路径', 'CS408 个性化资源包'] },
+  { cluster: '资源与评估', title: 'CS408 个性化资源包', type: 'literature', tags: ['ai-generated', 'resource-pack'], summary: '系统为图算法薄弱点生成的资源集合，包含讲解、导图、题库、代码、图解和 PPT。', why: '它是多智能体资源生成在文献盒里的可视化证据。', mistakes: ['只生成文本，没有资源清单', '资源没有指向画像和薄弱点'], related: ['最短路径', '拓扑排序', '学习路径规划'] },
+  { cluster: '资源与评估', title: '图算法评估记录', type: 'literature', tags: ['assessment'], summary: '记录一次针对图算法的评估结果和后续路径调整。', why: '它证明评估不是孤立分数，而会驱动路径和推送。', mistakes: ['只有分数没有诊断', '诊断没有后续动作'], related: ['最短路径', '图', 'CS408 个性化资源包'] },
+]
+
+const edges: EdgeDef[] = [
+  { from: '线性表', to: '数组', type: 'prerequisite', weight: 1.2 },
+  { from: '线性表', to: '链表', type: 'prerequisite', weight: 1.2 },
+  { from: '链表', to: '栈', type: 'related' },
+  { from: '队列', to: 'BFS', type: 'prerequisite', weight: 1.3 },
+  { from: '图', to: 'BFS', type: 'prerequisite', weight: 1.4 },
+  { from: '图', to: 'DFS', type: 'prerequisite', weight: 1.4 },
+  { from: 'BFS', to: '最短路径', type: 'derived', weight: 1.5 },
+  { from: 'DFS', to: '拓扑排序', type: 'derived', weight: 1.4 },
+  { from: '排序算法稳定性', to: '数组', type: 'related' },
+  { from: '数据表示', to: '补码', type: 'prerequisite' },
+  { from: '数据表示', to: '浮点数', type: 'prerequisite' },
+  { from: '补码', to: 'ALU', type: 'prerequisite' },
+  { from: '冯诺依曼结构', to: '指令周期', type: 'prerequisite' },
+  { from: '指令周期', to: 'CPU 流水线', type: 'derived', weight: 1.3 },
+  { from: 'CPU 流水线', to: '吞吐率与延迟', type: 'related', weight: 1.4 },
+  { from: 'Cache 局部性', to: '数组', type: 'related', weight: 1.5 },
+  { from: '进程', to: '线程', type: 'related' },
+  { from: '队列', to: '进程调度', type: 'related', weight: 1.4 },
+  { from: '线程', to: '同步互斥', type: 'prerequisite' },
+  { from: '同步互斥', to: '死锁', type: 'derived' },
+  { from: '虚拟内存', to: '页表', type: 'prerequisite', weight: 1.4 },
+  { from: '页表', to: 'TLB', type: 'derived', weight: 1.3 },
+  { from: 'TLB', to: '地址映射', type: 'related', weight: 1.5 },
+  { from: '虚拟内存', to: '缺页中断', type: 'derived' },
+  { from: '缺页中断', to: '页面置换', type: 'derived' },
+  { from: '页面置换', to: 'Cache 局部性', type: 'related', weight: 1.4 },
+  { from: '文件系统', to: '总线', type: 'related' },
+  { from: 'OSI 与 TCP/IP', to: 'IP 地址', type: 'prerequisite' },
+  { from: 'IP 地址', to: '子网划分', type: 'derived' },
+  { from: 'IP 地址', to: 'ARP', type: 'related' },
+  { from: 'IP 地址', to: 'DNS', type: 'related' },
+  { from: 'TCP 可靠传输', to: '滑动窗口', type: 'prerequisite' },
+  { from: '滑动窗口', to: '拥塞控制', type: 'derived' },
+  { from: 'TCP 可靠传输', to: 'HTTP', type: 'related' },
+  { from: 'DNS', to: 'HTTP', type: 'prerequisite' },
+  { from: 'TCP 可靠传输', to: '吞吐率与延迟', type: 'related', weight: 1.4 },
+  { from: '虚拟内存', to: '地址映射', type: 'related', weight: 1.5 },
+  { from: 'Cache 局部性', to: '地址映射', type: 'related', weight: 1.5 },
+  { from: '拓扑排序', to: '学习路径规划', type: 'related', weight: 1.5 },
+  { from: '最短路径', to: '学习路径规划', type: 'related', weight: 1.5 },
+  { from: '最短路径', to: '图算法评估记录', type: 'derived', weight: 1.4 },
+  { from: '图算法评估记录', to: 'CS408 个性化资源包', type: 'derived', weight: 1.5 },
+  { from: 'CS408 个性化资源包', to: '学习路径规划', type: 'related', weight: 1.4 },
+]
+
+function buildCardContent(card: CardDef): string {
+  const resourceManifest = card.title === 'CS408 个性化资源包'
+    ? `\n<!-- axiom-resources:${JSON.stringify([
+      { type: 'document', title: '图算法讲解文档', path: 'resources/cs408-graph/document.md', fileName: 'document.md' },
+      { type: 'mindmap', title: '图算法思维导图', path: 'resources/cs408-graph/mindmap.md', fileName: 'mindmap.md' },
+      { type: 'quiz', title: '最短路径题库', path: 'resources/cs408-graph/quiz.md', fileName: 'quiz.md' },
+      { type: 'diagram', title: 'Dijkstra 执行流程', path: 'resources/cs408-graph/diagram.mmd', fileName: 'diagram.mmd' },
+      { type: 'ppt', title: '图算法复习 PPT', path: 'resources/cs408-graph/presentation.pptx', fileName: 'presentation.pptx' },
+      { type: 'video', title: '最短路径动画脚本', path: 'resources/cs408-graph/video.html', fileName: 'video.html' },
+    ])} -->\n`
+    : ''
+
+  return `---
+title: "${card.title}"
+type: ${card.type}
+course: CS408
+cluster: ${card.cluster}
+tags: [${card.tags.join(', ')}]
+---
+
+# ${card.title}
+
+## 定义
+${card.summary}
+
+## 为什么重要
+${card.why}
+
+## 常见误区
+${card.mistakes.map((m) => `- ${m}`).join('\n')}
+
+## 关联
+${card.related.map((r) => `[[${r}]]`).join(' ')}
+
+## 评估线索
+- 能用自己的话解释边界条件。
+- 能说出至少一个和其他星团的连接。
+- 能指出一个常见错误并修正。
+${resourceManifest}
+`
+}
+
+async function seedCs408Vault(vaultId: string, userId: string) {
+  const clusterRows = new Map<string, { id: string }>()
+  for (const cluster of clusters) {
+    const row = await prisma.cluster.create({
       data: {
         vaultId,
-        concept: seed.concept,
-        masteryLevel: seed.masteryLevel,
-        status: seed.status,
-        accessCount: 3 + Math.floor(Math.random() * 8),
-        lastAccessed: randomRecentDate(6),
-        weakAreas: JSON.stringify(seed.weakAreas),
-        strongAreas: JSON.stringify(seed.strongAreas),
+        name: cluster.name,
+        color: cluster.color,
+        position: cluster.position,
       },
     })
+    clusterRows.set(cluster.name, row)
   }
 
-  const learningSessions = [
-    { domain: 'Data Structures', concept: 'Graph representations', status: 'completed', phase: 'reflect', outcome: 'understood', minutes: 48 },
-    { domain: 'Operating Systems', concept: 'Virtual Memory', status: 'completed', phase: 'practice', outcome: 'needs_review', minutes: 36 },
-    { domain: 'Computer Networks', concept: 'TCP Reliability', status: 'active', phase: 'explore', outcome: null, minutes: 22 },
-  ]
+  const cardRows = new Map<string, { id: string; type: string }>()
+  for (let index = 0; index < cards.length; index++) {
+    const card = cards[index]
+    const cluster = clusterRows.get(card.cluster)
+    if (!cluster) throw new Error(`Cluster not found: ${card.cluster}`)
 
-  for (const session of learningSessions) {
-    const createdAt = randomRecentDate(9)
-    const updatedAt = new Date(createdAt.getTime() + session.minutes * 60 * 1000)
-    await prisma.learningSession.create({
+    const row = await prisma.card.create({
       data: {
-        userId,
-        domain: session.domain,
-        concept: session.concept,
-        status: session.status,
-        phase: session.phase,
-        outcome: session.outcome,
-        metadata: JSON.stringify({ durationMinutes: session.minutes, source: 'seed-cs408-ui' }),
-        createdAt,
-        updatedAt,
+        vaultId,
+        clusterId: cluster.id,
+        path: `${slugify(card.cluster)}/${slugify(card.title)}.md`,
+        title: card.title,
+        type: card.type,
+        tags: JSON.stringify(['CS408', ...card.tags]),
+        content: buildCardContent(card),
+        createdAt: daysAgo(Math.max(1, cards.length - index)),
+        updatedAt: daysAgo(Math.max(0, Math.floor((cards.length - index) / 4))),
+      },
+    })
+    cardRows.set(card.title, { id: row.id, type: card.type })
+  }
+
+  const seenEdges = new Set<string>()
+  for (const edge of edges) {
+    const source = cardRows.get(edge.from)
+    const target = cardRows.get(edge.to)
+    if (!source || !target) throw new Error(`Invalid edge: ${edge.from} -> ${edge.to}`)
+    const key = `${source.id}:${target.id}:${edge.type}`
+    if (seenEdges.has(key)) continue
+    seenEdges.add(key)
+    await prisma.edge.create({
+      data: {
+        vaultId,
+        sourceId: source.id,
+        targetId: target.id,
+        type: edge.type,
+        weight: edge.weight ?? 1,
       },
     })
   }
 
-  const pathSeeds = [
-    {
-      name: 'CS408 Core Graph',
-      topic: 'CS408',
-      description: 'Primary demo path for Learn with mixed step states and graph-backed cards.',
+  const indexedCards = [...cardRows.entries()].filter(([, row]) => row.type !== 'fleeting').slice(0, 28)
+  for (const [title, row] of indexedCards) {
+    await prisma.ragDocumentIndex.create({
+      data: {
+        vaultId,
+        cardId: row.id,
+        provider: 'lightrag',
+        workspace: `vault-${vaultId.slice(0, 8)}`,
+        documentId: `cs408-${stableId(title)}`,
+        contentHash: stableId(`${title}:${row.id}`),
+        trackId: `seed-${stableId(title)}`,
+        status: 'indexed',
+        indexedAt: daysAgo(1),
+        lastSyncedAt: daysAgo(1),
+      },
+    })
+  }
+
+  await seedLearningPaths(vaultId, userId, cardRows)
+  await seedProfile(vaultId, userId)
+  await seedCapabilities(vaultId)
+  await seedSkills(vaultId)
+  await seedPushes(vaultId, userId)
+  await seedSessionsAndMemory(vaultId)
+}
+
+async function seedLearningPaths(vaultId: string, userId: string, cardRows: Map<string, { id: string; type: string }>) {
+  const main = await prisma.learningPath.create({
+    data: {
+      userId,
+      vaultId,
+      name: 'CS408 图算法薄弱点补强路径',
+      topic: '图算法与系统性能',
+      description: '从线性结构和图遍历进入最短路径，再连接地址映射、Cache 和 TCP 吞吐。',
       difficulty: 'intermediate',
+      totalSteps: 7,
+      doneSteps: 3,
+      status: 'active',
       source: 'graph',
-      steps: [
-        { title: 'linked-list', status: 'mastered', mastery: 96, chapter: 'DS Foundations', estimatedMinutes: 20 },
-        { title: 'stack', status: 'completed', mastery: 82, chapter: 'DS Foundations', estimatedMinutes: 18 },
-        { title: 'graph', status: 'learning', mastery: 54, chapter: 'Graph Focus', estimatedMinutes: 32 },
-        { title: 'shortest-path', status: 'available', mastery: 12, chapter: 'Graph Focus', estimatedMinutes: 28 },
-        { title: 'topological-sort', status: 'locked', mastery: 0, chapter: 'Graph Focus', estimatedMinutes: 24 },
-      ],
     },
-    {
-      name: 'Systems Review Track',
-      topic: 'Systems Review',
-      description: 'Cross-domain path spanning architecture, OS, and networking for UI demos.',
-      difficulty: 'advanced',
-      source: 'ai',
-      steps: [
-        { title: 'pipeline', status: 'completed', mastery: 78, chapter: 'Architecture', estimatedMinutes: 25 },
-        { title: 'virtual-memory', status: 'available', mastery: 38, chapter: 'Operating Systems', estimatedMinutes: 26 },
-        { title: 'tcp-reliability', status: 'learning', mastery: 61, chapter: 'Networking', estimatedMinutes: 30 },
-        { title: 'dns', status: 'locked', mastery: 0, chapter: 'Networking', estimatedMinutes: 18 },
-      ],
-    },
-  ]
+  })
 
-  const createdPaths: { id: string; name: string }[] = []
-  for (const pathSeed of pathSeeds) {
-    const doneSteps = pathSeed.steps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
-    const path = await prisma.learningPath.create({
+  const mainSteps = [
+    { title: '队列', chapter: '前置结构', status: 'mastered', mastery: 96, minutes: 12 },
+    { title: '图', chapter: '图模型', status: 'completed', mastery: 84, minutes: 20 },
+    { title: 'BFS', chapter: '图遍历', status: 'completed', mastery: 78, minutes: 24 },
+    { title: '最短路径', chapter: '薄弱点', status: 'learning', mastery: 52, minutes: 36 },
+    { title: '拓扑排序', chapter: '依赖建模', status: 'available', mastery: 34, minutes: 28 },
+    { title: '地址映射', chapter: '跨域桥接', status: 'locked', mastery: 18, minutes: 32 },
+    { title: '吞吐率与延迟', chapter: '综合输出', status: 'locked', mastery: 12, minutes: 30 },
+  ]
+  await createPathSteps(main.id, mainSteps, cardRows)
+
+  const system = await prisma.learningPath.create({
+    data: {
+      userId,
+      vaultId,
+      name: '存储系统跨域理解路径',
+      topic: '虚拟内存、TLB 与 Cache',
+      description: '把操作系统地址空间和组成原理缓存层级连成一条可解释路径。',
+      difficulty: 'advanced',
+      totalSteps: 5,
+      doneSteps: 2,
+      status: 'active',
+      source: 'ai',
+    },
+  })
+
+  const systemSteps = [
+    { title: '虚拟内存', chapter: 'OS 抽象', status: 'completed', mastery: 82, minutes: 26 },
+    { title: '页表', chapter: '地址转换', status: 'completed', mastery: 75, minutes: 20 },
+    { title: 'TLB', chapter: '硬件加速', status: 'learning', mastery: 61, minutes: 24 },
+    { title: 'Cache 局部性', chapter: '性能解释', status: 'available', mastery: 48, minutes: 26 },
+    { title: '地址映射', chapter: '综合表达', status: 'locked', mastery: 22, minutes: 30 },
+  ]
+  await createPathSteps(system.id, systemSteps, cardRows)
+
+  await prisma.pathAdjustmentHistory.create({
+    data: {
+      pathId: main.id,
+      trigger: 'assessment_failed',
+      adjustment: JSON.stringify({
+        type: 'add_review',
+        concept: '最短路径',
+        description: '评估得分 58%，自动插入 Dijkstra/Floyd 对比复习，并推送题库和流程图。',
+      }),
+      feedback: JSON.stringify({
+        assessmentRef: { toolName: 'generate_mcq', score: 58, threshold: 80 },
+        userFeedback: '我能做 BFS，但一到带权图就会乱。',
+      }),
+      appliedAt: daysAgo(2),
+    },
+  })
+
+  await prisma.pathAdjustmentHistory.create({
+    data: {
+      pathId: system.id,
+      trigger: 'assessment_excellent',
+      adjustment: JSON.stringify({
+        type: 'skip_ahead',
+        concept: '页表',
+        description: '页表掌握度高，跳过基础重复讲解，直接进入 TLB 与 Cache 的跨域解释。',
+      }),
+      feedback: JSON.stringify({
+        assessmentRef: { toolName: 'feynman_check', score: 95, threshold: 90 },
+        userFeedback: '我已经能讲清页号和页内偏移。',
+      }),
+      appliedAt: daysAgo(1),
+    },
+  })
+}
+
+async function createPathSteps(pathId: string, steps: Array<{ title: string; chapter: string; status: string; mastery: number; minutes: number }>, cardRows: Map<string, { id: string; type: string }>) {
+  let prevStepId: string | null = null
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i]
+    const row = await prisma.learningPathStep.create({
       data: {
-        userId,
-        vaultId,
-        name: pathSeed.name,
-        topic: pathSeed.topic,
-        description: pathSeed.description,
-        difficulty: pathSeed.difficulty,
-        source: pathSeed.source,
-        status: 'active',
-        totalSteps: pathSeed.steps.length,
-        doneSteps,
+        pathId,
+        cardId: cardRows.get(step.title)?.id ?? null,
+        order: i + 1,
+        title: step.title,
+        concept: step.title,
+        chapter: step.chapter,
+        description: `学习 ${step.title}：先解释概念，再连接图谱中的上下游节点，最后完成一次自测。`,
+        status: step.status,
+        mastery: step.mastery,
+        estimatedMinutes: step.minutes,
+        prerequisites: JSON.stringify(prevStepId ? [prevStepId] : []),
       },
     })
-    createdPaths.push({ id: path.id, name: path.name })
-
-    let previousStepId: string | null = null
-    for (let index = 0; index < pathSeed.steps.length; index++) {
-      const stepSeed = pathSeed.steps[index]
-      const linkedCard = titleToCard.get(stepSeed.title)
-      const step = await prisma.learningPathStep.create({
-        data: {
-          pathId: path.id,
-          cardId: linkedCard?.id || null,
-          order: index + 1,
-          title: stepSeed.title,
-          description: ${stepSeed.chapter} / ,
-          concept: stepSeed.title,
-          chapter: stepSeed.chapter,
-          status: stepSeed.status,
-          mastery: stepSeed.mastery,
-          estimatedMinutes: stepSeed.estimatedMinutes,
-          prerequisites: previousStepId ? JSON.stringify([previousStepId]) : JSON.stringify([]),
-        },
-      })
-      previousStepId = step.id
-    }
+    prevStepId = row.id
   }
+}
 
-  if (createdPaths[0]) {
-    const adjustmentHistory = [
-      {
-        trigger: 'assessment_failed',
-        adjustment: {
-          type: 'add_review',
-          concept: 'Graphs',
-          description: 'Insert a focused review step after weak performance on shortest-path comparisons.',
-        },
-        assessmentRef: { toolName: 'Feynman Test', score: 58, threshold: 60 },
-        feedbackText: 'Need one more pass on shortest path tradeoffs.',
-      },
-      {
-        trigger: 'assessment_excellent',
-        adjustment: {
-          type: 'skip_ahead',
-          concept: 'Arrays and Lists',
-          description: 'Skip repetitive foundation content and move directly into graph topics.',
-        },
-        assessmentRef: { toolName: 'MCQ', score: 97, threshold: 95 },
-        feedbackText: 'Foundations feel stable, so the path can move faster.',
-      },
-    ]
-
-    for (const item of adjustmentHistory) {
-      await prisma.pathAdjustmentHistory.create({
-        data: {
-          pathId: createdPaths[0].id,
-          trigger: item.trigger,
-          adjustment: JSON.stringify(item.adjustment),
-          feedback: JSON.stringify({
-            feedbackText: item.feedbackText,
-            assessmentRef: item.assessmentRef,
-          }),
-          appliedAt: randomRecentDate(7),
-        },
-      })
-    }
-  }
-
-  const profileSnapshot = {
+async function seedProfile(vaultId: string, userId: string) {
+  const profile = {
+    _ns: 'learning',
     userId,
     dimensions: {
-      depth: { score: 76, confidence: 0.82, evidence: ['High permanent-card ratio', 'Can explain shortest-path tradeoffs in Forge'] },
-      breadth: { score: 68, confidence: 0.77, evidence: ['Coverage spans 4 core topics', 'Cross-cluster links are already present'] },
-      connection: { score: 71, confidence: 0.79, evidence: ['Galaxy shows multi-cluster edges', 'Links memory management to architecture naturally'] },
-      expression: { score: 74, confidence: 0.7, evidence: ['Observation stream mentions clear explanations', 'Recent sessions include concrete examples'] },
-      application: { score: 62, confidence: 0.66, evidence: ['Practice is improving but still uneven', 'Push records still target reinforcement'] },
-      learning_pace: { score: 69, confidence: 0.74, evidence: ['Recent activity exists across the week', 'Cadence is steady with small dips'] },
+      depth: { score: 78, confidence: 0.86, evidence: ['永久卡平均长度高于 450 字', '能解释虚拟内存和 Cache 的边界'] },
+      breadth: { score: 74, confidence: 0.82, evidence: ['覆盖数据结构、组成原理、操作系统、网络四大星团', '已有 40+ 张课程卡片'] },
+      connection: { score: 81, confidence: 0.88, evidence: ['存在 10+ 条跨星团桥接边', '地址映射连接 OS 与组成原理'] },
+      expression: { score: 72, confidence: 0.76, evidence: ['会用误区清单复述概念', '能产出概念间对比'] },
+      application: { score: 63, confidence: 0.71, evidence: ['最短路径题库正确率偏低', '需要更多代码和流程图练习'] },
+      learning_pace: { score: 69, confidence: 0.79, evidence: ['近 7 天有连续学习记录', '路径推进存在一次停滞'] },
     },
     updateHistory: [
-      {
-        timestamp: Date.now() - 5 * 24 * 60 * 60 * 1000,
-        trigger: 'manual',
-        dimensionsUpdated: ['depth', 'expression'],
-        changes: { depth: { before: 69, after: 73 }, expression: { before: 67, after: 71 } },
-      },
-      {
-        timestamp: Date.now() - 2 * 24 * 60 * 60 * 1000,
-        trigger: 'assessment',
-        dimensionsUpdated: ['application', 'connection'],
-        changes: { application: { before: 56, after: 62 }, connection: { before: 66, after: 71 } },
-      },
-      {
-        timestamp: Date.now() - 8 * 60 * 60 * 1000,
-        trigger: 'session_end',
-        dimensionsUpdated: ['learning_pace'],
-        changes: { learning_pace: { before: 64, after: 69 } },
-      },
+      { timestamp: daysAgo(6).getTime(), trigger: 'conversation', dimensionsUpdated: ['breadth', 'expression'], changes: { breadth: { before: 61, after: 68 }, expression: { before: 58, after: 66 } } },
+      { timestamp: daysAgo(3).getTime(), trigger: 'assessment', dimensionsUpdated: ['application', 'connection'], changes: { application: { before: 59, after: 63 }, connection: { before: 74, after: 79 } } },
+      { timestamp: daysAgo(1).getTime(), trigger: 'graph_growth', dimensionsUpdated: ['depth', 'connection'], changes: { depth: { before: 74, after: 78 }, connection: { before: 79, after: 81 } } },
     ],
-    sessionCount: learningSessions.length,
-    totalLearningMinutes: learningSessions.reduce((sum, session) => sum + session.minutes, 0),
-    createdAt: Date.now() - 21 * 24 * 60 * 60 * 1000,
-    updatedAt: Date.now() - 8 * 60 * 60 * 1000,
+    sessionCount: 8,
+    totalLearningMinutes: 286,
+    createdAt: daysAgo(21).getTime(),
+    updatedAt: daysAgo(1).toISOString(),
   }
+
+  await prisma.vault.update({
+    where: { id: vaultId },
+    data: { profileCache: JSON.stringify(profile) },
+  })
 
   await prisma.educationProfileHistory.create({
     data: {
       vaultId,
-      profile: JSON.stringify(profileSnapshot),
-      snapshot: JSON.stringify({
-        averageScore: 70,
-        strongest: ['depth', 'expression'],
-        weakest: ['application'],
-      }),
-      createdAt: randomRecentDate(2),
+      profile: JSON.stringify(profile),
+      snapshot: JSON.stringify({ averageScore: 73, strongest: 'connection', weakest: 'application' }),
+      createdAt: daysAgo(1),
     },
   })
+}
 
-  const pushRecords = [
+async function seedCapabilities(vaultId: string) {
+  const capabilities = [
+    ['线性表', 92, 'mastered', ['顺序结构'], []],
+    ['图', 78, 'known', ['邻接表建模'], ['复杂度表达']],
+    ['最短路径', 58, 'learning', ['无权 BFS'], ['负权边处理', '算法选择']],
+    ['虚拟内存', 82, 'known', ['页表映射'], ['多级页表空间计算']],
+    ['TLB', 64, 'learning', ['命中流程'], ['上下文切换影响']],
+    ['TCP 可靠传输', 73, 'known', ['确认重传'], ['拥塞控制状态变化']],
+    ['拥塞控制', 55, 'learning', ['慢开始概念'], ['阈值更新']],
+  ] as const
+
+  for (const [concept, masteryLevel, status, strongAreas, weakAreas] of capabilities) {
+    await prisma.vaultCapability.create({
+      data: {
+        vaultId,
+        concept,
+        masteryLevel,
+        status,
+        accessCount: 2 + Math.floor(masteryLevel / 20),
+        lastAccessed: daysAgo(Math.max(1, 10 - Math.floor(masteryLevel / 10))),
+        strongAreas: JSON.stringify(strongAreas),
+        weakAreas: JSON.stringify(weakAreas),
+      },
+    })
+  }
+}
+
+async function seedSkills(vaultId: string) {
+  const skills = [
+    ['概念边界辨析', '能把相似概念拆成定义、条件、反例三段。', '认知策略', ['feynman', 'contrast'], 0.82, '在页表/TLB 对比中能主动指出查表层级。'],
+    ['跨域桥接', '能用一个问题连接两个课程模块。', '图谱能力', ['bridge', 'graph'], 0.88, '把 Cache 局部性连接到虚拟内存和数组访问。'],
+    ['算法适用条件检查', '在选算法前先检查边权、图规模和目标。', '解题能力', ['algorithm'], 0.64, '最短路径评估中仍需复习负权边。'],
+    ['自测驱动复习', '会用评估结果反推下一步学习资源。', '学习管理', ['assessment'], 0.74, '接受了图算法复习推送。'],
+  ] as const
+
+  for (const [name, description, category, tags, confidence, evidence] of skills) {
+    await prisma.vaultSkill.create({
+      data: {
+        vaultId,
+        name,
+        description,
+        category,
+        tags: JSON.stringify(tags),
+        confidence,
+        evidence,
+        source: 'seeded-demo-assessment',
+        demonstratedAt: daysAgo(2),
+      },
+    })
+  }
+}
+
+async function seedPushes(vaultId: string, userId: string) {
+  const pushes = [
     {
       trigger: 'assessment_failed',
-      reason: 'Weak shortest-path performance triggered extra review resources.',
+      reason: '最短路径评估 58%，系统推送对比讲解、题库和 Dijkstra 流程图。',
       viewedAt: null,
       engagedCount: 0,
       feedback: null,
       resources: [
-        { resourceId: 'push-review-graph', type: 'quiz', title: 'Shortest Path Drill Set', content: 'Compare Dijkstra, Floyd, and Bellman-Ford across common scenarios.' },
-        { resourceId: 'push-review-note', type: 'document', title: 'Graph Algorithms Quick Notes', content: 'A compact review sheet for prerequisites, use cases, and common mistakes.' },
+        { resourceId: 'graph-doc', type: 'document', title: 'Dijkstra / Floyd / Bellman-Ford 对比讲解', content: '按边权条件、复杂度和适用场景组织。', topic: '最短路径', difficulty: 'intermediate', estimatedMinutes: 18, concepts: ['最短路径', '图'], tags: ['review'] },
+        { resourceId: 'graph-quiz', type: 'quiz', title: '最短路径 8 题自测', content: '覆盖负权边、稠密图、单源/多源问题。', topic: '最短路径', difficulty: 'intermediate', estimatedMinutes: 16, concepts: ['最短路径'], tags: ['assessment'] },
+        { resourceId: 'graph-diagram', type: 'diagram', title: 'Dijkstra 执行流程图', content: '用 Mermaid 展示松弛过程和 visited 集合变化。', topic: '最短路径', difficulty: 'beginner', estimatedMinutes: 8, concepts: ['Dijkstra 算法'], tags: ['visual'] },
       ],
     },
     {
-      trigger: 'stage_completion',
-      reason: 'Strong fundamentals unlocked a more integrated systems practice bundle.',
-      viewedAt: randomRecentDate(1),
+      trigger: 'profile_updated',
+      reason: '连接维度提升，系统推荐跨域桥接资源巩固优势。',
+      viewedAt: daysAgo(1),
       engagedCount: 2,
-      feedback: {
-        engagedResourceIds: ['push-advance-systems'],
-        feedbackText: 'Integrated systems tasks were useful and connected multiple areas well.',
-      },
+      feedback: { engagedResourceIds: ['bridge-case'], feedbackText: '地址映射这条线很有帮助。' },
       resources: [
-        { resourceId: 'push-advance-systems', type: 'code', title: 'OS / Memory / Cache Mixed Practice', content: 'A more engineering-flavored exercise bundle for Forge sessions.' },
-        { resourceId: 'push-advance-diagram', type: 'diagram', title: 'Virtual-to-Physical Address Flow', content: 'Pairs nicely with Galaxy and Cognition for a cross-domain demo.' },
+        { resourceId: 'bridge-case', type: 'code', title: '虚拟地址到 Cache 行的手算案例', content: '从虚拟页号、TLB、物理页框推到 cache index/tag。', topic: '地址映射', difficulty: 'advanced', estimatedMinutes: 22, concepts: ['地址映射', 'TLB', 'Cache 局部性'], tags: ['bridge'] },
+        { resourceId: 'bridge-video', type: 'video', title: '地址转换动画脚本', content: '用分镜展示 CPU 访存、TLB miss、页表查询和 Cache 命中。', topic: '地址映射', difficulty: 'intermediate', estimatedMinutes: 10, concepts: ['地址映射'], tags: ['multimodal'] },
       ],
     },
   ]
 
-  for (const record of pushRecords) {
+  for (const push of pushes) {
     await prisma.pushRecord.create({
       data: {
         userId,
-        resources: JSON.stringify(record.resources),
-        trigger: record.trigger,
-        reason: record.reason,
-        sentAt: randomRecentDate(5),
-        expiresAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
-        viewedAt: record.viewedAt,
-        engagedCount: record.engagedCount,
-        feedback: record.feedback ? JSON.stringify(record.feedback) : null,
-      },
-    })
-  }
-
-  const observations = [
-    'The user is strongest when comparing related concepts rather than recalling isolated facts.',
-    'Recent sessions show growing interest in systems topics, especially memory and cache behavior.',
-    'Graph ideas are mostly in place, but shortest-path tradeoffs still benefit from repetition.',
-    'Learn mode works better when the path exposes explicit next steps instead of broad suggestions.',
-    'The study cadence is steady enough to make the dashboard and cognition surfaces feel active.',
-    'Recent practice has been good, but post-task reflection is still thinner than the raw activity volume.',
-  ]
-
-  for (const text of observations) {
-    await prisma.vaultMemory.create({
-      data: {
         vaultId,
-        key: seed_obs_,
-        value: JSON.stringify({ text, category: 'general' }),
-        category: 'observation',
-        createdAt: randomRecentDate(12),
+        resources: JSON.stringify(push.resources),
+        trigger: push.trigger,
+        reason: push.reason,
+        sentAt: push.viewedAt ? daysAgo(1) : daysAgo(2),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        viewedAt: push.viewedAt,
+        engagedCount: push.engagedCount,
+        feedback: push.feedback ? JSON.stringify(push.feedback) : null,
       },
     })
   }
+}
 
-  const primaryCards = [permanentCards[0], permanentCards[1], fleetingCards[0], literatureCards[0]].filter(Boolean)
-
+async function seedSessionsAndMemory(vaultId: string) {
   await prisma.agentSession.create({
     data: {
-      id: seed-agent-,
+      id: `cs408-agent-${vaultId.slice(0, 8)}`,
       vaultId,
-      name: 'CS408 Review Thread',
+      name: '最短路径诊断会话',
       messages: JSON.stringify([
-        {
-          id: 'm1',
-          role: 'system',
-          content: 'You are helping the user review CS408 topics inside the current vault.',
-          timestamp: randomRecentDate(2).toISOString(),
-        },
-        {
-          id: 'm2',
-          role: 'user',
-          content: 'Help me connect OS memory management with cache behavior and address translation.',
-          timestamp: randomRecentDate(2).toISOString(),
-        },
-        {
-          id: 'm3',
-          role: 'assistant',
-          content: 'We can look at it in four layers: translation, cache locality, page replacement, and process access patterns.',
-          timestamp: randomRecentDate(2).toISOString(),
-          references: primaryCards.map((card) => ({ title: card?.title, id: card?.id })),
-        },
+        { id: 's1', role: 'system', content: 'Oracle 负责提问，Profile 在后台更新画像，Assess 在回答后做诊断。', timestamp: daysAgo(2).toISOString() },
+        { id: 's2', role: 'user', content: '我知道 BFS，但 Dijkstra、Floyd 和 Bellman-Ford 总是分不清。', timestamp: daysAgo(2).toISOString() },
+        { id: 's3', role: 'assistant', content: '先不要背名字。你先判断：图有没有权重？有没有负权边？你要单源还是多源？', timestamp: daysAgo(2).toISOString() },
+        { id: 's4', role: 'tool_result', content: 'Assess: score=58, weakAreas=["负权边","算法选择"], nextAction="add_review_resource"', timestamp: daysAgo(2).toISOString() },
       ]),
-      createdAt: randomRecentDate(2),
-      updatedAt: randomRecentDate(1),
+      createdAt: daysAgo(2),
+      updatedAt: daysAgo(1),
     },
   })
 
-  console.log(  UI data:  learning paths,  sessions,  pushes)
+  const memories = [
+    ['observation:graph-weakness', '学生在无权图 BFS 上稳定，但带权最短路径算法选择不稳定。', 'observation'],
+    ['observation:bridge-strength', '学生能把 Cache 局部性连接到数组访问和页面置换。', 'observation'],
+    ['preference:visual-first', '复杂系统题更适合先给流程图，再给公式。', 'preference'],
+    ['context:demo-course', '当前演示库是一门完整 CS408 复习课程，包含四大模块和跨域综合节点。', 'context'],
+  ]
+
+  for (const [key, value, category] of memories) {
+    await prisma.vaultMemory.create({
+      data: { vaultId, key, value, category, createdAt: daysAgo(1) },
+    })
+  }
 }
+
+async function main() {
+  const user = await upsertDemoUser()
+  const vault = await prisma.vault.upsert({
+    where: { id: `${stableId(`${user.id}:${VAULT_NAME}`)}00000000`.slice(0, 24) },
+    update: { name: VAULT_NAME, userId: user.id },
+    create: {
+      id: `${stableId(`${user.id}:${VAULT_NAME}`)}00000000`.slice(0, 24),
+      userId: user.id,
+      name: VAULT_NAME,
+    },
+  })
+
+  await resetVault(vault.id)
+  await seedCs408Vault(vault.id, user.id)
+
+  const [cardCount, edgeCount, clusterCount, indexedCount, pathCount, pushCount] = await Promise.all([
+    prisma.card.count({ where: { vaultId: vault.id } }),
+    prisma.edge.count({ where: { vaultId: vault.id } }),
+    prisma.cluster.count({ where: { vaultId: vault.id } }),
+    prisma.ragDocumentIndex.count({ where: { vaultId: vault.id } }),
+    prisma.learningPath.count({ where: { vaultId: vault.id } }),
+    prisma.pushRecord.count({ where: { vaultId: vault.id } }),
+  ])
+
+  console.log('CS408 demo seed complete')
+  console.log(`user: ${DEMO_EMAIL} / ${DEMO_PASSWORD}`)
+  console.log(`vault: ${VAULT_NAME} (${vault.id})`)
+  console.log(`clusters=${clusterCount} cards=${cardCount} edges=${edgeCount} indexed=${indexedCount} paths=${pathCount} pushes=${pushCount}`)
+}
+
 main()
-  .catch((e) => {
-    console.error(e)
+  .catch((error) => {
+    console.error(error)
     process.exit(1)
   })
   .finally(async () => {
     await prisma.$disconnect()
   })
-
-async function seedUser(email: string, name: string) {
-  console.log(`\n鈹佲攣鈹?Seeding: ${email} 鈹佲攣鈹乗n`)
-
-  const user = await prisma.user.upsert({
-    where: { email },
-    update: {},
-    create: { email, name, emailVerified: true },
-  })
-  console.log(`  User: "${user.name}" <${user.email}> (id: ${user.id})`)
-
-  const existingAccount = await prisma.account.findFirst({
-    where: { userId: user.id, providerId: 'credential' },
-  })
-  if (!existingAccount) {
-    await prisma.account.create({
-      data: {
-        userId: user.id,
-        accountId: user.email,
-        providerId: 'credential',
-        password: await hashPassword('demo123456'),
-      },
-    })
-    console.log('  Account record created (password: demo123456)')
-  }
-
-  let vault = await prisma.vault.findFirst({ where: { userId: user.id } })
-  if (vault) {
-    vault = await prisma.vault.update({
-      where: { id: vault.id },
-      data: { name: 'CS408 Knowledge Graph' },
-    })
-  } else {
-    vault = await prisma.vault.create({
-      data: { userId: user.id, name: 'CS408 Knowledge Graph' },
-    })
-  }
-  console.log('  Vault: "' + vault.name + '" (id: ' + vault.id + ')')
-
-  const subjects: SubjectDef[] = [subjectDS, subjectCO, subjectOS, subjectCN]
-  const clusterMap = new Map<string, string>()
-
-  for (const subject of subjects) {
-    let cluster = await prisma.cluster.findFirst({
-      where: { vaultId: vault.id, name: subject.name },
-    })
-    if (!cluster) {
-      cluster = await prisma.cluster.create({
-        data: { vaultId: vault.id, name: subject.name, color: subject.color },
-      })
-      console.log('  + Created cluster: "' + subject.name + '" (' + subject.color + ')')
-    } else {
-      console.log('  鉁?Found cluster: "' + subject.name + '"')
-    }
-    clusterMap.set(subject.name, cluster.id)
-  }
-
-  const relatedMap = buildRelatedTitlesMap()
-  const pathSet = new Set<string>()
-  let totalCardCount = 0
-
-  for (const subject of subjects) {
-    const clusterId = clusterMap.get(subject.name)!
-    const allCardDefs: { title: string; type: 'permanent' | 'fleeting' | 'literature'; tags: string[] }[] = [
-      ...subject.permanent.map((c) => ({ title: c.title, type: 'permanent' as const, tags: getTags(subject.name, 'permanent', c.tags) })),
-      ...subject.fleeting.map((c) => ({ title: c.title, type: 'fleeting' as const, tags: getTags(subject.name, 'fleeting', c.tags) })),
-      ...subject.literature.map((c) => ({ title: c.title, type: 'literature' as const, tags: getTags(subject.name, 'literature', c.tags) })),
-    ]
-
-    for (const card of allCardDefs) {
-      const path = makePath(subject.name, card.title)
-      if (pathSet.has(path)) {
-        console.warn('  鈿?Duplicate path: "' + path + '" 鈥?skipping')
-        continue
-      }
-      pathSet.add(path)
-
-      const related = relatedMap.get(card.title)
-      const content = related
-        ? buildContent(card.title, related)
-        : linkContentV2(card.title)
-
-      await prisma.card.upsert({
-        where: { vaultId_path: { vaultId: vault.id, path } },
-        update: { title: card.title, type: card.type, tags: JSON.stringify(card.tags), createdAt: randomPastDate(30), clusterId, content },
-        create: { vaultId: vault.id, clusterId, path, title: card.title, content, type: card.type, tags: JSON.stringify(card.tags), createdAt: randomPastDate(30) },
-      })
-    }
-    totalCardCount += allCardDefs.length
-    console.log('  ' + subject.name + ': ' + allCardDefs.length + ' cards')
-  }
-
-  await prisma.edge.deleteMany({ where: { vaultId: vault.id } })
-
-  const allCards = await prisma.card.findMany({
-    where: { vaultId: vault.id },
-    select: { id: true, vaultId: true, content: true, title: true },
-  })
-  const cardsWithLinks = allCards.filter(c => c.content.includes('[['))
-  console.log('  Cards with [[WikiLink]]: ' + cardsWithLinks.length + ' / ' + allCards.length)
-
-  const CONCURRENCY = 10
-  let syncedCount = 0
-  for (let i = 0; i < cardsWithLinks.length; i += CONCURRENCY) {
-    const batch = cardsWithLinks.slice(i, i + CONCURRENCY)
-    await Promise.allSettled(batch.map(c => syncEdgesFromContent(prisma, c.id, c.vaultId, c.content)))
-    syncedCount += batch.length
-    process.stdout.write('  \rSyncing: ' + syncedCount + '/' + cardsWithLinks.length + '   ')
-  }
-  console.log('\r  Syncing: ' + syncedCount + '/' + cardsWithLinks.length + ' done')
-
-  await prisma.vault.update({ where: { id: vault.id }, data: { profileCache: null } })
-
-  const dbEdgeCount = await prisma.edge.count({ where: { vaultId: vault.id } })
-  console.log('  Edges: ' + dbEdgeCount + ' (auto-generated from [[WikiLink]])')
-  await seedSupportingUiData(user.id, vault.id)
-
-  // 鈹€鈹€ Seed AI observations 鈹€鈹€
-  const obsCount = await prisma.vaultMemory.count({ where: { vaultId: vault.id, category: 'observation' } })
-  if (obsCount === 0) {
-    const observations = [
-      '鐢ㄦ埛鍦ㄦ暟鎹粨鏋勬柟闈㈣繘灞曡緝蹇紝鎺掑簭绠楁硶鐨勭悊瑙ｅ拰琛ㄨ揪鑳藉姏绐佸嚭',
-      '鍦ㄩ€掑綊闂涓婄粡甯哥姽璞紝寤鸿鍔犲己鍑芥暟璋冪敤鏍堢殑缁冧範',
-      '鐢ㄦ埛鍋忓ソ閫氳繃浠ｇ爜绀轰緥鐞嗚В姒傚康锛屾娊璞″畾涔夊悗閰嶅悎鍏蜂綋渚嬪瓙鏁堟灉鏇村ソ',
-      '鏈€杩戝涔犲己搴︽湁鎵€涓嬮檷锛屼笂鍛ㄥ钩鍧囨瘡澶?2.5 灏忔椂锛屾湰鍛ㄩ檷鑷?1.2 灏忔椂',
-      '鐢ㄦ埛鐨勫叧鑱旇兘鍔涘緢寮猴紝缁忓父鑷彂鍦版妸鏂版蹇靛拰宸叉湁鐭ヨ瘑绫绘瘮',
-      '鍦ㄨ绠楁満缃戠粶 OSI 妯″瀷鐨勭悊瑙ｄ笂杩樹笉澶熺郴缁熷寲锛屽缓璁粠鐗╃悊灞傚紑濮嬮€愬眰娣卞叆',
-      '鐢ㄦ埛瀵圭紪璇戝師鐞嗚〃鐜板嚭娴撳帤鍏磋叮锛屽彲浠ユ帹鑽愮浉鍏冲涔犺矾寰?,
-      '浠ｇ爜涔﹀啓瑙勮寖锛屾敞閲婃竻鏅帮紝琛ㄨ揪鑳藉姏寮猴紝浣嗛」鐩疄鎴樼粡楠屼笉瓒?,
-    ]
-    for (const text of observations) {
-      await prisma.vaultMemory.create({
-        data: {
-          vaultId: vault.id,
-          key: `seed_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-          value: JSON.stringify({ text, category: 'general' }),
-          category: 'observation',
-          createdAt: randomPastDate(14),
-        },
-      })
-    }
-    console.log('  Observations: ' + observations.length + ' seeded')
-  }
-}
-
-async function main() {
-  console.log('=== CS408 Knowledge Graph Seed (WikiLink) ===')
-  await seedUser('morewhy.han@gmail.com', 'More Why')
-  await seedUser('demo@axiom.space', 'Demo User')
-  console.log()
-  console.log('=== Seed Complete ===')
-}
-
