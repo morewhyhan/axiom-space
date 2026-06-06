@@ -302,7 +302,7 @@ export class ResourceGenerationOrchestrator {
         }
 
         const prompt = RESOURCE_PROMPTS[type];
-        let content = await this.deps.callLLM(prompt, contentSafetyGuardrail.sanitizeUserPrompt(context));
+        let content = await this.deps.callLLM(prompt, context);
         let cleaned = this.cleanOutput(type, content);
 
         this.deps.onProgress?.({

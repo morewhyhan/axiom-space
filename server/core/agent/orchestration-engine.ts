@@ -323,6 +323,17 @@ export class AgentOrchestrationEngine {
         );
 
         step.outputs = result;
+        if (result?.status === 'failed') {
+          step.status = 'failed';
+          step.error = result.error || '未知错误';
+          state.logs.push({
+            timestamp: Date.now(),
+            agent: step.agentRole,
+            message: `步骤失败: ${step.error}`,
+            level: 'error'
+          });
+          throw new Error(step.error);
+        }
         step.status = 'completed';
         step.completedAt = Date.now();
 

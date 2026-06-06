@@ -45,13 +45,15 @@ type ResourceOrchestrationEvidence = {
 
 /** Persist a resource generation record to DB (fire-and-forget, scoped by userId+vaultId) */
 function persistResourceToDb(userId: string, topic: string, types: string[], detail: Record<string, any>): void {
-  const vaultId = getCurrentVaultId() || 'novault'
-  const sessionId = `resource-${userId}-${vaultId}`
+  const vaultId = getCurrentVaultId()
+  const sessionVaultId = vaultId || 'novault'
+  const sessionId = `resource-${userId}-${sessionVaultId}`
   prisma.learningSession.upsert({
     where: { id: sessionId },
     create: {
       id: sessionId,
       userId,
+      vaultId: vaultId || null,
       domain: '__resource__',
       concept: '资源生成记录',
       status: 'active',

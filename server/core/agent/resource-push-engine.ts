@@ -110,6 +110,22 @@ export class ResourcePushEngine {
             select: { doneSteps: true, totalSteps: true },
           });
 
+          const lastLearningSession = await prisma.learningSession.findFirst({
+            where: { userId, vaultId: vault.id },
+            orderBy: { updatedAt: 'desc' },
+            select: { updatedAt: true },
+          });
+          const lastCardActivity = await prisma.card.findFirst({
+            where: { vaultId: vault.id },
+            orderBy: { updatedAt: 'desc' },
+            select: { updatedAt: true, createdAt: true },
+          });
+          const lastActiveAt = [
+            lastLearningSession?.updatedAt?.getTime(),
+            lastCardActivity?.updatedAt?.getTime(),
+            lastCardActivity?.createdAt?.getTime(),
+          ].filter((n): n is number => typeof n === 'number').sort((a, b) => b - a)[0];
+
           // 读取最近的推送记录（用于 scheduled 检测）
           const lastPush = await prisma.pushRecord.findFirst({
             where: { userId, vaultId: vault.id },
@@ -129,7 +145,7 @@ export class ResourcePushEngine {
           } = {
             profile,
             learningPath: activePath ? { currentProgress: {} } : undefined,
-            lastActivityTime: lastPushTime,
+            lastActivityTime: lastActiveAt,
             lastPushTime,
           };
 
