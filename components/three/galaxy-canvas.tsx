@@ -130,6 +130,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let hoveredNode: THREE.Group | null = null;
     let pressedNode: THREE.Group | null = null;
     let lockedNode: THREE.Group | null = null;
+    let projectionAnimating = false;
     let hoverAttentionEnabled = true;
     let lastHoverRaycastAt = 0;
     let projectionMode: '3d' | '2d' = '3d';
@@ -198,10 +199,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     containerRef.current!.appendChild(labelOverlay);
 
     // Cluster labels (persistent, always visible)
-    const clusterLabelData: { name: string; color: number; position: THREE.Vector3 }[] = [];
+    const clusterLabelData: { name: string; color: number; position: THREE.Vector3; node?: THREE.Group }[] = [];
 
-    function addClusterLabel(name: string, color: number, pos: THREE.Vector3) {
-      clusterLabelData.push({ name, color, position: pos.clone() });
+    function addClusterLabel(name: string, color: number, pos: THREE.Vector3, node?: THREE.Group) {
+      clusterLabelData.push({ name, color, position: pos.clone(), node });
     }
 
     // Node labels (temporary, cleared on click)
@@ -257,7 +258,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
       // Render cluster labels
       for (const cl of clusterLabelData) {
-        const v = cl.position.clone().project(camera);
+        const labelPosition = cl.node ? cl.node.position : cl.position;
+        const v = labelPosition.clone().project(camera);
         if (v.z > 1) continue;
         const x = v.x * halfW + halfW;
         const y = -(v.y * halfH) + halfH;
@@ -392,6 +394,40 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     // --- Flowing Link Logic ---
     const flows: { points: THREE.Vector3[], mesh: THREE.Points, speed: number, offset: number }[] = [];
 
+    function buildLinkPoints(sourceNode: THREE.Group, targetNode: THREE.Group, semantic?: boolean): THREE.Vector3[] {
+      const start = sourceNode.position;
+      const end = targetNode.position;
+      const dist = start.distanceTo(end);
+      const mid = new THREE.Vector3().lerpVectors(start, end, 0.5);
+      const curveSeed = hashId(String(sourceNode.userData.id || '') + String(targetNode.userData.id || ''));
+      const direction = new THREE.Vector3().subVectors(end, start).normalize();
+      const centerOut = projectionMode === '2d'
+        ? new THREE.Vector3(0, 1, 0)
+        : (mid.lengthSq() > 1 ? mid.clone().normalize() : new THREE.Vector3(0, 1, 0));
+      const side = new THREE.Vector3().crossVectors(direction, centerOut);
+      if (side.lengthSq() < 0.01) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
+      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
+      side.normalize().multiplyScalar(seededRandom(curveSeed) > 0.5 ? 1 : -1);
+      const arcStrength = projectionMode === '2d' ? 0.08 : semantic ? 0.28 : 0.36;
+      const offsetMag = Math.min(projectionMode === '2d' ? 42 : 180, Math.max(18, dist * arcStrength));
+      mid
+        .add(side.multiplyScalar(offsetMag))
+        .add(centerOut.multiplyScalar(Math.min(projectionMode === '2d' ? 22 : 90, dist * (projectionMode === '2d' ? 0.035 : 0.16))));
+      return new THREE.QuadraticBezierCurve3(start, mid, end).getPoints(56);
+    }
+
+    function refreshLinkGeometry(): void {
+      allLinks.forEach((line) => {
+        const source = line.userData.source as THREE.Group | undefined;
+        const target = line.userData.target as THREE.Group | undefined;
+        if (!source || !target) return;
+        const points = buildLinkPoints(source, target, !!line.userData.semantic);
+        line.geometry.dispose();
+        line.geometry = new THREE.BufferGeometry().setFromPoints(points);
+        if (line.userData.flowRef) line.userData.flowRef.points = points;
+      });
+    }
+
     function createCurve(
       sourceNode: THREE.Group,
       targetNode: THREE.Group,
@@ -401,28 +437,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       trueColor?: number,
       semantic?: boolean
     ): void {
-      const start = sourceNode.position;
-      const end = targetNode.position;
-      const dist = start.distanceTo(end);
-
-      // Strong orbital curvature: use a deterministic side vector plus a small
-      // outward lift so long overview links read as arcs instead of straight chords.
-      const mid = new THREE.Vector3().lerpVectors(start, end, 0.5);
-      const curveSeed = hashId(String(sourceNode.userData.id || '') + String(targetNode.userData.id || ''));
-      const direction = new THREE.Vector3().subVectors(end, start).normalize();
-      const centerOut = mid.lengthSq() > 1 ? mid.clone().normalize() : new THREE.Vector3(0, 1, 0);
-      const side = new THREE.Vector3().crossVectors(direction, centerOut);
-      if (side.lengthSq() < 0.01) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
-      if (side.lengthSq() < 0.01) side.set(1, 0, 0);
-      side.normalize().multiplyScalar(seededRandom(curveSeed) > 0.5 ? 1 : -1);
-      const arcStrength = semantic ? 0.28 : 0.36;
-      const offsetMag = Math.min(180, Math.max(34, dist * arcStrength));
-      mid
-        .add(side.multiplyScalar(offsetMag))
-        .add(centerOut.multiplyScalar(Math.min(90, dist * 0.16)));
-
-      const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
-      const points = curve.getPoints(56);
+      const dist = sourceNode.position.distanceTo(targetNode.position);
+      const points = buildLinkPoints(sourceNode, targetNode, semantic);
       const geo = new THREE.BufferGeometry().setFromPoints(points);
 
       const line = new THREE.Line(
@@ -444,7 +460,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         semantic: !!semantic,
         clusterColor: color,
         trueColor: trueColor || color,
-        curve,
       };
 
       if (isInternal || semantic) line.visible = false;
@@ -473,8 +488,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         const flowMesh = new THREE.Points(pGeo, pMat);
         flowMesh.visible = false; // Hidden until focused
         linksGroup.add(flowMesh);
-        flows.push({ points, mesh: flowMesh, speed: 0.005 + Math.random() * 0.01, offset: Math.random() });
+        const flow = { points, mesh: flowMesh, speed: 0.005 + Math.random() * 0.01, offset: Math.random() };
+        flows.push(flow);
         line.userData.flowMesh = flowMesh;
+        line.userData.flowRef = flow;
       }
     }
 
@@ -894,7 +911,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
         // Cluster name label — always visible above the sun
         const clusterPos = new THREE.Vector3(cx, cy, cz);
-        addClusterLabel(cluster.name, 0xffffff, clusterPos);
+        addClusterLabel(cluster.name, 0xffffff, clusterPos, sun);
 
         // Link sun to center
         const core = allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE')!;
@@ -1050,6 +1067,115 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
+    function getCoreNode(): THREE.Group | undefined {
+      return allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE' && !n.userData.isSun && !n.userData.id);
+    }
+
+    function capture3DPositions(): void {
+      allNodes.forEach((node) => {
+        if (!node.userData.position3D) node.userData.position3D = node.position.clone();
+      });
+    }
+
+    function computeFlatProjectionTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      const core = getCoreNode();
+      if (core) targets.set(core, new THREE.Vector3(0, 0, 0));
+
+      const suns = Array.from(clusterSuns.entries()).sort((a, b) => a[0] - b[0]);
+      const ringRadius = Math.max(380, Math.min(760, suns.length * 92));
+      const occupied = new Set<THREE.Group>();
+      if (core) occupied.add(core);
+
+      suns.forEach(([clusterId, sun], index) => {
+        const angle = (index / Math.max(1, suns.length)) * Math.PI * 2 - Math.PI / 2;
+        const center = new THREE.Vector3(Math.cos(angle) * ringRadius, 0, Math.sin(angle) * ringRadius);
+        targets.set(sun, center);
+        occupied.add(sun);
+
+        const children = clusterNodes.get(clusterId) || [];
+        children.forEach((node, childIndex) => {
+          const seed = hashId(String(node.userData.id || node.userData.name || childIndex));
+          const layer = childIndex < 6 ? 0 : childIndex < 18 ? 1 : 2;
+          const localIndex = layer === 0 ? childIndex : layer === 1 ? childIndex - 6 : childIndex - 18;
+          const layerCount = layer === 0
+            ? Math.min(6, children.length)
+            : layer === 1
+              ? Math.min(12, Math.max(0, children.length - 6))
+              : Math.max(1, children.length - 18);
+          const radius = 78 + layer * 72 + seededRandom(seed) * 18;
+          const theta = (localIndex / Math.max(1, layerCount)) * Math.PI * 2 + seededRandom(seed + 7) * 0.35;
+          targets.set(node, new THREE.Vector3(
+            center.x + Math.cos(theta) * radius,
+            0,
+            center.z + Math.sin(theta) * radius,
+          ));
+          occupied.add(node);
+        });
+      });
+
+      const looseNodes = allNodes.filter(node => !occupied.has(node) && !node.userData.isSun && node.userData.id);
+      const looseRadius = ringRadius + 285;
+      looseNodes.forEach((node, index) => {
+        const seed = hashId(String(node.userData.id || index));
+        const angle = (index / Math.max(1, looseNodes.length)) * Math.PI * 2 + seededRandom(seed) * 0.2;
+        const radius = looseRadius + (seededRandom(seed + 1) - 0.5) * 110;
+        targets.set(node, new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+      });
+
+      return targets;
+    }
+
+    function animateNodesTo(targets: Map<THREE.Group, THREE.Vector3>, duration: number): void {
+      projectionAnimating = true;
+      gsap.killTweensOf(allNodes.map(node => node.position));
+      targets.forEach((target, node) => {
+        gsap.to(node.position, {
+          x: target.x,
+          y: target.y,
+          z: target.z,
+          duration,
+          ease: 'expo.inOut',
+        });
+      });
+      gsap.delayedCall(duration + 0.05, () => {
+        projectionAnimating = false;
+        refreshLinkGeometry();
+      });
+    }
+
+    function applyFlatProjection(): void {
+      capture3DPositions();
+      const targets = computeFlatProjectionTargets();
+      allLinks.forEach((link) => {
+        if (link.userData._filtered) return;
+        link.visible = true;
+        const mat = link.material as THREE.LineBasicMaterial;
+        gsap.to(mat, { opacity: link.userData.semantic ? 0.34 : 0.16, duration: 0.45 });
+      });
+      animateNodesTo(targets, 0.95);
+      refreshLinksAndLabels();
+    }
+
+    function restoreSpatialProjection(): void {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      allNodes.forEach((node) => {
+        const position3D = node.userData.position3D as THREE.Vector3 | undefined;
+        if (position3D) targets.set(node, position3D);
+      });
+      animateNodesTo(targets, 0.85);
+      allLinks.forEach((link) => {
+        if (link.userData._filtered) return;
+        if (link.userData.isInternal || link.userData.semantic) {
+          link.visible = false;
+        } else {
+          link.visible = true;
+          const mat = link.material as THREE.LineBasicMaterial;
+          gsap.to(mat, { opacity: link.userData.baseOpacity ?? 0.12, duration: 0.45 });
+        }
+      });
+    }
+
     function resetCameraView(): void {
       const resetBtn = document.getElementById('reset-view-btn');
       if (resetBtn) resetBtn.classList.remove('visible');
@@ -1059,6 +1185,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       }
       projectionMode = '3d';
       controls.enableRotate = true;
+      restoreSpatialProjection();
       lockedNode = null;
       pressedNode = null;
       lastFocusSelection = [];
@@ -1137,10 +1264,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         pressedNode = null;
         applyGraphAttention(null);
         clearNodeLabels();
+        applyFlatProjection();
         gsap.killTweensOf(controls.target);
         gsap.killTweensOf(camera.position);
         gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 0.75, ease: 'expo.out' });
-        gsap.to(camera.position, { x: 0, y: 1550, z: 0.1, duration: 0.9, ease: 'expo.out' });
+        gsap.to(camera.position, { x: 0, y: 1680, z: 0.1, duration: 0.95, ease: 'expo.out' });
       } else {
         controls.enableRotate = true;
         if (autoRotateBeforeFocus !== null) {
@@ -1335,6 +1463,14 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     controls.zoomSpeed = 0.85;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.2;
+    if (useAppStore.getState().graphProjectionMode === '2d') {
+      projectionMode = '2d';
+      controls.autoRotate = false;
+      controls.enableRotate = false;
+      camera.position.set(0, 1680, 0.1);
+      controls.target.set(0, 0, 0);
+      document.getElementById('reset-view-btn')?.classList.add('visible');
+    }
     applyNodeModeVisual(useAppStore.getState().mode, true);
     const unsubscribeModeVisual = useAppStore.subscribe((state, prevState) => {
       if (state.mode !== prevState.mode) {
@@ -1640,6 +1776,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       buildDemoLearningPath(dataRef.current.learningPathSteps);
       createLearningPath();
       applyNodeModeVisual(useAppStore.getState().mode, true);
+      if (projectionMode === '2d') {
+        requestAnimationFrame(() => applyFlatProjection());
+      }
     }
 
     // If data already available at mount time (fast fetch), render immediately
@@ -1856,6 +1995,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       animationId = requestAnimationFrame(animate);
       const time = performance.now() * 0.001;
       controls.update();
+      if (projectionAnimating) refreshLinkGeometry();
       composer.render();
       renderLabels();
 

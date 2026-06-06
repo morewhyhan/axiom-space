@@ -105,9 +105,9 @@ export default function GalaxyControls() {
   }
   const toggleNeighborhoodOnly = () => setNeighborhoodOnly(!neighborhoodOnly)
   const toggleHideIsolated = () => setHideIsolated(!hideIsolated)
-  const toggleIntEdges = () => { const v = !intEdges; if (projectionMode === '2d' || callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
-  const toggleCometsVis = () => { const v = !cometsVis; if (projectionMode === '2d' || callCanvas('__setCometsVisible', [v])) setCometsVis(v) }
-  const toggleExtEdges = () => { const v = !extEdges; if (projectionMode === '2d' || callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
+  const toggleIntEdges = () => { const v = !intEdges; if (callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
+  const toggleCometsVis = () => { const v = !cometsVis; if (callCanvas('__setCometsVisible', [v])) setCometsVis(v) }
+  const toggleExtEdges = () => { const v = !extEdges; if (callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
   const toggleType = (type: string, state: boolean, setter: any) => { const v = !state; if (callCanvas('__setNodeTypeVisible', [type, v])) setter(v) }
   const resetView = () => {
     if (callCanvas('__resetCameraView', [])) setProjectionMode('3d')

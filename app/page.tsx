@@ -23,7 +23,6 @@ const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-li
 const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
-const Graph2DCanvas = dynamic(() => import('@/components/galaxy/graph-2d-canvas'), { ssr: false })
 const CognitionSidebar = dynamic(() => import('@/components/cognition/cognition-sidebar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
 const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
@@ -469,12 +468,6 @@ export default function Home() {
             clusters={galaxyData?.clusters ?? []}
             vaultId={currentVaultId}
             learningPathSteps={learningPathSteps}
-          />
-          <Graph2DCanvas
-            nodes={galaxyData?.nodes ?? []}
-            edges={galaxyData?.edges ?? []}
-            clusters={galaxyData?.clusters ?? []}
-            visible={graphProjectionMode === '2d'}
           />
           <button id="reset-view-btn" onClick={() => {
             const resetFn = useGalaxyActions.getState().actions.resetCameraView
