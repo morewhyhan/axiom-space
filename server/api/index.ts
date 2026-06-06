@@ -12,6 +12,7 @@ import dashboardRoutes from './routes/dashboard';
 import galaxyRoutes from './routes/galaxy';
 import cognitionRoutes from './routes/cognition';
 import eventRoutes from './routes/events';
+import ragRoutes from './routes/rag';
 
 const app = new Hono().basePath('/api')
 
@@ -31,6 +32,7 @@ const appWithRoutes = app
   .route('/galaxy', galaxyRoutes)
   .route('/cognition', cognitionRoutes)
   .route('/events', eventRoutes)
+  .route('/rag', ragRoutes)
   // Better Auth handler (keep existing)
   .all('/auth/*', async (c) => {
     const { auth } = await import('@/lib/auth')

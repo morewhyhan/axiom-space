@@ -254,7 +254,92 @@ function computeStreak(dates: Date[]): number {
 
 // ── AI Observations ──
 // Stored in vaultMemory table with category='observation'
-app
+const routes = app
+  .get('/gaps', async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: true, gaps: [] })
+
+    const [clusters, isolatedCards, unindexed] = await Promise.all([
+      prisma.cluster.findMany({
+        where: { vaultId: vault.id },
+        select: {
+          id: true,
+          name: true,
+          color: true,
+          cards: { select: { id: true, title: true, type: true } },
+        },
+        orderBy: { position: 'asc' },
+      }),
+      prisma.card.findMany({
+        where: {
+          vaultId: vault.id,
+          edgesFrom: { none: {} },
+          edgesTo: { none: {} },
+        },
+        select: { id: true, title: true, type: true },
+        take: 8,
+        orderBy: { updatedAt: 'desc' },
+      }),
+      prisma.ragDocumentIndex.findMany({
+        where: { vaultId: vault.id, provider: 'lightrag', status: { in: ['failed', 'indexing', 'pending'] } },
+        select: { cardId: true, status: true, lastError: true, card: { select: { title: true, type: true } } },
+        take: 8,
+        orderBy: { updatedAt: 'desc' },
+      }).catch(() => []),
+    ])
+
+    const gaps: Array<{
+      id: string
+      type: 'no_permanent' | 'isolated' | 'rag_pending'
+      title: string
+      detail: string
+      severity: 'high' | 'medium' | 'low'
+      cardId?: string | null
+      clusterId?: string | null
+    }> = []
+
+    for (const cluster of clusters) {
+      const permanent = cluster.cards.filter((card) => card.type === 'permanent').length
+      const draft = cluster.cards.filter((card) => card.type !== 'permanent').length
+      if (cluster.cards.length >= 2 && permanent === 0) {
+        gaps.push({
+          id: `cluster:${cluster.id}:no-permanent`,
+          type: 'no_permanent',
+          title: `${cluster.name} 缺少永久卡`,
+          detail: `该星团有 ${draft} 张待整理卡片，但还没有稳定沉淀的永久知识。`,
+          severity: draft >= 5 ? 'high' : 'medium',
+          clusterId: cluster.id,
+        })
+      }
+    }
+
+    for (const card of isolatedCards) {
+      gaps.push({
+        id: `card:${card.id}:isolated`,
+        type: 'isolated',
+        title: `${card.title || '未命名卡片'} 仍是孤立节点`,
+        detail: '这张卡没有显式连接，建议在 Forge 中补充 WikiLink 或用相关卡片推荐建立关联。',
+        severity: card.type === 'permanent' ? 'high' : 'medium',
+        cardId: card.id,
+      })
+    }
+
+    for (const item of unindexed) {
+      gaps.push({
+        id: `rag:${item.cardId}:${item.status}`,
+        type: 'rag_pending',
+        title: `${item.card.title || '未命名卡片'} 尚未稳定进入知识库`,
+        detail: item.status === 'failed'
+          ? `RAG 同步失败：${item.lastError || '未知错误'}`
+          : `当前状态为 ${item.status}，AI 对话可能暂时无法召回它。`,
+        severity: item.status === 'failed' ? 'high' : 'low',
+        cardId: item.cardId,
+      })
+    }
+
+    return c.json({ success: true, gaps: gaps.slice(0, 12) })
+  })
   .get('/observations', async (c) => {
     const userId = c.get('userId') as string
     const vault = await resolveVault(c, userId)
@@ -325,4 +410,4 @@ app
     })
   })
 
-export default app
+export default routes

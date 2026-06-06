@@ -14,6 +14,7 @@ import { runWithAgentContext } from '@/server/core/agent/agent-context';
 import { subscribeResourceProgress } from '@/server/core/agent/notification-bus';
 import type { StreamCallbacks } from '@/types/agent';
 import { prisma } from '@/lib/db';
+import { queryLightRAGContext } from '@/server/core/rag/lightrag-service';
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .post('/chat', requireAuth, zValidator('json', z.object({
@@ -79,7 +80,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
       try {
         const callbacks: StreamCallbacks = {
-          onToolStart: (toolName, args) => {
+          onToolStart: (toolName, _args) => {
             stream.writeSSE({
               event: 'tool_start',
               data: JSON.stringify({ type: 'tool_start', tool: toolName }),
@@ -103,8 +104,16 @@ const app = new Hono<{ Variables: { userId: string } }>()
         // Persist user message to DB
         if (dbSessionId) await persistMessage(dbSessionId, 'user', message)
 
+        const ragEnhanced = await buildRagEnhancedMessage(message, resolvedVaultId)
+        if (ragEnhanced.references.length > 0) {
+          await stream.writeSSE({
+            event: 'rag_context',
+            data: JSON.stringify({ type: 'rag_context', references: ragEnhanced.references }),
+          })
+        }
+
         let fullText = ''
-        for await (const chunk of agent.runStream(message, callbacks)) {
+        for await (const chunk of agent.runStream(ragEnhanced.message, callbacks)) {
           fullText += chunk
           await stream.writeSSE({
             event: 'text',
@@ -256,7 +265,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     })
     if (!card) return c.json({ success: false, error: 'Card not found' }, 404)
 
-    let pathMeta: { pathId?: string; pathTitle?: string; stepId?: string; stepTitle?: string } = {}
+    const pathMeta: { pathId?: string; pathTitle?: string; stepId?: string; stepTitle?: string } = {}
     if (pathId) {
       const path = await prisma.learningPath.findFirst({
         where: { id: pathId, userId, vaultId },
@@ -715,18 +724,6 @@ function parseSessionMetadata(metadata?: string | null): {
   }
 }
 
-/** Extract text content from a message (handles string and array content blocks) */
-function extractText(content: string | Array<{ type: string; text: string }>): string {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return content
-      .filter((b: { type: string; text: string }) => b.type === 'text')
-      .map((b: { type: string; text: string }) => b.text)
-      .join('')
-  }
-  return ''
-}
-
 // ── Agent message DB persistence ────────────────────────────
 // In-memory map: userId+vaultId → learningSession.id
 // Ensures each user has one active agent learningSession per vault in DB.
@@ -884,6 +881,35 @@ function normalizeSessionTitle(raw: string): string | null {
 
   if (!title) return null
   return title.slice(0, 24)
+}
+
+async function buildRagEnhancedMessage(message: string, vaultId: string | null): Promise<{
+  message: string
+  references: Array<{ referenceId: string; filePath: string; cardId: string | null; vaultId: string | null; title: string | null; type: string | null }>
+}> {
+  if (!vaultId || process.env.LIGHTRAG_CHAT_CONTEXT !== 'true') return { message, references: [] }
+
+  const context = await queryLightRAGContext({
+    vaultId,
+    query: message,
+    mode: 'mix',
+    topK: Number(process.env.LIGHTRAG_CHAT_TOP_K || 8),
+  })
+  if (!context.answer.trim()) {
+    if (context.error) console.debug('[LightRAG] chat context unavailable:', context.error)
+    return { message, references: [] }
+  }
+
+  return {
+    references: context.references,
+    message: `请优先参考下面的 LightRAG 知识库检索结果回答用户问题；如果检索结果不足或不相关，请明确说明，并结合当前对话继续回答。
+
+【LightRAG 检索上下文】
+${context.answer.slice(0, Number(process.env.LIGHTRAG_CHAT_CONTEXT_LIMIT || 6000))}
+
+【用户问题】
+${message}`,
+  }
 }
 
 export default app

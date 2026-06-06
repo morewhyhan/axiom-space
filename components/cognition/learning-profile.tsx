@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react'
 import { ArrowRight, BrainCircuit, ChevronRight, Network, Target } from 'lucide-react'
-import { useCognition } from '@/hooks/use-cognition'
+import { useCognition, useKnowledgeGaps } from '@/hooks/use-cognition'
 import { useAppStore } from '@/stores/mode-store'
 import type { Mode } from '@/stores/mode-store'
 
@@ -20,6 +20,7 @@ function getDomainWeight(item: { weight?: number; hours?: number }) {
 
 export default function LearningProfile() {
   const { data, loading } = useCognition()
+  const { gaps } = useKnowledgeGaps()
 
   const dimensions = data?.dimensions ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0 }
   const stats = data?.stats ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 }
@@ -40,7 +41,11 @@ export default function LearningProfile() {
         <section className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
           <div className="mb-4 flex items-center justify-between">
             <PanelHeader title="认知维度" icon={<BrainCircuit className="h-4 w-4" />} />
-            <button className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5" style={{ fontSize: 'var(--f8)' }}>
+            <button
+              className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5"
+              style={{ fontSize: 'var(--f8)' }}
+              onClick={() => useAppStore.getState().setMode('learn')}
+            >
               维度详情 <ChevronRight className="inline h-3.5 w-3.5" />
             </button>
           </div>
@@ -68,10 +73,10 @@ export default function LearningProfile() {
         <section className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
           <div className="grid grid-cols-[180px_1fr_44px] gap-5">
             <div className="border-r border-white/8 pr-5">
-              <PanelHeader title="学习状态" />
+              <PanelHeader title="知识状态" />
               <div className="mt-4 text-4xl font-light text-white/85">{totalCards}</div>
               <div className="mt-1 mono text-white/28" style={{ fontSize: 'var(--f8)' }}>已积累知识点</div>
-              <div className="mt-2 mono text-cyan-300/75" style={{ fontSize: 'var(--f8)' }}>较昨日 +{Math.max(stats.streakDays, 0)}</div>
+              <div className="mt-2 mono text-cyan-300/75" style={{ fontSize: 'var(--f8)' }}>连续 {Math.max(stats.streakDays, 0)} 天</div>
             </div>
             <div className="min-w-0">
               <div className="mb-3 mono text-white/35" style={{ fontSize: 'var(--f8)' }}>重点领域</div>
@@ -94,7 +99,11 @@ export default function LearningProfile() {
                 </div>
               </div>
             </div>
-            <button className="flex items-center justify-center rounded-xl border border-white/8 bg-white/[0.025] text-white/28 hover:bg-white/[0.045]">
+            <button
+              className="flex items-center justify-center rounded-xl border border-white/8 bg-white/[0.025] text-white/28 hover:bg-white/[0.045]"
+              onClick={() => useAppStore.getState().setMode('learn')}
+              aria-label="打开路径规划页面"
+            >
               <ChevronRight className="h-5 w-5" />
             </button>
           </div>
@@ -125,7 +134,13 @@ export default function LearningProfile() {
           <div className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
             <div className="mb-3 flex items-center justify-between">
               <PanelHeader title="知识网络" />
-              <button className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35" style={{ fontSize: 'var(--f8)' }}>查看详情</button>
+              <button
+                className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5"
+                style={{ fontSize: 'var(--f8)' }}
+                onClick={() => useAppStore.getState().setMode('galaxy')}
+              >
+                查看详情
+              </button>
             </div>
             <KnowledgeCloud domains={topDomains} />
           </div>
@@ -134,7 +149,13 @@ export default function LearningProfile() {
         <section className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
           <div className="mb-4 flex items-center justify-between">
             <PanelHeader title="知识结构" />
-            <button className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35" style={{ fontSize: 'var(--f8)' }}>查看完整图谱</button>
+            <button
+              className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5"
+              style={{ fontSize: 'var(--f8)' }}
+              onClick={() => useAppStore.getState().setMode('galaxy')}
+            >
+              查看完整图谱
+            </button>
           </div>
           <div className="grid grid-cols-[260px_1fr_160px] gap-5">
               <div className="max-h-44 overflow-y-auto no-scrollbar rounded-xl border border-white/8 bg-white/[0.025] p-4">
@@ -162,6 +183,38 @@ export default function LearningProfile() {
           </div>
         </section>
 
+        {gaps.length > 0 && (
+          <section className="glass-panel rounded-2xl border border-amber-300/14 bg-amber-300/[0.04] p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <PanelHeader title="知识缺口" icon={<Target className="h-4 w-4" />} />
+              <span className="mono text-amber-200/55" style={{ fontSize: 'var(--f8)' }}>{gaps.length}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {gaps.slice(0, 6).map((gap) => (
+                <button
+                  key={gap.id}
+                  type="button"
+                  className="rounded-xl border border-white/8 bg-black/20 p-3 text-left transition-colors hover:bg-white/[0.035]"
+                  onClick={() => {
+                    if (gap.cardId) {
+                      useAppStore.getState().setSelectedNode({ id: gap.cardId, title: gap.title.replace(/ (仍是孤立节点|尚未稳定进入知识库)$/, ''), type: 'fleeting' })
+                      useAppStore.getState().setMode('forge')
+                    } else {
+                      useAppStore.getState().setMode('learn')
+                    }
+                  }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`h-1.5 w-1.5 rounded-full ${gap.severity === 'high' ? 'bg-red-300' : gap.severity === 'medium' ? 'bg-amber-300' : 'bg-cyan-300'}`} />
+                    <span className="truncate text-white/72" style={{ fontSize: 'var(--f9)' }}>{gap.title}</span>
+                  </div>
+                  <p className="mt-1 line-clamp-2 text-white/36" style={{ fontSize: 'var(--f8)' }}>{gap.detail}</p>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
         <section className="glass-panel rounded-2xl border border-pink-400/16 bg-pink-400/[0.055] p-4">
           <div className="grid grid-cols-[150px_1fr_140px] items-center gap-4">
             <div className="flex items-center gap-3">
@@ -169,7 +222,7 @@ export default function LearningProfile() {
               <span className="font-medium text-white/80">建议下一步</span>
             </div>
             <div className="truncate text-white/58" style={{ fontSize: 'var(--f9)' }}>
-              {nextActions[0] || growthEdges[0] || '继续扩展知识星系'}
+              {nextActions[0] || growthEdges[0] || '继续扩展知识图谱'}
             </div>
             <button
               className="rounded-xl border border-pink-300/20 bg-pink-500/80 px-4 py-2 text-sm font-medium text-white shadow-[0_0_22px_rgba(244,114,182,0.24)] transition-colors hover:bg-pink-400"

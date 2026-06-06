@@ -328,7 +328,7 @@ export default function LearnControls() {
                     <div>🏷️ 知识点 {importResult.stats.fleeting} 个</div>
                     <div>📄 文献记录 {importResult.stats.literature} 个</div>
                     <div>🔗 关联边 {importResult.stats.edges} 条</div>
-                    {importResult.pathId && <div>📚 已自动创建学习路径 ✓</div>}
+                    {importResult.pathId && <div>📚 已自动创建任务路径 ✓</div>}
                   </div>
                 )}
                 {genError && <div className="mono text-[8px] text-red-400/60">{genError}</div>}

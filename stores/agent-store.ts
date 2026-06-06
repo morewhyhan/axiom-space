@@ -10,6 +10,16 @@ export interface AgentMessage {
   /** Optional thinking/reasoning content sent separately from the main answer */
   thinkingContent?: string
   resourceProgress?: ResourceProgressItem[]
+  ragReferences?: RagReference[]
+}
+
+export interface RagReference {
+  referenceId: string
+  filePath: string
+  cardId: string | null
+  vaultId: string | null
+  title: string | null
+  type: string | null
 }
 
 export type ResourceProgressStatus =
@@ -77,6 +87,7 @@ interface AgentStore {
   _appendMessage: (msg: AgentMessage) => void
   _updateLastMessage: (content: string, thinkingContent?: string) => void
   _upsertLastResourceProgress: (item: ResourceProgressItem) => void
+  _setLastRagReferences: (references: RagReference[]) => void
 
   // Stream abort control — shared across hook instances so switchSession
   // can cancel a stream started by ForgeChat before switching.
@@ -146,6 +157,16 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
         ? existing.map((entry) => entry.resourceType === item.resourceType ? { ...entry, ...item } : entry)
         : [...existing, item]
       updated[lastIndex] = { ...last, resourceProgress: next }
+      return { messages: updated }
+    }),
+  _setLastRagReferences: (references) =>
+    set((s) => {
+      const updated = [...s.messages]
+      if (updated.length === 0) return { messages: updated }
+      const lastIndex = updated.length - 1
+      const last = updated[lastIndex]
+      if (last.role !== 'assistant') return { messages: updated }
+      updated[lastIndex] = { ...last, ragReferences: references }
       return { messages: updated }
     }),
 

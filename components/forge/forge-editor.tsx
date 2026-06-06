@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { client } from '@/lib/api-client'
@@ -23,6 +23,29 @@ type ResourceManifestItem = {
   fileName: string
 }
 
+type RagCardStatusValue = 'pending' | 'indexing' | 'indexed' | 'failed' | 'disabled'
+
+type RagCardStatus = {
+  status: RagCardStatusValue
+  synced: boolean
+  index: {
+    status: RagCardStatusValue
+    lastError: string | null
+    indexedAt: string | null
+    lastSyncedAt: string | null
+  } | null
+}
+
+type RelatedRagCard = {
+  id: string
+  title: string
+  type: string
+  path: string
+  clusterName: string | null
+  clusterColor: string | null
+  reason: string
+}
+
 const CARD_TYPE_LABELS: Record<string, string> = {
   fleeting: '◇ 灵感',
   literature: '○ 文献',
@@ -41,6 +64,22 @@ function cardTypeTone(type: string | undefined) {
   return 'text-emerald-300/70'
 }
 
+function ragStatusLabel(status: RagCardStatusValue | undefined) {
+  if (status === 'indexed') return '已进入知识库'
+  if (status === 'indexing') return '索引中'
+  if (status === 'failed') return '同步失败'
+  if (status === 'disabled') return '未启用'
+  return '等待同步'
+}
+
+function ragStatusTone(status: RagCardStatusValue | undefined) {
+  if (status === 'indexed') return 'text-emerald-300/75'
+  if (status === 'indexing') return 'text-cyan-300/75'
+  if (status === 'failed') return 'text-red-300/80'
+  if (status === 'disabled') return 'text-white/30'
+  return 'text-amber-300/70'
+}
+
 export default function ForgeEditor() {
   const [editorMode, setEditorMode] = useState<'live' | 'read'>('live')
   const [cardContent, setCardContent] = useState('')
@@ -49,6 +88,7 @@ export default function ForgeEditor() {
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const [relatedOpen, setRelatedOpen] = useState(false)
 
   // Video detection: if card content has axiom-video marker, fetch and render video HTML
   const [videoHtml, setVideoHtml] = useState<string | null>(null)
@@ -77,6 +117,38 @@ export default function ForgeEditor() {
   const currentVaultId = useAppStore((state) => state.currentVaultId)
   const queryClient = useQueryClient()
   const readContainerRef = useRef<HTMLDivElement>(null)
+  const ragStatusQuery = useQuery({
+    queryKey: ['rag-card-status', selectedNode?.id],
+    enabled: !!selectedNode?.id,
+    queryFn: async (): Promise<RagCardStatus> => {
+      if (!selectedNode?.id) throw new Error('No card selected')
+      const res = await (client.api.rag.card[':id'].status.$get as (args: {
+        param: { id: string }
+      }) => Promise<Response>)({ param: { id: selectedNode.id } })
+      const data = await res.json() as { success: boolean; status?: RagCardStatus; error?: string }
+      if (!data.success || !data.status) throw new Error(data.error || 'Failed to load RAG status')
+      return data.status
+    },
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'indexing' || status === 'pending' ? 3000 : false
+    },
+  })
+  const relatedCardsQuery = useQuery({
+    queryKey: ['rag-related-cards', selectedNode?.id],
+    enabled: !!selectedNode?.id && ragStatusQuery.data?.status === 'indexed',
+    queryFn: async (): Promise<RelatedRagCard[]> => {
+      if (!selectedNode?.id) return []
+      const res = await (client.api.rag.card[':id'].related.$get as (args: {
+        param: { id: string }
+        query?: { limit?: string }
+      }) => Promise<Response>)({ param: { id: selectedNode.id }, query: { limit: '6' } })
+      const data = await res.json() as { success: boolean; cards?: RelatedRagCard[]; error?: string }
+      if (!data.success) throw new Error(data.error || 'Failed to load related cards')
+      return data.cards ?? []
+    },
+    staleTime: 60_000,
+  })
 
   const parseResourceManifest = useCallback((content: string): ResourceManifestItem[] => {
     const match = content.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
@@ -337,6 +409,18 @@ export default function ForgeEditor() {
     requestAnimationFrame(() => { ta.selectionStart = newPos; ta.selectionEnd = newPos; ta.focus() })
   }, [wikiSuggestions, wikiIdx, cardContent])
 
+  const insertWikiLink = useCallback((title: string) => {
+    if (!title.trim()) return
+    const link = `[[${title.trim()}]]`
+    if (cardContent.includes(link)) {
+      toast('这条关联已经存在', { duration: 1800 })
+      return
+    }
+    setCardContent((current) => `${current.trimEnd()}\n\n${link}\n`)
+    setDirty(true)
+    toast.success('已插入关联链接')
+  }, [cardContent])
+
   const handleSave = useCallback(async () => {
     if (!selectedNode || !dirty) return
     setSaving(true)
@@ -368,6 +452,9 @@ export default function ForgeEditor() {
         queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
         // Invalidate all card-links — saving this card may affect backlinks on other cards
         queryClient.invalidateQueries({ queryKey: ['card-links'] })
+        queryClient.invalidateQueries({ queryKey: ['rag-card-status', selectedNode.id] })
+        queryClient.invalidateQueries({ queryKey: ['rag-related-cards', selectedNode.id] })
+        queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
       } else {
         // Keep dirty so the user can retry; surface server-side reason.
         toast.error(`保存失败: ${data?.error || '未知错误'}`)
@@ -379,6 +466,25 @@ export default function ForgeEditor() {
       setSaving(false)
     }
   }, [selectedNode, cardContent, cardTitle, dirty, currentVaultId, queryClient])
+
+  const handleRetryRagSync = useCallback(async () => {
+    if (!selectedNode) return
+    try {
+      toast('正在重新同步知识库...', { duration: 2000 })
+      const res = await (client.api.rag.card[':id'].sync.$post as (args: {
+        param: { id: string }
+      }) => Promise<Response>)({ param: { id: selectedNode.id } })
+      const data = await res.json() as { success: boolean; result?: { status?: string; error?: string }; error?: string }
+      if (!data.success) {
+        toast.error(data.result?.error || data.error || '重新同步失败')
+      } else {
+        toast.success(data.result?.status === 'indexed' ? '知识库已同步' : '同步任务已更新')
+      }
+      queryClient.invalidateQueries({ queryKey: ['rag-card-status', selectedNode.id] })
+    } catch (err) {
+      toast.error(`重新同步失败: ${(err as Error)?.message || '网络异常'}`)
+    }
+  }, [selectedNode, queryClient])
 
   // Ctrl+S to save (use ref to avoid re-registration on every keystroke)
   const handleSaveRef = useRef(handleSave)
@@ -611,9 +717,9 @@ export default function ForgeEditor() {
           /* Empty / select state */
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="serif text-2xl text-white/10 mb-4">Forge Editor</div>
+              <div className="serif text-2xl text-white/10 mb-4">Card Editor</div>
               <p className="mono text-white/20" style={{ fontSize: 'var(--f10)' }}>
-                从 Galaxy 中选择节点或开始 Agent 对话
+                从知识图谱中选择节点，或在 AI 工作台开始对话
                 <br />
                 以查看和编辑卡片
               </p>
@@ -668,6 +774,29 @@ export default function ForgeEditor() {
                   >◇ 提取灵感</button>
                 )}
               </div>
+              <div className="w-px h-3 bg-white/5" />
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>
+                  RAG
+                </span>
+                <span
+                  className={`mono truncate ${ragStatusTone(ragStatusQuery.data?.status)}`}
+                  style={{ fontSize: 'var(--f8)' }}
+                  title={ragStatusQuery.data?.index?.lastError || undefined}
+                >
+                  {ragStatusQuery.isLoading ? '检查中' : ragStatusLabel(ragStatusQuery.data?.status)}
+                </span>
+                {ragStatusQuery.data?.status === 'failed' && (
+                  <button
+                    className="mono text-red-300/70 hover:text-red-200 hover:bg-red-500/10 px-2 py-0.5 rounded transition-colors"
+                    style={{ fontSize: 'var(--f8)' }}
+                    onClick={handleRetryRagSync}
+                    title={ragStatusQuery.data.index?.lastError || '重新同步知识库'}
+                  >
+                    重试
+                  </button>
+                )}
+              </div>
               <div className="flex-1" />
               {lastSavedAt ? (
                 <span className="mono text-green-400/70" style={{ fontSize: 'var(--f8)' }}>
@@ -692,6 +821,51 @@ export default function ForgeEditor() {
               </button>
             </div>
             {/* Editor content */}
+            {relatedCardsQuery.data && relatedCardsQuery.data.length > 0 && (
+              <div className="border-b border-white/5 bg-emerald-400/[0.025]">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between px-5 py-2 text-left transition-colors hover:bg-white/[0.025]"
+                  onClick={() => setRelatedOpen((open) => !open)}
+                >
+                  <span className="mono text-emerald-300/70 uppercase" style={{ fontSize: 'var(--f8)' }}>
+                    可能关联 {relatedCardsQuery.data.length}
+                  </span>
+                  <span className="mono text-white/28" style={{ fontSize: 'var(--f8)' }}>
+                    {relatedOpen ? '收起' : '展开'}
+                  </span>
+                </button>
+                {relatedOpen && (
+                  <div className="grid grid-cols-2 gap-2 px-5 pb-3">
+                    {relatedCardsQuery.data.map((card) => (
+                      <div key={card.id} className="rounded-lg border border-white/8 bg-black/20 p-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className={`h-2 w-2 shrink-0 rounded-full ${card.type === 'permanent' ? 'bg-purple-400' : card.type === 'literature' ? 'bg-pink-400' : 'bg-cyan-400'}`} />
+                          <button
+                            className="min-w-0 truncate text-left text-white/70 hover:text-white"
+                            style={{ fontSize: 'var(--f9)' }}
+                            onClick={() => useAppStore.getState().setSelectedNode({ id: card.id, title: card.title, type: card.type })}
+                            title={card.title}
+                          >
+                            {card.title}
+                          </button>
+                        </div>
+                        <div className="mt-1 truncate text-white/30" style={{ fontSize: 'var(--f8)' }}>
+                          {card.clusterName || card.path}
+                        </div>
+                        <button
+                          className="mono mt-2 rounded border border-emerald-300/15 px-2 py-0.5 text-emerald-200/65 hover:bg-emerald-400/10"
+                          style={{ fontSize: 'var(--f8)' }}
+                          onClick={() => insertWikiLink(card.title)}
+                        >
+                          建立链接
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {editorMode === 'live' ? (
               <div className="flex-1 p-0 overflow-hidden relative">
                 <textarea

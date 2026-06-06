@@ -128,8 +128,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let autoRotateBeforeFocus: boolean | null = null;
     let lastFocusSelection: THREE.Group[] = [];
     let hoveredNode: THREE.Group | null = null;
+    let pressedNode: THREE.Group | null = null;
     let lockedNode: THREE.Group | null = null;
+    let hoverAttentionEnabled = true;
     let lastHoverRaycastAt = 0;
+    let projectionMode: '3d' | '2d' = '3d';
     const dimNodeModes = new Set(['forge', 'cognition', 'learn']);
 
     const { register, unregister } = useGalaxyActions.getState()
@@ -661,13 +664,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       allNodes.forEach((n) => {
         if (!n.visible) return;
         if (n === node) {
-          setNodePresence(n, locked ? 1.34 : 1.2, 1, 0.24);
+          setNodePresence(n, 1, 1, 0.24);
           restoreNodeColor(n);
         } else if (neighbors.has(n)) {
-          setNodePresence(n, 1.02, locked ? 0.92 : 0.82, 0.24);
+          setNodePresence(n, 1, locked ? 0.92 : 0.82, 0.24);
           restoreNodeColor(n);
         } else {
-          setNodePresence(n, locked ? 0.42 : 0.78, locked ? 0.035 : 0.32, 0.24);
+          setNodePresence(n, 1, locked ? 0.035 : 0.32, 0.24);
           if (locked) setNodeColor(n, 0x111119);
         }
       });
@@ -701,11 +704,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       lastFocusSelection = focusSelection;
       frameSelection(focusSelection, node, node.userData.isSun ? 1.15 : 0.75);
       lockedNode = node;
-      hoveredNode = null;
+      pressedNode = null;
 
       // Special highlight for focused node
       if (node.userData.ring) {
-        gsap.to(node.userData.ring.scale, { x: 1.5, y: 1.5, z: 1.5, duration: 0.5 });
         gsap.to(node.userData.ring.material, { opacity: 0.8, duration: 0.5 });
       }
       if (node.userData.isSun) currentClusterId = node.userData.clusterId;
@@ -864,9 +866,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       // Skip if no real data — wait for async fetch
       if (clustersData.length === 0 && nodesData.length === 0) return;
 
-      const CLUSTER_COLORS = [0xa855f7, 0x22d3ee, 0xf472b6, 0x818cf8, 0x34d399, 0xfbbf24];
-      const mixColors = [0xa855f7, 0x22d3ee, 0xf472b6];
-
       // Build a lookup from node title to node data for edge matching
       const nodeTitleToGroup = new Map<string, THREE.Group>();
       const nodeDegree = new Map<string, number>();
@@ -1007,10 +1006,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
             sunPos.y + r * Math.sin(p) * Math.sin(a) * 0.7,
             sunPos.z + r * Math.cos(p),
           );
-          // Assign cluster coloring so focus/highlight works
-          const targetIdx = clusterIdxByDbId.get(targetClusterId!) ?? -1;
-          node.userData.clusterId = targetIdx;
-          node.userData.clusterColor = CLUSTER_COLORS[targetIdx % CLUSTER_COLORS.length];
+          // Keep real ownership clear: edge affinity may influence placement,
+          // but an unclustered card is not a member until card.clusterId is set.
+          node.userData.clusterId = null;
+          node.userData.affinityClusterId = targetClusterId;
+          node.userData.clusterColor = utc;
         } else {
           // Truly orphan — form a compact virtual cluster in the spiral pattern
           const seed = hashId(cardNode.id);
@@ -1057,8 +1057,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         controls.autoRotate = autoRotateBeforeFocus;
         autoRotateBeforeFocus = null;
       }
+      projectionMode = '3d';
+      controls.enableRotate = true;
       lockedNode = null;
-      hoveredNode = null;
+      pressedNode = null;
       lastFocusSelection = [];
       clearNodeLabels();
       gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.2 });
@@ -1122,6 +1124,43 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     register('getCometSpeed', () => cometSpeedMultiplier);
     register('setCometsVisible', (v: boolean) => { scene.children.forEach(c => { if (c.userData && c.userData.isComet) c.visible = v; }); });
     register('getCometsVisible', () => { const c = scene.children.find(c => c.userData && c.userData.isComet); return c ? c.visible !== false : true; });
+    register('setProjectionMode', (mode: '3d' | '2d') => {
+      projectionMode = mode;
+      const resetBtn = document.getElementById('reset-view-btn');
+      if (mode === '2d') {
+        if (resetBtn) resetBtn.classList.add('visible');
+        if (autoRotateBeforeFocus === null) autoRotateBeforeFocus = controls.autoRotate;
+        controls.autoRotate = false;
+        controls.enableRotate = false;
+        lockedNode = null;
+        hoveredNode = null;
+        pressedNode = null;
+        applyGraphAttention(null);
+        clearNodeLabels();
+        gsap.killTweensOf(controls.target);
+        gsap.killTweensOf(camera.position);
+        gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 0.75, ease: 'expo.out' });
+        gsap.to(camera.position, { x: 0, y: 1550, z: 0.1, duration: 0.9, ease: 'expo.out' });
+      } else {
+        controls.enableRotate = true;
+        if (autoRotateBeforeFocus !== null) {
+          controls.autoRotate = autoRotateBeforeFocus;
+          autoRotateBeforeFocus = null;
+        }
+        resetCameraView();
+      }
+    });
+    register('getProjectionMode', () => projectionMode);
+    register('setHoverAttention', (v: boolean) => {
+      hoverAttentionEnabled = v;
+      if (!v) {
+        hoveredNode = null;
+        if (lockedNode) applyGraphAttention(lockedNode, true);
+        else if (pressedNode) applyGraphAttention(pressedNode, false);
+        else applyGraphAttention(null);
+      }
+    });
+    register('getHoverAttention', () => hoverAttentionEnabled);
     register('fitSelection', () => {
       const selection = lastFocusSelection.filter(n => n.visible !== false);
       if (selection.length > 0) frameSelection(selection, selection[0], 0.9);
@@ -1302,7 +1341,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         applyNodeModeVisual(state.mode);
         requestAnimationFrame(() => {
           if (lockedNode) applyGraphAttention(lockedNode, true);
-          else if (hoveredNode) applyGraphAttention(hoveredNode, false);
+          else if (pressedNode) applyGraphAttention(pressedNode, false);
+          else if (hoverAttentionEnabled && hoveredNode) applyGraphAttention(hoveredNode, false);
         });
       }
     });
@@ -1718,10 +1758,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     };
     renderer.domElement.addEventListener('contextmenu', onContextMenu);
 
-    // Hover previews relationships; click locks the same neighborhood.
+    // Hover attention is user-configurable; when it is disabled, only press and
+    // click paths raycast so dense graphs stay responsive.
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
-    let pointerDown: { x: number; y: number } | null = null;
+    let pointerDown: { x: number; y: number; node: THREE.Group | null; previousLockedNode: THREE.Group | null } | null = null;
     function setMouseFromEvent(e: MouseEvent): void {
       mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
@@ -1739,14 +1780,26 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
     const onMouseDown = (e: MouseEvent) => {
       if (e.button !== 0) return;
-      pointerDown = { x: e.clientX, y: e.clientY };
+      const node = findNodeAt(e);
+      pointerDown = { x: e.clientX, y: e.clientY, node, previousLockedNode: lockedNode };
+      pressedNode = node;
+      if (node) {
+        renderer.domElement.style.cursor = 'grabbing';
+        if (autoRotateBeforeFocus === null) autoRotateBeforeFocus = controls.autoRotate;
+        controls.autoRotate = false;
+        applyGraphAttention(node, false);
+      }
 
       // Dismiss any existing edge info panel first
       const existing = document.getElementById('galaxy-edge-panel');
       if (existing) existing.remove();
     };
     const onMouseMove = (e: MouseEvent) => {
-      if (pointerDown || lockedNode) return;
+      if (pressedNode) {
+        renderer.domElement.style.cursor = 'grabbing';
+        return;
+      }
+      if (!hoverAttentionEnabled || lockedNode) return;
       const now = performance.now();
       if (now - lastHoverRaycastAt < 90) return;
       lastHoverRaycastAt = now;
@@ -1759,10 +1812,17 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     const onMouseUp = (e: MouseEvent) => {
       if (e.button !== 0 || !pointerDown) return;
       const moved = Math.hypot(e.clientX - pointerDown.x, e.clientY - pointerDown.y);
+      const downState = pointerDown;
       pointerDown = null;
-      if (moved > 5) return;
+      pressedNode = null;
+      renderer.domElement.style.cursor = '';
+      if (moved > 5) {
+        if (downState.previousLockedNode) applyGraphAttention(downState.previousLockedNode, true);
+        else applyGraphAttention(null);
+        return;
+      }
 
-      const node = findNodeAt(e);
+      const node = downState.node && findNodeAt(e) === downState.node ? downState.node : findNodeAt(e);
       if (node) {
         focusNode(node);
         return;
@@ -1770,10 +1830,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     };
     const onMouseLeave = () => {
-      if (lockedNode) return;
-      hoveredNode = null;
+      pointerDown = null;
+      pressedNode = null;
       renderer.domElement.style.cursor = '';
-      applyGraphAttention(null);
+      if (lockedNode) applyGraphAttention(lockedNode, true);
+      else applyGraphAttention(null);
     };
     renderer.domElement.addEventListener('mousedown', onMouseDown);
     renderer.domElement.addEventListener('mousemove', onMouseMove);

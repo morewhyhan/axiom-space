@@ -96,12 +96,12 @@ export default function LearnStage() {
         <div className="border-b border-white/5 bg-gradient-to-b from-purple-500/6 to-transparent px-6 py-5">
           <div className="flex items-center justify-between gap-4">
             <div className="min-w-0">
-              <div className="mono text-[7px] uppercase tracking-[0.28em] text-white/25">Learning Workbench</div>
-              <div className="mt-2 text-xl font-semibold text-white/90">{currentPath?.name || '选择一个学习路径'}</div>
+              <div className="mono text-[7px] uppercase tracking-[0.28em] text-white/25">Path Planner</div>
+              <div className="mt-2 text-xl font-semibold text-white/90">{currentPath?.name || '选择一个任务路径'}</div>
               <div className="mt-2 max-w-[56ch] text-sm leading-6 text-white/40">
                 {currentPath
-                  ? '左侧创建和管理路径，右侧按章节推进当前步骤。默认只展示主路径，避免星系关系图干扰学习节奏。'
-                  : '先在左侧创建或选择一个路径，然后在这里查看进度、下一步和学习状态。'}
+                  ? '左侧创建和管理路径，右侧按章节推进当前步骤。默认只展示主路径，避免知识图谱干扰推进节奏。'
+                  : '先在左侧创建或选择一个路径，然后在这里查看进度、下一步和任务状态。'}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -213,7 +213,7 @@ export default function LearnStage() {
               <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/8 bg-white/[0.04] text-xl text-white/20">
                 ◈
               </div>
-              <div className="text-lg font-semibold text-white/80">先选一个学习路径</div>
+              <div className="text-lg font-semibold text-white/80">先选一个任务路径</div>
               <div className="mt-2 text-sm leading-6 text-white/38">
                 左侧创建或选择路径后，这里会显示当前进度、下一步和关系图模式。
               </div>

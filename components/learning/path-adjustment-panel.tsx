@@ -61,7 +61,7 @@ export default function PathAdjustmentPanel({ pathId }: { pathId?: string }) {
     return (
       <div className="glass-panel p-6 rounded-2xl text-center">
         <p className="mono text-white/40">还没有路径调整记录</p>
-        <p className="mono text-white/20 text-sm mt-2">继续学习，系统会根据评估结果自动调整你的学习路径</p>
+        <p className="mono text-white/20 text-sm mt-2">继续推进任务，系统会根据评估结果自动调整你的任务路径</p>
       </div>
     )
   }
@@ -73,7 +73,7 @@ export default function PathAdjustmentPanel({ pathId }: { pathId?: string }) {
         <div className="flex items-center justify-between">
           <div>
             <span className="mono opacity-40 uppercase block text-sm mb-2">Path_Adjustments</span>
-            <h2 className="text-2xl font-bold">学习路径调整</h2>
+            <h2 className="text-2xl font-bold">任务路径调整</h2>
           </div>
           <div className="text-right">
             <div className="text-3xl font-bold text-green-400">{historyList.length}</div>

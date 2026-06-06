@@ -116,6 +116,7 @@ export function useGeneratePath() {
       // Generating a path creates cards & edges in the knowledge graph
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
     },
   })
 }
@@ -197,6 +198,28 @@ export function useDeletePath() {
       })
       // Background refetch to ensure server-consistent data
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+    },
+  })
+}
+
+export function useArchivePath() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (params: { pathId: string; archived: boolean }) => {
+      const res = await client.api.learning.path[':pathId'].$patch({
+        param: { pathId: params.pathId },
+        json: { status: params.archived ? 'archived' : 'active' },
+      })
+      const data = await res.json() as ApiResult<{ path: { id: string; status: string } }>
+      if (!data.success) throw new Error(data.error || 'Archive failed')
+      return data.path
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
     },
   })
 }

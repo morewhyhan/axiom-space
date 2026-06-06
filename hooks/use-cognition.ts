@@ -69,6 +69,16 @@ export interface Observation {
   createdAt: string
 }
 
+export interface KnowledgeGap {
+  id: string
+  type: 'no_permanent' | 'isolated' | 'rag_pending'
+  title: string
+  detail: string
+  severity: 'high' | 'medium' | 'low'
+  cardId?: string | null
+  clusterId?: string | null
+}
+
 async function fetchCognition(vaultId?: string | null): Promise<CognitionData | null> {
   const params = vaultId ? { query: { vid: vaultId } } : {}
   const res = await client.api.cognition.stats.$get(params)
@@ -92,12 +102,22 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
 
 async function fetchObservations(vaultId?: string | null): Promise<Observation[]> {
   if (!vaultId) return []
-  const res = await fetch(`/api/cognition/observations?vid=${vaultId}`)
+  const res = await client.api.cognition.observations.$get({ query: { vid: vaultId } })
   const data: { success: boolean; observations?: Observation[]; error?: string } = await res.json()
   if (!data.success) {
     throw new Error(data.error || '获取观察数据失败')
   }
   return data.observations ?? []
+}
+
+async function fetchKnowledgeGaps(vaultId?: string | null): Promise<KnowledgeGap[]> {
+  if (!vaultId) return []
+  const res = await client.api.cognition.gaps.$get({ query: { vid: vaultId } })
+  const data: { success: boolean; gaps?: KnowledgeGap[]; error?: string } = await res.json()
+  if (!data.success) {
+    throw new Error(data.error || '获取知识缺口失败')
+  }
+  return data.gaps ?? []
 }
 
 export function useCognition() {
@@ -130,6 +150,23 @@ export function useObservations() {
   })
   return {
     observations: query.data ?? [],
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refetch: query.refetch,
+  }
+}
+
+export function useKnowledgeGaps() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const query = useQuery({
+    queryKey: ['knowledge-gaps', currentVaultId],
+    queryFn: () => fetchKnowledgeGaps(currentVaultId),
+    enabled: !!currentVaultId,
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: false,
+  })
+  return {
+    gaps: query.data ?? [],
     loading: query.isLoading,
     error: query.error?.message ?? null,
     refetch: query.refetch,

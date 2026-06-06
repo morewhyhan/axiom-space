@@ -1,0 +1,95 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: axiom-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-axiom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-axiom_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-axiom}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - axiom_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-axiom} -d ${POSTGRES_DB:-axiom}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: axiom-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - axiom_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: axiom-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - axiom_ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+
+  lightrag:
+    image: ghcr.io/hkuds/lightrag:latest
+    container_name: axiom-lightrag
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      PORT: 9621
+      HOST: 0.0.0.0
+      LIGHTRAG_API_KEY: ${LIGHTRAG_API_KEY:-}
+      WHITELIST_PATHS: /health
+
+      # LightRAG needs its own LLM + embedding configuration. AXIOM stays the
+      # source of truth; this service only stores derived RAG indexes.
+      LLM_BINDING: ${LIGHTRAG_LLM_BINDING:-openai}
+      LLM_BINDING_HOST: ${LIGHTRAG_LLM_BINDING_HOST:-https://api.openai.com/v1}
+      LLM_BINDING_API_KEY: ${LIGHTRAG_LLM_BINDING_API_KEY:-}
+      LLM_MODEL: ${LIGHTRAG_LLM_MODEL:-gpt-4o-mini}
+      KEYWORD_LLM_MODEL: ${LIGHTRAG_KEYWORD_LLM_MODEL:-gpt-4o-mini}
+      QUERY_LLM_MODEL: ${LIGHTRAG_QUERY_LLM_MODEL:-gpt-4o-mini}
+
+      EMBEDDING_BINDING: ${LIGHTRAG_EMBEDDING_BINDING:-openai}
+      EMBEDDING_BINDING_HOST: ${LIGHTRAG_EMBEDDING_BINDING_HOST:-https://api.openai.com/v1}
+      EMBEDDING_BINDING_API_KEY: ${LIGHTRAG_EMBEDDING_BINDING_API_KEY:-}
+      EMBEDDING_MODEL: ${LIGHTRAG_EMBEDDING_MODEL:-text-embedding-3-small}
+      EMBEDDING_DIM: ${LIGHTRAG_EMBEDDING_DIM:-1536}
+      EMBEDDING_TOKEN_LIMIT: ${LIGHTRAG_EMBEDDING_TOKEN_LIMIT:-8192}
+
+      LIGHTRAG_KV_STORAGE: JsonKVStorage
+      LIGHTRAG_DOC_STATUS_STORAGE: JsonDocStatusStorage
+      LIGHTRAG_GRAPH_STORAGE: NetworkXStorage
+      LIGHTRAG_VECTOR_STORAGE: NanoVectorDBStorage
+    ports:
+      - "${LIGHTRAG_PORT:-9621}:9621"
+    volumes:
+      - axiom_lightrag_data:/app/data
+      - axiom_lightrag_config:/app/config
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  axiom_postgres_data:
+  axiom_redis_data:
+  axiom_ollama_data:
+  axiom_lightrag_data:
+  axiom_lightrag_config:

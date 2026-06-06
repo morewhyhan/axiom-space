@@ -30,7 +30,7 @@ export default function InsightsPanel() {
             <NotebookText className="h-5 w-5 text-pink-200" />
             <div>
               <div className="font-medium text-white/78">AI 观察记录</div>
-              <div className="mt-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>可追溯学习观察</div>
+              <div className="mt-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>可追溯认知观察</div>
             </div>
           </div>
           <span className="rounded-lg border border-pink-400/18 bg-pink-400/8 px-2 py-1 mono text-pink-100/75" style={{ fontSize: 'var(--f8)' }}>
@@ -76,16 +76,16 @@ export default function InsightsPanel() {
             </div>
             <div className="text-white/35">暂无观察记录</div>
             <p className="mt-2 max-w-[220px] leading-relaxed text-white/18" style={{ fontSize: 'var(--f8)' }}>
-              当学习会话明确写入观察时，这里会形成时间线。
+              当 AI 工作台明确写入观察时，这里会形成时间线。
             </p>
           </div>
         )}
 
         {observations.length > 0 && (
           <div className="border-t border-white/8 px-6 py-4">
-            <button className="w-full rounded-xl border border-white/10 bg-white/[0.025] px-4 py-2.5 text-white/45 transition-colors hover:bg-white/5 hover:text-white/70" style={{ fontSize: 'var(--f9)' }}>
-              查看更多记录
-            </button>
+            <div className="mono text-center text-white/28" style={{ fontSize: 'var(--f8)' }}>
+              已显示全部观察记录
+            </div>
           </div>
         )}
       </div>

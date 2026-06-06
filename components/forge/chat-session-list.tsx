@@ -1,11 +1,12 @@
 'use client'
 
 /**
- * Forge Task Workspace Sidebar
+ * AI workspace sidebar
  *
- * - Projects: learning-path task groups from Learn
- * - Talks: raw discussion streams
- * - Archive: completed paths and archived threads
+ * - Tasks: task paths from Path Planner
+ * - Talks: standalone discussion streams
+ * Card-bound threads are opened through the task/card they belong to, rather
+ * than exposed as a separate primary workspace tab.
  */
 
 import { useEffect, useMemo, useState } from 'react'
@@ -14,6 +15,8 @@ import {
   Archive,
   ArrowRight,
   BookOpen,
+  ChevronDown,
+  ChevronRight,
   CheckCircle2,
   Clock3,
   FileText,
@@ -31,7 +34,7 @@ import { useExecuteStep, useLearningPaths, type LearningPath, type LearningStep 
 import type { SessionSummary } from '@/hooks/use-agent'
 import { useAppStore } from '@/stores/mode-store'
 
-type ViewMode = 'projects' | 'conversations' | 'archive'
+type ViewMode = 'tasks' | 'talks'
 
 const TYPE_LABEL: Record<string, string> = {
   fleeting: 'FLEETING',
@@ -64,7 +67,8 @@ export default function ChatSessionList() {
   const setActiveLearningStepId = useAppStore((s) => s.setActiveLearningStepId)
   const openModal = useAppStore((s) => s.openModal)
   const [query, setQuery] = useState('')
-  const [view, setView] = useState<ViewMode>('projects')
+  const [view, setView] = useState<ViewMode>('tasks')
+  const [showArchivedTasks, setShowArchivedTasks] = useState(false)
 
   useEffect(() => { loadSessions() }, [loadSessions])
 
@@ -85,12 +89,18 @@ export default function ChatSessionList() {
     return map
   }, [sessions])
 
-  const archivedSessions = useMemo(
-    () => sessions.filter((session) => isArchivedSession(session)),
-    [sessions],
-  )
+  const sessionsByCard = useMemo(() => {
+    const map = new Map<string, SessionSummary[]>()
+    for (const session of sessions) {
+      if (!session.cardId) continue
+      const list = map.get(session.cardId) ?? []
+      list.push(session)
+      map.set(session.cardId, list)
+    }
+    return map
+  }, [sessions])
 
-  const taskPaths = useMemo(() => {
+  const allTaskPaths = useMemo(() => {
     const q = query.trim().toLowerCase()
     return (learningData?.paths ?? [])
       .filter((path) => matchesPath(path, q))
@@ -102,7 +112,12 @@ export default function ChatSessionList() {
       })
   }, [learningData?.paths, query, selectedPathId])
 
-  const conversationSessions = useMemo(() => {
+  const taskPaths = useMemo(
+    () => allTaskPaths.filter((path) => showArchivedTasks || !isArchivedPath(path)),
+    [allTaskPaths, showArchivedTasks],
+  )
+
+  const allTalkSessions = useMemo(() => {
     const q = query.trim().toLowerCase()
     return sessions
       .filter((session) => !session.pathId && !session.cardId)
@@ -110,42 +125,11 @@ export default function ChatSessionList() {
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
   }, [query, sessions])
 
-  const cardThreadSessions = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return sessions
-      .filter((session) => session.cardId && !session.pathId)
-      .filter((session) => matchesSession(session, q))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-  }, [query, sessions])
-
-  const archivedTaskPaths = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return (learningData?.paths ?? [])
-      .filter((path) => path.progress >= 100 || path.status === 'completed' || path.status === 'archived')
-      .filter((path) => matchesPath(path, q))
-      .sort((a, b) => new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime())
-  }, [learningData?.paths, query])
-
-  const archivedConversationSessions = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return sessions
-      .filter((session) => isArchivedSession(session) && !session.cardId)
-      .filter((session) => matchesSession(session, q))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-  }, [query, sessions])
-
-  const archivedCardThreads = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return sessions
-      .filter((session) => isArchivedSession(session) && !!session.cardId && !session.pathId)
-      .filter((session) => matchesSession(session, q))
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-  }, [query, sessions])
+  const talkSessions = allTalkSessions
 
   const counts = {
-    projects: taskPaths.length,
-    talks: conversationSessions.length,
-    archive: archivedTaskPaths.length + archivedSessions.length,
+    tasks: allTaskPaths.length,
+    talks: allTalkSessions.length,
   }
 
   const handleOpenStep = async (path: LearningPath, step: LearningStep) => {
@@ -206,14 +190,14 @@ export default function ChatSessionList() {
               <div className="flex items-center gap-2">
                 <FolderKanban className="h-4 w-4 text-pink-300/80" />
                 <div className="mono text-white/35 uppercase tracking-[0.22em]" style={{ fontSize: 'var(--f8)' }}>
-                  Forge Workspace
+                  AI Workspace
                 </div>
               </div>
               <div className="mt-1 text-white/88 font-medium" style={{ fontSize: 'var(--f10)' }}>
-                项目优先的任务工作台
+                任务与自由对话
               </div>
               <div className="mt-1 text-white/22 leading-relaxed" style={{ fontSize: 'var(--f8)' }}>
-                Projects 是 Learn 过来的任务组，Talks 是原始对话，Archive 是完成后的历史。
+                任务组默认收起；卡片线程从对应任务卡片进入。
               </div>
             </div>
             <button
@@ -232,17 +216,15 @@ export default function ChatSessionList() {
             </button>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <SummaryPill label="Projects" value={counts.projects} icon={Layers3} tone="text-pink-300" />
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <SummaryPill label="Tasks" value={counts.tasks} icon={Layers3} tone="text-pink-300" />
             <SummaryPill label="Talks" value={counts.talks} icon={MessageSquareText} tone="text-cyan-300" />
-            <SummaryPill label="Archive" value={counts.archive} icon={Archive} tone="text-emerald-300" />
           </div>
 
           <div className="mt-4 flex gap-1 rounded-xl border border-white/8 bg-black/25 p-1">
             {[
-              { id: 'projects' as const, label: 'Projects', icon: Layers3 },
-              { id: 'conversations' as const, label: 'Talks', icon: MessageSquareText },
-              { id: 'archive' as const, label: 'Archive', icon: Archive },
+              { id: 'tasks' as const, label: 'Tasks', icon: Layers3 },
+              { id: 'talks' as const, label: 'Talks', icon: MessageSquareText },
             ].map((item) => {
               const Icon = item.icon
               const active = view === item.id
@@ -267,18 +249,30 @@ export default function ChatSessionList() {
               className="w-full bg-transparent text-sm text-white/70 outline-none placeholder:text-white/20"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索任务 / 对话 / 章节..."
+              placeholder="搜索任务或对话..."
             />
           </div>
 
         </div>
 
         <div className="flex-1 overflow-y-auto no-scrollbar p-3">
-          {view === 'projects' && (
+          {view === 'tasks' && (
             <div className="space-y-4">
-              <SectionLabel title="Active Tasks" icon={Layers3} count={taskPaths.length} />
+              <div className="flex items-center justify-between gap-3">
+                <SectionLabel title="Tasks" icon={Layers3} count={taskPaths.length} />
+                <button
+                  className={`rounded-lg border px-2 py-1 text-[10px] mono transition-colors ${
+                    showArchivedTasks
+                      ? 'border-emerald-400/25 bg-emerald-400/10 text-emerald-200'
+                      : 'border-white/8 text-white/25 hover:border-white/16 hover:text-white/50'
+                  }`}
+                  onClick={() => setShowArchivedTasks((value) => !value)}
+                >
+                  {showArchivedTasks ? '隐藏归档' : '显示归档'}
+                </button>
+              </div>
               {taskPaths.length === 0 ? (
-                <EmptyState label="暂无可执行的任务组" />
+                <EmptyState label="暂无学习任务" />
               ) : (
                 taskPaths.map((path) => (
                   <TaskGroupCard
@@ -286,7 +280,9 @@ export default function ChatSessionList() {
                     path={path}
                     sessions={sessionsByPath.get(path.id) ?? []}
                     active={path.id === selectedPathId}
+                    archived={isArchivedPath(path)}
                     currentStepId={activeLearningStepId}
+                    sessionsByCard={sessionsByCard}
                     onOpen={() => void handleOpenTask(path)}
                     onOpenStep={(step) => void handleOpenStep(path, step)}
                   />
@@ -295,86 +291,18 @@ export default function ChatSessionList() {
             </div>
           )}
 
-          {view === 'conversations' && (
+          {view === 'talks' && (
             <div className="space-y-4">
-              <SectionLabel title="Talks" icon={MessageSquareText} count={conversationSessions.length} />
-              {conversationSessions.length === 0 ? (
-                <EmptyState label="暂无独立对话流" />
+              <SectionLabel title="Standalone Talks" icon={MessageSquareText} count={talkSessions.length} />
+              {talkSessions.length === 0 ? (
+                <EmptyState label="暂无普通对话" />
               ) : (
-                conversationSessions.map((session) => (
+                talkSessions.map((session) => (
                   <ConversationCard
                     key={session.id}
                     session={session}
                     active={session.id === sessionId}
-                    onOpen={() => void handleOpenConversation(session)}
-                    onDelete={() => deleteSession(session.id)}
-                  />
-                ))
-              )}
-
-              <SectionLabel title="Card Threads" icon={Sparkles} count={cardThreadSessions.length} />
-              {cardThreadSessions.length === 0 ? (
-                <EmptyState label="暂无卡片线程" />
-              ) : (
-                cardThreadSessions.map((session) => (
-                  <ConversationCard
-                    key={session.id}
-                    session={session}
-                    active={session.id === sessionId}
-                    onOpen={() => void handleOpenConversation(session)}
-                    onDelete={() => deleteSession(session.id)}
-                  />
-                ))
-              )}
-            </div>
-          )}
-
-          {view === 'archive' && (
-            <div className="space-y-4">
-              <SectionLabel title="Archived Tasks" icon={Archive} count={archivedTaskPaths.length} />
-              {archivedTaskPaths.length === 0 ? (
-                <EmptyState label="没有完成归档的任务组" />
-              ) : (
-                archivedTaskPaths.map((path) => (
-                  <TaskGroupCard
-                    key={path.id}
-                    path={path}
-                    sessions={sessionsByPath.get(path.id) ?? []}
-                    active={path.id === selectedPathId}
-                    archived
-                    currentStepId={activeLearningStepId}
-                    onOpen={() => void handleOpenTask(path)}
-                    onOpenStep={(step) => void handleOpenStep(path, step)}
-                  />
-                ))
-              )}
-
-              <SectionLabel title="Archived Talks" icon={Clock3} count={archivedConversationSessions.length} />
-              {archivedConversationSessions.length === 0 ? (
-                <EmptyState label="没有已归档对话" />
-              ) : (
-                archivedConversationSessions.map((session) => (
-                  <ConversationCard
-                    key={session.id}
-                    session={session}
-                    active={session.id === sessionId}
-                    archived
-                    onOpen={() => void handleOpenConversation(session)}
-                    onDelete={() => deleteSession(session.id)}
-                  />
-                ))
-              )}
-
-              <SectionLabel title="Archived Threads" icon={Archive} count={archivedCardThreads.length} />
-              {archivedCardThreads.length === 0 ? (
-                <EmptyState label="没有已归档卡片线程" />
-              ) : (
-                archivedCardThreads.map((session) => (
-                  <ConversationCard
-                    key={session.id}
-                    session={session}
-                    active={session.id === sessionId}
-                    archived
+                    archived={isArchivedSession(session)}
                     onOpen={() => void handleOpenConversation(session)}
                     onDelete={() => deleteSession(session.id)}
                   />
@@ -390,10 +318,10 @@ export default function ChatSessionList() {
             onClick={() => openModal('newcard')}
           >
             <Plus className="h-3.5 w-3.5" />
-            <span className="mono" style={{ fontSize: 'var(--f8)' }}>New Task</span>
+            <span className="mono" style={{ fontSize: 'var(--f8)' }}>New Card</span>
           </button>
           <span className="mono text-white/18" style={{ fontSize: 'var(--f7)' }}>
-            {taskPaths.length} tasks · {conversationSessions.length} talks
+            {taskPaths.length} tasks · {talkSessions.length} talks
           </span>
         </div>
       </div>
@@ -407,6 +335,7 @@ function TaskGroupCard({
   active,
   archived = false,
   currentStepId,
+  sessionsByCard,
   onOpen,
   onOpenStep,
 }: {
@@ -415,13 +344,16 @@ function TaskGroupCard({
   active: boolean
   archived?: boolean
   currentStepId: string | null
+  sessionsByCard: Map<string, SessionSummary[]>
   onOpen: () => void
   onOpenStep: (step: LearningStep) => void
 }) {
+  const [expanded, setExpanded] = useState(false)
   const nextStep = resolveTaskStep(path, currentStepId)
   const doneCount = path.steps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
   const stepCount = path.steps.length
   const progress = path.progress || (stepCount ? Math.round((doneCount / stepCount) * 100) : 0)
+  const aiChatCount = path.steps.reduce((sum, step) => sum + getStepSessions(step, sessions, sessionsByCard).length, 0)
 
   return (
     <div
@@ -431,7 +363,7 @@ function TaskGroupCard({
           : 'border-white/6 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.045]'
       }`}
     >
-      <button className="w-full text-left" onClick={onOpen}>
+      <button className="w-full text-left" onClick={() => setExpanded((value) => !value)}>
         <div className="flex items-start gap-3">
           <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${archived ? 'text-emerald-300/80 border-emerald-400/20 bg-emerald-400/8' : active ? 'text-pink-300/80 border-pink-400/20 bg-pink-400/8' : 'text-white/40 border-white/10 bg-white/5'}`}>
             {archived ? <Archive className="h-4 w-4" /> : <Layers3 className="h-4 w-4" />}
@@ -442,13 +374,14 @@ function TaskGroupCard({
               <div className={`truncate font-medium ${active ? 'text-white' : 'text-white/68 group-hover:text-white/85'}`} style={{ fontSize: 'var(--f9)' }}>
                 {path.name}
               </div>
-              <div className="ml-auto shrink-0 mono text-white/18" style={{ fontSize: 'var(--f7)' }}>
+              <div className="ml-auto flex shrink-0 items-center gap-2 mono text-white/18" style={{ fontSize: 'var(--f7)' }}>
                 {stepCount} steps
+                {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
               </div>
             </div>
 
             <div className="mt-2 text-white/25" style={{ fontSize: 'var(--f8)' }}>
-              {path.topic || path.description || '由 Learn 导入的任务组'}
+              {path.topic || path.description || '由路径规划导入的任务组'}
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -461,7 +394,7 @@ function TaskGroupCard({
               </span>
               <span className="inline-flex items-center gap-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>
                 <MessageSquareText className="h-3 w-3" />
-                {sessions.length} threads
+                {aiChatCount} AI 对话
               </span>
               {nextStep && (
                 <span className="inline-flex items-center gap-1 rounded-md border border-purple-400/15 bg-purple-400/8 px-1.5 py-0.5 mono text-purple-200/80" style={{ fontSize: 'var(--f7)' }}>
@@ -477,9 +410,23 @@ function TaskGroupCard({
         </div>
       </button>
 
+      <div className="mt-3 flex items-center justify-between gap-3 pl-11">
+        <div className="mono text-white/20" style={{ fontSize: 'var(--f7)' }}>
+          {expanded ? '已展开步骤' : '默认收起，展开后选择具体卡片'}
+        </div>
+        <button
+          className="inline-flex items-center gap-1 rounded-lg border border-pink-400/20 bg-pink-400/8 px-2.5 py-1.5 text-[10px] mono text-pink-200 transition-colors hover:bg-pink-400/14"
+          onClick={onOpen}
+        >
+          继续
+          <ArrowRight className="h-3 w-3" />
+        </button>
+      </div>
+
+      {expanded && (
       <div className="mt-3 space-y-2 pl-11">
         {path.steps.map((step) => {
-          const stepSessions = sessions.filter((session) => session.stepId === step.id)
+          const stepSessions = getStepSessions(step, sessions, sessionsByCard)
           const selected = step.id === currentStepId
           const status = step.status
           const tone = stepTone(status)
@@ -508,6 +455,7 @@ function TaskGroupCard({
           )
         })}
       </div>
+      )}
     </div>
   )
 }
@@ -671,6 +619,28 @@ function resolveTaskStep(path: LearningPath, activeStepId: string | null): Learn
     ?? null
 }
 
+function getStepSessions(
+  step: LearningStep,
+  sessions: SessionSummary[],
+  sessionsByCard: Map<string, SessionSummary[]>,
+): SessionSummary[] {
+  const seen = new Set<string>()
+  const matched: SessionSummary[] = []
+  for (const session of sessions) {
+    if (session.stepId !== step.id) continue
+    seen.add(session.id)
+    matched.push(session)
+  }
+  if (step.cardId) {
+    for (const session of sessionsByCard.get(step.cardId) ?? []) {
+      if (seen.has(session.id)) continue
+      seen.add(session.id)
+      matched.push(session)
+    }
+  }
+  return matched
+}
+
 function matchesPath(path: LearningPath, q: string): boolean {
   if (!q) return true
   const haystack = [
@@ -707,6 +677,10 @@ function isArchivedSession(session: SessionSummary): boolean {
   return session.status === 'completed'
     || session.threadStatus === 'archived'
     || session.cardType === 'permanent'
+}
+
+function isArchivedPath(path: LearningPath): boolean {
+  return path.status === 'archived'
 }
 
 function stepTone(status: LearningStep['status']) {

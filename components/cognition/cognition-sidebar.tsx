@@ -33,7 +33,7 @@ export default function CognitionSidebar() {
             <span className="serif text-xl text-white/90">{loading ? '-' : initial}</span>
           </div>
           <div className="min-w-0 flex-1">
-            <PanelTitle title="学习画像" icon={<UserRound className="h-3.5 w-3.5" />} />
+            <PanelTitle title="认知画像" icon={<UserRound className="h-3.5 w-3.5" />} />
             <div className="mt-2 truncate text-white/88 font-medium" style={{ fontSize: 'var(--f11)' }}>{loading ? '加载中' : userName}</div>
             <div className="mt-1 mono text-white/35" style={{ fontSize: 'var(--f8)' }}>{totalCards} 张卡片</div>
           </div>

@@ -80,17 +80,17 @@ export default function Header() {
           <button className={`mode-btn ${mode === 'dashboard' ? 'active' : ''}`} onClick={() => setMode('dashboard' as Mode)} title="仪表板 — 查看知识统计、最近活动和系统状态">
             <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>仪表板</span>DASHBOARD
           </button>
-          <button className={`mode-btn forge-mode ${mode === 'forge' ? 'active' : ''}`} onClick={() => setMode('forge' as Mode)} title="AI 对话 — 与 Agent 对话，创建和编辑知识卡片">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>AI 对话</span>FORGE
+          <button className={`mode-btn forge-mode ${mode === 'forge' ? 'active' : ''}`} onClick={() => setMode('forge' as Mode)} title="AI 工作台 — 继续任务、普通对话和卡片加工">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>AI 工作台</span>WORKSPACE
           </button>
-          <button className={`mode-btn ${mode === 'galaxy' ? 'active' : ''}`} onClick={() => setMode('galaxy' as Mode)} title="星系图 — 3D 可视化浏览知识网络">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>可视化</span>GALAXY
+          <button className={`mode-btn ${mode === 'galaxy' ? 'active' : ''}`} onClick={() => setMode('galaxy' as Mode)} title="知识图谱 — 可视化浏览和整理知识网络">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>知识图谱</span>GRAPH
           </button>
-          <button className={`mode-btn cognition-mode ${mode === 'cognition' ? 'active' : ''}`} onClick={() => setMode('cognition' as Mode)} title="认知分析 — 查看学习画像和认知雷达">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>认知</span>COGNITION
+          <button className={`mode-btn cognition-mode ${mode === 'cognition' ? 'active' : ''}`} onClick={() => setMode('cognition' as Mode)} title="认知洞察 — 查看能力画像、观察记录和下一步建议">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>认知洞察</span>INSIGHTS
           </button>
-          <button className={`mode-btn learn-mode ${mode === 'learn' ? 'active' : ''}`} onClick={() => setMode('learn' as Mode)} title="学习路径 — 按步骤系统化学习">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>学习</span>LEARN
+          <button className={`mode-btn learn-mode ${mode === 'learn' ? 'active' : ''}`} onClick={() => setMode('learn' as Mode)} title="路径规划 — 创建、整理和推进任务路径">
+            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>路径规划</span>PATH
           </button>
           {vaults.length > 0 && (
             <>

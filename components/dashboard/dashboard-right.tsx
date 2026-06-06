@@ -79,7 +79,7 @@ export default function DashboardRight() {
     }
     const fn = actions[actionMap[f]]
     if (typeof fn !== 'function') {
-      toast.error('Galaxy 画布尚未就绪，请先切换到 Galaxy 模式')
+      toast.error('知识图谱画布尚未就绪，请先切换到知识图谱页面')
       return
     }
     fn()
@@ -89,11 +89,11 @@ export default function DashboardRight() {
     setMetrics(m)
     if (m === 'orphans') {
       const fn = actions.showOrphansOnly
-      if (typeof fn !== 'function') { toast.error('Galaxy 画布尚未就绪，请先切换到 Galaxy 模式'); return }
+      if (typeof fn !== 'function') { toast.error('知识图谱画布尚未就绪，请先切换到知识图谱页面'); return }
       fn()
     } else {
       const setVisible = actions.setNodeTypeVisible
-      if (typeof setVisible !== 'function') { toast.error('Galaxy 画布尚未就绪，请先切换到 Galaxy 模式'); return }
+      if (typeof setVisible !== 'function') { toast.error('知识图谱画布尚未就绪，请先切换到知识图谱页面'); return }
       setVisible('permanent', m === 'all' || m === 'perm')
       setVisible('fleeting', m === 'all' || m === 'fleet')
       setVisible('literature', m === 'all')
@@ -161,7 +161,7 @@ export default function DashboardRight() {
             <div className="space-y-2">
               <div className="flex items-center gap-2.5 cursor-pointer group" onClick={() => setMode('forge')}><span className="w-1.5 h-1.5 rounded-full bg-purple-400 flex-shrink-0 group-hover:shadow-[0_0_8px_#a855f7] transition-all" /><span style={{ fontSize: 'var(--f10)' }} className="text-white/60 group-hover:text-white transition-colors">New Card</span><span className="mono opacity-15 ml-auto" style={{ fontSize: 'var(--f7)' }}>N</span></div>
               <div className="flex items-center gap-2.5 cursor-pointer group" onClick={() => openModal('importtext')}><span className="w-1.5 h-1.5 rounded-full bg-cyan-400 flex-shrink-0 group-hover:shadow-[0_0_8px_#22d3ee] transition-all" /><span style={{ fontSize: 'var(--f10)' }} className="text-white/60 group-hover:text-white transition-colors">Import Literature</span><span className="mono opacity-15 ml-auto" style={{ fontSize: 'var(--f7)' }}>I</span></div>
-              <div className="flex items-center gap-2.5 cursor-pointer group" onClick={() => setMode('learn')}><span className="w-1.5 h-1.5 rounded-full bg-pink-400 flex-shrink-0 group-hover:shadow-[0_0_8px_#f472b6] transition-all" /><span style={{ fontSize: 'var(--f10)' }} className="text-white/60 group-hover:text-white transition-colors">Start Learning</span><span className="mono opacity-15 ml-auto" style={{ fontSize: 'var(--f7)' }}>L</span></div>
+              <div className="flex items-center gap-2.5 cursor-pointer group" onClick={() => setMode('learn')}><span className="w-1.5 h-1.5 rounded-full bg-pink-400 flex-shrink-0 group-hover:shadow-[0_0_8px_#f472b6] transition-all" /><span style={{ fontSize: 'var(--f10)' }} className="text-white/60 group-hover:text-white transition-colors">Plan Path</span><span className="mono opacity-15 ml-auto" style={{ fontSize: 'var(--f7)' }}>P</span></div>
             </div>
           </div>
           <div className="hud-line"></div>

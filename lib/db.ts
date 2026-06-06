@@ -29,7 +29,37 @@ function createPrismaClient() {
     }
   }) as unknown as typeof originalTransaction
 
-  return client
+  return client.$extends({
+    name: 'rag-card-indexing',
+    query: {
+      card: {
+        async create({ args, query }) {
+          const result = await query(args)
+          if (typeof result.id === 'string') scheduleRagIndexCard(result.id)
+          return result
+        },
+        async update({ args, query }) {
+          const result = await query(args)
+          if (typeof result.id === 'string') scheduleRagIndexCard(result.id)
+          return result
+        },
+        async upsert({ args, query }) {
+          const result = await query(args)
+          if (typeof result.id === 'string') scheduleRagIndexCard(result.id)
+          return result
+        },
+      },
+    },
+  }) as unknown as PrismaClient
+}
+
+function scheduleRagIndexCard(cardId: string) {
+  if (!process.env.LIGHTRAG_BASE_URL) return
+  void import('@/server/core/jobs/queue')
+    .then(({ enqueueRagIndexCard }) => enqueueRagIndexCard(cardId))
+    .catch((err) => {
+      console.warn('[RAG] failed to enqueue card index:', err instanceof Error ? err.message : String(err))
+    })
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient()

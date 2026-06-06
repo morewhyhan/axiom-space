@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useGalaxyData, useCreateCluster, useUpdateCluster, useDeleteCluster, useAssignCardCluster } from '@/hooks/use-galaxy'
-import { useGalaxyActions } from '@/stores/mode-store'
+import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import { toast } from 'sonner'
 
 /** Call a Three.js canvas bridge function; warn the user if the canvas hasn't mounted yet. */
@@ -35,6 +35,10 @@ export default function GalaxyControls() {
   const [bloom, setBloom] = useState(1.4)
   const [cometSpeed, setCometSpeed] = useState(1)
   const [milkyWay, setMilkyWay] = useState(true)
+  const hoverAttention = useAppStore((s) => s.graphHoverAttention)
+  const setHoverAttention = useAppStore((s) => s.setGraphHoverAttention)
+  const projectionMode = useAppStore((s) => s.graphProjectionMode)
+  const setProjectionMode = useAppStore((s) => s.setGraphProjectionMode)
   const [intEdges, setIntEdges] = useState(false)
   const [extEdges, setExtEdges] = useState(false)
   const [cometsVis, setCometsVis] = useState(true)
@@ -69,25 +73,39 @@ export default function GalaxyControls() {
       const bl = acts.getBloom?.() as number | undefined; if (bl !== undefined) setBloom(bl);
       const cs = acts.getCometSpeed?.() as number | undefined; if (cs !== undefined) setCometSpeed(cs);
       const mw = acts.getMilkyWay?.() as boolean | undefined; if (mw !== undefined) setMilkyWay(mw);
+      const ha = acts.getHoverAttention?.() as boolean | undefined; if (ha !== undefined) setHoverAttention(ha);
+      const pm = acts.getProjectionMode?.() as '3d' | '2d' | undefined; if (pm !== undefined) setProjectionMode(pm);
       // Did any of the reads succeed?  Stop polling.
-      if (ar !== undefined || sr !== undefined || bl !== undefined || cs !== undefined || mw !== undefined) return;
+      if (ar !== undefined || sr !== undefined || bl !== undefined || cs !== undefined || mw !== undefined || ha !== undefined || pm !== undefined) return;
       attempts++;
       if (attempts < maxAttempts) timerId = setTimeout(poll, 200);
     };
     poll();
     return () => { if (timerId !== null) clearTimeout(timerId) }
-  }, [])
+  }, [setHoverAttention, setProjectionMode])
 
   const toggleAutoRotate = () => { const v = !autoRotate; if (callCanvas('__setAutoRotate', [v])) setAutoRotate(v) }
   const handleSpeed = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setRotateSpeed', [v])) setRotateSpeed(v) }
   const handleBloom = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setBloom', [v])) setBloom(v) }
   const handleComet = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setCometSpeed', [v])) setCometSpeed(v) }
   const toggleMilkyWay = () => { const v = !milkyWay; if (callCanvas('__setMilkyWay', [v])) setMilkyWay(v) }
+  const toggleHoverAttention = () => {
+    const v = !hoverAttention
+    setHoverAttention(v)
+    callCanvas('__setHoverAttention', [v])
+  }
+  const toggleProjectionMode = () => {
+    const v = projectionMode === '3d' ? '2d' : '3d'
+    setProjectionMode(v)
+    callCanvas('__setProjectionMode', [v])
+  }
   const toggleIntEdges = () => { const v = !intEdges; if (callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
   const toggleCometsVis = () => { const v = !cometsVis; if (callCanvas('__setCometsVisible', [v])) setCometsVis(v) }
   const toggleExtEdges = () => { const v = !extEdges; if (callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
   const toggleType = (type: string, state: boolean, setter: any) => { const v = !state; if (callCanvas('__setNodeTypeVisible', [type, v])) setter(v) }
-  const resetView = () => { callCanvas('__resetCameraView', []) }
+  const resetView = () => {
+    if (callCanvas('__resetCameraView', [])) setProjectionMode('3d')
+  }
   const fitSelection = () => { callCanvas('__fitSelection', []) }
 
   // ── Cluster management state ──
@@ -177,6 +195,8 @@ export default function GalaxyControls() {
             <input type="range" min="0" max="3" step="0.1" value={cometSpeed} onChange={handleComet} className="orbit-slider cursor-pointer" />
           </div>
           {[
+            { label: '悬停聚焦', val: hoverAttention, fn: toggleHoverAttention },
+            { label: projectionMode === '3d' ? '3D 星系' : '2D 图谱', val: projectionMode === '2d', fn: toggleProjectionMode },
             { label: '彗星', val: cometsVis, fn: toggleCometsVis },
             { label: '银河带', val: milkyWay, fn: toggleMilkyWay },
             { label: '内部连线', val: intEdges, fn: toggleIntEdges },

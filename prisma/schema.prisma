@@ -6,7 +6,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -83,6 +83,7 @@ model card {
   edgesFrom edge[] @relation("EdgeSource")
   edgesTo   edge[] @relation("EdgeTarget")
   learningPathSteps learningPathStep[]
+  ragIndexes ragDocumentIndex[]
 
   @@unique([vaultId, path])
   @@index([vaultId, type])
@@ -357,9 +358,36 @@ model vault {
   learningPaths             learningPath[]
   educationProfileHistory   EducationProfileHistory[]
   pushRecords               PushRecord[]
+  ragDocumentIndexes        ragDocumentIndex[]
 
 
   @@index([userId])
+}
+
+// LightRAG sidecar index state — AXIOM remains the source of truth.
+model ragDocumentIndex {
+  id             String   @id @default(uuid())
+  vaultId        String
+  cardId         String
+  provider       String   @default("lightrag")
+  workspace      String
+  documentId     String
+  contentHash    String
+  trackId        String?
+  status         String   @default("pending") // pending | indexing | indexed | failed | disabled
+  lastError      String?
+  indexedAt      DateTime?
+  lastSyncedAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  card  card  @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, cardId])
+  @@unique([provider, documentId])
+  @@index([vaultId, status])
+  @@index([workspace])
 }
 
 model learningPath {

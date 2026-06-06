@@ -23,6 +23,7 @@ const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-li
 const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
+const Graph2DCanvas = dynamic(() => import('@/components/galaxy/graph-2d-canvas'), { ssr: false })
 const CognitionSidebar = dynamic(() => import('@/components/cognition/cognition-sidebar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
 const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
@@ -34,6 +35,8 @@ const LandingPage = dynamic(() => import('@/components/landing/landing-page'))
 
 export default function Home() {
   const mode = useAppStore((s) => s.mode)
+  const graphProjectionMode = useAppStore((s) => s.graphProjectionMode)
+  const setGraphProjectionMode = useAppStore((s) => s.setGraphProjectionMode)
   const modal = useAppStore((s) => s.modal)
   const openModal = useAppStore((s) => s.openModal)
   const closeModal = useCallback(() => {
@@ -159,7 +162,7 @@ export default function Home() {
 
   const loadStatusText = !authPending && isLoggedIn
     ? galaxyData && !galaxyLoading ? '准备就绪'
-      : currentVaultId ? '正在加载星系数据...'
+      : currentVaultId ? '正在加载知识图谱数据...'
       : '正在加载知识库...'
     : ''
 
@@ -467,9 +470,16 @@ export default function Home() {
             vaultId={currentVaultId}
             learningPathSteps={learningPathSteps}
           />
+          <Graph2DCanvas
+            nodes={galaxyData?.nodes ?? []}
+            edges={galaxyData?.edges ?? []}
+            clusters={galaxyData?.clusters ?? []}
+            visible={graphProjectionMode === '2d'}
+          />
           <button id="reset-view-btn" onClick={() => {
             const resetFn = useGalaxyActions.getState().actions.resetCameraView
             if (resetFn) resetFn()
+            setGraphProjectionMode('3d')
           }}>⊙ RESET VIEW</button>
 
           {!immersive && <div className="relative z-10 flex flex-col h-screen pointer-events-none">
@@ -481,7 +491,9 @@ export default function Home() {
                     <DashboardLeft />
                   </div>
                   <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
-                    <div className="graph-hint" id={mode === 'dashboard' ? 'graph-hint' : undefined}>拖拽旋转 · 滚轮缩放 · 点击选择节点</div>
+                    <div className="graph-hint" id={mode === 'dashboard' ? 'graph-hint' : undefined}>
+                      {graphProjectionMode === '2d' ? '拖拽平移 · 滚轮缩放 · 点击聚焦节点' : '拖拽旋转 · 滚轮缩放 · 点击选择节点'}
+                    </div>
                     <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'dashboard' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'dashboard' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
                     <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
                       <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
@@ -545,7 +557,9 @@ export default function Home() {
                     <GalaxyControls />
                   </div>
                   <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
-                    <div className="graph-hint" id={mode === 'galaxy' ? 'graph-hint' : undefined}>拖拽旋转 · 滚轮缩放 · 点击选择节点</div>
+                    <div className="graph-hint" id={mode === 'galaxy' ? 'graph-hint' : undefined}>
+                      {graphProjectionMode === '2d' ? '拖拽平移 · 滚轮缩放 · 点击聚焦节点' : '拖拽旋转 · 滚轮缩放 · 点击选择节点'}
+                    </div>
                     <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'galaxy' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'galaxy' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
                     <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
                       <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
@@ -806,7 +820,7 @@ export default function Home() {
                     {learningProfile && (
                       <div className="mb-5 space-y-3">
                         <div className="hud-line"></div>
-                        <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f8)' }}>Learning_Profile</span>
+                        <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f8)' }}>Ability_Profile</span>
                         <div className="grid grid-cols-3 gap-3">
                           <div className="text-center bg-white/5 rounded-lg p-3">
                             <div className="serif text-lg text-green-400">{learningProfile.masteryRate}%</div>
@@ -846,7 +860,7 @@ export default function Home() {
                   </div>
                   <div className="p-5 space-y-2">
                     {[
-                      ['⌘K', '搜索节点'], ['⌘N', '新建节点'], ['⌘1/2/3/4/5', '切换模式（仪表板/AI对话/星系/认知/学习）'], ['/', '命令面板'], ['Esc', '关闭面板'], ['Ctrl+S', '保存卡片（编辑器中）'], ['Ctrl+Z', '撤销编辑（编辑器中）'],
+                      ['⌘K', '搜索节点'], ['⌘N', '新建节点'], ['⌘1/2/3/4/5', '切换页面（仪表板/AI工作台/知识图谱/认知洞察/路径规划）'], ['/', '命令面板'], ['Esc', '关闭面板'], ['Ctrl+S', '保存卡片（编辑器中）'], ['Ctrl+Z', '撤销编辑（编辑器中）'],
                     ].map(([key, desc]) => (
                       <div key={key as string} className="flex justify-between items-center py-2 border-b border-white/5">
                         <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>{key as string}</span>
@@ -868,19 +882,19 @@ export default function Home() {
                     <div>
                       <h2 className="serif text-xl text-white/80 mb-2">欢迎来到 AXIOM 认知操作系统</h2>
                       <p className="text-white/40 leading-relaxed" style={{ fontSize: 'var(--f10)' }}>
-                        AXIOM 将你的知识可视化为星系图谱，让 AI 帮助你整理、连接、深化认知。
+                        AXIOM 将你的知识可视化为知识图谱，让 AI 帮助你整理、连接、深化认知。
                       </p>
                     </div>
                     <div className="hud-line"></div>
                     <div>
-                      <span className="mono opacity-30 uppercase tracking-wider block mb-3" style={{ fontSize: 'var(--f8)' }}>5 个模式</span>
+                      <span className="mono opacity-30 uppercase tracking-wider block mb-3" style={{ fontSize: 'var(--f8)' }}>5 个页面</span>
                       <div className="space-y-2.5">
                         {[
                           { key: '1', name: '仪表板', sub: 'Dashboard', desc: '查看知识统计、最近活动和系统状态概览', color: 'text-white/60', dot: 'bg-white/40' },
-                          { key: '2', name: 'AI 对话', sub: 'Forge', desc: '与 AI Agent 对话，创建和编辑知识卡片 — 推荐从这里开始', color: 'text-pink-400', dot: 'bg-pink-400', recommend: true },
-                          { key: '3', name: '星系图', sub: 'Galaxy', desc: '3D 可视化浏览你的知识网络，发现隐藏关联', color: 'text-cyan-400', dot: 'bg-cyan-400' },
-                          { key: '4', name: '认知分析', sub: 'Cognition', desc: '查看 AI 生成的认知雷达和学习画像', color: 'text-purple-400', dot: 'bg-purple-400' },
-                          { key: '5', name: '学习路径', sub: 'Learn', desc: '按步骤系统化学习，追踪学习进度', color: 'text-amber-400', dot: 'bg-amber-400' },
+                          { key: '2', name: 'AI 工作台', sub: 'Workspace', desc: '继续任务、普通对话和卡片加工 — 推荐从这里开始', color: 'text-pink-400', dot: 'bg-pink-400', recommend: true },
+                          { key: '3', name: '知识图谱', sub: 'Graph', desc: '可视化浏览和整理你的知识网络，发现隐藏关联', color: 'text-cyan-400', dot: 'bg-cyan-400' },
+                          { key: '4', name: '认知洞察', sub: 'Insights', desc: '查看能力画像、观察记录和下一步建议', color: 'text-purple-400', dot: 'bg-purple-400' },
+                          { key: '5', name: '路径规划', sub: 'Path', desc: '创建、整理和推进任务路径', color: 'text-amber-400', dot: 'bg-amber-400' },
                         ].map(m => (
                           <div key={m.key} className={`flex items-start gap-3 p-3 rounded-lg ${m.recommend ? 'bg-pink-500/5 border border-pink-500/15' : 'bg-white/[0.02] border border-white/5'}`}>
                             <span className={`w-5 h-5 rounded-full ${m.dot} flex items-center justify-center shrink-0 mt-0.5`}>
@@ -902,7 +916,7 @@ export default function Home() {
                     <div>
                       <span className="mono opacity-30 uppercase tracking-wider block mb-2" style={{ fontSize: 'var(--f8)' }}>快捷键</span>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                        {[['⌘K', '搜索'], ['⌘N', '新建卡片'], ['⌘1-5', '切换模式'], ['/', '命令面板']].map(([k, d]) => (
+                        {[['⌘K', '搜索'], ['⌘N', '新建卡片'], ['⌘1-5', '切换页面'], ['/', '命令面板']].map(([k, d]) => (
                           <div key={k as string} className="flex gap-2">
                             <span className="mono text-white/50 shrink-0" style={{ fontSize: 'var(--f9)' }}>{k as string}</span>
                             <span className="text-white/30" style={{ fontSize: 'var(--f9)' }}>{d as string}</span>

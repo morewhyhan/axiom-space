@@ -63,7 +63,7 @@ export default function ProfileBar() {
 
       {/* Label at bottom */}
       <div className="mt-auto mono text-white/10 text-center" style={{ fontSize: 'var(--f7)' }}>
-        <span style={{ writingMode: 'vertical-rl' }}>COGNITION</span>
+        <span style={{ writingMode: 'vertical-rl' }}>INSIGHTS</span>
       </div>
     </aside>
   )

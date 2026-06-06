@@ -9,6 +9,7 @@ import { resolveVault } from '@/server/api/auth-helper'
 import { aiManager } from '@/server/core/ai/AIManager'
 import { pathAdjustmentEngine } from '@/server/core/learning/path-adjustment-engine'
 import type { LearningPath } from '@/server/core/learning/path-adjustment-engine'
+import { queryLightRAGContext } from '@/server/core/rag/lightrag-service'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
 
@@ -64,9 +65,10 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vid = vault.id
     const topic = c.req.query('topic')?.trim().toLowerCase()
 
-    // 1. Try persisted paths first
+    // 1. Try persisted paths first. Return all path statuses so the UI can
+    // filter active/archived without losing the archive list.
     const persistedPaths = await prisma.learningPath.findMany({
-      where: { userId, vaultId: vid, status: 'active' },
+      where: { userId, vaultId: vid },
       include: {
         steps: {
           orderBy: { order: 'asc' },
@@ -95,6 +97,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
             status: s.status as 'locked' | 'available' | 'learning' | 'completed' | 'mastered',
             desc: s.description || '',
             concept: s.concept || undefined,
+            chapter: s.chapter || undefined,
             mastery: s.mastery,
             estimatedMinutes: s.estimatedMinutes || undefined,
             prerequisites: safeParseJsonArray(s.prerequisites),
@@ -102,9 +105,13 @@ const app = new Hono<{ Variables: { userId: string } }>()
           totalCount: p.totalSteps,
           doneCount: p.doneSteps,
           progress: p.totalSteps > 0 ? Math.round((p.doneSteps / p.totalSteps) * 100) : 0,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
         }))
+      const inboxPath = await buildUnassignedTaskPath(vid, topic)
+      if (inboxPath) paths.unshift(inboxPath)
 
-      const activePath = paths.find(p => p.steps.some(s => s.status === 'learning' || s.status === 'available'))
+      const activePath = paths.find(p => p.status !== 'archived' && p.steps.some(s => s.status === 'learning' || s.status === 'available'))
         ?? paths[0] ?? null
       const activeStep = activePath
         ? activePath.steps.findIndex(s => s.status === 'learning') !== -1
@@ -226,6 +233,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
         status: (s as { status: string }).status as string,
         desc: ((s as { description: string | null }).description) || '',
         concept: (s as { concept: string | null }).concept || undefined,
+        chapter: (s as { chapter?: string | null }).chapter || undefined,
         mastery: (s as { mastery: number }).mastery,
         estimatedMinutes: (s as { estimatedMinutes: number | null }).estimatedMinutes || undefined,
         prerequisites: safeParseJsonArray((s as { prerequisites: string | null }).prerequisites),
@@ -233,7 +241,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
       totalCount: p.totalSteps,
       doneCount: p.doneSteps,
       progress: p.totalSteps > 0 ? Math.round((p.doneSteps / p.totalSteps) * 100) : 0,
+      createdAt: (p as { createdAt?: Date }).createdAt,
+      updatedAt: (p as { updatedAt?: Date }).updatedAt,
     }))
+    const inboxPath = await buildUnassignedTaskPath(vid, topic)
+    if (inboxPath) paths.unshift(inboxPath)
 
     const activePath = paths.find((p: { steps: Array<{ status: string }> }) => p.steps.some((s: { status: string }) => s.status === 'learning' || s.status === 'available'))
       ?? paths[0] ?? null
@@ -293,6 +305,22 @@ const app = new Hono<{ Variables: { userId: string } }>()
 - 注意: 优先加强薄弱概念，跳过已掌握概念，适当深化学习中的概念
 ` : ''
 
+    const ragContext = await queryLightRAGContext({
+      vaultId: vid,
+      query: `${topic}\n${material.slice(0, 1000)}`,
+      mode: 'mix',
+      topK: 6,
+    }).then((context) => context.answer
+      ? `
+## 用户知识库检索结果
+${context.answer.slice(0, 2400)}
+`
+      : '')
+      .catch((err) => {
+        console.warn('[Learning] LightRAG context unavailable:', err instanceof Error ? err.message : String(err))
+        return ''
+      })
+
     // ── Batch mode: generate many concept cards with relationships ──
     if (mode === 'batch') {
       try {
@@ -326,6 +354,7 @@ Level: ${level}
 ${material ? `Reference Material: ${material.slice(0, 3000)}` : ''}
 Existing Knowledge: ${existingTitles.join(', ') || '(none)'}
 ${capabilityContext}
+${ragContext}
 Generate ${batchSize} interconnected concept cards for "${topic}".`
 
         const rawResponse = await aiManager.callAPI(batchSystemPrompt, [
@@ -505,6 +534,7 @@ Level: ${level}
 ${material ? `Reference Material: ${material.slice(0, 3000)}` : ''}
 Existing Knowledge: ${existingTitles.join(', ') || '(none)'}
 ${capabilityContext}
+${ragContext}
 Generate a learning path for "${topic}" at ${level} level.`
 
       const rawResponse = await aiManager.callAPI(systemPrompt, [
@@ -1085,6 +1115,25 @@ ${conversationText}
       evaluation,
       cardUpgraded: evaluation?.passed ?? false,
     })
+  })
+
+  // PATCH /api/learning/path/:pathId — 更新路径状态（归档/恢复）
+  .patch('/path/:pathId', zValidator('json', z.object({
+    status: z.enum(['active', 'archived']),
+  })), async (c) => {
+    const userId = c.get('userId') as string
+    const pathId = c.req.param('pathId')
+    const { status } = c.req.valid('json')
+
+    const path = await prisma.learningPath.findUnique({ where: { id: pathId } })
+    if (!path || path.userId !== userId) return c.json({ success: false, error: 'Path not found' }, 404)
+
+    const updated = await prisma.learningPath.update({
+      where: { id: pathId },
+      data: { status },
+    })
+
+    return c.json({ success: true, path: { id: updated.id, status: updated.status } })
   })
 
   // DELETE /api/learning/path/:pathId — 删除路径
@@ -1836,6 +1885,62 @@ function buildEnginePath(pathId: string, userId: string, path: {
       skippedStages: steps.filter((s: { status?: string | null }) => s.status === 'skipped').length,
       adjustmentCount: 0,
     },
+  }
+}
+
+async function buildUnassignedTaskPath(vaultId: string, topic?: string) {
+  const cards = await prisma.card.findMany({
+    where: {
+      vaultId,
+      learningPathSteps: { none: {} },
+      ...(topic ? {
+        OR: [
+          { title: { contains: topic } },
+          { content: { contains: topic } },
+        ],
+      } : {}),
+    },
+    orderBy: { updatedAt: 'desc' },
+    take: 80,
+    select: {
+      id: true,
+      title: true,
+      content: true,
+      type: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  })
+
+  if (cards.length === 0) return null
+
+  return {
+    id: '__unassigned_tasks__',
+    name: '零散卡片任务组',
+    description: '尚未安排进正式学习任务组的真实卡片。',
+    topic: '零散卡片任务组',
+    color: '#22d3ee',
+    difficulty: 'unassigned',
+    source: 'unassigned',
+    status: 'active',
+    steps: cards.map((card, index) => ({
+      index: index + 1,
+      id: `inbox:${card.id}`,
+      cardId: card.id,
+      name: card.title || card.content.split('\n').find(Boolean)?.slice(0, 60) || '未命名卡片',
+      status: 'available' as const,
+      desc: '尚未安排进正式学习任务组的卡片',
+      concept: card.title || undefined,
+      chapter: card.type === 'permanent' ? '永久卡片' : card.type === 'literature' ? '文献卡片' : '闪念卡片',
+      mastery: 0,
+      estimatedMinutes: 10,
+      prerequisites: [],
+    })),
+    totalCount: cards.length,
+    doneCount: 0,
+    progress: 0,
+    createdAt: cards[cards.length - 1]?.createdAt,
+    updatedAt: cards[0]?.updatedAt,
   }
 }
 

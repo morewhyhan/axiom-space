@@ -13,7 +13,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useAppStore } from '@/stores/mode-store'
 import { useAuthSession } from '@/hooks/use-auth'
 import { getSiteUrl } from '@/lib/site-url'
-import type { AgentMessage, SessionSummary } from '@/stores/agent-store'
+import type { AgentMessage, RagReference, SessionSummary } from '@/stores/agent-store'
 import type { ResourceProgressStatus } from '@/stores/agent-store'
 
 // Re-export for callers that import the types from this file
@@ -200,6 +200,15 @@ export function useAgent() {
                   error: typeof payload.error === 'string' ? payload.error : undefined,
                   timestamp: typeof payload.timestamp === 'number' ? payload.timestamp : undefined,
                 })
+              }
+              if (payload.type === 'rag_context' && Array.isArray(payload.references)) {
+                useAgentStore.getState()._setLastRagReferences(
+                  payload.references.filter((reference: unknown): reference is RagReference => {
+                    if (!reference || typeof reference !== 'object') return false
+                    const value = reference as Partial<RagReference>
+                    return typeof value.filePath === 'string'
+                  }),
+                )
               }
               if (payload.type === 'tool_end') {
                 useAgentStore.getState()._setCurrentProgress('')

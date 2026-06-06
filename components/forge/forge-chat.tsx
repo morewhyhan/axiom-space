@@ -12,7 +12,7 @@ import { useAgent } from '@/hooks/use-agent'
 import { useLearningPaths } from '@/hooks/use-learning'
 import { toast } from 'sonner'
 import { useAppStore } from '@/stores/mode-store'
-import type { AgentMessage } from '@/stores/agent-store'
+import type { AgentMessage, RagReference } from '@/stores/agent-store'
 import type { ResourceProgressItem } from '@/stores/agent-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { parseMD } from '@/lib/markdown'
@@ -35,21 +35,6 @@ const PROGRESS_STEPS = [
    ─────────────────────────────────────────────── */
 const isImeComposing = (e: React.KeyboardEvent) =>
   (e.nativeEvent as KeyboardEvent).isComposing || e.key === 'Process'
-
-function buildForgeGuide(cardTitle?: string | null): string {
-  const title = cardTitle?.trim() || '当前卡片'
-  return [
-    `Forge · 卡片锻造师已接管「${title}」。`,
-    '',
-    '我会按三个层次帮你把这张 fleeting note 锻造成 permanent knowledge：',
-    '',
-    '1. 定义边界：先确认这个概念解决什么问题，以及它不是什么。',
-    '2. 补足论证：找出因果链、反例、约束条件和适用场景。',
-    '3. 形成知识卡：整理为标题、核心命题、证据、关联概念和可复用结论。',
-    '',
-    '建议下一步：在编辑器里补一句“我为什么认为它重要”，然后点击保存；确认内容稳定后再升级为 Permanent。',
-  ].join('\n')
-}
 
 /* ───────────────────────────────────────────────
    Separate <think> / <thinking> blocks from answer text (fallback)
@@ -291,6 +276,64 @@ function ResourceProgressPanel({ items }: { items: ResourceProgressItem[] }) {
   )
 }
 
+function RagReferencePanel({ references }: { references: RagReference[] }) {
+  const uniqueReferences = useMemo(() => {
+    const seen = new Set<string>()
+    return references.filter((reference) => {
+      const key = reference.cardId || reference.filePath
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).slice(0, 6)
+  }, [references])
+
+  if (uniqueReferences.length === 0) return null
+
+  return (
+    <div className="mt-3 rounded-lg border border-emerald-400/10 bg-emerald-400/[0.035] px-3 py-2">
+      <div className="mono mb-1.5 text-emerald-300/70 uppercase" style={{ fontSize: 'var(--f8)' }}>
+        Knowledge References
+      </div>
+      <div className="flex flex-col gap-1">
+        {uniqueReferences.map((reference, index) => {
+          const canOpen = !!reference.cardId
+          const label = reference.title || (reference.cardId
+            ? `Card ${reference.cardId.slice(0, 8)}`
+            : reference.filePath
+          )
+          return (
+            <button
+              key={`${reference.filePath}-${index}`}
+              type="button"
+              disabled={!canOpen}
+              onClick={() => {
+                if (!reference.cardId) return
+                useAppStore.getState().setSelectedNode({
+                  id: reference.cardId,
+                  title: label,
+                  type: reference.type || 'fleeting',
+                })
+                useAppStore.getState().setMode('forge')
+              }}
+              className={`flex min-w-0 items-center gap-2 rounded px-2 py-1 text-left transition-colors ${
+                canOpen
+                  ? 'text-white/55 hover:bg-white/5 hover:text-emerald-200'
+                  : 'cursor-default text-white/30'
+              }`}
+              title={reference.filePath}
+            >
+              <span className="mono shrink-0 text-emerald-300/60" style={{ fontSize: 'var(--f8)' }}>
+                [{reference.referenceId || index + 1}]
+              </span>
+              <span className="truncate" style={{ fontSize: 'var(--f9)' }}>{label}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 /* ───────────────────────────────────────────────
    Message Bubble — renders a single message
    ─────────────────────────────────────────────── */
@@ -357,6 +400,7 @@ function ChatMessage({
             <>
               {message.content && <MarkdownContent content={message.content} />}
               <ResourceProgressPanel items={message.resourceProgress ?? []} />
+              <RagReferencePanel references={message.ragReferences ?? []} />
             </>
           )}
         </div>
@@ -457,15 +501,13 @@ export default function ForgeChat() {
       case 'new':
         await createTalkSession()
         break
-      case 'forge': {
-        const agentStore = useAgentStore.getState()
-        agentStore._appendMessage({ role: 'user', content: '/forge' })
-        agentStore._appendMessage({
-          role: 'assistant',
-          content: buildForgeGuide(selectedNode?.title),
-        })
+      case 'forge':
+        await sendMessage(
+          selectedNode?.title
+            ? `请作为卡片锻造师接管「${selectedNode.title}」，先给出锻造这张卡片的真实下一步计划。`
+            : '请作为卡片锻造师接管当前对话，先给出把这个主题沉淀成知识卡片的真实下一步计划。',
+        )
         break
-      }
       case 'title': {
         if (currentSession) {
           const ok = await autoTitleSession(currentSession.id)
@@ -513,10 +555,11 @@ export default function ForgeChat() {
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
       // Subtle notification on first agent response per session
       if (!notifiedRef.current) {
         notifiedRef.current = true
-        toast('AI 正在后台分析对话，更新你的画像和知识卡片', { duration: 4000, style: { fontSize: '11px', background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.3)' } })
+        toast('AI 已完成本轮回复，相关视图正在同步最新数据', { duration: 4000, style: { fontSize: '11px', background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.3)' } })
       }
     }
   }
@@ -561,7 +604,7 @@ export default function ForgeChat() {
               <Hammer className="h-4 w-4" />
             </div>
             <div className="min-w-0">
-              <span className="mono text-pink-300/90 uppercase tracking-[0.26em]" style={{ fontSize: 'var(--f9)' }}>Forge Console</span>
+              <span className="mono text-pink-300/90 uppercase tracking-[0.26em]" style={{ fontSize: 'var(--f9)' }}>AI Workspace</span>
               <div className="mt-1 mono text-white/28" style={{ fontSize: 'var(--f7)' }}>
                 {streaming
                   ? PROGRESS_STEPS[progressStep]
@@ -612,7 +655,7 @@ export default function ForgeChat() {
               <div className="forge-empty-symbol">
                 <Sparkles className="h-6 w-6" />
               </div>
-              <div className="serif text-2xl text-white/18 mb-3 tracking-widest">FORGE</div>
+              <div className="serif text-2xl text-white/18 mb-3 tracking-widest">AI WORKSPACE</div>
               <div className="mono text-white/38 leading-relaxed px-4" style={{ fontSize: 'var(--f10)' }}>
                 把灵感、文献和问题放进这里。Agent 会帮你澄清边界、补齐证据，并生成可沉淀的知识卡片。
               </div>

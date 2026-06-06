@@ -15,29 +15,29 @@ import { useAppStore, type PanelId } from '@/stores/mode-store'
 const FORGE_ITEMS = [
   {
     id: 'sessionList' as const,
-    label: '工作台',
-    description: '任务组、普通会话和归档入口',
+    label: '任务',
+    description: '任务组和普通对话入口',
     icon: LayoutDashboard,
     tone: 'text-pink-300',
   },
   {
     id: 'chat' as const,
-    label: '对话',
-    description: 'Forge 中央对话面板',
+    label: 'AI 对话',
+    description: '当前任务或会话的对话区',
     icon: MessageSquareText,
     tone: 'text-cyan-300',
   },
   {
     id: 'fileTree' as const,
-    label: '文件列表',
-    description: '卡片文件列表，插在工作台右侧',
+    label: '卡片库',
+    description: '按类型或星团浏览卡片',
     icon: Files,
     tone: 'text-purple-300',
   },
   {
     id: 'editor' as const,
-    label: '编辑',
-    description: '右侧卡片编辑器',
+    label: '卡片编辑',
+    description: '查看和修改当前卡片',
     icon: PenLine,
     tone: 'text-pink-300',
   },
@@ -66,7 +66,7 @@ export default function PanelBar() {
             <div className="flex items-center justify-between border-b border-white/8 px-3 py-2">
               <div className="flex items-center gap-2">
                 <SlidersHorizontal className="h-3.5 w-3.5 text-white/45" />
-                <span className="mono text-[9px] uppercase tracking-[0.16em] text-white/45">Panels</span>
+                <span className="mono text-[9px] uppercase tracking-[0.16em] text-white/45">Workspace Panels</span>
               </div>
               <span className="mono text-[8px] text-white/22">{openCount}/4 open</span>
             </div>
@@ -110,10 +110,10 @@ export default function PanelBar() {
               : 'border-white/10 bg-black/58 text-white/46 hover:border-white/16 hover:text-white/70'
           }`}
           onClick={() => setOpen((value) => !value)}
-          title="面板收纳"
+          title="AI 工作台面板"
         >
           <PanelLeft className="h-4 w-4" />
-          <span className="mono text-[9px] uppercase tracking-[0.12em]">Panels</span>
+          <span className="mono text-[9px] uppercase tracking-[0.12em]">Workspace</span>
           <span className="mono rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[8px] text-white/36">
             {openCount}
           </span>
@@ -125,7 +125,7 @@ export default function PanelBar() {
   return (
     <div className="flex items-center px-4 py-1 border-t border-white/5 pointer-events-auto" style={{ height: 34 }}>
       <div className="flex-1 text-center">
-        <span className="mono text-white/15 tracking-widest" style={{ fontSize: 9 }}>COGNITION</span>
+        <span className="mono text-white/15 tracking-widest" style={{ fontSize: 9 }}>INSIGHTS</span>
       </div>
     </div>
   )

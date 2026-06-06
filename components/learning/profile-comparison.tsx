@@ -80,8 +80,8 @@ export default function ProfileComparison() {
       <div className="glass-panel p-6 rounded-2xl">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <span className="mono opacity-40 uppercase block text-sm mb-2">Education_Profile</span>
-            <h2 className="text-2xl font-bold">6维学习画像</h2>
+            <span className="mono opacity-40 uppercase block text-sm mb-2">Ability_Profile</span>
+            <h2 className="text-2xl font-bold">6维能力画像</h2>
           </div>
           <div className="text-right">
             <div className="text-3xl font-bold text-purple-400">{Math.round(avgScore)}</div>

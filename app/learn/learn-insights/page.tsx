@@ -24,9 +24,9 @@ export default function LearnInsightsPage() {
     <div className="min-h-screen p-6 space-y-6">
       {/* 页面头部 */}
       <div>
-        <h1 className="text-4xl font-bold mb-2">学习洞察</h1>
+        <h1 className="text-4xl font-bold mb-2">认知洞察</h1>
         <p className="text-white/60">
-          实时了解您的学习进度、能力评估和推荐资源
+          实时了解您的知识状态、能力评估和推荐资源
         </p>
       </div>
 
@@ -63,20 +63,20 @@ export default function LearnInsightsPage() {
           </div>
         )}
 
-        {/* 学习画像（桌面端占 1 列，移动端独占） */}
+        {/* 能力画像（桌面端占 1 列，移动端独占） */}
         {(activeTab === 'profile' || activeTab === 'overview' || window.innerWidth >= 1024) && (
           <div className={`${activeTab === 'profile' ? '' : activeTab === 'overview' ? '' : 'hidden lg:block'}`}>
-            <h3 className="text-lg font-semibold mb-4 hidden lg:block">学习画像</h3>
+            <h3 className="text-lg font-semibold mb-4 hidden lg:block">能力画像</h3>
             <Suspense fallback={<LoadingPanel />}>
               <EducationProfileView />
             </Suspense>
           </div>
         )}
 
-        {/* 学习路径（桌面端占 1 列，移动端独占） */}
+        {/* 任务路径（桌面端占 1 列，移动端独占） */}
         {(activeTab === 'path' || activeTab === 'overview' || window.innerWidth >= 1024) && (
           <div className={`${activeTab === 'path' ? '' : activeTab === 'overview' ? '' : 'hidden lg:block'}`}>
-            <h3 className="text-lg font-semibold mb-4 hidden lg:block">学习路径</h3>
+            <h3 className="text-lg font-semibold mb-4 hidden lg:block">任务路径</h3>
             <Suspense fallback={<LoadingPanel />}>
               <PathAdjustmentView />
             </Suspense>
@@ -109,18 +109,18 @@ function OverviewPanel() {
   return (
     <div className="space-y-6">
       <div className="glass-panel p-6 rounded-2xl">
-        <h2 className="text-2xl font-bold mb-4">🎯 学习概览</h2>
+        <h2 className="text-2xl font-bold mb-4">🎯 知识概览</h2>
 
         {/* 快速统计 */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-gradient-to-br from-purple-500/20 to-purple-500/5 p-4 rounded-lg border border-purple-500/20">
-            <p className="text-xs text-purple-300 uppercase mb-1">学习画像</p>
+            <p className="text-xs text-purple-300 uppercase mb-1">能力画像</p>
             <p className="text-2xl font-bold text-purple-300">6 维</p>
             <p className="text-xs text-white/40 mt-1">实时自动分析</p>
           </div>
 
           <div className="bg-gradient-to-br from-blue-500/20 to-blue-500/5 p-4 rounded-lg border border-blue-500/20">
-            <p className="text-xs text-blue-300 uppercase mb-1">学习路径</p>
+            <p className="text-xs text-blue-300 uppercase mb-1">任务路径</p>
             <p className="text-2xl font-bold text-blue-300">动态</p>
             <p className="text-xs text-white/40 mt-1">智能调整</p>
           </div>
@@ -142,19 +142,19 @@ function OverviewPanel() {
         <div className="space-y-4">
           <div className="p-4 bg-white/5 rounded-lg border border-white/10">
             <h3 className="font-semibold mb-2 flex items-center gap-2">
-              <span>🎯</span> 6维学习画像
+              <span>🎯</span> 6维能力画像
             </h3>
             <p className="text-sm text-white/70">
-              系统自动分析您的学习表现，从深度、广度、联接、表达、应用、节奏 6 个维度评估您的能力，提供全面的学习洞察。
+              系统自动分析您的知识构建表现，从深度、广度、联接、表达、应用、节奏 6 个维度评估能力，提供全面的认知洞察。
             </p>
           </div>
 
           <div className="p-4 bg-white/5 rounded-lg border border-white/10">
             <h3 className="font-semibold mb-2 flex items-center gap-2">
-              <span>📚</span> 动态学习路径
+              <span>📚</span> 动态任务路径
             </h3>
             <p className="text-sm text-white/70">
-              根据您的评估成绩实时调整学习难度和内容。表现优异可自动跳级，表现欠佳可获得自动复习资源，确保学习体验最优。
+              根据您的评估结果实时调整任务难度和内容。表现优异可自动跳级，表现欠佳可获得复习资源，确保推进节奏合理。
             </p>
           </div>
 
@@ -163,7 +163,7 @@ function OverviewPanel() {
               <span>🎁</span> 智能资源推送
             </h3>
             <p className="text-sm text-white/70">
-              基于您的学习画像和薄弱点，系统智能推荐最适合您的学习资源。支持文档、代码、图解、视频等多种形式，满足不同学习需求。
+              基于您的能力画像和薄弱点，系统智能推荐最适合的资源。支持文档、代码、图解、视频等多种形式。
             </p>
           </div>
 
@@ -172,7 +172,7 @@ function OverviewPanel() {
               <span>⚡</span> 完整反馈闭环
             </h3>
             <p className="text-sm text-white/70">
-              您的学习数据和反馈不断优化系统的推荐算法。更多的学习让系统更了解您，推荐也越来越精准。
+              您的任务推进数据和反馈不断优化系统的推荐算法。使用越多，推荐也越精准。
             </p>
           </div>
         </div>
@@ -184,7 +184,7 @@ function OverviewPanel() {
         <ol className="space-y-3 text-sm text-white/80">
           <li className="flex items-start gap-3">
             <span className="flex-shrink-0 w-6 h-6 bg-purple-500/30 rounded-full flex items-center justify-center text-xs font-bold">1</span>
-            <span>完成一个学习会话（Forge 或 Learn 模式）</span>
+            <span>完成一个 AI 工作台或路径规划会话</span>
           </li>
           <li className="flex items-start gap-3">
             <span className="flex-shrink-0 w-6 h-6 bg-purple-500/30 rounded-full flex items-center justify-center text-xs font-bold">2</span>
@@ -192,7 +192,7 @@ function OverviewPanel() {
           </li>
           <li className="flex items-start gap-3">
             <span className="flex-shrink-0 w-6 h-6 bg-purple-500/30 rounded-full flex items-center justify-center text-xs font-bold">3</span>
-            <span>系统自动更新您的 6维画像和学习路径</span>
+            <span>系统自动更新您的 6维画像和任务路径</span>
           </li>
           <li className="flex items-start gap-3">
             <span className="flex-shrink-0 w-6 h-6 bg-purple-500/30 rounded-full flex items-center justify-center text-xs font-bold">4</span>

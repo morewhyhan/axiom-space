@@ -5,13 +5,12 @@
  */
 import { Hono } from 'hono'
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
-import { DbAdapter } from '@/server/infra/storage/DbAdapter'
 import { prisma } from '@/lib/db'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
 import archiver from 'archiver'
 import { requireAuth } from '../middleware/auth'
-import { syncEdgesFromContent, parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
+import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
 import { runWithAgentContext } from '@/server/core/agent/agent-context'
 
 /** Defensive JSON.parse — never lets a corrupt tags column 500 the request. */

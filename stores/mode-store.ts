@@ -33,6 +33,8 @@ export interface VaultInfo {
   cardCount: number
 }
 
+export type GraphProjectionMode = '3d' | '2d'
+
 interface AppStore {
   mode: Mode
   setMode: (mode: Mode) => void
@@ -82,6 +84,11 @@ interface AppStore {
   setSelectedPathId: (id: string | null) => void
   activeLearningStepId: string | null
   setActiveLearningStepId: (id: string | null) => void
+  /* ── Knowledge graph view ── */
+  graphProjectionMode: GraphProjectionMode
+  setGraphProjectionMode: (mode: GraphProjectionMode) => void
+  graphHoverAttention: boolean
+  setGraphHoverAttention: (enabled: boolean) => void
   /* ── Onboarding ── */
   hasCompletedOnboarding: boolean
   setHasCompletedOnboarding: (v: boolean) => void
@@ -163,6 +170,11 @@ export const useAppStore = create<AppStore>()(
       setSelectedPathId: (id) => set({ selectedPathId: id }),
       activeLearningStepId: null,
       setActiveLearningStepId: (id) => set({ activeLearningStepId: id }),
+      /* ── Knowledge graph view ── */
+      graphProjectionMode: '3d',
+      setGraphProjectionMode: (mode) => set({ graphProjectionMode: mode }),
+      graphHoverAttention: true,
+      setGraphHoverAttention: (enabled) => set({ graphHoverAttention: enabled }),
       /* ── Onboarding ── */
       hasCompletedOnboarding: false,
       setHasCompletedOnboarding: (v) => set({ hasCompletedOnboarding: v }),
@@ -194,6 +206,8 @@ export const useAppStore = create<AppStore>()(
         panelLayout: state.panelLayout,
         panelSizes: state.panelSizes,
         chatPanelOpen: state.chatPanelOpen,
+        graphProjectionMode: state.graphProjectionMode,
+        graphHoverAttention: state.graphHoverAttention,
       }),
     }
   )
