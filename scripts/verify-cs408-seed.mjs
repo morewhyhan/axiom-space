@@ -1,5 +1,6 @@
 import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
+import { readFile } from 'node:fs/promises'
 
 const prisma = new PrismaClient()
 const VAULT_NAME = 'CS408 Knowledge Graph'
@@ -52,6 +53,21 @@ try {
   const crossClusterEdges = edges.filter((edge) => edge.source.clusterId && edge.target.clusterId && edge.source.clusterId !== edge.target.clusterId)
   const bridgeTitles = new Set(['地址映射', '吞吐率与延迟', '学习路径规划', 'CS408 个性化资源包'])
   const bridgeCards = cards.filter((card) => bridgeTitles.has(card.title || ''))
+  const pushedResources = pushes.flatMap((push) => {
+    try {
+      return JSON.parse(push.resources || '[]')
+    } catch {
+      return []
+    }
+  })
+  const pushedTypes = new Set(pushedResources.map((resource) => resource.type).filter(Boolean))
+  const sourceFiles = await Promise.all([
+    readFile('server/core/agent/tool-impl/resource-tools.ts', 'utf8'),
+    readFile('server/core/agent/ResourceGenerationOrchestrator.ts', 'utf8'),
+    readFile('server/core/agent/orchestration-engine.ts', 'utf8'),
+    readFile('server/api/routes/learning.ts', 'utf8'),
+  ])
+  const source = sourceFiles.join('\n')
 
   let profile = null
   try {
@@ -72,9 +88,13 @@ try {
     pass('capabilities', capabilities.length >= 7, `${capabilities.length} capabilities`),
     pass('skills', skills.length >= 4, `${skills.length} skills`),
     pass('push records', pushes.length >= 2, `${pushes.length} pushes`),
+    pass('push resource diversity', pushedResources.length >= 5 && pushedTypes.size >= 5, `${pushedResources.length} resources, types=${Array.from(pushedTypes).join(', ')}`),
     pass('memories', memories.length >= 4, `${memories.length} memories`),
     pass('agent sessions', agentSessions.length >= 1, `${agentSessions.length} agent sessions`),
     pass('rag indexes', indexedCount >= 20, `${indexedCount} indexed docs`),
+    pass('multi-agent resource chain', source.includes("executeFlow('resource_generation'") && source.includes('Profile/Planner/Generator/Reviewer/Pusher'), 'push_resource invokes resource_generation flow'),
+    pass('guardrail resource chain', source.includes('contentSafetyGuardrail.filter') && source.includes('factualCheckGuardrail.verify') && source.includes('guardrail-'), 'resource generation writes safety/factual reports'),
+    pass('push list query', source.includes('take: 20'), 'push-resources returns recent records, not only latest'),
   ]
 
   const ok = checks.every(Boolean)

@@ -436,6 +436,22 @@ export class RealAgent {
           this.messageBus.publish(resultMessage);
         } catch (error) {
           console.error(`[${this.role}] 处理任务失败:`, error);
+          const resultMessage: AgentMessage = {
+            messageId: nanoid(),
+            from: this.role,
+            to: 'orchestrator',
+            type: 'result',
+            payload: {
+              stepId: message.payload.stepId,
+              result: {
+                status: 'failed',
+                error: error instanceof Error ? error.message : String(error),
+              },
+            },
+            timestamp: Date.now(),
+            priority: 'high'
+          };
+          this.messageBus.publish(resultMessage);
         }
       }
     });
@@ -467,9 +483,13 @@ export class RealAgent {
    */
   private async handleProfile(payload: Record<string, any>): Promise<Record<string, any>> {
     const userId = payload.userId || '';
+    const previousResults = payload.previousResults || {};
+    const vaultId = previousResults.vaultId || payload.vaultId;
     const { prisma } = await import('@/lib/db');
 
-    const vault = await prisma.vault.findFirst({ where: { userId } });
+    const vault = vaultId
+      ? await prisma.vault.findFirst({ where: { id: vaultId, userId } })
+      : await prisma.vault.findFirst({ where: { userId } });
     if (!vault) {
       return {
         userLevel: 'beginner',
@@ -636,7 +656,10 @@ export class RealAgent {
     const { prisma } = await import('@/lib/db');
     const { emitNotification } = await import('./notification-bus');
 
-    const vault = await prisma.vault.findFirst({ where: { userId } });
+    const inputVaultId = previousResults.vaultId || payload.vaultId;
+    const vault = inputVaultId
+      ? await prisma.vault.findFirst({ where: { id: inputVaultId, userId } })
+      : await prisma.vault.findFirst({ where: { userId } });
     const vaultId = vault?.id || '';
 
     const resourceCount = generated.length || 1;
@@ -647,6 +670,7 @@ export class RealAgent {
         await prisma.pushRecord.create({
           data: {
             userId,
+            vaultId: vaultId || null,
             resources: JSON.stringify(generated),
             trigger: 'stage_completion',
             reason: message,

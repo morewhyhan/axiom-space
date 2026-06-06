@@ -1499,7 +1499,7 @@ ${conversationText}
           expiresAt: { gt: new Date() }, // 只获取未过期的
         },
         orderBy: { sentAt: 'desc' },
-        take: 1, // 只获取最新的推送
+        take: 20,
       })
 
       let records: Array<Record<string, unknown>> = []

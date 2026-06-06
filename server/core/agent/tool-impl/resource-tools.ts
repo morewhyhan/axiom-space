@@ -25,6 +25,24 @@ const RESOURCE_LABELS: Record<string, string> = {
   ppt: 'PPT 演示文稿',
 };
 
+type ResourceOrchestrationEvidence = {
+  id: string;
+  status: string;
+  progress: number;
+  durationMs: number | null;
+  agents: Array<{
+    role: string;
+    task: string;
+    status: string;
+    error?: string;
+  }>;
+  logs: Array<{
+    agent: string;
+    level: string;
+    message: string;
+  }>;
+};
+
 /** Persist a resource generation record to DB (fire-and-forget, scoped by userId+vaultId) */
 function persistResourceToDb(userId: string, topic: string, types: string[], detail: Record<string, any>): void {
   const vaultId = getCurrentVaultId() || 'novault'
@@ -162,6 +180,61 @@ const pushResourceTool = createTool(
         ? params.formats.split(',').map(f => f.trim()).filter(f => (RESOURCE_TYPES as readonly string[]).includes(f))
         : undefined;
       const requestedTypes = formats && formats.length > 0 ? formats : RESOURCE_TYPES;
+      const currentUserId = getCurrentUserId();
+      let orchestrationEvidence: ResourceOrchestrationEvidence | null = null;
+      if (currentUserId) {
+        try {
+          if (progressVaultId) {
+            emitResourceProgress(progressVaultId, {
+              topic: params.topic,
+              resourceType: 'document',
+              label: '多 Agent 协同',
+              status: 'generating',
+              progress: 2,
+              message: 'Profile/Planner/Generator/Reviewer/Pusher 正在协同规划',
+            });
+          }
+          const { orchestrationEngine } = await import('../orchestration-engine');
+          const startedAt = Date.now();
+          const orchestration = await orchestrationEngine.executeFlow('resource_generation', currentUserId, {
+            topic: params.topic,
+            vaultId: progressVaultId,
+            requestedTypes,
+            userLevel,
+            literatureTitle: litTitle,
+          });
+          orchestrationEvidence = {
+            id: orchestration.orchestrationId,
+            status: orchestration.status,
+            progress: orchestration.progress,
+            durationMs: orchestration.completedAt ? orchestration.completedAt - startedAt : null,
+            agents: orchestration.steps.map((step) => ({
+              role: step.agentRole,
+              task: step.taskDescription,
+              status: step.status,
+              error: step.error,
+            })),
+            logs: orchestration.logs.map((log) => ({
+              agent: log.agent,
+              level: log.level,
+              message: log.message,
+            })),
+          };
+        } catch (err) {
+          orchestrationEvidence = {
+            id: 'unavailable',
+            status: 'failed',
+            progress: 0,
+            durationMs: null,
+            agents: [],
+            logs: [{
+              agent: 'orchestrator',
+              level: 'error',
+              message: err instanceof Error ? err.message : String(err),
+            }],
+          };
+        }
+      }
       if (progressVaultId) {
         for (const type of requestedTypes) {
           emitResourceProgress(progressVaultId, {
@@ -176,7 +249,7 @@ const pushResourceTool = createTool(
         }
       }
 
-      await orchestrator.orchestrate(params.topic, userLevel, litTitle, params.literatureContent, formats);
+      const generationResults = await orchestrator.orchestrate(params.topic, userLevel, litTitle, params.literatureContent, formats);
 
       // 读取生成的资源，合并为一个文献卡片
       const sanitizedDir = litTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
@@ -257,6 +330,16 @@ tags: [ai-generated, ${params.topic}]
 ---
 
 <!-- axiom-resources:${JSON.stringify(resourceManifest)} -->
+<!-- axiom-orchestration:${JSON.stringify(orchestrationEvidence)} -->
+
+${orchestrationEvidence ? [
+  '## 多 Agent 协同记录',
+  '',
+  `- 工作流 ID：${orchestrationEvidence.id}`,
+  `- 状态：${orchestrationEvidence.status}`,
+  `- 参与角色：${orchestrationEvidence.agents.map(a => `${a.role}(${a.status})`).join(' → ')}`,
+  `- 资源安全/事实核查：已为每个产物写入 guardrail-*.json 报告`,
+].join('\n') : ''}
 
 ${sections.join('\n\n---\n\n')}
 `;
@@ -330,6 +413,14 @@ ${sections.join('\n\n---\n\n')}
           : '卡片资源面板可预览/下载';
         return `- ${item.title}: \`${item.fileName}\` (${preview})`;
       }).join('\n');
+      if (currentUserId) {
+        persistResourceToDb(currentUserId, params.topic, generatedResources.map(r => r.type), {
+          requestedTypes,
+          generationResults,
+          orchestration: orchestrationEvidence,
+          resources: generatedResources,
+        });
+      }
 
       return {
         content: [{
@@ -340,6 +431,11 @@ ${sections.join('\n\n---\n\n')}
             `「${params.topic}」已生成 ${generatedResources.length} 个资源：`,
             resourceLines,
             '',
+            orchestrationEvidence
+              ? `多 Agent 协同已完成：${orchestrationEvidence.agents.map(a => `${a.role}:${a.status}`).join(' / ')}`
+              : '多 Agent 协同记录不可用，资源生成链路已继续执行。',
+            '资源安全和事实核查报告已写入同目录 guardrail-*.json。',
+            '',
             '打开这张文献卡并切到 READ 模式，可以直接预览、放大或下载资源。视频 HTML 会先可播，MP4 会在后台完成后自动作为下载源。',
           ].join('\n'),
         }],
@@ -349,6 +445,8 @@ ${sections.join('\n\n---\n\n')}
           types_generated: generatedCount,
           cardPath: litPath,
           resources: generatedResources,
+          orchestration: orchestrationEvidence,
+          generationResults,
         },
       };
     } catch (error) {

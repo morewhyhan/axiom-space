@@ -8,6 +8,8 @@ import { hyperframesHTMLBuilder } from '../ai/hyperframes/generator';
 import type { HyperFramesConfig } from '../ai/hyperframes/generator';
 import { renderDocx, renderPdf, renderPptx } from '../ai/hyperframes/resource-renderer';
 import { hyperframesRenderer } from '../ai/hyperframes/renderer';
+import { contentSafetyGuardrail } from '../ai/guardrails/content-safety';
+import { factualCheckGuardrail } from '../ai/guardrails/factual-check';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -32,6 +34,18 @@ export interface GenerationResult {
   type: ResourceType;
   status: 'completed' | 'failed' | 'skipped';
   error?: string;
+  guardrails?: GuardrailReport;
+}
+
+export interface GuardrailReport {
+  safetyStatus: 'passed' | 'blocked' | 'review_needed';
+  factualStatus: 'passed' | 'warning' | 'blocked';
+  message: string;
+  issues: Array<{
+    assertion: string;
+    status: string;
+    suggestion?: string;
+  }>;
 }
 
 const RESOURCE_PROGRESS_START: Record<ResourceType, number> = {
@@ -288,7 +302,7 @@ export class ResourceGenerationOrchestrator {
         }
 
         const prompt = RESOURCE_PROMPTS[type];
-        let content = await this.deps.callLLM(prompt, context);
+        let content = await this.deps.callLLM(prompt, contentSafetyGuardrail.sanitizeUserPrompt(context));
         let cleaned = this.cleanOutput(type, content);
 
         this.deps.onProgress?.({
@@ -309,6 +323,27 @@ export class ResourceGenerationOrchestrator {
           });
           results.push({ type, status: 'failed', error: validationError });
           continue;
+        }
+
+        const guardrailReport = await this.runGuardrails(type, cleaned);
+        if (guardrailReport.safetyStatus === 'blocked' || guardrailReport.factualStatus === 'blocked') {
+          const error = guardrailReport.message;
+          this.state.failGenerating(type, error);
+          this.deps.onProgress?.({
+            type,
+            status: 'failed',
+            progress: 100,
+            message: '资源安全/事实校验失败',
+            error,
+          });
+          if (this.deps.saveResourceFile) {
+            await this.saveGuardrailReport(literatureTitle, type, guardrailReport).catch(() => {});
+          }
+          results.push({ type, status: 'failed', error, guardrails: guardrailReport });
+          continue;
+        }
+        if (this.deps.saveResourceFile) {
+          await this.saveGuardrailReport(literatureTitle, type, guardrailReport);
         }
 
         // ── Post-processing per type ──
@@ -377,7 +412,7 @@ export class ResourceGenerationOrchestrator {
           });
         }
         this.state.completeGenerating(type);
-        results.push({ type, status: 'completed' });
+        results.push({ type, status: 'completed', guardrails: guardrailReport });
       } catch (error: any) {
         this.state.failGenerating(type, error.message || String(error));
         this.deps.onProgress?.({
@@ -426,6 +461,48 @@ export class ResourceGenerationOrchestrator {
     }
 
     return text.trim();
+  }
+
+  private async runGuardrails(type: ResourceType, content: string): Promise<GuardrailReport> {
+    const safety = await contentSafetyGuardrail.filter(content);
+    if (safety.status === 'blocked') {
+      return {
+        safetyStatus: 'blocked',
+        factualStatus: 'blocked',
+        message: safety.reason || '内容安全校验未通过',
+        issues: [{
+          assertion: safety.reason || 'content_safety',
+          status: 'blocked',
+          suggestion: safety.suggestion,
+        }],
+      };
+    }
+
+    const factual = await factualCheckGuardrail.verify(content, type);
+    return {
+      safetyStatus: safety.status,
+      factualStatus: factual.status,
+      message: factual.message,
+      issues: factual.issues.map((issue) => ({
+        assertion: issue.assertion,
+        status: issue.status,
+        suggestion: issue.suggestion,
+      })),
+    };
+  }
+
+  private async saveGuardrailReport(
+    literatureTitle: string,
+    type: ResourceType,
+    report: GuardrailReport,
+  ): Promise<void> {
+    if (!this.deps.saveResourceFile) return;
+    const fileName = `guardrail-${type}.json`;
+    await this.deps.saveResourceFile(literatureTitle, fileName, JSON.stringify({
+      resourceType: type,
+      checkedAt: new Date().toISOString(),
+      ...report,
+    }, null, 2));
   }
 
   private async renderAndSaveMp4(config: HyperFramesConfig, literatureTitle: string, type: ResourceType): Promise<void> {
