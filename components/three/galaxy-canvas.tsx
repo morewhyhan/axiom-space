@@ -131,6 +131,16 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let pressedNode: THREE.Group | null = null;
     let lockedNode: THREE.Group | null = null;
     let projectionAnimating = false;
+    let flatInteractionSnapshot: {
+      autoRotate: boolean;
+      enableRotate: boolean;
+      enablePan: boolean;
+      screenSpacePanning: boolean;
+      minDistance: number;
+      maxDistance: number;
+      mouseButtons: OrbitControls['mouseButtons'];
+      touches: OrbitControls['touches'];
+    } | null = null;
     let hoverAttentionEnabled = true;
     let lastHoverRaycastAt = 0;
     let projectionMode: '3d' | '2d' = '3d';
@@ -1077,6 +1087,50 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
+    function enterFlatInteractionMode(): void {
+      if (!flatInteractionSnapshot) {
+        flatInteractionSnapshot = {
+          autoRotate: controls.autoRotate,
+          enableRotate: controls.enableRotate,
+          enablePan: controls.enablePan,
+          screenSpacePanning: controls.screenSpacePanning,
+          minDistance: controls.minDistance,
+          maxDistance: controls.maxDistance,
+          mouseButtons: { ...controls.mouseButtons },
+          touches: { ...controls.touches },
+        };
+      }
+
+      controls.autoRotate = false;
+      controls.enableRotate = false;
+      controls.enablePan = true;
+      controls.screenSpacePanning = true;
+      controls.minDistance = 260;
+      controls.maxDistance = 2600;
+      controls.mouseButtons = {
+        LEFT: THREE.MOUSE.PAN,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.PAN,
+      };
+      controls.touches = {
+        ONE: THREE.TOUCH.PAN,
+        TWO: THREE.TOUCH.DOLLY_PAN,
+      };
+    }
+
+    function exitFlatInteractionMode(): void {
+      if (!flatInteractionSnapshot) return;
+      controls.autoRotate = flatInteractionSnapshot.autoRotate;
+      controls.enableRotate = flatInteractionSnapshot.enableRotate;
+      controls.enablePan = flatInteractionSnapshot.enablePan;
+      controls.screenSpacePanning = flatInteractionSnapshot.screenSpacePanning;
+      controls.minDistance = flatInteractionSnapshot.minDistance;
+      controls.maxDistance = flatInteractionSnapshot.maxDistance;
+      controls.mouseButtons = { ...flatInteractionSnapshot.mouseButtons };
+      controls.touches = { ...flatInteractionSnapshot.touches };
+      flatInteractionSnapshot = null;
+    }
+
     function computeFlatProjectionTargets(): Map<THREE.Group, THREE.Vector3> {
       const targets = new Map<THREE.Group, THREE.Vector3>();
       const core = getCoreNode();
@@ -1184,7 +1238,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         autoRotateBeforeFocus = null;
       }
       projectionMode = '3d';
-      controls.enableRotate = true;
+      exitFlatInteractionMode();
       restoreSpatialProjection();
       lockedNode = null;
       pressedNode = null;
@@ -1237,10 +1291,14 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         learningPath.group.visible = learningPath.visible;
       });
     register('setAutoRotate', (on: boolean) => {
+      if (projectionMode === '2d') {
+        if (flatInteractionSnapshot) flatInteractionSnapshot.autoRotate = on;
+        return;
+      }
       controls.autoRotate = on;
       if (autoRotateBeforeFocus !== null) autoRotateBeforeFocus = on;
     });
-    register('getAutoRotate', () => controls.autoRotate);
+    register('getAutoRotate', () => projectionMode === '2d' ? false : controls.autoRotate);
     register('setRotateSpeed', (s: number) => { controls.autoRotateSpeed = s; });
     register('getRotateSpeed', () => controls.autoRotateSpeed);
     register('setBloom', (v: number) => { if (bloomPass) bloomPass.strength = v; });
@@ -1256,9 +1314,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const resetBtn = document.getElementById('reset-view-btn');
       if (mode === '2d') {
         if (resetBtn) resetBtn.classList.add('visible');
-        if (autoRotateBeforeFocus === null) autoRotateBeforeFocus = controls.autoRotate;
-        controls.autoRotate = false;
-        controls.enableRotate = false;
+        enterFlatInteractionMode();
         lockedNode = null;
         hoveredNode = null;
         pressedNode = null;
@@ -1267,14 +1323,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         applyFlatProjection();
         gsap.killTweensOf(controls.target);
         gsap.killTweensOf(camera.position);
-        gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 0.75, ease: 'expo.out' });
-        gsap.to(camera.position, { x: 0, y: 1680, z: 0.1, duration: 0.95, ease: 'expo.out' });
+        gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 0.95, ease: 'expo.inOut' });
+        gsap.to(camera.position, { x: 0, y: 1680, z: 0.1, duration: 0.95, ease: 'expo.inOut' });
       } else {
-        controls.enableRotate = true;
-        if (autoRotateBeforeFocus !== null) {
-          controls.autoRotate = autoRotateBeforeFocus;
-          autoRotateBeforeFocus = null;
-        }
+        exitFlatInteractionMode();
         resetCameraView();
       }
     });
@@ -1465,8 +1517,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     controls.autoRotateSpeed = 0.2;
     if (useAppStore.getState().graphProjectionMode === '2d') {
       projectionMode = '2d';
-      controls.autoRotate = false;
-      controls.enableRotate = false;
+      enterFlatInteractionMode();
       camera.position.set(0, 1680, 0.1);
       controls.target.set(0, 0, 0);
       document.getElementById('reset-view-btn')?.classList.add('visible');

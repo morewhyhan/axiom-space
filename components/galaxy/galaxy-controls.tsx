@@ -39,10 +39,6 @@ export default function GalaxyControls() {
   const setHoverAttention = useAppStore((s) => s.setGraphHoverAttention)
   const projectionMode = useAppStore((s) => s.graphProjectionMode)
   const setProjectionMode = useAppStore((s) => s.setGraphProjectionMode)
-  const neighborhoodOnly = useAppStore((s) => s.graphNeighborhoodOnly)
-  const setNeighborhoodOnly = useAppStore((s) => s.setGraphNeighborhoodOnly)
-  const hideIsolated = useAppStore((s) => s.graphHideIsolated)
-  const setHideIsolated = useAppStore((s) => s.setGraphHideIsolated)
   const [intEdges, setIntEdges] = useState(false)
   const [extEdges, setExtEdges] = useState(false)
   const [cometsVis, setCometsVis] = useState(true)
@@ -88,7 +84,14 @@ export default function GalaxyControls() {
     return () => { if (timerId !== null) clearTimeout(timerId) }
   }, [setHoverAttention, setProjectionMode])
 
-  const toggleAutoRotate = () => { const v = !autoRotate; if (callCanvas('__setAutoRotate', [v])) setAutoRotate(v) }
+  const toggleAutoRotate = () => {
+    if (projectionMode === '2d') {
+      setAutoRotate(false)
+      return
+    }
+    const v = !autoRotate
+    if (callCanvas('__setAutoRotate', [v])) setAutoRotate(v)
+  }
   const handleSpeed = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setRotateSpeed', [v])) setRotateSpeed(v) }
   const handleBloom = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setBloom', [v])) setBloom(v) }
   const handleComet = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setCometSpeed', [v])) setCometSpeed(v) }
@@ -101,10 +104,15 @@ export default function GalaxyControls() {
   const toggleProjectionMode = () => {
     const v = projectionMode === '3d' ? '2d' : '3d'
     setProjectionMode(v)
-    callCanvas('__setProjectionMode', [v])
+    if (callCanvas('__setProjectionMode', [v])) {
+      if (v === '2d') {
+        setAutoRotate(false)
+      } else {
+        const currentAutoRotate = useGalaxyActions.getState().actions.getAutoRotate?.() as boolean | undefined
+        if (currentAutoRotate !== undefined) setAutoRotate(currentAutoRotate)
+      }
+    }
   }
-  const toggleNeighborhoodOnly = () => setNeighborhoodOnly(!neighborhoodOnly)
-  const toggleHideIsolated = () => setHideIsolated(!hideIsolated)
   const toggleIntEdges = () => { const v = !intEdges; if (callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
   const toggleCometsVis = () => { const v = !cometsVis; if (callCanvas('__setCometsVisible', [v])) setCometsVis(v) }
   const toggleExtEdges = () => { const v = !extEdges; if (callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
@@ -203,8 +211,6 @@ export default function GalaxyControls() {
           {[
             { label: '悬停聚焦', val: hoverAttention, fn: toggleHoverAttention },
             { label: projectionMode === '3d' ? '3D 星系' : '2D 图谱', val: projectionMode === '2d', fn: toggleProjectionMode },
-            { label: '只看邻域', val: neighborhoodOnly, fn: toggleNeighborhoodOnly },
-            { label: '隐藏孤点', val: hideIsolated, fn: toggleHideIsolated },
             { label: '彗星', val: cometsVis, fn: toggleCometsVis },
             { label: '银河带', val: milkyWay, fn: toggleMilkyWay },
             { label: '内部连线', val: intEdges, fn: toggleIntEdges },

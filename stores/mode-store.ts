@@ -89,10 +89,6 @@ interface AppStore {
   setGraphProjectionMode: (mode: GraphProjectionMode) => void
   graphHoverAttention: boolean
   setGraphHoverAttention: (enabled: boolean) => void
-  graphNeighborhoodOnly: boolean
-  setGraphNeighborhoodOnly: (enabled: boolean) => void
-  graphHideIsolated: boolean
-  setGraphHideIsolated: (enabled: boolean) => void
   /* ── Onboarding ── */
   hasCompletedOnboarding: boolean
   setHasCompletedOnboarding: (v: boolean) => void
@@ -179,10 +175,6 @@ export const useAppStore = create<AppStore>()(
       setGraphProjectionMode: (mode) => set({ graphProjectionMode: mode }),
       graphHoverAttention: true,
       setGraphHoverAttention: (enabled) => set({ graphHoverAttention: enabled }),
-      graphNeighborhoodOnly: false,
-      setGraphNeighborhoodOnly: (enabled) => set({ graphNeighborhoodOnly: enabled }),
-      graphHideIsolated: false,
-      setGraphHideIsolated: (enabled) => set({ graphHideIsolated: enabled }),
       /* ── Onboarding ── */
       hasCompletedOnboarding: false,
       setHasCompletedOnboarding: (v) => set({ hasCompletedOnboarding: v }),
@@ -216,8 +208,6 @@ export const useAppStore = create<AppStore>()(
         chatPanelOpen: state.chatPanelOpen,
         graphProjectionMode: state.graphProjectionMode,
         graphHoverAttention: state.graphHoverAttention,
-        graphNeighborhoodOnly: state.graphNeighborhoodOnly,
-        graphHideIsolated: state.graphHideIsolated,
       }),
     }
   )
