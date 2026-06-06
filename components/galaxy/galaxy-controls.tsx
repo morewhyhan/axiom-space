@@ -5,6 +5,8 @@ import { useGalaxyData, useCreateCluster, useUpdateCluster, useDeleteCluster, us
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import { toast } from 'sonner'
 
+const PLANAR_LAYOUTS = new Set(['flat', 'radial', 'concentric', 'task-flow', 'timeline'])
+
 /** Call a Three.js canvas bridge function; warn the user if the canvas hasn't mounted yet. */
 function callCanvas<T extends (...args: any[]) => any>(name: string, args: Parameters<T>): boolean {
   const storeName = name.replace(/^__/, '')
@@ -37,8 +39,8 @@ export default function GalaxyControls() {
   const [milkyWay, setMilkyWay] = useState(true)
   const hoverAttention = useAppStore((s) => s.graphHoverAttention)
   const setHoverAttention = useAppStore((s) => s.setGraphHoverAttention)
-  const projectionMode = useAppStore((s) => s.graphProjectionMode)
-  const setProjectionMode = useAppStore((s) => s.setGraphProjectionMode)
+  const layoutMode = useAppStore((s) => s.graphLayoutMode)
+  const setLayoutMode = useAppStore((s) => s.setGraphLayoutMode)
   const [intEdges, setIntEdges] = useState(false)
   const [extEdges, setExtEdges] = useState(false)
   const [cometsVis, setCometsVis] = useState(true)
@@ -74,18 +76,18 @@ export default function GalaxyControls() {
       const cs = acts.getCometSpeed?.() as number | undefined; if (cs !== undefined) setCometSpeed(cs);
       const mw = acts.getMilkyWay?.() as boolean | undefined; if (mw !== undefined) setMilkyWay(mw);
       const ha = acts.getHoverAttention?.() as boolean | undefined; if (ha !== undefined) setHoverAttention(ha);
-      const pm = acts.getProjectionMode?.() as '3d' | '2d' | undefined; if (pm !== undefined) setProjectionMode(pm);
+      const lm = acts.getLayoutMode?.() as typeof layoutMode | undefined; if (lm !== undefined) setLayoutMode(lm);
       // Did any of the reads succeed?  Stop polling.
-      if (ar !== undefined || sr !== undefined || bl !== undefined || cs !== undefined || mw !== undefined || ha !== undefined || pm !== undefined) return;
+      if (ar !== undefined || sr !== undefined || bl !== undefined || cs !== undefined || mw !== undefined || ha !== undefined || lm !== undefined) return;
       attempts++;
       if (attempts < maxAttempts) timerId = setTimeout(poll, 200);
     };
     poll();
     return () => { if (timerId !== null) clearTimeout(timerId) }
-  }, [setHoverAttention, setProjectionMode])
+  }, [layoutMode, setHoverAttention, setLayoutMode])
 
   const toggleAutoRotate = () => {
-    if (projectionMode === '2d') {
+    if (PLANAR_LAYOUTS.has(layoutMode)) {
       setAutoRotate(false)
       return
     }
@@ -101,24 +103,12 @@ export default function GalaxyControls() {
     setHoverAttention(v)
     callCanvas('__setHoverAttention', [v])
   }
-  const toggleProjectionMode = () => {
-    const v = projectionMode === '3d' ? '2d' : '3d'
-    setProjectionMode(v)
-    if (callCanvas('__setProjectionMode', [v])) {
-      if (v === '2d') {
-        setAutoRotate(false)
-      } else {
-        const currentAutoRotate = useGalaxyActions.getState().actions.getAutoRotate?.() as boolean | undefined
-        if (currentAutoRotate !== undefined) setAutoRotate(currentAutoRotate)
-      }
-    }
-  }
   const toggleIntEdges = () => { const v = !intEdges; if (callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
   const toggleCometsVis = () => { const v = !cometsVis; if (callCanvas('__setCometsVisible', [v])) setCometsVis(v) }
   const toggleExtEdges = () => { const v = !extEdges; if (callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
   const toggleType = (type: string, state: boolean, setter: any) => { const v = !state; if (callCanvas('__setNodeTypeVisible', [type, v])) setter(v) }
   const resetView = () => {
-    if (callCanvas('__resetCameraView', [])) setProjectionMode('3d')
+    if (callCanvas('__resetCameraView', [])) setLayoutMode('galaxy')
   }
   const fitSelection = () => { callCanvas('__fitSelection', []) }
 
@@ -167,6 +157,7 @@ export default function GalaxyControls() {
   const clusters = galaxyData?.clusters ?? []
   const allNodes = galaxyData?.nodes ?? []
   const unattachedNodes = allNodes.filter(n => !n.clusterId)
+  const autoRotateOn = autoRotate && !PLANAR_LAYOUTS.has(layoutMode)
 
   return (
     <aside
@@ -182,8 +173,8 @@ export default function GalaxyControls() {
         <div className="space-y-4">
           <div className="flex justify-between items-center group cursor-pointer" onClick={toggleAutoRotate}>
             <span className="mono text-white/60 group-hover:text-white transition-colors" style={{ fontSize: 'var(--f9)' }}>自动旋转</span>
-            <button className={`orbit-toggle ${autoRotate ? 'orbit-toggle-on' : ''}`}>
-              <span className={`orbit-toggle-dot ${autoRotate ? 'orbit-toggle-dot-on' : ''}`} />
+            <button className={`orbit-toggle ${autoRotateOn ? 'orbit-toggle-on' : ''}`}>
+              <span className={`orbit-toggle-dot ${autoRotateOn ? 'orbit-toggle-dot-on' : ''}`} />
             </button>
           </div>
           <div>
@@ -210,7 +201,6 @@ export default function GalaxyControls() {
           </div>
           {[
             { label: '悬停聚焦', val: hoverAttention, fn: toggleHoverAttention },
-            { label: projectionMode === '3d' ? '3D 星系' : '2D 图谱', val: projectionMode === '2d', fn: toggleProjectionMode },
             { label: '彗星', val: cometsVis, fn: toggleCometsVis },
             { label: '银河带', val: milkyWay, fn: toggleMilkyWay },
             { label: '内部连线', val: intEdges, fn: toggleIntEdges },

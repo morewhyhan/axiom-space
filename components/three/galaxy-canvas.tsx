@@ -21,7 +21,7 @@ function seededRandom(seed: number): number {
   const x = Math.sin(seed + 1) * 10000;
   return x - Math.floor(x);
 }
-import { useGalaxyActions, useAppStore } from '@/stores/mode-store';
+import { useGalaxyActions, useAppStore, type GraphLayoutMode } from '@/stores/mode-store';
 
 export interface GalaxyCanvasHandle {
   resetCameraView: () => void;
@@ -121,6 +121,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       clusterOuterRadius: 228,
       clusterLayerGap: 24,
     };
+    const PLANAR_LAYOUT_MODES = new Set<GraphLayoutMode>(['flat', 'radial', 'concentric', 'task-flow', 'timeline']);
+    const STRUCTURED_LAYOUT_MODES = new Set<GraphLayoutMode>(['layered', 'matrix', 'mastery', 'evidence']);
 
     let frames = 0;
     let lastTime = performance.now();
@@ -130,7 +132,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     let hoveredNode: THREE.Group | null = null;
     let pressedNode: THREE.Group | null = null;
     let lockedNode: THREE.Group | null = null;
-    let projectionAnimating = false;
+    let layoutAnimating = false;
+    let autoRotateBeforeLayout: boolean | null = null;
     let flatInteractionSnapshot: {
       autoRotate: boolean;
       enableRotate: boolean;
@@ -143,7 +146,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     } | null = null;
     let hoverAttentionEnabled = true;
     let lastHoverRaycastAt = 0;
-    let projectionMode: '3d' | '2d' = '3d';
+    let layoutMode: GraphLayoutMode = 'galaxy';
     const dimNodeModes = new Set(['forge', 'cognition', 'learn']);
 
     const { register, unregister } = useGalaxyActions.getState()
@@ -411,18 +414,19 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const mid = new THREE.Vector3().lerpVectors(start, end, 0.5);
       const curveSeed = hashId(String(sourceNode.userData.id || '') + String(targetNode.userData.id || ''));
       const direction = new THREE.Vector3().subVectors(end, start).normalize();
-      const centerOut = projectionMode === '2d'
+      const planar = PLANAR_LAYOUT_MODES.has(layoutMode);
+      const centerOut = planar
         ? new THREE.Vector3(0, 1, 0)
         : (mid.lengthSq() > 1 ? mid.clone().normalize() : new THREE.Vector3(0, 1, 0));
       const side = new THREE.Vector3().crossVectors(direction, centerOut);
       if (side.lengthSq() < 0.01) side.crossVectors(direction, new THREE.Vector3(0, 1, 0));
       if (side.lengthSq() < 0.01) side.set(1, 0, 0);
       side.normalize().multiplyScalar(seededRandom(curveSeed) > 0.5 ? 1 : -1);
-      const arcStrength = projectionMode === '2d' ? 0.08 : semantic ? 0.28 : 0.36;
-      const offsetMag = Math.min(projectionMode === '2d' ? 42 : 180, Math.max(18, dist * arcStrength));
+      const arcStrength = planar ? 0.08 : semantic ? 0.28 : 0.36;
+      const offsetMag = Math.min(planar ? 42 : 180, Math.max(18, dist * arcStrength));
       mid
         .add(side.multiplyScalar(offsetMag))
-        .add(centerOut.multiplyScalar(Math.min(projectionMode === '2d' ? 22 : 90, dist * (projectionMode === '2d' ? 0.035 : 0.16))));
+        .add(centerOut.multiplyScalar(Math.min(planar ? 22 : 90, dist * (planar ? 0.035 : 0.16))));
       return new THREE.QuadraticBezierCurve3(start, mid, end).getPoints(56);
     }
 
@@ -1131,7 +1135,168 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       flatInteractionSnapshot = null;
     }
 
-    function computeFlatProjectionTargets(): Map<THREE.Group, THREE.Vector3> {
+    function getGraphNeighbors(node: THREE.Group): Set<THREE.Group> {
+      const neighbors = new Set<THREE.Group>();
+      allLinks.forEach((link) => {
+        const source = link.userData.source as THREE.Group | undefined;
+        const target = link.userData.target as THREE.Group | undefined;
+        if (!source || !target) return;
+        if (source === node) neighbors.add(target);
+        if (target === node) neighbors.add(source);
+      });
+      return neighbors;
+    }
+
+    function getNodeDegree(node: THREE.Group): number {
+      return getGraphNeighbors(node).size;
+    }
+
+    function getTypeRank(node: THREE.Group): number {
+      if (node.userData.isSun) return 4;
+      if (!node.userData.id) return 5;
+      const type = String(node.userData.type || '');
+      if (type === 'permanent') return 3;
+      if (type === 'fleeting') return 2;
+      if (type === 'literature') return 1;
+      return 0;
+    }
+
+    function getTypeLayer(node: THREE.Group): number {
+      if (node.userData.isSun) return 220;
+      if (!node.userData.id) return 340;
+      const type = String(node.userData.type || '');
+      if (type === 'permanent') return 80;
+      if (type === 'fleeting') return -70;
+      if (type === 'literature') return -220;
+      return -120;
+    }
+
+    function getClusterSlot(node: THREE.Group): number {
+      const raw = node.userData.clusterId;
+      if (typeof raw === 'number') return raw;
+      return clusterSuns.size;
+    }
+
+    function sortedByGraphSemantics(nodes: THREE.Group[]): THREE.Group[] {
+      return [...nodes].sort((a, b) => {
+        const clusterDiff = getClusterSlot(a) - getClusterSlot(b);
+        if (clusterDiff !== 0) return clusterDiff;
+        const typeDiff = getTypeRank(b) - getTypeRank(a);
+        if (typeDiff !== 0) return typeDiff;
+        const degreeDiff = getNodeDegree(b) - getNodeDegree(a);
+        if (degreeDiff !== 0) return degreeDiff;
+        return String(a.userData.name || '').localeCompare(String(b.userData.name || ''));
+      });
+    }
+
+    function placeMiniGrid(
+      targets: Map<THREE.Group, THREE.Vector3>,
+      nodes: THREE.Group[],
+      center: THREE.Vector3,
+      gap = 48,
+      columns = 4
+    ): void {
+      const sorted = sortedByGraphSemantics(nodes);
+      const rows = Math.max(1, Math.ceil(sorted.length / columns));
+      sorted.forEach((node, index) => {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+        targets.set(node, new THREE.Vector3(
+          center.x + (col - (Math.min(columns, sorted.length) - 1) / 2) * gap,
+          center.y,
+          center.z + (row - (rows - 1) / 2) * gap,
+        ));
+      });
+    }
+
+    function getLearningStatusForNode(node: THREE.Group): string | undefined {
+      return learningPath.steps.find((step) => step.node === node)?.status;
+    }
+
+    function computeGalaxyTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      allNodes.forEach((node) => {
+        const position3D = node.userData.position3D as THREE.Vector3 | undefined;
+        targets.set(node, position3D ? position3D.clone() : node.position.clone());
+      });
+      return targets;
+    }
+
+    function computeFlatMapTargets(): Map<THREE.Group, THREE.Vector3> {
+      const graphNodes = allNodes.filter(node => node.visible !== false);
+      const positions = new Map<THREE.Group, THREE.Vector2>();
+      const velocities = new Map<THREE.Group, THREE.Vector2>();
+      const core = getCoreNode();
+
+      graphNodes.forEach((node, index) => {
+        const seed = hashId(String(node.userData.id || node.userData.name || index));
+        const stored = node.userData.position3D as THREE.Vector3 | undefined;
+        const angle = seededRandom(seed) * Math.PI * 2;
+        const radius = stored ? Math.max(120, Math.min(720, Math.sqrt(stored.x ** 2 + stored.z ** 2) * 0.78)) : 260 + seededRandom(seed + 1) * 420;
+        positions.set(node, node === core
+          ? new THREE.Vector2(0, 0)
+          : new THREE.Vector2(Math.cos(angle) * radius, Math.sin(angle) * radius)
+        );
+        velocities.set(node, new THREE.Vector2(0, 0));
+      });
+
+      const iterations = graphNodes.length > 160 ? 48 : 78;
+      for (let step = 0; step < iterations; step++) {
+        for (let i = 0; i < graphNodes.length; i++) {
+          const a = graphNodes[i];
+          const pa = positions.get(a)!;
+          const va = velocities.get(a)!;
+          for (let j = i + 1; j < graphNodes.length; j++) {
+            const b = graphNodes[j];
+            const pb = positions.get(b)!;
+            const delta = new THREE.Vector2().subVectors(pa, pb);
+            const distSq = Math.max(80, delta.lengthSq());
+            const force = Math.min(18, 36000 / distSq);
+            delta.normalize().multiplyScalar(force);
+            va.add(delta);
+            velocities.get(b)!.sub(delta);
+          }
+        }
+
+        allLinks.forEach((link) => {
+          const source = link.userData.source as THREE.Group | undefined;
+          const target = link.userData.target as THREE.Group | undefined;
+          if (!source || !target || !positions.has(source) || !positions.has(target)) return;
+          const ps = positions.get(source)!;
+          const pt = positions.get(target)!;
+          const delta = new THREE.Vector2().subVectors(pt, ps);
+          const dist = Math.max(1, delta.length());
+          const desired = link.userData.semantic ? 142 : link.userData.isInternal ? 118 : 220;
+          const strength = link.userData.semantic ? 0.026 : 0.012;
+          const pull = delta.multiplyScalar(((dist - desired) / dist) * strength);
+          velocities.get(source)!.add(pull);
+          velocities.get(target)!.sub(pull);
+        });
+
+        graphNodes.forEach((node) => {
+          const pos = positions.get(node)!;
+          const vel = velocities.get(node)!;
+          if (node === core) {
+            pos.set(0, 0);
+            vel.set(0, 0);
+            return;
+          }
+          vel.add(pos.clone().multiplyScalar(-0.003));
+          pos.add(vel.multiplyScalar(0.34));
+          vel.multiplyScalar(0.62);
+        });
+      }
+
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      allNodes.forEach((node) => {
+        const pos = positions.get(node);
+        if (pos) targets.set(node, new THREE.Vector3(pos.x, 0, pos.y));
+        else targets.set(node, node.position.clone().setY(0));
+      });
+      return targets;
+    }
+
+    function computeRadialTargets(): Map<THREE.Group, THREE.Vector3> {
       const targets = new Map<THREE.Group, THREE.Vector3>();
       const core = getCoreNode();
       if (core) targets.set(core, new THREE.Vector3(0, 0, 0));
@@ -1142,34 +1307,29 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (core) occupied.add(core);
 
       suns.forEach(([clusterId, sun], index) => {
-        const angle = (index / Math.max(1, suns.length)) * Math.PI * 2 - Math.PI / 2;
-        const center = new THREE.Vector3(Math.cos(angle) * ringRadius, 0, Math.sin(angle) * ringRadius);
+        const centerAngle = (index / Math.max(1, suns.length)) * Math.PI * 2 - Math.PI / 2;
+        const center = new THREE.Vector3(Math.cos(centerAngle) * 260, 0, Math.sin(centerAngle) * 260);
         targets.set(sun, center);
         occupied.add(sun);
 
         const children = clusterNodes.get(clusterId) || [];
-        children.forEach((node, childIndex) => {
+        const sortedChildren = sortedByGraphSemantics(children);
+        const arc = Math.min(Math.PI * 1.45, (Math.PI * 2 / Math.max(1, suns.length)) * 0.82);
+        sortedChildren.forEach((node, childIndex) => {
           const seed = hashId(String(node.userData.id || node.userData.name || childIndex));
-          const layer = childIndex < 6 ? 0 : childIndex < 18 ? 1 : 2;
-          const localIndex = layer === 0 ? childIndex : layer === 1 ? childIndex - 6 : childIndex - 18;
-          const layerCount = layer === 0
-            ? Math.min(6, children.length)
-            : layer === 1
-              ? Math.min(12, Math.max(0, children.length - 6))
-              : Math.max(1, children.length - 18);
-          const radius = 78 + layer * 72 + seededRandom(seed) * 18;
-          const theta = (localIndex / Math.max(1, layerCount)) * Math.PI * 2 + seededRandom(seed + 7) * 0.35;
+          const radius = 455 + (childIndex % 3) * 72 + seededRandom(seed) * 16;
+          const theta = centerAngle - arc / 2 + (childIndex / Math.max(1, sortedChildren.length - 1)) * arc;
           targets.set(node, new THREE.Vector3(
-            center.x + Math.cos(theta) * radius,
+            Math.cos(theta) * radius,
             0,
-            center.z + Math.sin(theta) * radius,
+            Math.sin(theta) * radius,
           ));
           occupied.add(node);
         });
       });
 
       const looseNodes = allNodes.filter(node => !occupied.has(node) && !node.userData.isSun && node.userData.id);
-      const looseRadius = ringRadius + 285;
+      const looseRadius = Math.max(640, ringRadius + 285);
       looseNodes.forEach((node, index) => {
         const seed = hashId(String(node.userData.id || index));
         const angle = (index / Math.max(1, looseNodes.length)) * Math.PI * 2 + seededRandom(seed) * 0.2;
@@ -1180,8 +1340,205 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       return targets;
     }
 
+    function computeConcentricTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      const centerNode = lockedNode || pressedNode || hoveredNode || getCoreNode() || allNodes[0];
+      if (!centerNode) return targets;
+
+      const layers = new Map<number, THREE.Group[]>();
+      const seen = new Set<THREE.Group>([centerNode]);
+      let frontier = [centerNode];
+      targets.set(centerNode, new THREE.Vector3(0, 0, 0));
+
+      for (let depth = 1; depth <= 3; depth++) {
+        const next: THREE.Group[] = [];
+        frontier.forEach((node) => {
+          getGraphNeighbors(node).forEach((neighbor) => {
+            if (seen.has(neighbor)) return;
+            seen.add(neighbor);
+            next.push(neighbor);
+          });
+        });
+        layers.set(depth, sortedByGraphSemantics(next));
+        frontier = next;
+      }
+
+      const outside = sortedByGraphSemantics(allNodes.filter(node => !seen.has(node)));
+      if (outside.length > 0) layers.set(4, outside);
+
+      layers.forEach((nodesInLayer, depth) => {
+        const radius = depth * 205;
+        nodesInLayer.forEach((node, index) => {
+          const seed = hashId(String(node.userData.id || node.userData.name || index));
+          const angle = (index / Math.max(1, nodesInLayer.length)) * Math.PI * 2 + seededRandom(seed) * 0.16;
+          targets.set(node, new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius));
+        });
+      });
+      return targets;
+    }
+
+    function computeLayeredTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      const core = getCoreNode();
+      if (core) targets.set(core, new THREE.Vector3(0, 340, -360));
+
+      const suns = Array.from(clusterSuns.entries()).sort((a, b) => a[0] - b[0]);
+      const clusterWidth = 260;
+      suns.forEach(([clusterId, sun], index) => {
+        const baseX = (index - (suns.length - 1) / 2) * clusterWidth;
+        targets.set(sun, new THREE.Vector3(baseX, 210, -180));
+        const children = clusterNodes.get(clusterId) || [];
+        const byType = new Map<string, THREE.Group[]>();
+        children.forEach((node) => {
+          const type = String(node.userData.type || 'other');
+          byType.set(type, [...(byType.get(type) || []), node]);
+        });
+        Array.from(byType.entries()).forEach(([type, nodesOfType]) => {
+          const y = type === 'permanent' ? 60 : type === 'fleeting' ? -90 : type === 'literature' ? -240 : -150;
+          placeMiniGrid(targets, nodesOfType, new THREE.Vector3(baseX, y, 80), 48, 3);
+        });
+      });
+
+      const placed = new Set(targets.keys());
+      const loose = allNodes.filter(node => !placed.has(node));
+      placeMiniGrid(targets, loose, new THREE.Vector3(0, -310, 360), 54, 6);
+      return targets;
+    }
+
+    function computeMatrixTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      const cells = new Map<string, THREE.Group[]>();
+      allNodes.forEach((node) => {
+        const cluster = getClusterSlot(node);
+        const type = node.userData.isSun ? 'sun' : String(node.userData.type || 'other');
+        const degree = getNodeDegree(node);
+        const band = degree >= 4 ? 'high' : degree >= 2 ? 'mid' : 'low';
+        const key = `${cluster}:${type}:${band}`;
+        cells.set(key, [...(cells.get(key) || []), node]);
+      });
+
+      const totalClusters = Math.max(1, clusterSuns.size + 1);
+      cells.forEach((cellNodes, key) => {
+        const [clusterRaw, type, band] = key.split(':');
+        const cluster = Number(clusterRaw);
+        const x = (cluster - (totalClusters - 1) / 2) * 220;
+        const y = type === 'sun' ? 260 : type === 'permanent' ? 120 : type === 'fleeting' ? -40 : type === 'literature' ? -200 : -120;
+        const z = band === 'high' ? -230 : band === 'mid' ? 0 : 230;
+        placeMiniGrid(targets, cellNodes, new THREE.Vector3(x, y, z), 38, 3);
+      });
+      return targets;
+    }
+
+    function computeTaskFlowTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      const core = getCoreNode();
+      if (core) targets.set(core, new THREE.Vector3(-560, 0, 0));
+
+      const pathNodes = learningPath.steps
+        .sort((a, b) => a.stepIndex - b.stepIndex)
+        .map(step => step.node)
+        .filter((node, index, arr) => arr.indexOf(node) === index);
+      const fallbackQueue = sortedByGraphSemantics(allNodes.filter(node => node.userData.id && !node.userData.isSun));
+      const queue = pathNodes.length > 0 ? pathNodes : fallbackQueue.slice(0, Math.min(24, fallbackQueue.length));
+      const queueSet = new Set(queue);
+
+      queue.forEach((node, index) => {
+        const z = (index - (queue.length - 1) / 2) * 86;
+        targets.set(node, new THREE.Vector3(0, 0, z));
+      });
+
+      const suns = Array.from(clusterSuns.values());
+      suns.forEach((sun, index) => {
+        targets.set(sun, new THREE.Vector3(-300, 0, (index - (suns.length - 1) / 2) * 118));
+      });
+
+      const sideSlots = new Map<string, number>();
+      allNodes.filter(node => !targets.has(node)).forEach((node) => {
+        const relatedQueueIndex = queue.findIndex(q => getGraphNeighbors(q).has(node));
+        const row = relatedQueueIndex >= 0 ? relatedQueueIndex : queue.length + sideSlots.size;
+        const side = String(node.userData.type || '') === 'literature' || String(node.userData.type || '') === 'fleeting' ? -1 : 1;
+        const slotKey = `${row}:${side}`;
+        const offset = sideSlots.get(slotKey) ?? 0;
+        sideSlots.set(slotKey, offset + 1);
+        targets.set(node, new THREE.Vector3(side * 310, 0, (row - (queue.length - 1) / 2) * 86 + (offset % 3) * 22));
+      });
+
+      queueSet.forEach((node) => {
+        if (!targets.has(node)) targets.set(node, new THREE.Vector3(0, 0, 0));
+      });
+      return targets;
+    }
+
+    function computeTimelineTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      const ordered = sortedByGraphSemantics(allNodes)
+        .sort((a, b) => hashId(String(a.userData.id || a.userData.name)) - hashId(String(b.userData.id || b.userData.name)));
+      ordered.forEach((node, index) => {
+        const x = (index - (ordered.length - 1) / 2) * 78;
+        const type = String(node.userData.type || '');
+        const z = node.userData.isSun ? -260 : type === 'permanent' ? -90 : type === 'fleeting' ? 80 : type === 'literature' ? 250 : 0;
+        targets.set(node, new THREE.Vector3(x, 0, z));
+      });
+      return targets;
+    }
+
+    function computeMasteryTargets(): Map<THREE.Group, THREE.Vector3> {
+      const base = computeFlatMapTargets();
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      allNodes.forEach((node) => {
+        const status = getLearningStatusForNode(node);
+        const type = String(node.userData.type || '');
+        let score = node.userData.isSun ? 0.68 : !node.userData.id ? 0.9 : type === 'permanent' ? 0.72 : type === 'literature' ? 0.52 : type === 'fleeting' ? 0.34 : 0.45;
+        if (status === 'mastered') score = 1;
+        else if (status === 'completed') score = 0.86;
+        else if (status === 'learning') score = 0.58;
+        else if (status === 'available') score = 0.42;
+        else if (status === 'locked') score = 0.14;
+        score = Math.min(1, score + Math.min(0.14, getNodeDegree(node) * 0.025));
+        const pos = base.get(node) || node.position.clone();
+        targets.set(node, new THREE.Vector3(pos.x, -170 + score * 430, pos.z));
+      });
+      return targets;
+    }
+
+    function computeEvidenceTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      const core = getCoreNode();
+      if (core) targets.set(core, new THREE.Vector3(0, 330, -300));
+      const suns = Array.from(clusterSuns.entries()).sort((a, b) => a[0] - b[0]);
+      const radius = Math.max(300, suns.length * 70);
+      suns.forEach(([clusterId, sun], index) => {
+        const angle = (index / Math.max(1, suns.length)) * Math.PI * 2 - Math.PI / 2;
+        const base = new THREE.Vector3(Math.cos(angle) * radius, 170, Math.sin(angle) * radius);
+        targets.set(sun, base);
+        const children = clusterNodes.get(clusterId) || [];
+        const evidence = children.filter(n => String(n.userData.type || '') === 'literature');
+        const concepts = children.filter(n => String(n.userData.type || '') === 'permanent');
+        const fleeting = children.filter(n => String(n.userData.type || '') === 'fleeting');
+        placeMiniGrid(targets, concepts, base.clone().setY(50), 44, 3);
+        placeMiniGrid(targets, fleeting, base.clone().setY(-90), 44, 3);
+        placeMiniGrid(targets, evidence, base.clone().setY(-240), 44, 3);
+      });
+      const placed = new Set(targets.keys());
+      placeMiniGrid(targets, allNodes.filter(node => !placed.has(node)), new THREE.Vector3(0, -300, 320), 46, 6);
+      return targets;
+    }
+
+    function computeLayoutTargets(mode: GraphLayoutMode): Map<THREE.Group, THREE.Vector3> {
+      if (mode === 'galaxy') return computeGalaxyTargets();
+      if (mode === 'flat') return computeFlatMapTargets();
+      if (mode === 'radial') return computeRadialTargets();
+      if (mode === 'concentric') return computeConcentricTargets();
+      if (mode === 'layered') return computeLayeredTargets();
+      if (mode === 'matrix') return computeMatrixTargets();
+      if (mode === 'task-flow') return computeTaskFlowTargets();
+      if (mode === 'timeline') return computeTimelineTargets();
+      if (mode === 'mastery') return computeMasteryTargets();
+      return computeEvidenceTargets();
+    }
+
     function animateNodesTo(targets: Map<THREE.Group, THREE.Vector3>, duration: number): void {
-      projectionAnimating = true;
+      layoutAnimating = true;
       gsap.killTweensOf(allNodes.map(node => node.position));
       targets.forEach((target, node) => {
         gsap.to(node.position, {
@@ -1193,41 +1550,94 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         });
       });
       gsap.delayedCall(duration + 0.05, () => {
-        projectionAnimating = false;
+        layoutAnimating = false;
         refreshLinkGeometry();
       });
     }
 
-    function applyFlatProjection(): void {
-      capture3DPositions();
-      const targets = computeFlatProjectionTargets();
+    function applyLayoutLinkVisibility(mode: GraphLayoutMode): void {
+      const galaxyOverview = mode === 'galaxy';
       allLinks.forEach((link) => {
         if (link.userData._filtered) return;
-        link.visible = true;
         const mat = link.material as THREE.LineBasicMaterial;
-        gsap.to(mat, { opacity: link.userData.semantic ? 0.34 : 0.16, duration: 0.45 });
+        if (link.userData.flowMesh) link.userData.flowMesh.visible = false;
+        if (galaxyOverview && (link.userData.isInternal || link.userData.semantic)) {
+          link.visible = false;
+          return;
+        }
+        link.visible = true;
+        const opacity = galaxyOverview
+          ? link.userData.baseOpacity ?? 0.12
+          : link.userData.semantic
+            ? 0.34
+            : link.userData.isInternal
+              ? 0.12
+              : 0.18;
+        gsap.to(mat, { opacity, duration: 0.45, ease: 'power2.out' });
       });
-      animateNodesTo(targets, 0.95);
-      refreshLinksAndLabels();
     }
 
-    function restoreSpatialProjection(): void {
-      const targets = new Map<THREE.Group, THREE.Vector3>();
-      allNodes.forEach((node) => {
-        const position3D = node.userData.position3D as THREE.Vector3 | undefined;
-        if (position3D) targets.set(node, position3D);
-      });
-      animateNodesTo(targets, 0.85);
-      allLinks.forEach((link) => {
-        if (link.userData._filtered) return;
-        if (link.userData.isInternal || link.userData.semantic) {
-          link.visible = false;
-        } else {
-          link.visible = true;
-          const mat = link.material as THREE.LineBasicMaterial;
-          gsap.to(mat, { opacity: link.userData.baseOpacity ?? 0.12, duration: 0.45 });
+    function configureControlsForLayout(mode: GraphLayoutMode): void {
+      if (mode === 'galaxy') {
+        exitFlatInteractionMode();
+        if (autoRotateBeforeLayout !== null) {
+          controls.autoRotate = autoRotateBeforeLayout;
+          autoRotateBeforeLayout = null;
         }
-      });
+        controls.enablePan = true;
+        controls.enableRotate = true;
+        return;
+      }
+      if (autoRotateBeforeLayout === null) autoRotateBeforeLayout = controls.autoRotate;
+      if (PLANAR_LAYOUT_MODES.has(mode)) {
+        enterFlatInteractionMode();
+        return;
+      }
+      exitFlatInteractionMode();
+      controls.enablePan = true;
+      controls.enableRotate = true;
+      controls.autoRotate = false;
+      if (STRUCTURED_LAYOUT_MODES.has(mode)) controls.maxDistance = 2600;
+    }
+
+    function frameLayoutCamera(mode: GraphLayoutMode, duration = 0.95): void {
+      const cameraTargets: Record<GraphLayoutMode, THREE.Vector3> = {
+        galaxy: new THREE.Vector3(780, 560, 780),
+        flat: new THREE.Vector3(0, 1680, 0.1),
+        radial: new THREE.Vector3(0, 1480, 0.1),
+        concentric: new THREE.Vector3(0, 1360, 0.1),
+        layered: new THREE.Vector3(940, 720, 920),
+        matrix: new THREE.Vector3(980, 820, 920),
+        'task-flow': new THREE.Vector3(0, 1560, 0.1),
+        timeline: new THREE.Vector3(0, 1520, 0.1),
+        mastery: new THREE.Vector3(980, 860, 980),
+        evidence: new THREE.Vector3(920, 700, 1040),
+      };
+      gsap.killTweensOf(controls.target);
+      gsap.killTweensOf(camera.position);
+      gsap.to(controls.target, { x: 0, y: 0, z: 0, duration, ease: 'expo.inOut' });
+      const target = cameraTargets[mode];
+      gsap.to(camera.position, { x: target.x, y: target.y, z: target.z, duration, ease: 'expo.inOut' });
+    }
+
+    function applyGraphLayout(mode: GraphLayoutMode, duration = 0.95): void {
+      capture3DPositions();
+      layoutMode = mode;
+      useAppStore.getState().setGraphLayoutMode(mode);
+      const resetBtn = document.getElementById('reset-view-btn');
+      if (resetBtn) resetBtn.classList.toggle('visible', mode !== 'galaxy');
+      if (mode !== 'concentric') {
+        lockedNode = null;
+        pressedNode = null;
+        hoveredNode = null;
+      }
+      applyGraphAttention(null);
+      clearNodeLabels();
+      configureControlsForLayout(mode);
+      applyLayoutLinkVisibility(mode);
+      animateNodesTo(computeLayoutTargets(mode), duration);
+      refreshLinksAndLabels();
+      frameLayoutCamera(mode, duration);
     }
 
     function resetCameraView(): void {
@@ -1237,20 +1647,19 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         controls.autoRotate = autoRotateBeforeFocus;
         autoRotateBeforeFocus = null;
       }
-      projectionMode = '3d';
+      layoutMode = 'galaxy';
+      useAppStore.getState().setGraphLayoutMode('galaxy');
       exitFlatInteractionMode();
-      restoreSpatialProjection();
+      if (autoRotateBeforeLayout !== null) {
+        controls.autoRotate = autoRotateBeforeLayout;
+        autoRotateBeforeLayout = null;
+      }
+      animateNodesTo(computeGalaxyTargets(), 0.85);
       lockedNode = null;
       pressedNode = null;
       lastFocusSelection = [];
       clearNodeLabels();
-      gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 1.2 });
-      gsap.to(camera.position, {
-        x: 780,
-        y: 560,
-        z: 780,
-        duration: 1.5,
-      });
+      frameLayoutCamera('galaxy', 1.2);
       allNodes.forEach((n) => {
         gsap.to(n.scale, { x: 1, y: 1, z: 1, duration: 0.5 });
         if (n.userData.trueColor) setNodeColor(n, n.userData.trueColor);
@@ -1259,21 +1668,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         if (t && typeVisible[t] !== undefined) n.visible = typeVisible[t];
       });
       reapplyFilters();
-      allLinks.forEach((l) => {
-        if (l.userData._filtered) return;
-        if (l.userData.isInternal) {
-          l.visible = false;
-        } else if (l.userData.semantic) {
-          l.visible = false; // Hide WikiLink edges when resetting to overview
-        } else {
-          l.visible = true;
-          (l.material as THREE.LineBasicMaterial).color.set(l.userData.clusterColor);
-          gsap.to(l.material, {
-            opacity: l.userData.baseOpacity,
-            duration: 0.5,
-          });
-        }
-      });
+      applyLayoutLinkVisibility('galaxy');
     }
 
     // Expose resetCameraView via window so imperative handle can call it
@@ -1291,14 +1686,16 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         learningPath.group.visible = learningPath.visible;
       });
     register('setAutoRotate', (on: boolean) => {
-      if (projectionMode === '2d') {
+      if (PLANAR_LAYOUT_MODES.has(layoutMode)) {
         if (flatInteractionSnapshot) flatInteractionSnapshot.autoRotate = on;
+        if (autoRotateBeforeLayout !== null) autoRotateBeforeLayout = on;
         return;
       }
       controls.autoRotate = on;
+      if (autoRotateBeforeLayout !== null) autoRotateBeforeLayout = on;
       if (autoRotateBeforeFocus !== null) autoRotateBeforeFocus = on;
     });
-    register('getAutoRotate', () => projectionMode === '2d' ? false : controls.autoRotate);
+    register('getAutoRotate', () => PLANAR_LAYOUT_MODES.has(layoutMode) ? false : controls.autoRotate);
     register('setRotateSpeed', (s: number) => { controls.autoRotateSpeed = s; });
     register('getRotateSpeed', () => controls.autoRotateSpeed);
     register('setBloom', (v: number) => { if (bloomPass) bloomPass.strength = v; });
@@ -1309,28 +1706,14 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     register('getCometSpeed', () => cometSpeedMultiplier);
     register('setCometsVisible', (v: boolean) => { scene.children.forEach(c => { if (c.userData && c.userData.isComet) c.visible = v; }); });
     register('getCometsVisible', () => { const c = scene.children.find(c => c.userData && c.userData.isComet); return c ? c.visible !== false : true; });
-    register('setProjectionMode', (mode: '3d' | '2d') => {
-      projectionMode = mode;
-      const resetBtn = document.getElementById('reset-view-btn');
-      if (mode === '2d') {
-        if (resetBtn) resetBtn.classList.add('visible');
-        enterFlatInteractionMode();
-        lockedNode = null;
-        hoveredNode = null;
-        pressedNode = null;
-        applyGraphAttention(null);
-        clearNodeLabels();
-        applyFlatProjection();
-        gsap.killTweensOf(controls.target);
-        gsap.killTweensOf(camera.position);
-        gsap.to(controls.target, { x: 0, y: 0, z: 0, duration: 0.95, ease: 'expo.inOut' });
-        gsap.to(camera.position, { x: 0, y: 1680, z: 0.1, duration: 0.95, ease: 'expo.inOut' });
-      } else {
-        exitFlatInteractionMode();
-        resetCameraView();
-      }
+    register('setLayoutMode', (mode: GraphLayoutMode) => {
+      applyGraphLayout(mode);
     });
-    register('getProjectionMode', () => projectionMode);
+    register('getLayoutMode', () => layoutMode);
+    register('setProjectionMode', (mode: '3d' | '2d') => {
+      applyGraphLayout(mode === '2d' ? 'flat' : 'galaxy');
+    });
+    register('getProjectionMode', () => PLANAR_LAYOUT_MODES.has(layoutMode) ? '2d' : '3d');
     register('setHoverAttention', (v: boolean) => {
       hoverAttentionEnabled = v;
       if (!v) {
@@ -1515,10 +1898,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     controls.zoomSpeed = 0.85;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.2;
-    if (useAppStore.getState().graphProjectionMode === '2d') {
-      projectionMode = '2d';
-      enterFlatInteractionMode();
-      camera.position.set(0, 1680, 0.1);
+    layoutMode = useAppStore.getState().graphLayoutMode;
+    if (layoutMode !== 'galaxy') {
+      configureControlsForLayout(layoutMode);
+      const initialCamera = PLANAR_LAYOUT_MODES.has(layoutMode)
+        ? new THREE.Vector3(0, 1600, 0.1)
+        : new THREE.Vector3(940, 760, 960);
+      camera.position.copy(initialCamera);
       controls.target.set(0, 0, 0);
       document.getElementById('reset-view-btn')?.classList.add('visible');
     }
@@ -1827,8 +2213,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       buildDemoLearningPath(dataRef.current.learningPathSteps);
       createLearningPath();
       applyNodeModeVisual(useAppStore.getState().mode, true);
-      if (projectionMode === '2d') {
-        requestAnimationFrame(() => applyFlatProjection());
+      if (layoutMode !== 'galaxy') {
+        requestAnimationFrame(() => applyGraphLayout(layoutMode, 0.85));
       }
     }
 
@@ -2046,7 +2432,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       animationId = requestAnimationFrame(animate);
       const time = performance.now() * 0.001;
       controls.update();
-      if (projectionAnimating) refreshLinkGeometry();
+      if (layoutAnimating) refreshLinkGeometry();
       composer.render();
       renderLabels();
 
@@ -2190,11 +2576,45 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       gsap.killTweensOf(camera.position);
 
       // Clean up registered galaxy actions
-      unregister('resetCameraView');
-      unregister('toggleLearningPath');
-      unregister('isLearningPathVisible');
-      unregister('buildGalaxyScene');
-      unregister('fitSelection');
+      [
+        'resetCameraView',
+        'toggleLearningPath',
+        'isLearningPathVisible',
+        'rebuildLearningPath',
+        'setAutoRotate',
+        'getAutoRotate',
+        'setRotateSpeed',
+        'getRotateSpeed',
+        'setBloom',
+        'getBloom',
+        'setMilkyWay',
+        'getMilkyWay',
+        'setCometSpeed',
+        'getCometSpeed',
+        'setCometsVisible',
+        'getCometsVisible',
+        'setLayoutMode',
+        'getLayoutMode',
+        'setProjectionMode',
+        'getProjectionMode',
+        'setHoverAttention',
+        'getHoverAttention',
+        'fitSelection',
+        'setNodeTypeVisible',
+        'getTypeVisible',
+        'setExternalEdgesVisible',
+        'setInternalEdgesVisible',
+        'setAllNodesVisible',
+        'focusOverview',
+        'focusByCluster',
+        'focusZenMode',
+        'showOrphansOnly',
+        'showAllNodes',
+        'focusRecent',
+        'focusNodeById',
+        'findNodeByTitle',
+        'buildGalaxyScene',
+      ].forEach(unregister);
 
       // Dispose learning path
       learningPath.group.traverse((obj) => {

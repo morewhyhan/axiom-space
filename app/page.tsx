@@ -13,6 +13,7 @@ import { useLearningPaths, useLearningProfile, useMemorySearch } from '@/hooks/u
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
+import type { GraphLayoutMode } from '@/stores/mode-store'
 
 const GalaxyCanvas = dynamic(() => import('@/components/three/galaxy-canvas'), { ssr: false })
 const DashboardLeft = dynamic(() => import('@/components/dashboard/dashboard-left'))
@@ -22,6 +23,7 @@ const ForgeEditor = dynamic(() => import('@/components/forge/forge-editor'))
 const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-list'))
 const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
+const GalaxyLayoutPanel = dynamic(() => import('@/components/galaxy/galaxy-layout-panel'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
 const CognitionSidebar = dynamic(() => import('@/components/cognition/cognition-sidebar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
@@ -34,8 +36,8 @@ const LandingPage = dynamic(() => import('@/components/landing/landing-page'))
 
 export default function Home() {
   const mode = useAppStore((s) => s.mode)
-  const graphProjectionMode = useAppStore((s) => s.graphProjectionMode)
-  const setGraphProjectionMode = useAppStore((s) => s.setGraphProjectionMode)
+  const graphLayoutMode = useAppStore((s) => s.graphLayoutMode)
+  const setGraphLayoutMode = useAppStore((s) => s.setGraphLayoutMode)
   const modal = useAppStore((s) => s.modal)
   const openModal = useAppStore((s) => s.openModal)
   const closeModal = useCallback(() => {
@@ -436,6 +438,21 @@ export default function Home() {
   }, [])
 
   const showLoadingHint = isLoggedIn && !authPending && (galaxyLoading || !galaxyData)
+  const graphLayoutHint = useMemo(() => {
+    const hints: Record<GraphLayoutMode, string> = {
+      galaxy: '拖拽旋转 · 滚轮缩放 · 星团总览',
+      flat: '拖拽平移 · 滚轮缩放 · 关系网络',
+      radial: '拖拽平移 · 滚轮缩放 · 环形连线',
+      concentric: '拖拽平移 · 滚轮缩放 · 邻域外扩',
+      layered: '拖拽旋转 · 滚轮缩放 · 层级依赖',
+      matrix: '拖拽旋转 · 滚轮缩放 · 分类矩阵',
+      'task-flow': '拖拽平移 · 滚轮缩放 · 行动序列',
+      timeline: '拖拽平移 · 滚轮缩放 · 时间轨道',
+      mastery: '拖拽旋转 · 滚轮缩放 · 掌握地形',
+      evidence: '拖拽旋转 · 滚轮缩放 · 证据堆叠',
+    }
+    return hints[graphLayoutMode]
+  }, [graphLayoutMode])
 
   // Oracle modal color map — avoids dynamic Tailwind classes that get purged
   const oracleColors: Record<string, { bg: string; text: string; border: string }> = {
@@ -472,7 +489,7 @@ export default function Home() {
           <button id="reset-view-btn" onClick={() => {
             const resetFn = useGalaxyActions.getState().actions.resetCameraView
             if (resetFn) resetFn()
-            setGraphProjectionMode('3d')
+            setGraphLayoutMode('galaxy')
           }}>⊙ RESET VIEW</button>
 
           {!immersive && <div className="relative z-10 flex flex-col h-screen pointer-events-none">
@@ -485,7 +502,7 @@ export default function Home() {
                   </div>
                   <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
                     <div className="graph-hint" id={mode === 'dashboard' ? 'graph-hint' : undefined}>
-                      {graphProjectionMode === '2d' ? '拖拽平移 · 滚轮缩放 · 点击聚焦节点' : '拖拽旋转 · 滚轮缩放 · 点击选择节点'}
+                      {graphLayoutHint}
                     </div>
                     <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'dashboard' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'dashboard' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
                     <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
@@ -548,10 +565,11 @@ export default function Home() {
                 <div className={`mode-stage ${mode === 'galaxy' ? 'active' : ''}`} aria-hidden={mode !== 'galaxy'}>
                   <div className="left-zone">
                     <GalaxyControls />
+                    <GalaxyLayoutPanel />
                   </div>
                   <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
                     <div className="graph-hint" id={mode === 'galaxy' ? 'graph-hint' : undefined}>
-                      {graphProjectionMode === '2d' ? '拖拽平移 · 滚轮缩放 · 点击聚焦节点' : '拖拽旋转 · 滚轮缩放 · 点击选择节点'}
+                      {graphLayoutHint}
                     </div>
                     <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'galaxy' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'galaxy' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
                     <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">

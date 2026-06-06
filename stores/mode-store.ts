@@ -33,7 +33,17 @@ export interface VaultInfo {
   cardCount: number
 }
 
-export type GraphProjectionMode = '3d' | '2d'
+export type GraphLayoutMode =
+  | 'galaxy'
+  | 'flat'
+  | 'radial'
+  | 'concentric'
+  | 'layered'
+  | 'matrix'
+  | 'task-flow'
+  | 'timeline'
+  | 'mastery'
+  | 'evidence'
 
 interface AppStore {
   mode: Mode
@@ -85,8 +95,8 @@ interface AppStore {
   activeLearningStepId: string | null
   setActiveLearningStepId: (id: string | null) => void
   /* ── Knowledge graph view ── */
-  graphProjectionMode: GraphProjectionMode
-  setGraphProjectionMode: (mode: GraphProjectionMode) => void
+  graphLayoutMode: GraphLayoutMode
+  setGraphLayoutMode: (mode: GraphLayoutMode) => void
   graphHoverAttention: boolean
   setGraphHoverAttention: (enabled: boolean) => void
   /* ── Onboarding ── */
@@ -171,8 +181,8 @@ export const useAppStore = create<AppStore>()(
       activeLearningStepId: null,
       setActiveLearningStepId: (id) => set({ activeLearningStepId: id }),
       /* ── Knowledge graph view ── */
-      graphProjectionMode: '3d',
-      setGraphProjectionMode: (mode) => set({ graphProjectionMode: mode }),
+      graphLayoutMode: 'galaxy',
+      setGraphLayoutMode: (mode) => set({ graphLayoutMode: mode }),
       graphHoverAttention: true,
       setGraphHoverAttention: (enabled) => set({ graphHoverAttention: enabled }),
       /* ── Onboarding ── */
@@ -181,22 +191,30 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: 'axiom-store',
-      version: 4,
+      version: 5,
       migrate: (persistedState, version) => {
-        if (version >= 4 || !persistedState || typeof persistedState !== 'object') return persistedState
-        const state = persistedState as Partial<AppStore>
-        return {
+        if (!persistedState || typeof persistedState !== 'object') return persistedState
+        const state = persistedState as Partial<AppStore> & {
+          graphProjectionMode?: '3d' | '2d'
+          graphLayoutMode?: GraphLayoutMode
+        }
+        const next = {
           ...state,
-          panelLayout: {
+          graphLayoutMode: state.graphLayoutMode ?? (state.graphProjectionMode === '2d' ? 'flat' : 'galaxy'),
+        }
+        if (version < 4) {
+          next.panelLayout = {
             left: ['sessionList'],
             right: state.panelLayout?.right?.filter((panel) => panel === 'editor') ?? ['editor'],
-          },
-          panelSizes: {
-            ...state.panelSizes,
+          }
+          next.panelSizes = {
+            ...DEFAULT_PANEL_SIZES,
+            ...(state.panelSizes ?? {}),
             fileTree: 280,
             sessionList: 340,
-          },
+          }
         }
+        return next
       },
       partialize: (state) => ({
         lastVaultId: state.lastVaultId,
@@ -206,7 +224,7 @@ export const useAppStore = create<AppStore>()(
         panelLayout: state.panelLayout,
         panelSizes: state.panelSizes,
         chatPanelOpen: state.chatPanelOpen,
-        graphProjectionMode: state.graphProjectionMode,
+        graphLayoutMode: state.graphLayoutMode,
         graphHoverAttention: state.graphHoverAttention,
       }),
     }
