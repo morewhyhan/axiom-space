@@ -4,6 +4,11 @@ import { prismaAdapter } from "better-auth/adapters/prisma"
 import { prisma } from "./db"
 import { getAuthUrl } from "./site-url"
 
+const localTrustedOrigins = [
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+]
+
 // In production a secret MUST be set. In dev we fall back to a fixed
 // development-only string so the app can boot without configuration —
 // but warn loudly so the user sees they need to set it before shipping.
@@ -32,6 +37,9 @@ export const auth = betterAuth({
   }),
   secret: authSecret,
   baseURL: getAuthUrl(),
+  trustedOrigins: process.env.NODE_ENV === 'production'
+    ? [getAuthUrl()]
+    : Array.from(new Set([getAuthUrl(), ...localTrustedOrigins])),
   advanced: {
     cookiePrefix: "hononext",
     crossSubDomainCookies: {
