@@ -52,6 +52,7 @@ const RESOURCE_PROGRESS_START: Record<ResourceType, number> = {
   document: 4,
   mindmap: 4,
   quiz: 4,
+  code: 4,
   video: 4,
   svg: 4,
   diagram: 4,
@@ -108,6 +109,20 @@ mindmap
     "explanation": "选项B正确，因为..."
   }
 ]`,
+
+  code: `你是 AXIOM 代码实操资源生成专家。请根据以下内容生成一个可以直接练习的代码案例。
+
+要求：
+1. 输出 Markdown，必须包含以下章节：
+   ## 练习目标
+   ## 初始代码
+   ## 任务要求
+   ## 测试样例
+   ## 参考实现
+   ## 讲解
+2. 至少包含 2 个 fenced code block，优先使用 TypeScript、Python 或伪代码中最贴近主题的一种
+3. 练习必须可操作，不要只给概念解释
+4. 输出纯 Markdown，不要加前言`,
 
   video: `你是 AXIOM 教学视频脚本生成专家。请根据以下学习主题，生成一个教学动画视频的场景配置。
 
@@ -212,6 +227,15 @@ function validateResource(type: ResourceType, content: string): string | null {
           if (!arr[i].question || !arr[i].answer) return `Question ${i + 1} missing question/answer`;
         }
       } catch { return 'Quiz is not valid JSON'; }
+      break;
+    }
+    case 'code': {
+      if (len < 300) return `Too short (${len} chars, min 300)`;
+      const required = ['练习目标', '初始代码', '任务要求', '测试样例', '参考实现'];
+      const missing = required.filter((section) => !text.includes(section));
+      if (missing.length > 2) return `Missing code practice sections: ${missing.join(', ')}`;
+      const codeBlockCount = (text.match(/```/g) || []).length / 2;
+      if (codeBlockCount < 2) return `Need at least 2 code blocks, got ${codeBlockCount}`;
       break;
     }
     case 'video': {
@@ -440,7 +464,7 @@ export class ResourceGenerationOrchestrator {
   private cleanOutput(type: ResourceType, raw: string): string {
     let text = raw.trim();
 
-    if (type === 'document' || type === 'docx' || type === 'pdf' || type === 'ppt') {
+    if (type === 'document' || type === 'code' || type === 'docx' || type === 'pdf' || type === 'ppt') {
       text = text.replace(/^```(?:markdown|md|html)?\s*\n?/, '').replace(/\n?```\s*$/, '');
     }
     if (type === 'mindmap' || type === 'diagram') {

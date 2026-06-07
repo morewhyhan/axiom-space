@@ -18,6 +18,7 @@ export function getDefaultAgentConfig(): Required<AxiomAgentConfig> {
     toolExecution: 'parallel',
     apiKey: aiConfig.model.apiKey,
     oracleId: 'default',
+    vaultId: '',
     maxRetries: 3,
     retryDelay: 1000,
     skillName: '',

@@ -9,6 +9,7 @@ import { Type } from "@mariozechner/pi-ai";
 import { createTool, toolRegistry } from "../tools";
 import { getShellHookAllowlist } from "@/server/core/agent/security/ShellHookAllowlist";
 import { getVaultPath, resolvePath } from "./helpers";
+import { consumeConfirmationToken, createConfirmationToken } from "../OperationConfirmation";
 
 const axiom = createAxiomCompat(getFileStorage());
 
@@ -265,7 +266,13 @@ const lsTool = createTool(
   }),
   async (_id, params) => {
     try {
-      const resolvedPath = params.dirPath === '.' ? (getVaultPath() || '') : resolvePath(params.dirPath);
+      if (!getVaultPath()) {
+        return {
+          content: [{ type: 'text', text: '未打开 Vault，请先打开一个 Vault。' }],
+          details: { error: 'No vault open' },
+        };
+      }
+      const resolvedPath = params.dirPath === '.' ? '' : resolvePath(params.dirPath);
       const result = await getFileStorage().listDir(resolvedPath);
       if (result?.success) {
         const entries = (result.entries!)
@@ -314,6 +321,7 @@ const deleteFileTool = createTool(
     filePath: Type.String({ description: '要删除的文件路径（相对于 Vault 根目录）' }),
     force: Type.Optional(Type.Boolean({ description: '设为 true 可跳过确认直接删除（默认为软删除）。设为 true 且 needConfirm=true 时才永久删除。' })),
     needConfirm: Type.Optional(Type.Boolean({ description: '默认为 true。设为 false 可跳过 ask_user 确认（仅配合 force 使用）。' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行 force 删除时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -329,10 +337,30 @@ const deleteFileTool = createTool(
 
       // Delete confirmation gate (对标 D-14)
       if (!params.force && params.needConfirm !== false) {
+        const confirmation = createConfirmationToken('delete_file', resolvedPath);
         console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
         return {
-          content: [{ type: 'text', text: `请确认是否删除 ${params.filePath}。确认后我将执行操作。` }],
-          details: { awaitingConfirmation: true },
+          content: [{ type: 'text', text: `请确认是否删除 ${params.filePath}。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            filePath: params.filePath,
+          },
+        };
+      }
+
+      if (params.force && !consumeConfirmationToken('delete_file', resolvedPath, params.confirmationToken)) {
+        const confirmation = createConfirmationToken('delete_file', resolvedPath);
+        return {
+          content: [{ type: 'text', text: `删除 ${params.filePath} 需要重新确认。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            filePath: params.filePath,
+            error: 'Invalid or missing confirmationToken',
+          },
         };
       }
 

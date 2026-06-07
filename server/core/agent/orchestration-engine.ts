@@ -7,6 +7,7 @@
 
 import { EventEmitter } from 'events';
 import { nanoid } from 'nanoid';
+import { getProfileCacheEntry } from '@/server/api/profile-cache';
 
 /**
  * Agent 消息协议
@@ -520,10 +521,7 @@ export class RealAgent {
     if (permanentCount > 20) userLevel = 'advanced';
     else if (permanentCount > 5) userLevel = 'intermediate';
 
-    let profileCache: Record<string, any> = {};
-    if (vault.profileCache) {
-      try { profileCache = JSON.parse(vault.profileCache); } catch { /* ignore parse error */ }
-    }
+    const profileCache = getProfileCacheEntry<Record<string, any>>(vault.profileCache, 'agentProfile')?.data ?? {};
 
     const capabilities = await prisma.vaultCapability.findMany({ where: { vaultId: vault.id } });
     const weakPoints = capabilities.filter(c => c.masteryLevel < 30).map(c => c.concept);

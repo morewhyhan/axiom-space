@@ -249,16 +249,13 @@ export function filterToolsByIntent(
     return null; // 不限制
   }
 
-  // 始终包含核心工具 — Agent 必须能在任何意图下访问知识库
+  // 始终包含低风险核心工具。创建、删除、资源生成类工具只跟随
+  // 当前意图开放，避免在普通对话里打断用户或生成多余资源。
   const allowed = new Set([
     ...intentRoute.tools,
     // Core: knowledge graph & vault access (always available)
     'memory_search', 'search_history', 'search_cards', 'refresh_vault',
     'assess_understanding', 'ask_user', 'feynman_test',
-    // Core: card creation (Agent must be able to create cards anytime)
-    'create_fleeing_card', 'create_permanent_card',
-    // Core: resource generation
-    'push_resource', 'extract_cards',
   ]);
 
   return allTools.filter(t => allowed.has(t));

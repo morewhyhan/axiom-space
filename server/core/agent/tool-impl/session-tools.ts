@@ -8,7 +8,7 @@ import { Type } from "@mariozechner/pi-ai";
 const axiom = createAxiomCompat(getFileStorage());
 
 import { createTool, toolRegistry } from "../tools";
-import { getVaultPath, getSessionState, setSessionState } from "./helpers";
+import { getVaultPath, getSessionState, setSessionState, resolvePath } from "./helpers";
 import { DEFAULT_MODEL, DEFAULT_COMPRESSION_MODEL } from "@/types/agent";
 
 // In-memory cache replacing localStorage (browser API unavailable in Node.js)
@@ -382,10 +382,7 @@ const feynmanTestTool = createTool(
             throw new Error('No vault path available');
           }
 
-          // Resolve to absolute path for axiom.readFile/writeFile
-          const fullPath = targetCardPath.startsWith('/') || targetCardPath.match(/^[A-Za-z]:\\/)
-            ? targetCardPath
-            : `${vaultPath}/${targetCardPath}`;
+          const fullPath = resolvePath(targetCardPath);
 
           const readResult = await getFileStorage().readFile(fullPath);
 

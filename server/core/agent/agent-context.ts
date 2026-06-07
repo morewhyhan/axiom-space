@@ -1,16 +1,16 @@
 /**
  * AgentContext — per-invocation context for the Agent tool layer.
  *
- * Built on AsyncLocalStorage so any async chain initiated inside the
- * Agent's run/runStream can recover the calling user's identity
- * without threading it through every function signature.
+ * Built on AsyncLocalStorage so any async chain initiated inside an
+ * Agent invocation can recover the calling user's identity without
+ * threading it through every function signature.
  *
  * Used by:
  *   - GlobalFileStorage.getFileStorage()  → picks DbAdapter(userId)
  *   - Agent tools that need to write to the user's vault
  *
  * Set by:
- *   - AxiomAgent.run / runStream (wraps inner execution)
+ *   - API route handlers and context-bound Agent tools
  */
 
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -18,23 +18,13 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 export interface AgentContext {
   userId: string
   vaultId?: string
+  agent?: unknown
 }
 
 const storage = new AsyncLocalStorage<AgentContext>()
 
-// Module-level fallback: pi-agent-core doesn't preserve AsyncLocalStorage
-// across tool execution boundaries, so we keep a sync fallback.
-let _fallbackVaultId: string | undefined
-let _fallbackUserId: string | undefined
-
 export function runWithAgentContext<T>(ctx: AgentContext, fn: () => T): T {
-  _fallbackUserId = ctx.userId
-  _fallbackVaultId = ctx.vaultId
-  try {
-    return storage.run(ctx, fn)
-  } finally {
-    // Don't clear on exit — keep as fallback for async tool calls
-  }
+  return storage.run(ctx, fn)
 }
 
 export function getAgentContext(): AgentContext | undefined {
@@ -42,9 +32,13 @@ export function getAgentContext(): AgentContext | undefined {
 }
 
 export function getCurrentUserId(): string | undefined {
-  return storage.getStore()?.userId || _fallbackUserId
+  return storage.getStore()?.userId
 }
 
 export function getCurrentVaultId(): string | undefined {
-  return storage.getStore()?.vaultId || _fallbackVaultId
+  return storage.getStore()?.vaultId
+}
+
+export function getCurrentAgent<T = unknown>(): T | undefined {
+  return storage.getStore()?.agent as T | undefined
 }

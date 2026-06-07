@@ -10,6 +10,8 @@
 import type { ToolMiddleware } from '../tools';
 import { getVaultPath } from '@/lib/platform';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { requiresConfirmation } from '../ToolContracts';
+import { isConfirmationTokenValid } from '../OperationConfirmation';
 
 import path from 'node:path';
 import { realpath } from 'node:fs/promises';
@@ -162,13 +164,14 @@ export class FileSafetyGuardrail implements ToolMiddleware {
 
     // Delete confirmation gate (对标 D-14)
     // Check if this is a delete/rename operation that needs confirmation
-    const destructiveTools = new Set(['delete_file', 'delete_card']);
-    if (destructiveTools.has(toolName)) {
-      // The caller (Plan 04 tool handler) must check:
-      // 1. If args.force === true → proceed directly
-      // 2. If args.force !== true → call ask_user before proceeding
-      // The guardrail flags the operation as destructive — the tool handler
-      // decides whether to confirm or block based on args.force
+    if (requiresConfirmation(toolName) && (args.force === true || args.confirmed === true)) {
+      const target = String(args.filePath || args.cardPath || args.path || '');
+      if (!isConfirmationTokenValid(toolName, target, args.confirmationToken)) {
+        return {
+          proceed: false,
+          reason: `工具 ${toolName} 属于高风险操作，必须使用用户确认后得到的一次性 confirmationToken 执行。`,
+        };
+      }
     }
 
     return { proceed: true, args };

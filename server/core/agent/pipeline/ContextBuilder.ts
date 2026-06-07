@@ -19,6 +19,7 @@ import { loadVaultData } from './MemoryService';
 import { getVaultPath } from '@/lib/platform';
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '../agent-context';
+import { getProfileCacheEntry } from '@/server/api/profile-cache';
 
 // ────────────────────────────────────────────────────────────
 // ContextBuilder
@@ -106,7 +107,9 @@ export class ContextBuilder {
       });
       if (!vault?.profileCache) return '';
 
-      const profile = JSON.parse(vault.profileCache);
+      const profileEntry = getProfileCacheEntry<Record<string, any>>(vault.profileCache, 'agentProfile');
+      const profile = profileEntry?.data;
+      if (!profile || typeof profile !== 'object') return '';
       const lines: string[] = [];
 
       if (Array.isArray(profile.learningGoals) && profile.learningGoals.length > 0) {

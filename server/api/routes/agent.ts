@@ -15,6 +15,9 @@ import { subscribeResourceProgress } from '@/server/core/agent/notification-bus'
 import type { StreamCallbacks } from '@/types/agent';
 import { prisma } from '@/lib/db';
 import { queryLightRAGContext } from '@/server/core/rag/lightrag-service';
+import { registerBuiltinTools } from '@/server/core/agent/builtin-tools';
+import { toolRegistry } from '@/server/core/agent/tools';
+import { revokeConfirmationToken } from '@/server/core/agent/OperationConfirmation';
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .post('/chat', requireAuth, zValidator('json', z.object({
@@ -79,6 +82,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
       }
 
       try {
+        await hydrateAgentFromDb(agent, dbSessionId)
+        const toolSummaries: string[] = []
         const callbacks: StreamCallbacks = {
           onToolStart: (toolName, _args) => {
             stream.writeSSE({
@@ -89,13 +94,18 @@ const app = new Hono<{ Variables: { userId: string } }>()
           onToolEnd: (toolName, result) => {
             const toolText = extractToolResultText(result)
             const details = (result as { details?: unknown } | null)?.details
+            const interactive = isInteractiveToolResult(toolName, details)
+            if (toolName === 'push_resource' && toolText.trim()) {
+              toolSummaries.push(toolText.trim())
+            }
             stream.writeSSE({
               event: 'tool_end',
               data: JSON.stringify({
                 type: 'tool_end',
                 tool: toolName,
-                text: toolName === 'push_resource' ? toolText : undefined,
-                details: toolName === 'push_resource' ? details : undefined,
+                text: toolName === 'push_resource' || interactive ? toolText : undefined,
+                details: toolName === 'push_resource' || interactive ? details : undefined,
+                requiresUserInput: interactive,
               }),
             }).catch(() => {})
           },
@@ -121,8 +131,12 @@ const app = new Hono<{ Variables: { userId: string } }>()
           })
         }
 
-        // Persist assistant response to DB
-        if (dbSessionId) await persistMessage(dbSessionId, 'assistant', fullText)
+        // Persist assistant response to DB. Resource tool summaries are also
+        // stored so reloaded sessions match what the UI showed during streaming.
+        const persistedAssistantText = toolSummaries.length > 0
+          ? [fullText.trim(), ...toolSummaries].filter(Boolean).join('\n\n')
+          : fullText
+        if (dbSessionId) await persistMessage(dbSessionId, 'assistant', persistedAssistantText)
 
         // Send completion event with full text
         await stream.writeSSE({
@@ -483,6 +497,44 @@ const app = new Hono<{ Variables: { userId: string } }>()
       },
     })
   })
+  // POST /api/agent/sessions/:id/activate — Make a session the active workspace thread
+  .post('/sessions/:id/activate', requireAuth, zValidator('query', z.object({
+    vid: z.string().optional(),
+  })), async (c) => {
+    const userId = c.get('userId') as string
+    const sessionId = c.req.param('id')
+    const vaultId = await resolveAgentVaultId(userId, c.req.query('vid'))
+
+    const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
+    const metadata = parseSessionMetadata(session?.metadata)
+    if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+      return c.json({ success: false, error: 'Not found' }, 404)
+    }
+    if (session.status === 'completed' || metadata.threadStatus === 'archived') {
+      return c.json({ success: false, error: 'Archived thread cannot be activated' }, 400)
+    }
+
+    const kind = resolveSessionKind(session, metadata)
+    if (kind === 'unknown') return c.json({ success: false, error: 'Invalid session' }, 400)
+
+    await prisma.$transaction([
+      prisma.learningSession.updateMany({
+        where: { userId, domain: '__agent__', vaultId, status: 'active', id: { not: sessionId } },
+        data: { status: 'paused' },
+      }),
+      prisma.learningSession.update({
+        where: { id: sessionId },
+        data: {
+          status: 'active',
+          phase: kind === 'conversation' ? 'conversation' : 'card-thread',
+        },
+      }),
+    ])
+
+    agentSessionMap.set(buildSessionMapKey(userId, vaultId), sessionId)
+
+    return c.json({ success: true, sessionId })
+  })
   // DELETE /api/agent/sessions/:id — Delete a specific session
   .delete('/sessions/:id', requireAuth, zValidator('query', z.object({
     vid: z.string().optional(),
@@ -492,11 +544,22 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vaultId = await resolveAgentVaultId(userId, c.req.query('vid'))
 
     const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
-    if (!session || session.userId !== userId || session.vaultId !== vaultId) return c.json({ success: false, error: 'Not found' }, 404)
+    if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+      return c.json({ success: false, error: 'Not found' }, 404)
+    }
 
-    await prisma.learningSession.delete({ where: { id: sessionId } })
+    const mapKey = buildSessionMapKey(userId, vaultId)
+    const shouldClearRuntime = session.status === 'active' || agentSessionMap.get(mapKey) === sessionId
 
-    return c.json({ success: true })
+    await prisma.$transaction(async (tx) => {
+      await tx.learningMessage.deleteMany({ where: { sessionId } })
+      await tx.learningSession.delete({ where: { id: sessionId } })
+    })
+
+    if (agentSessionMap.get(mapKey) === sessionId) agentSessionMap.delete(mapKey)
+    if (shouldClearRuntime) clearAgentRuntimeForVault(userId, vaultId)
+
+    return c.json({ success: true, sessionId })
   })
   // DELETE /api/agent/sessions/:id/messages — Clear messages in one card thread
   .delete('/sessions/:id/messages', requireAuth, zValidator('query', z.object({
@@ -516,8 +579,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
     await prisma.learningMessage.deleteMany({ where: { sessionId } })
 
-    const entry = agentCache.get(buildAgentCacheKey(userId, undefined, vaultId))
-    if (entry) agentCache.delete(buildAgentCacheKey(userId, undefined, vaultId))
+    const mapKey = buildSessionMapKey(userId, vaultId)
+    if (session.status === 'active' || agentSessionMap.get(mapKey) === sessionId) {
+      clearAgentRuntimeForVault(userId, vaultId)
+      agentSessionMap.set(mapKey, sessionId)
+    }
 
     return c.json({ success: true, sessionId })
   })
@@ -530,7 +596,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     let session
     if (sessionId) {
       session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
-      if (!session || session.userId !== userId || session.vaultId !== vaultId) {
+      if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
         return c.json({ success: true, messages: [], sessionId: null })
       }
     } else {
@@ -565,10 +631,85 @@ const app = new Hono<{ Variables: { userId: string } }>()
   .post('/reset-memory', requireAuth, async (c) => {
     const userId = c.get('userId') as string
     const vaultId = await resolveAgentVaultId(userId, c.req.query('vid'))
-    return runWithAgentContext({ userId, ...(vaultId ? { vaultId } : {}) }, async () => {
-      const agent = await getAgentForUser(userId, undefined, vaultId)
-      agent.newSession()
-      return c.json({ success: true })
+    clearAgentRuntimeForVault(userId, vaultId)
+    return c.json({ success: true })
+  })
+  // POST /api/agent/confirm-operation — execute a user-confirmed destructive tool directly.
+  .post('/confirm-operation', requireAuth, zValidator('json', z.object({
+    tool: z.enum(['delete_file', 'delete_card']),
+    target: z.string().min(1),
+    confirmationToken: z.string().min(1),
+    vaultId: z.string().optional(),
+    sessionId: z.string().optional(),
+  })), async (c) => {
+    const userId = c.get('userId') as string
+    const { tool, target, confirmationToken, vaultId, sessionId } = c.req.valid('json')
+    const resolvedVaultId = await resolveAgentVaultId(userId, vaultId)
+    if (!resolvedVaultId) return c.json({ success: false, error: 'Vault not found' }, 404)
+    const dbSessionId = sessionId
+      ? await ensureAgentSession(userId, resolvedVaultId, sessionId).catch(() => null)
+      : null
+    if (sessionId && !dbSessionId) return c.json({ success: false, error: '当前会话不可用于确认操作。' }, 400)
+
+    return runWithAgentContext({ userId, vaultId: resolvedVaultId }, async () => {
+      registerBuiltinTools()
+      const registeredTool = toolRegistry.get(tool)
+      if (!registeredTool) return c.json({ success: false, error: `Tool not registered: ${tool}` }, 500)
+
+      const affectedCard = tool === 'delete_card'
+        ? await findCardByAgentTarget(resolvedVaultId, target)
+        : null
+
+      const params = tool === 'delete_card'
+        ? { cardPath: target, force: true, confirmationToken }
+        : { filePath: target, force: true, confirmationToken }
+
+      if (dbSessionId) {
+        await persistMessage(dbSessionId, 'user', `确认执行高风险操作：${tool === 'delete_card' ? '删除卡片' : '删除文件'} ${target}`)
+      }
+      const result = await (registeredTool as any).execute(`confirm-${Date.now()}`, params)
+      const text = extractToolResultText(result)
+      const details = (result as { details?: unknown } | null)?.details
+      const awaiting = !!(details && typeof details === 'object' && (details as Record<string, unknown>).awaitingConfirmation === true)
+      const error = details && typeof details === 'object' && typeof (details as Record<string, unknown>).error === 'string'
+        ? String((details as Record<string, unknown>).error)
+        : undefined
+
+      if (awaiting || error) {
+        return c.json({ success: false, text, details, error: error || 'Operation still requires confirmation' }, 400)
+      }
+      const assistantText = text || '操作已完成。'
+      if (dbSessionId) {
+        await persistMessage(dbSessionId, 'assistant', assistantText)
+        void maybeAutoTitleSession(dbSessionId, userId, resolvedVaultId).catch(() => {})
+      }
+      return c.json({ success: true, text: assistantText, details, affectedCard })
+    })
+  })
+  // POST /api/agent/cancel-operation — revoke a pending destructive confirmation.
+  .post('/cancel-operation', requireAuth, zValidator('json', z.object({
+    tool: z.enum(['delete_file', 'delete_card']),
+    target: z.string().min(1),
+    confirmationToken: z.string().min(1),
+    vaultId: z.string().optional(),
+    sessionId: z.string().optional(),
+  })), async (c) => {
+    const userId = c.get('userId') as string
+    const { tool, target, confirmationToken, vaultId, sessionId } = c.req.valid('json')
+    const resolvedVaultId = await resolveAgentVaultId(userId, vaultId)
+    if (!resolvedVaultId) return c.json({ success: false, error: 'Vault not found' }, 404)
+    const dbSessionId = sessionId
+      ? await ensureAgentSession(userId, resolvedVaultId, sessionId).catch(() => null)
+      : null
+    if (sessionId && !dbSessionId) return c.json({ success: false, error: '当前会话不可用于取消操作。' }, 400)
+
+    return runWithAgentContext({ userId, vaultId: resolvedVaultId }, async () => {
+      const revoked = revokeConfirmationToken(tool, target, confirmationToken)
+      if (dbSessionId) {
+        await persistMessage(dbSessionId, 'user', `取消高风险操作：${tool === 'delete_card' ? '删除卡片' : '删除文件'} ${target}`)
+        await persistMessage(dbSessionId, 'assistant', revoked ? '已取消，操作不会执行。' : '该确认请求已失效。')
+      }
+      return c.json({ success: true, revoked })
     })
   })
   // DELETE /api/agent/sessions — Clear current session and start fresh
@@ -581,6 +722,39 @@ const app = new Hono<{ Variables: { userId: string } }>()
   // GET /api/agent/health — Agent health check
   .get('/health', (c) => {
     return c.json({ status: 'ok', timestamp: Date.now() })
+  })
+  // GET /api/agent/xunfei/compat — minimal iFlytek Spark compatibility check.
+  .get('/xunfei/compat', requireAuth, async (c) => {
+    const { createXunfeiConfigFromEnv, callXunfeiAPI } = await import('@/server/core/ai/xunfei-adapter')
+    const config = createXunfeiConfigFromEnv()
+    if (!config) {
+      return c.json({
+        success: false,
+        configured: false,
+        error: 'XUNFEI_APP_ID, XUNFEI_API_KEY, XUNFEI_API_SECRET are required.',
+      })
+    }
+
+    if (c.req.query('probe') !== '1') {
+      return c.json({
+        success: true,
+        configured: true,
+        version: config.version,
+        probe: false,
+      })
+    }
+
+    const content = await callXunfeiAPI(config, [{ role: 'user', content: '请只回答 OK' }], {
+      temperature: 0.1,
+      maxTokens: 16,
+    })
+    return c.json({
+      success: true,
+      configured: true,
+      version: config.version,
+      probe: true,
+      content,
+    })
   })
   // GET /api/agent/status — Agent status (model, budget, etc.)
   .get('/status', requireAuth, async (c) => {
@@ -651,11 +825,13 @@ async function getAgentForUser(userId: string, oracleId?: string, vaultId?: stri
   const agent = (await createAgent({
     apiKey: aiConfig.model.apiKey,
     userId,
+    vaultId: vaultId || undefined,
     modelId: aiConfig.model.modelId,
     oracleId: resolvedOracleId,
     systemPrompt,
     enableMemory: true,
     enableSkills: true,
+    sessionPersistence: false,
   })) as AxiomAgent
 
   agentCache.set(cacheKey, { agent, lastUsed: Date.now() })
@@ -679,6 +855,15 @@ function buildAgentCacheKey(userId: string, oracleId?: string, vaultId?: string 
 
 function buildSessionMapKey(userId: string, vaultId?: string | null): string {
   return [userId, vaultId || 'no-vault'].join('::')
+}
+
+function clearAgentRuntimeForVault(userId: string, vaultId?: string | null): void {
+  const cachePrefix = `${userId}::${vaultId || 'no-vault'}::`
+  for (const [key, entry] of agentCache) {
+    if (!key.startsWith(cachePrefix)) continue
+    entry.agent.dispose().catch(() => {})
+    agentCache.delete(key)
+  }
 }
 
 function parseSessionMetadata(metadata?: string | null): {
@@ -802,6 +987,44 @@ async function persistMessage(sessionId: string, role: 'user' | 'assistant' | 's
   }
 }
 
+async function findCardByAgentTarget(vaultId: string, target: string): Promise<{
+  id: string
+  title: string | null
+  type: string
+  path: string
+} | null> {
+  const normalized = target
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/^\/+/, '')
+  if (!normalized) return null
+  return prisma.card.findFirst({
+    where: {
+      vaultId,
+      OR: [
+        { path: normalized },
+        { path: target },
+        { title: normalized.replace(/\.md$/i, '').split('/').pop() || normalized },
+      ],
+    },
+    select: { id: true, title: true, type: true, path: true },
+  })
+}
+
+async function hydrateAgentFromDb(agent: AxiomAgent, sessionId: string): Promise<void> {
+  const messages = await prisma.learningMessage.findMany({
+    where: {
+      sessionId,
+      role: { in: ['user', 'assistant', 'system'] },
+    },
+    orderBy: { timestamp: 'desc' },
+    take: 40,
+    select: { role: true, content: true, timestamp: true },
+  })
+  agent.hydrateMessages(messages.reverse())
+}
+
 function resolveSessionKind(
   session: { concept?: string | null; metadata?: string | null; phase?: string | null } | null | undefined,
   metadata?: ReturnType<typeof parseSessionMetadata>,
@@ -921,4 +1144,15 @@ function extractToolResultText(result: unknown): string {
     .map((item) => typeof item?.text === 'string' ? item.text : '')
     .filter(Boolean)
     .join('\n\n')
+}
+
+function isInteractiveToolResult(toolName: string, details: unknown): boolean {
+  if (toolName === 'ask_user' || toolName === 'assess_understanding' || toolName === 'feynman_test') {
+    return true
+  }
+  if (!details || typeof details !== 'object') return false
+  const value = details as Record<string, unknown>
+  return value.awaitingConfirmation === true ||
+    value.awaitingUserResponse === true ||
+    value.asked === true
 }

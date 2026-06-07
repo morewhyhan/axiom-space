@@ -1,9 +1,11 @@
 /**
- * AuditLogger — 结构化审计日志（纯内存模式）
+ * AuditLogger — 结构化审计日志
  *
- * 将关键事件记录在内存环形缓冲区中，不再持久化到磁盘文件。
- * 缓冲区满时丢弃最旧条目。
+ * 关键事件先写入内存环形缓冲区，同时尽力异步落库。
+ * 审计不能阻断主链路，但生产事故复盘必须能从 DB 找回记录。
  */
+
+import { getAgentContext } from '@/server/core/agent/agent-context';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -52,12 +54,15 @@ export class AuditLogger {
   log(entry: Omit<AuditEntry, 'timestamp'>): void {
     if (entry.level < this.minLevel) return;
 
-    this.buffer.push({ ...entry, timestamp: new Date().toISOString() });
+    const stored = { ...entry, timestamp: new Date().toISOString() };
+    this.buffer.push(stored);
 
     // 缓冲区满时丢弃最旧条目
     if (this.buffer.length > MAX_BUFFER_SIZE) {
       this.buffer = this.buffer.slice(-Math.floor(MAX_BUFFER_SIZE / 2));
     }
+
+    this.persist(stored).catch(() => {});
   }
 
   debug(category: LogCategory, event: string, details: Record<string, unknown> = {}): void {
@@ -79,6 +84,26 @@ export class AuditLogger {
   /** 获取当前日志条目（用于调试/展示） */
   getEntries(): AuditEntry[] {
     return [...this.buffer];
+  }
+
+  private async persist(entry: AuditEntry): Promise<void> {
+    try {
+      const context = getAgentContext();
+      const { prisma } = await import('@/lib/db');
+      await prisma.agentAuditLog.create({
+        data: {
+          userId: context?.userId || null,
+          vaultId: context?.vaultId || null,
+          sessionId: entry.sessionId || null,
+          level: entry.level,
+          category: entry.category,
+          event: entry.event,
+          details: JSON.stringify(entry.details || {}),
+        },
+      });
+    } catch {
+      // Never let audit persistence break the user-facing Agent run.
+    }
   }
 }
 

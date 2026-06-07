@@ -187,6 +187,25 @@ model agentSession {
   @@index([vaultId])
 }
 
+// Agent 审计日志 — 记录工具调用、拦截、重试、LLM 调用等关键事件
+model agentAuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  vaultId   String?
+  sessionId String?
+  level     Int
+  category  String
+  event     String
+  details   String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([vaultId])
+  @@index([sessionId])
+  @@index([category])
+  @@index([createdAt])
+}
+
 // ═══════════════════════════════════════════════
 // Vault Memory — 替代 .axiom/memories/MEMORY.md
 // ═══════════════════════════════════════════════

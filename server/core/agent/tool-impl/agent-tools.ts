@@ -255,7 +255,14 @@ const sessionsSpawnTool = createTool(
   async (_id, params) => {
     try {
       const { getSubagentManager, SubagentMode, SubagentRole, AGENT_ROLES } = await import('../subagent/SubagentSystem');
+      const { getCurrentAgent } = await import('@/server/core/agent/agent-context');
       const manager = getSubagentManager();
+      const parentAgent = getCurrentAgent<any>();
+      if (parentAgent) {
+        manager.setParentAgent(parentAgent);
+        const parentMemory = typeof parentAgent.getMemory === 'function' ? parentAgent.getMemory() : null;
+        if (parentMemory) manager.setParentMemory(parentMemory as any);
+      }
 
       // 如果指定了 skillName，加载 skill 内容
       let skillContent: string | undefined;

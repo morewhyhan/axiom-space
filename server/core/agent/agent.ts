@@ -10,7 +10,7 @@ import { Interruptible } from "@/server/core/learning/core/interrupt";
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { getModel, completeSimple } from '@mariozechner/pi-ai';
 import type { KnownProvider, Model, Message, AssistantMessage, Tool, Api } from '@mariozechner/pi-ai';
-import { Agent, type AgentMessage } from '@mariozechner/pi-agent-core';
+import { Agent, type AgentMessage, type AgentTool } from '@mariozechner/pi-agent-core';
 import { resolveAiConfig } from '@/lib/ai-config';
 import type { AxiomAgentConfig, AgentRunResult, StreamCallbacks, ModelConfig, LLMProvider } from '@/types/agent';
 import { toolRegistry, type ToolMiddleware } from './tools';
@@ -47,11 +47,7 @@ import { PromptService } from './pipeline/PromptService';
 import { AgentPipeline } from './pipeline/Pipeline';
 import type { IMemoryManager, ILearningSkillManager } from './pipeline/interfaces';
 import { AgentErrorClassifier } from './errors';
-
-declare global {
-  // Global agent reference for builtin tools that access the running agent instance
-  var __axiomAgent: AxiomAgent | undefined;
-}
+import { runWithAgentContext } from './agent-context';
 
 const _vp = () => process.env["VAULT_PATH"] || "";
 
@@ -75,6 +71,7 @@ export class AxiomAgent extends Interruptible {
   setUnsubscribeFn(fn: (() => void) | null): void { this._unsubscribeFn = fn; }
   /** Expose _getModel publicly for Pipeline error recovery */
   resolveModel() { return this._getModel(); }
+  getRuntimeTools(): AgentTool<any>[] { return this._getContextBoundTools(); }
 
   private _lastUserMessage: string = '';
   private _turnCount: number = 0;
@@ -88,9 +85,6 @@ export class AxiomAgent extends Interruptible {
   constructor(services: AgentServices) {
     super();
     this.services = services;
-
-    // Global expose Agent instance for builtin tools
-    globalThis.__axiomAgent = this;
 
     // ── Create composed services (before Agent) ──────────────
     const vaultPath = services.config.vaultPath || process.env.VAULT_PATH || '';
@@ -123,7 +117,7 @@ export class AxiomAgent extends Interruptible {
         systemPrompt: this.services.config.systemPrompt,
         model: this._getModel() ?? undefined,
         thinkingLevel: this.services.config.thinkingLevel,
-        tools: toolRegistry.getAll(),
+        tools: this._getContextBoundTools(),
         messages: [],
       },
       convertToLlm: (messages) => this.services.promptService.convertToLlm(messages) as Message[],
@@ -151,7 +145,7 @@ export class AxiomAgent extends Interruptible {
 
     // Sync memory tools to agent state
     if (this.services.config.enableMemory) {
-      this.services.agent.state.tools = toolRegistry.getAll();
+      this.services.agent.state.tools = this._getContextBoundTools();
     }
 
     // Load persisted session
@@ -734,6 +728,21 @@ export class AxiomAgent extends Interruptible {
     };
   }
 
+  private _getContextBoundTools(): AgentTool<any>[] {
+    const userId = this.services.config.userId;
+    const vaultId = this.services.config.vaultId;
+    if (!userId) return toolRegistry.getAll();
+
+    return toolRegistry.getAll().map((tool) => ({
+      ...tool,
+      execute: (...args: Parameters<typeof tool.execute>) =>
+        runWithAgentContext(
+          { userId, ...(vaultId ? { vaultId } : {}), agent: this },
+          () => tool.execute(...args),
+        ),
+    }));
+  }
+
   // ── Tool call tracking (used by Pipeline) ──
   resetToolCalls(): void { this._currentTurnToolCalls = []; }
   recordToolCall(tc: EmptyToolCall): void { this._currentTurnToolCalls.push(tc); }
@@ -1034,6 +1043,32 @@ export class AxiomAgent extends Interruptible {
     return this.services.sessionId;
   }
 
+  hydrateMessages(messages: Array<{ role: string; content: string; timestamp?: Date | number | string | null }>): void {
+    const hydrated = messages
+      .filter((message) =>
+        (message.role === 'user' || message.role === 'assistant' || message.role === 'system') &&
+        typeof message.content === 'string' &&
+        message.content.trim().length > 0,
+      )
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+        timestamp: message.timestamp instanceof Date
+          ? message.timestamp.getTime()
+          : typeof message.timestamp === 'string'
+            ? Date.parse(message.timestamp) || Date.now()
+            : message.timestamp ?? Date.now(),
+      } as unknown as AgentMessage));
+
+    this.services.agent.state.messages = hydrated;
+    this.services.learning.budget.reset();
+    this.resetInterrupt?.();
+    this._turnCount = hydrated.filter((message) => (message as { role?: string }).role === 'user').length;
+    const lastUser = [...hydrated].reverse().find((message) => (message as { role?: string }).role === 'user') as { content?: string } | undefined;
+    this._lastUserMessage = lastUser?.content ?? '';
+    this._backgroundAnalyzer.reset(hydrated.length);
+  }
+
   newSession(): void {
     this.services.sessionId = this.services.sessionService.generateSessionId();
     this.services.agent.state.messages = [];
@@ -1041,6 +1076,7 @@ export class AxiomAgent extends Interruptible {
     this.resetInterrupt?.();
     this._turnCount = 0;
     this._lastUserMessage = '';
+    this._backgroundAnalyzer.reset();
     this.services.sessionService.saveSession({
       messages: [],
       modelConfig: this.services.modelConfig,

@@ -12,9 +12,8 @@ import type { Model } from '@mariozechner/pi-ai';
 import type {
   SubagentConfig,
   SubagentRunRecord,
-  SubagentRole,
 } from '@/server/core/agent/subagent/SubagentTypes';
-import { SubagentStatus } from '@/server/core/agent/subagent/SubagentTypes';
+import { SubagentRole, SubagentStatus } from '@/server/core/agent/subagent/SubagentTypes';
 import { AGENT_ROLES } from '@/server/core/agent/subagent/SubagentTypes';
 import type { ModelConfig } from '@/types/agent';
 import { resolveAiConfig } from '@/lib/ai-config';
@@ -22,8 +21,48 @@ import { toolRegistry } from '../tools';
 import { SubagentHeartbeat } from '@/server/core/agent/subagent/SubagentHeartbeat';
 import type { MemoryManager } from '../../learning/memory/manager';
 import { getVaultPath } from '@/lib/platform';
-import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { getAgentContext, getCurrentVaultId, runWithAgentContext } from '@/server/core/agent/agent-context';
 import { emitNotification } from '../notification-bus';
+
+const ROLE_ALLOWED_TOOLS: Record<SubagentRole, string[]> = {
+  [SubagentRole.Oracle]: [
+    'read', 'grep', 'find', 'ls', 'search_cards', 'memory', 'memory_search', 'search_history',
+    'assess_understanding', 'ask_user', 'feynman_test', 'web_search',
+  ],
+  [SubagentRole.Profile]: [
+    'read', 'grep', 'find', 'ls', 'search_cards', 'memory', 'memory_search', 'search_history',
+    'write_memory', 'edit_memory', 'read_skill', 'list_skills',
+  ],
+  [SubagentRole.Forge]: [
+    'read', 'grep', 'find', 'ls', 'search_cards', 'memory', 'memory_search', 'search_history',
+    'push_resource', 'generate_ppt', 'extract_cards', 'create_fleeing_card', 'create_permanent_card',
+    'web_search',
+  ],
+  [SubagentRole.Guide]: [
+    'read', 'grep', 'find', 'ls', 'search_cards', 'memory', 'memory_search', 'search_history',
+    'find_learning_path', 'recommend_next_step', 'suggest_related_concepts', 'recommend_resources',
+    'create_study_plan', 'get_progress', 'suggest_next_topic',
+  ],
+  [SubagentRole.Assess]: [
+    'read', 'grep', 'find', 'ls', 'search_cards', 'memory', 'memory_search', 'search_history',
+    'assess_understanding', 'feynman_test', 'generate_mcq', 'batch_assess',
+    'get_assessment_result', 'check_card_quality', 'detect_duplicates',
+  ],
+};
+
+const SANDBOX_DENY_TOOLS = new Set([
+  'bash',
+  'eval',
+  'exec',
+  'delete_file',
+  'rename_file',
+  'delete_card',
+  'delete_skill',
+  'update_skill',
+  'cleanup_broken_links',
+  'merge_duplicate_cards',
+  'rebuild_index',
+]);
 
 export class SubagentLifecycle {
   private currentDepth = 0;
@@ -55,9 +94,9 @@ export class SubagentLifecycle {
    * Create and start a subagent.
    */
   async spawn(config: SubagentConfig): Promise<string> {
-    // sandbox 仅在无 role 时默认启用；有 role 时由 role 决定工具集
+    // 子 Agent 默认全部运行在工具沙箱内。role 只负责收窄能力边界，不负责绕过沙箱。
     if (config.sandbox === undefined) {
-      config.sandbox = !config.role;
+      config.sandbox = true;
     }
 
     // 深度检查
@@ -246,28 +285,39 @@ export class SubagentLifecycle {
   // ── Tool Selection ─────────────────────────────────────────
 
   private getToolsForConfig(config: SubagentConfig): any[] {
-    if (config.sandbox) {
-      return this.getSandboxTools();
-    }
+    const baseTools = config.role && AGENT_ROLES[config.role]
+      ? this.getRoleTools(config.role, false)
+      : toolRegistry.getAll();
     if (config.role && AGENT_ROLES[config.role]) {
-      return this.getRoleTools(config.role);
+      const roleTools = this.getRoleTools(config.role, false);
+      return config.sandbox ? this.getSandboxTools(roleTools) : this.bindContextToTools(roleTools);
     }
-    return toolRegistry.getAll();
+    return config.sandbox ? this.getSandboxTools(baseTools) : this.bindContextToTools(baseTools);
   }
 
-  private getRoleTools(role: SubagentRole): any[] {
-    const roleDef = AGENT_ROLES[role];
-    if (!roleDef) return toolRegistry.getAll();
-
+  private getRoleTools(role: SubagentRole, bind = true): any[] {
+    if (!AGENT_ROLES[role]) {
+      const tools = toolRegistry.getAll();
+      return bind ? this.bindContextToTools(tools) : tools;
+    }
     const allTools = toolRegistry.getAll();
-    const blocked = new Set(roleDef.blockedTools);
-    return allTools.filter((t) => !blocked.has(t.name));
+    const allowed = new Set(ROLE_ALLOWED_TOOLS[role]);
+    const tools = allTools.filter((t) => allowed.has(t.name));
+    return bind ? this.bindContextToTools(tools) : tools;
   }
 
-  private getSandboxTools(): any[] {
-    const allTools = toolRegistry.getAll();
-    const denyList = ['bash', 'eval', 'exec'];
-    return allTools.filter((t) => !denyList.includes(t.name));
+  private getSandboxTools(baseTools = toolRegistry.getAll()): any[] {
+    return this.bindContextToTools(baseTools.filter((t) => !SANDBOX_DENY_TOOLS.has(t.name)));
+  }
+
+  private bindContextToTools(tools: any[]): any[] {
+    const context = getAgentContext();
+    if (!context?.userId) return tools;
+    return tools.map((tool) => ({
+      ...tool,
+      execute: (...args: Parameters<typeof tool.execute>) =>
+        runWithAgentContext(context, () => tool.execute(...args)),
+    }));
   }
 
   // ── System Prompt ──────────────────────────────────────────

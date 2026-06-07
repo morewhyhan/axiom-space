@@ -10,6 +10,7 @@ import { getVaultPath, resolvePath } from "./helpers";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { emitNotification } from '../notification-bus';
+import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
 const axiom = createAxiomCompat(getFileStorage());
 
 const createFleeingCardTool = createTool(
@@ -411,6 +412,7 @@ const deleteCardTool = createTool(
   Type.Object({
     cardPath: Type.String({ description: '要删除的卡片路径（相对于 Vault 根目录，如 "permanent/concept.md"）' }),
     force: Type.Optional(Type.Boolean({ description: '设为 true 可跳过确认直接删除' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行删除时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -442,74 +444,67 @@ const deleteCardTool = createTool(
         : '';
 
       // Confirmation gate (对标 D-14)
+      const resolvedDeletePath = resolvePath(params.cardPath);
       if (!params.force) {
-        const confirmText = backlinkText
-          ? `请确认是否删除卡片 "${params.cardPath}"。\n${backlinkText}\n确认后我将执行操作。`
-          : `请确认是否删除卡片 "${params.cardPath}"。确认后我将执行操作。`;
+        const confirmation = createConfirmationToken('delete_card', resolvedDeletePath);
         console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
         return {
-          content: [{ type: 'text', text: confirmText }],
-          details: { awaitingConfirmation: true, backlink_count: backlinks.length, backlinks: backlinks.map(b => b.title) },
+          content: [{ type: 'text', text: backlinkText ? `请确认是否删除卡片 "${params.cardPath}"。\n${backlinkText}` : `请确认是否删除卡片 "${params.cardPath}"。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            cardPath: params.cardPath,
+            backlink_count: backlinks.length,
+            backlinks: backlinks.map(b => b.title),
+          },
         };
       }
 
-      // Soft-delete via file storage + prisma (对标 D-10, D-13)
-      const fileStorage = getFileStorage()
-      const resolvedPath = params.cardPath.startsWith('/')
-        ? params.cardPath
-        : `${vaultPath}/${params.cardPath}`;
-
-      // Try to soft-delete: move to .axiom/trash/ then remove DB record
-      let softDeleted = false;
-      const trashPath = `${vaultPath}/.axiom/trash/${params.cardPath.split('/').pop() || 'deleted'}`;
-      try {
-        const renameResult = await fileStorage.rename(resolvedPath, trashPath);
-        if (renameResult?.success) {
-          softDeleted = true;
-        }
-      } catch (e) {
-        console.debug('[delete_card] File rename failed, falling back to direct delete:', e);
-      }
-
-      // Also remove from DB
-      const vId = getCurrentVaultId();
-      if (vId) {
-        try {
-          // Match by path
-          const dbCard = await prisma.card.findFirst({
-            where: { vaultId: vId, path: params.cardPath },
-          });
-          if (dbCard) {
-            // Delete edges first
-            await prisma.edge.deleteMany({
-              where: {
-                OR: [
-                  { sourceId: dbCard.id },
-                  { targetId: dbCard.id },
-                ],
-              },
-            });
-            await prisma.card.delete({ where: { id: dbCard.id } });
-          }
-        } catch (dbErr) {
-          console.debug('[delete_card] DB delete failed:', dbErr);
-        }
-      }
-
-      if (softDeleted) {
+      if (!consumeConfirmationToken('delete_card', resolvedDeletePath, params.confirmationToken)) {
+        const confirmation = createConfirmationToken('delete_card', resolvedDeletePath);
         return {
-          content: [{ type: 'text', text: `卡片已移动到回收站: ${params.cardPath}\n可通过 .axiom/trash/ 恢复。` }],
-          details: { cardPath: params.cardPath, trashPath },
+          content: [{ type: 'text', text: `删除卡片 "${params.cardPath}" 需要重新确认。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            cardPath: params.cardPath,
+            error: 'Invalid or missing confirmationToken',
+          },
         };
       }
 
-      // Fallback: force delete from file storage
+      // Confirmed delete. Paths are always relative to the current Vault.
+      const fileStorage = getFileStorage()
+      const resolvedPath = resolvedDeletePath;
+      const vId = getCurrentVaultId();
+
+      const dbCard = vId ? await prisma.card.findFirst({
+        where: { vaultId: vId, path: resolvedPath },
+      }) : null;
+
       const delResult = await fileStorage.deleteFile(resolvedPath);
       if (!delResult?.success) {
         return {
           content: [{ type: 'text', text: `删除失败: ${delResult?.error || '未知错误'}` }],
           details: { error: delResult?.error },
         };
+      }
+      if (vId && dbCard) {
+        try {
+          await prisma.edge.deleteMany({
+            where: {
+              OR: [
+                { sourceId: dbCard.id },
+                { targetId: dbCard.id },
+              ],
+            },
+          });
+          await prisma.card.deleteMany({ where: { id: dbCard.id } });
+        } catch (dbErr) {
+          console.debug('[delete_card] DB delete failed:', dbErr);
+        }
       }
       return {
         content: [{ type: 'text', text: `卡片已删除: ${params.cardPath}` }],
@@ -596,37 +591,77 @@ const addGraphEdgeTool = createTool(
         return { content: [{ type: 'text', text: '未打开 Vault。' }], details: {} };
       }
 
-      const fileStorage = getFileStorage()
-const axiom = createAxiomCompat(fileStorage);
-      if (!(axiom as any)?.loadCard || !(axiom as any)?.updateCard) {
-        return { content: [{ type: 'text', text: '卡片操作功能不可用。' }], details: {} };
+      const vaultId = getCurrentVaultId();
+      if (!vaultId) {
+        return { content: [{ type: 'text', text: '未打开 Vault。' }], details: { error: 'No vault open' } };
       }
 
-      // 尝试加载源卡片（先永久、后灵感）
-      let sourceResult = await (axiom as any).loadCard(vaultPath, `permanent/${params.source}.md`);
-      let sourceType = 'permanent';
-      if (!sourceResult.success || !sourceResult.card) {
-        sourceResult = await (axiom as any).loadCard(vaultPath, `fleeting/${params.source}.md`);
-        sourceType = 'fleeting';
-      }
-      if (!sourceResult.success || !sourceResult.card) {
+      const [sourceCard, targetCard] = await Promise.all([
+        prisma.card.findFirst({
+          where: {
+            vaultId,
+            OR: [
+              { title: params.source },
+              { path: `permanent/${params.source}.md` },
+              { path: `fleeting/${params.source}.md` },
+            ],
+          },
+        }),
+        prisma.card.findFirst({
+          where: {
+            vaultId,
+            OR: [
+              { title: params.target },
+              { path: `permanent/${params.target}.md` },
+              { path: `fleeting/${params.target}.md` },
+            ],
+          },
+        }),
+      ]);
+
+      if (!sourceCard) {
         return {
           content: [{ type: 'text', text: `源概念 "${params.source}" 不存在（未在灵感盒或永久盒中找到）。` }],
           details: { error: `Source card not found: ${params.source}` },
         };
       }
-
-      const card = sourceResult.card;
-      const links = card.links || { to: [], from: [] };
-      if (!links.to.includes(params.target)) {
-        links.to.push(params.target);
+      if (!targetCard) {
+        return {
+          content: [{ type: 'text', text: `目标概念 "${params.target}" 不存在（未在灵感盒或永久盒中找到）。` }],
+          details: { error: `Target card not found: ${params.target}` },
+        };
       }
 
-      await (axiom as any).updateCard(vaultPath, `${sourceType}/${params.source}.md`, { ...card, links }, card.content || '');
+      const edgeType = params.type || 'related';
+      const strength = params.strength ?? 0.8;
+      const existingEdge = await prisma.edge.findFirst({
+        where: { vaultId, sourceId: sourceCard.id, targetId: targetCard.id, type: edgeType },
+      });
+      const edge = existingEdge
+        ? await prisma.edge.update({ where: { id: existingEdge.id }, data: { weight: strength } })
+        : await prisma.edge.create({
+          data: {
+            vaultId,
+            sourceId: sourceCard.id,
+            targetId: targetCard.id,
+            type: edgeType,
+            weight: strength,
+          },
+        });
+
+      const targetTitle = targetCard.title || params.target;
+      const linkPattern = new RegExp(`\\[\\[${targetTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`);
+      if (!linkPattern.test(sourceCard.content || '')) {
+        await getFileStorage().writeFile(
+          sourceCard.path,
+          `${sourceCard.content || ''}${(sourceCard.content || '').endsWith('\n') ? '' : '\n'}\n[[${targetTitle}]]`,
+          sourceCard.type,
+        );
+      }
 
       return {
-        content: [{ type: 'text', text: `关系已添加: ${params.source} --[${params.type || 'related'}]--> ${params.target}` }],
-        details: { source: params.source, target: params.target, type: params.type || 'related', strength: params.strength || 0.8 },
+        content: [{ type: 'text', text: `关系已添加: ${params.source} --[${edgeType}]--> ${params.target}` }],
+        details: { source: params.source, target: params.target, type: edgeType, strength, edgeId: edge.id },
       };
     } catch (error) {
       return {

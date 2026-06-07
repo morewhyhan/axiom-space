@@ -6,6 +6,7 @@
 
 import { nanoid } from 'nanoid';
 import { emitNotification } from './notification-bus';
+import { getProfileCacheEntry } from '@/server/api/profile-cache';
 
 /**
  * 推送触发器定义
@@ -135,7 +136,7 @@ export class ResourcePushEngine {
           const lastPushTime = lastPush?.sentAt?.getTime();
 
           // 构建用户状态对象传递给 detectTriggers
-          const profile = vault.profileCache ? JSON.parse(vault.profileCache) : null;
+          const profile = getProfileCacheEntry(vault.profileCache, 'educationProfile')?.data ?? null;
           const userState: {
             profile?: any;
             learningPath?: any;

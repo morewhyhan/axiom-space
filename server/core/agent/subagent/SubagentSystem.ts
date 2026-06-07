@@ -25,6 +25,8 @@ import { SubagentEventBus } from './SubagentEventBus';
 import type { SubagentConfig, SubagentRunRecord, SubagentEvent } from './SubagentTypes';
 import { SubagentStatus } from './SubagentTypes';
 import type { MemoryManager } from '@/server/core/learning/memory/manager';
+import { getAgentContext } from '@/server/core/agent/agent-context';
+import { getSubagentManagerKey } from './SubagentManagerScope';
 
 /**
  * Subagent 管理器
@@ -145,16 +147,20 @@ export class SubagentManager {
   }
 }
 
-/**
- * 全局单例
- */
-let globalSubagentManager: SubagentManager | null = null;
+const subagentManagers = new Map<string, SubagentManager>();
+
+function getManagerKey(): string {
+  return getSubagentManagerKey(getAgentContext());
+}
 
 export function getSubagentManager(): SubagentManager {
-  if (!globalSubagentManager) {
-    globalSubagentManager = new SubagentManager();
+  const key = getManagerKey();
+  let manager = subagentManagers.get(key);
+  if (!manager) {
+    manager = new SubagentManager();
+    subagentManagers.set(key, manager);
   }
-  return globalSubagentManager;
+  return manager;
 }
 
 /**

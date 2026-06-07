@@ -9,11 +9,12 @@
  */
 
 import { useCallback, useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAgentStore } from '@/stores/agent-store'
 import { useAppStore } from '@/stores/mode-store'
 import { useAuthSession } from '@/hooks/use-auth'
 import { getSiteUrl } from '@/lib/site-url'
-import type { AgentMessage, RagReference, SessionSummary } from '@/stores/agent-store'
+import type { AgentConfirmationRequest, AgentMessage, RagReference, SessionSummary } from '@/stores/agent-store'
 import type { ResourceProgressStatus } from '@/stores/agent-store'
 
 // Re-export for callers that import the types from this file
@@ -22,6 +23,48 @@ export type { AgentMessage, SessionSummary }
 // Module-level guard: prevent double auto-init when ChatSessionList and
 // ForgeChat both mount in the same render cycle for the same vault.
 let autoInitVaultId: string | null = null
+
+function extractConfirmationRequest(payload: any): AgentConfirmationRequest | null {
+  if (!payload || payload.type !== 'tool_end' || payload.requiresUserInput !== true) return null
+  const details = payload.details
+  if (!details || typeof details !== 'object') return null
+  if (details.awaitingConfirmation !== true || typeof details.confirmationToken !== 'string') return null
+
+  const tool = typeof payload.tool === 'string' ? payload.tool : 'unknown'
+  const target = typeof details.filePath === 'string'
+    ? details.filePath
+    : typeof details.cardPath === 'string'
+      ? details.cardPath
+      : typeof details.target === 'string'
+        ? details.target
+        : ''
+
+  return {
+    id: `${tool}:${details.confirmationToken}`,
+    tool,
+    target,
+    confirmationToken: details.confirmationToken,
+    prompt: typeof payload.text === 'string' ? payload.text : '',
+    status: 'pending',
+    createdAt: Date.now(),
+    expiresAt: typeof details.expiresAt === 'number' ? details.expiresAt : undefined,
+    backlinkCount: typeof details.backlink_count === 'number' ? details.backlink_count : undefined,
+    backlinks: Array.isArray(details.backlinks)
+      ? details.backlinks.filter((item: unknown): item is string => typeof item === 'string')
+      : undefined,
+  }
+}
+
+function invalidateWorkspaceQueries(queryClient: ReturnType<typeof useQueryClient>, vaultId: string) {
+  queryClient.invalidateQueries({ queryKey: ['galaxy', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['dashboard-stats', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['learning-paths', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['learning-profile', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['cognition', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['observations', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['card-links'] })
+}
 
 export function useAgent() {
   /* ── Read state from the shared store ── */
@@ -34,6 +77,7 @@ export function useAgent() {
   const currentProgress = useAgentStore((s) => s.currentProgress)
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const { data: sessionData } = useAuthSession()
+  const queryClient = useQueryClient()
   const isLoggedIn = !!sessionData?.session
 
   /* ── Load when the active vault changes (once across all hook instances) ── */
@@ -154,6 +198,7 @@ export function useAgent() {
       let assistantContent = ''
       let buffer = ''
       let insertedResourceSummary = false
+      const insertedToolPrompts = new Set<string>()
 
       store._appendMessage({ role: 'assistant', content: '' })
 
@@ -219,6 +264,20 @@ export function useAgent() {
                     useAgentStore.getState()._updateLastMessage(assistantContent)
                   }
                 }
+                if (payload.requiresUserInput === true && typeof payload.text === 'string' && payload.text.trim()) {
+                  const promptKey = `${payload.tool}:${payload.text.trim()}`
+                  if (!insertedToolPrompts.has(promptKey)) {
+                    insertedToolPrompts.add(promptKey)
+                    assistantContent += `${assistantContent ? '\n\n' : ''}${payload.text.trim()}`
+                    if (useAgentStore.getState().sessionId === currentSessionId) {
+                      useAgentStore.getState()._updateLastMessage(assistantContent)
+                    }
+                  }
+                }
+                const confirmationRequest = extractConfirmationRequest(payload)
+                if (confirmationRequest) {
+                  useAgentStore.getState()._upsertLastConfirmationRequest(confirmationRequest)
+                }
               }
               if (payload.error) useAgentStore.getState()._setError(payload.error)
             } catch {
@@ -253,21 +312,107 @@ export function useAgent() {
   const switchSession = useCallback((id: string) => {
     // Abort any in-progress stream before switching
     useAgentStore.getState()._abortStream()
-    useAgentStore.getState().switchSession(id)
+    return useAgentStore.getState().switchSession(id)
   }, [])
   const createSession = useCallback(() => useAgentStore.getState().createSession(), [])
   const createTalkSession = useCallback(() => useAgentStore.getState().createTalkSession(), [])
   const renameSession = useCallback((id: string, title: string) => useAgentStore.getState().renameSession(id, title), [])
   const autoTitleSession = useCallback((id: string) => useAgentStore.getState().autoTitleSession(id), [])
   const openCardThread = useCallback((card: { id: string; title: string; type: string }) => {
-    useAgentStore.getState().openCardThread(card)
+    return useAgentStore.getState().openCardThread(card)
   }, [])
   const deleteSession = useCallback((id: string) => useAgentStore.getState().deleteSession(id), [])
   const clearMessages = useCallback(() => useAgentStore.getState().clearMessages(), [])
+  const markConfirmationRequest = useCallback((id: string, status: AgentConfirmationRequest['status']) => {
+    useAgentStore.getState()._markConfirmationRequest(id, status)
+  }, [])
+  const confirmOperation = useCallback(async (request: AgentConfirmationRequest) => {
+    const store = useAgentStore.getState()
+    if (store.streaming) return
+    const currentVaultId = useAppStore.getState().currentVaultId
+    if (!currentVaultId) {
+      store._setError('请先选择一个知识库。')
+      return
+    }
+
+    store._setStreaming(true)
+    store._setError(null)
+    store._appendMessage({
+      role: 'user',
+      content: `确认执行高风险操作：${request.tool}${request.target ? ` ${request.target}` : ''}`,
+    })
+
+    try {
+      const response = await fetch(`${getSiteUrl()}/api/agent/confirm-operation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          tool: request.tool,
+          target: request.target,
+          confirmationToken: request.confirmationToken,
+          vaultId: currentVaultId,
+          sessionId: store.sessionId ?? undefined,
+        }),
+      })
+      const payload = await response.json().catch(() => null) as {
+        success?: boolean
+        text?: string
+        error?: string
+        affectedCard?: { id: string; path?: string | null } | null
+      } | null
+      if (!response.ok || payload?.success !== true) {
+        throw new Error(payload?.error || `确认操作失败 (${response.status})`)
+      }
+      store._markConfirmationRequest(request.id, 'confirmed')
+      store._appendMessage({ role: 'assistant', content: payload.text || '操作已完成。' })
+      invalidateWorkspaceQueries(queryClient, currentVaultId)
+      const selectedNode = useAppStore.getState().selectedNode
+      if (payload.affectedCard?.id && selectedNode?.id === payload.affectedCard.id) {
+        useAppStore.getState().clearSelectedNode()
+      }
+      store.loadSessions().catch(() => {})
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '确认操作失败'
+      store._markConfirmationRequest(request.id, message.includes('requires confirmation') || message.includes('失效') ? 'expired' : 'failed')
+      store._setError(message)
+      store._appendMessage({ role: 'assistant', content: message })
+    } finally {
+      useAgentStore.getState()._setStreaming(false)
+      useAgentStore.getState()._setCurrentProgress('')
+    }
+  }, [queryClient])
+
+  const cancelOperation = useCallback(async (request: AgentConfirmationRequest) => {
+    const store = useAgentStore.getState()
+    const currentVaultId = useAppStore.getState().currentVaultId
+    if (!currentVaultId) {
+      store._markConfirmationRequest(request.id, 'cancelled')
+      return
+    }
+    store._markConfirmationRequest(request.id, 'cancelled')
+    try {
+      await fetch(`${getSiteUrl()}/api/agent/cancel-operation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          tool: request.tool,
+          target: request.target,
+          confirmationToken: request.confirmationToken,
+          vaultId: currentVaultId,
+          sessionId: store.sessionId ?? undefined,
+        }),
+      })
+      store.loadSessions().catch(() => {})
+    } catch {
+      // Local cancellation still hides the action; expired server tokens cannot execute.
+    }
+  }, [])
 
   return {
     messages, loading, streaming, error, currentProgress,
     sessions, sessionId,
-    sendMessage, clearMessages, switchSession, createSession, createTalkSession, renameSession, autoTitleSession, openCardThread, deleteSession, loadSessions,
+    sendMessage, clearMessages, switchSession, createSession, createTalkSession, renameSession, autoTitleSession, openCardThread, deleteSession, loadSessions, markConfirmationRequest, confirmOperation, cancelOperation,
   }
 }

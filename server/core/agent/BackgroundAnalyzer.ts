@@ -72,6 +72,7 @@ export class BackgroundAnalyzer {
   private lastAnalyzedIndex: number = 0;
 
   setVaultPath(path: string) { this.vaultPath = path; }
+  reset(index = 0) { this.lastAnalyzedIndex = Math.max(0, index); }
 
   async analyze(
     messages: Array<{ role: string; content: string; timestamp?: number }>,
@@ -243,5 +244,4 @@ export class BackgroundAnalyzer {
     } catch { /* non-fatal */ }
   }
 
-  reset() { this.lastAnalyzedIndex = 0; }
 }

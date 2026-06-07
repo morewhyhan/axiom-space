@@ -5,7 +5,7 @@
 import { Type } from "@mariozechner/pi-ai";
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath } from "./helpers";
-import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { getCurrentAgent, getCurrentVaultId } from '@/server/core/agent/agent-context';
 import type { MemorySearchResult } from "@/server/core/learning/memory/provider";
 import { emitNotification } from '../notification-bus';
 
@@ -24,10 +24,11 @@ const memorySearchTool = createTool(
       const limit = Math.min(params.limit || 5, 20);
 
       // 优先使用 agent memory if available
-      const agent = (globalThis as any).__axiomAgent;
-      if (agent && agent.getMemory()) {
+      const agent = getCurrentAgent<{ getMemory?: () => { search: (query: string, limit: number) => Promise<MemorySearchResult[]> } }>();
+      const memory = agent?.getMemory?.();
+      if (memory) {
         try {
-          const results = await agent.getMemory().search(params.query, limit);
+          const results = await memory.search(params.query, limit);
 
           if (results.length === 0) {
             return {
@@ -192,10 +193,11 @@ const writeMemoryTool = createTool(
   }),
   async (_id, params) => {
     try {
-      const agent = (globalThis as any).__axiomAgent;
-      if (agent && agent.getMemory()) {
+      const agent = getCurrentAgent<{ getMemory?: () => { handleToolCall: (tool: string, args: Record<string, unknown>) => Promise<unknown> } }>();
+      const memory = agent?.getMemory?.();
+      if (memory) {
         try {
-          const result = await agent.getMemory().handleToolCall('memory', {
+          const result = await memory.handleToolCall('memory', {
             action: 'add',
             target: params.target,
             content: params.content,
@@ -270,10 +272,11 @@ const editMemoryTool = createTool(
   }),
   async (_id, params) => {
     try {
-      const agent = (globalThis as any).__axiomAgent;
-      if (agent && agent.getMemory()) {
+      const agent = getCurrentAgent<{ getMemory?: () => { handleToolCall: (tool: string, args: Record<string, unknown>) => Promise<unknown> } }>();
+      const memory = agent?.getMemory?.();
+      if (memory) {
         try {
-          const result = await agent.getMemory().handleToolCall('memory', {
+          const result = await memory.handleToolCall('memory', {
             action: 'replace',
             target: params.target,
             old_text: params.oldText,

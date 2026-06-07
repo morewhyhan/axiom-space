@@ -12,11 +12,13 @@ import { getVaultPath } from "./helpers";
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { prisma } from '@/lib/db';
 import { emitNotification, emitResourceProgress } from '../notification-bus';
+import type { ResourceType } from '../ResourceGenerationState';
 
 const RESOURCE_LABELS: Record<string, string> = {
   document: '学习文档',
   mindmap: '思维导图',
   quiz: '练习题',
+  code: '代码实操',
   video: '教学视频',
   svg: 'SVG 图解',
   diagram: 'Mermaid 图表',
@@ -72,21 +74,66 @@ function persistResourceToDb(userId: string, topic: string, types: string[], det
   }).catch(() => {});
 }
 
+function inferDefaultResourceTypes(
+  topic: string,
+  literatureContent: string | undefined,
+  userLevel: string,
+): ResourceType[] {
+  const text = `${topic} ${literatureContent || ''}`.toLowerCase();
+  const types = new Set<ResourceType>(['document']);
+
+  if (/(图|流程|关系|结构|架构|路径|系统|网络|状态|sequence|flow|diagram|map)/i.test(text)) {
+    types.add(/(关系|结构|体系|知识|章节|地图|mindmap|map)/i.test(text) ? 'mindmap' : 'diagram');
+  }
+
+  if (/(练习|测试|题|测验|评估|巩固|复习|quiz|exam|test)/i.test(text)) {
+    types.add('quiz');
+  }
+
+  if (/(代码|编程|算法|实现|函数|项目|实操|案例|python|java|typescript|javascript|react|next|sql|code)/i.test(text)) {
+    types.add('code');
+  }
+
+  if (/(视频|动画|演示视频|video)/i.test(text)) {
+    types.add('video');
+  }
+
+  if (/(svg|矢量|插图|示意图)/i.test(text)) {
+    types.add('svg');
+  }
+
+  if (/(ppt|演示文稿|汇报)/i.test(text)) {
+    types.add('ppt');
+  }
+  if (/(pdf|打印|讲义)/i.test(text)) {
+    types.add('pdf');
+  }
+  if (/(word|docx|文档模板)/i.test(text)) {
+    types.add('docx');
+  }
+
+  if (types.size === 1) types.add('mindmap');
+  if (types.size < 3 && userLevel !== 'beginner') types.add('quiz');
+
+  return Array.from(types).slice(0, 4);
+}
+
 const pushResourceTool = createTool(
   'push_resource',
   '推送学习资源到文献盒',
-  '为当前学习主题生成全套学习资料并保存到文献盒。支持 9 种格式：'
-  + '📄 文档(markdown)、🧠 思维导图(mermaid)、❓ 练习题(JSON)、🎬 教学视频(HTML/MP4)、'
+  '为当前学习主题生成必要的学习资料并保存到文献盒。支持 10 种格式：'
+  + '📄 文档(markdown)、🧠 思维导图(mermaid)、❓ 练习题(JSON)、💻 代码实操(markdown)、🎬 教学视频(HTML/MP4)、'
   + '📊 SVG矢量图、🔀 Mermaid流程图/时序图/类图等、📝 Word文档(docx)、📑 PDF文档、📽️ PPT演示文稿。'
   + '【关键时机】当用户说"整理成学习资料"、"保存到文献盒"、"生成文档"、"导出Word"、"导出PDF"、"做个PPT"'
-  + '"画个流程图"、"生成SVG"等类似请求时，必须直接调用此工具。不填 formats 则生成全部格式。'
+  + '"画个流程图"、"生成SVG"等类似请求时，必须直接调用此工具。不要在普通对话里打断式推送资源；'
+  + '不填 formats 时按用户意图生成 2-4 个核心资源，只有明确要求时才生成视频/PDF/Word/PPT 等重资源。'
   + '用户水平自动从画像推断，无需询问用户。自动跳过已有资源。',
   Type.Object({
     topic: Type.String({ description: '学习主题（必填）。从对话上下文或用户消息中提取。' }),
     level: Type.Optional(Type.String({ description: '可选。不填则自动从 .axiom/user-profile.json 读取。' })),
     literatureTitle: Type.Optional(Type.String({ description: '关联的文献标题。' })),
     literatureContent: Type.Optional(Type.String({ description: '文献内容截取。' })),
-    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成SVG和图表。不填则生成全部9种格式。可用值: document,mindmap,quiz,video,svg,diagram,docx,pdf,ppt' })),
+    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成SVG和图表。不填则按对话意图生成 2-4 个核心资源。可用值: document,mindmap,quiz,code,video,svg,diagram,docx,pdf,ppt' })),
   }),
   async (_id, params) => {
     try {
@@ -179,9 +226,11 @@ const pushResourceTool = createTool(
       const orchestrator = new ResourceGenerationOrchestrator(state, deps);
 
       const formats = params.formats
-        ? params.formats.split(',').map(f => f.trim()).filter(f => (RESOURCE_TYPES as readonly string[]).includes(f))
+        ? params.formats.split(',').map(f => f.trim()).filter(f => (RESOURCE_TYPES as readonly string[]).includes(f)) as ResourceType[]
         : undefined;
-      const requestedTypes = formats && formats.length > 0 ? formats : RESOURCE_TYPES;
+      const requestedTypes = formats && formats.length > 0
+        ? formats
+        : inferDefaultResourceTypes(params.topic, params.literatureContent, userLevel);
       const currentUserId = getCurrentUserId();
       let orchestrationEvidence: ResourceOrchestrationEvidence | null = null;
       if (currentUserId) {
@@ -251,7 +300,7 @@ const pushResourceTool = createTool(
         }
       }
 
-      const generationResults = await orchestrator.orchestrate(params.topic, userLevel, litTitle, params.literatureContent, formats);
+      const generationResults = await orchestrator.orchestrate(params.topic, userLevel, litTitle, params.literatureContent, requestedTypes);
 
       // 读取生成的资源，合并为一个文献卡片
       const sanitizedDir = litTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');

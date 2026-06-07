@@ -14,18 +14,19 @@
 import type { AxiomAgent } from '../agent';
 import type { AgentServices } from './AgentServices';
 import type { StreamCallbacks, AgentMessage } from '@/types/agent';
+import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { IntentRoute } from '../IntentRouter';
 import type { ChatMessage } from '../feedback/SteerMechanism';
 import type { ToolCall as EmptyToolCall, EmptyResponseMessage } from '../feedback/EmptyResponseHandler';
 import { AgentState } from '../AgentStateMachine';
 import { classifyIntent, classifyIntentSmart, filterToolsByIntent } from '../IntentRouter';
-import { shouldDelegate, getToolsForIntent } from '@/server/core/agent/subagent/SubagentRouter';
 import { getSkillEngine } from '../SkillEngine';
-import { toolRegistry } from '../tools';
 import { InterruptError } from '@/server/core/learning/core/interrupt';
 import { LogCategory } from '../audit/AuditLogger';
 import { getVaultPath } from '@/lib/platform';
-import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { prisma } from '@/lib/db';
+import { getProfileCacheEntry, setProfileCacheEntry } from '@/server/api/profile-cache';
 // (Capability tracking integrated via MemoryManager)
 import { MessageRole } from '@/types/learning';
 
@@ -44,6 +45,22 @@ export interface PipelineContext {
 
 const INTENT_THRESHOLD = 0.5;
 const LEARNING_CONTEXTS = new Set(['learn', 'create', 'analyze', 'profile']);
+const SAFE_CONFIRMATION_TOOLS = new Set([
+  'read',
+  'grep',
+  'find',
+  'ls',
+  'search_cards',
+  'memory',
+  'memory_search',
+  'search_history',
+  'retrieve_memory',
+  'search_memory',
+  'read_skill',
+  'list_skills',
+  'ask_user',
+  'web_search',
+]);
 
 // ── Pipeline ──
 
@@ -202,10 +219,10 @@ export class AgentPipeline {
       console.debug('[Agent] buildSystemPrompt failed (non-fatal):', err instanceof Error ? err.message : String(err));
     }
 
-    // ── Tool availability: always provide all tools ──
-    // The LLM is smart enough to decide which tools to use.
-    // Intent routing is used only for prompt hints, not tool restriction.
-    this.services.agent.state.tools = toolRegistry.getAll();
+    // ── Tool availability ──
+    // Tools are rebound per Agent instance so DB/file writes always carry the
+    // active user/vault context through pi-agent-core execution boundaries.
+    this.services.agent.state.tools = selectToolsForTurn(this.agent.getRuntimeTools(), intentRoute);
 
     // ── Budget check ──
     if (this.services.config.enableBudget) {
@@ -746,6 +763,11 @@ export class AgentPipeline {
         );
     }
 
+    this.updateEducationProfileSnapshot()
+      .catch((err) =>
+        console.debug('[Agent] Education profile update failed:', err),
+      );
+
     // ── Background review (every N turns) ──
     if (this.agent.getBackgroundReview()) {
       this.agent
@@ -765,6 +787,53 @@ export class AgentPipeline {
   // ═══════════════════════════════════════════════════════════════
   // Private helpers
   // ═══════════════════════════════════════════════════════════════
+
+  private async updateEducationProfileSnapshot(): Promise<void> {
+    const vaultId = getCurrentVaultId();
+    const userId = getCurrentUserId();
+    if (!vaultId || !userId) return;
+
+    const vault = await prisma.vault.findFirst({
+      where: { id: vaultId, userId },
+      select: { profileCache: true },
+    });
+    if (!vault) return;
+
+    const { EducationProfileAnalyzer } = await import('@/server/core/learning/education-profile');
+    const analyzer = new EducationProfileAnalyzer();
+    const messages = this.services.agent.state.messages
+      .slice(-20)
+      .map((m: { role: string; content: unknown; timestamp?: number }) => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+        timestamp: m.timestamp || Date.now(),
+      }));
+    const currentProfile = getProfileCacheEntry<Record<string, unknown>>(vault.profileCache, 'educationProfile')?.data || {};
+    const updates = await analyzer.analyzeSession({
+      sessionId: this.services.sessionId,
+      userId,
+      messages,
+      metadata: { source: 'agent-post-turn' },
+    }, currentProfile as any, messages);
+    const mergedProfile = {
+      ...currentProfile,
+      ...updates,
+      userId,
+      sessionCount: Number((currentProfile as { sessionCount?: unknown }).sessionCount || 0) + 1,
+      lastUpdated: new Date().toISOString(),
+    };
+
+    const latestVault = await prisma.vault.findUnique({
+      where: { id: vaultId },
+      select: { profileCache: true },
+    });
+    await prisma.vault.update({
+      where: { id: vaultId },
+      data: {
+        profileCache: setProfileCacheEntry(latestVault?.profileCache ?? vault.profileCache, 'educationProfile', mergedProfile),
+      },
+    });
+  }
 
   /**
    * Handle empty response from the LLM (nudge / reuse / retry / abort).
@@ -964,4 +1033,18 @@ export class AgentPipeline {
     callbacks?.onError?.(error as Error);
     throw error;
   }
+}
+
+function selectToolsForTurn(tools: AgentTool<any>[], intentRoute: IntentRoute | null): AgentTool<any>[] {
+  if (!intentRoute) return tools.filter((tool) => SAFE_CONFIRMATION_TOOLS.has(tool.name));
+
+  const toolNames = tools.map((tool) => tool.name);
+  if (intentRoute.needsConfirmation || intentRoute.confidence < INTENT_THRESHOLD) {
+    return tools.filter((tool) => SAFE_CONFIRMATION_TOOLS.has(tool.name));
+  }
+
+  const byIntent = filterToolsByIntent(intentRoute, toolNames);
+  if (!byIntent) return tools;
+  const allowed = new Set(byIntent);
+  return tools.filter((tool) => allowed.has(tool.name));
 }
