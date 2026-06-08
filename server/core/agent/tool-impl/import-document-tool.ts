@@ -10,7 +10,7 @@
  * 一次调用完成全部导入，避免逐张创建的低效。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createHash } from 'crypto';
 import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';

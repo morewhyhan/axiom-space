@@ -33,7 +33,7 @@ if (process.env.NODE_ENV !== 'production' && !process.env.BETTER_AUTH_SECRET) {
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, {
-    provider: "sqlite",
+    provider: "postgresql",
   }),
   secret: authSecret,
   baseURL: getAuthUrl(),

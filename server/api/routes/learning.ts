@@ -2,16 +2,29 @@
  * Learning API Routes
  * AI 驱动的学习路径生成 + 进度追踪
  */
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
-import { aiManager } from '@/server/core/ai/AIManager'
 import { pathAdjustmentEngine } from '@/server/core/learning/path-adjustment-engine'
 import type { LearningPath } from '@/server/core/learning/path-adjustment-engine'
 import { queryLightRAGContext } from '@/server/core/rag/lightrag-service'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
+import { getProfileCacheEntry, setProfileCacheEntry } from '../profile-cache'
+
+const vaultQuerySchema = z.object({ vid: z.string().optional() })
+const pathAdjustmentsQuerySchema = vaultQuerySchema.extend({ pathId: z.string().optional() })
+
+async function getAiManager() {
+  const mod = await import('@/server/core/ai/AIManager')
+  return mod.aiManager
+}
+
+function matchesRequestedVault(c: Context, vaultId: string | null | undefined): boolean {
+  const expectedVaultId = c.req.query('vid')
+  return !expectedVaultId || expectedVaultId === vaultId
+}
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
@@ -357,6 +370,7 @@ ${capabilityContext}
 ${ragContext}
 Generate ${batchSize} interconnected concept cards for "${topic}".`
 
+        const aiManager = await getAiManager()
         const rawResponse = await aiManager.callAPI(batchSystemPrompt, [
           { role: 'user' as const, content: batchUserMessage },
         ], { temperature: 0.4, maxTokens: 4096 })
@@ -537,6 +551,7 @@ ${capabilityContext}
 ${ragContext}
 Generate a learning path for "${topic}" at ${level} level.`
 
+      const aiManager = await getAiManager()
       const rawResponse = await aiManager.callAPI(systemPrompt, [
         { role: 'user' as const, content: userMessage },
       ], { temperature: 0.3, maxTokens: 4096 })
@@ -798,6 +813,7 @@ Generate a learning path for "${topic}" at ${level} level.`
 
   // POST /api/learning/path/:pathId/execute — 开始学习一个 step
   .post('/path/:pathId/execute',
+    zValidator('query', vaultQuerySchema),
     zValidator('json', z.object({ stepId: z.string() })),
     async (c) => {
     const userId = c.get('userId') as string
@@ -807,7 +823,7 @@ Generate a learning path for "${topic}" at ${level} level.`
     if (!stepId) return c.json({ success: false, error: 'STEP_ID_REQUIRED' }, 400)
 
     const path = await prisma.learningPath.findUnique({ where: { id: pathId } })
-    if (!path || path.userId !== userId) return c.json({ success: false, error: 'Path not found' }, 404)
+    if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) return c.json({ success: false, error: 'Path not found' }, 404)
 
     const step = await prisma.learningPathStep.findUnique({ where: { id: stepId } })
     if (!step || step.pathId !== pathId) return c.json({ success: false, error: 'Step not found' }, 404)
@@ -819,24 +835,24 @@ Generate a learning path for "${topic}" at ${level} level.`
     // Ensure a Card exists for this step (create if missing)
     let cardId = step.cardId
     if (!cardId) {
-      const vault = await resolveVault(c, userId)
-      if (vault) {
-        const safeTitle = step.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100)
-        const card = await prisma.card.create({
-          data: {
-            vaultId: vault.id,
-            path: `${safeTitle}.md`,
-            title: step.title,
-            content: `# ${step.title}\n\n${step.description || ''}\n\n> 概念: ${step.concept || step.title}`,
-            type: 'fleeting',
-          },
-        })
-        cardId = card.id
-        await prisma.learningPathStep.update({
-          where: { id: stepId },
-          data: { cardId: card.id },
-        })
-      }
+      const safeTitle = step.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100)
+      const cardPath = `${safeTitle}.md`
+      const card = await prisma.card.upsert({
+        where: { vaultId_path: { vaultId: path.vaultId, path: cardPath } },
+        update: { title: step.title },
+        create: {
+          vaultId: path.vaultId,
+          path: cardPath,
+          title: step.title,
+          content: `# ${step.title}\n\n${step.description || ''}\n\n> 概念: ${step.concept || step.title}`,
+          type: 'fleeting',
+        },
+      })
+      cardId = card.id
+      await prisma.learningPathStep.update({
+        where: { id: stepId },
+        data: { cardId: card.id },
+      })
     }
 
     // Update step status
@@ -855,6 +871,7 @@ Generate a learning path for "${topic}" at ${level} level.`
         status: 'active',
         phase: 'explore',
         metadata: JSON.stringify({
+          cardId,
           pathId,
           stepId,
           pathTitle: path.name || path.topic || undefined,
@@ -871,6 +888,7 @@ Generate a learning path for "${topic}" at ${level} level.`
 
   // POST /api/learning/path/:pathId/step/:stepId/progress — 更新步骤进度 + AI 评估
   .post('/path/:pathId/step/:stepId/progress',
+    zValidator('query', vaultQuerySchema),
     zValidator('json', z.object({
       status: z.string(),
       mastery: z.number().optional(),
@@ -887,7 +905,7 @@ Generate a learning path for "${topic}" at ${level} level.`
     if (!validStatuses.includes(status)) return c.json({ success: false, error: 'INVALID_STATUS' }, 400)
 
     const path = await prisma.learningPath.findUnique({ where: { id: pathId } })
-    if (!path || path.userId !== userId) return c.json({ success: false, error: 'Path not found' }, 404)
+    if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) return c.json({ success: false, error: 'Path not found' }, 404)
 
     const step = await prisma.learningPathStep.findUnique({ where: { id: stepId } })
     if (!step || step.pathId !== pathId) return c.json({ success: false, error: 'Step not found' }, 404)
@@ -945,6 +963,7 @@ ${conversationText}
 
 请评估用户对「${step.title}」的掌握程度。`
 
+          const aiManager = await getAiManager()
           const rawEval = await aiManager.callAPI(evalPrompt, [
             { role: 'user' as const, content: evalUserMsg },
           ], { temperature: 0.1, maxTokens: 512 })
@@ -961,15 +980,42 @@ ${conversationText}
 
           // ── Auto-upgrade card if passed ──
           if (evaluation.passed) {
-            await prisma.card.update({
+            const upgradedCard = await prisma.card.update({
               where: { id: step.cardId },
               data: { type: 'permanent' },
             })
+            const cardThreadSessions = await prisma.learningSession.findMany({
+              where: {
+                userId,
+                vaultId: upgradedCard.vaultId,
+                domain: '__agent__',
+                metadata: { contains: upgradedCard.id },
+              },
+              select: { id: true, metadata: true },
+            })
+            await Promise.all(
+              cardThreadSessions
+                .filter((session) => parsePathSessionMetadata(session.metadata).cardId === upgradedCard.id)
+                .map((session) => prisma.learningSession.update({
+                  where: { id: session.id },
+                  data: {
+                    status: 'completed',
+                    phase: 'archived',
+                    metadata: JSON.stringify({
+                      ...parsePathSessionMetadata(session.metadata),
+                      cardId: upgradedCard.id,
+                      cardType: 'permanent',
+                      threadStatus: 'archived',
+                      archivedAt: new Date().toISOString(),
+                    }),
+                  },
+                })),
+            )
 
             // Save observation to vaultMemory
             await prisma.vaultMemory.create({
               data: {
-                vaultId: card?.vaultId || '',
+                vaultId: upgradedCard.vaultId,
                 key: `eval_${stepId}_${Date.now()}`,
                 value: JSON.stringify({
                   concept: step.title,
@@ -996,6 +1042,14 @@ ${conversationText}
       where: { id: stepId },
       data: { status: finalStatus, mastery: Math.min(100, Math.max(0, finalMastery)) },
     })
+    if (sessionId && (finalStatus === 'completed' || finalStatus === 'mastered')) {
+      await prisma.learningSession.updateMany({
+        where: { id: sessionId, userId, vaultId: path.vaultId },
+        data: { status: 'completed', phase: 'completed' },
+      }).catch((err: unknown) => {
+        console.warn('[Learning] Failed to complete learning session:', err instanceof Error ? err.message : String(err))
+      })
+    }
 
     // ── Path adjustment: write adjustment history record ──
     if (evaluation) {
@@ -1118,7 +1172,7 @@ ${conversationText}
   })
 
   // PATCH /api/learning/path/:pathId — 更新路径状态（归档/恢复）
-  .patch('/path/:pathId', zValidator('json', z.object({
+  .patch('/path/:pathId', zValidator('query', vaultQuerySchema), zValidator('json', z.object({
     status: z.enum(['active', 'archived']),
   })), async (c) => {
     const userId = c.get('userId') as string
@@ -1126,7 +1180,7 @@ ${conversationText}
     const { status } = c.req.valid('json')
 
     const path = await prisma.learningPath.findUnique({ where: { id: pathId } })
-    if (!path || path.userId !== userId) return c.json({ success: false, error: 'Path not found' }, 404)
+    if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) return c.json({ success: false, error: 'Path not found' }, 404)
 
     const updated = await prisma.learningPath.update({
       where: { id: pathId },
@@ -1137,18 +1191,45 @@ ${conversationText}
   })
 
   // DELETE /api/learning/path/:pathId — 删除路径
-  .delete('/path/:pathId', async (c) => {
+  .delete('/path/:pathId', zValidator('query', vaultQuerySchema), async (c) => {
     const userId = c.get('userId') as string
     const pathId = c.req.param('pathId')
 
     const path = await prisma.learningPath.findUnique({ where: { id: pathId } })
-    if (!path || path.userId !== userId) return c.json({ success: false, error: 'Path not found' }, 404)
+    if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) return c.json({ success: false, error: 'Path not found' }, 404)
 
-    // Cascade delete steps first (SQLite doesn't always cascade reliably)
-    await prisma.learningPathStep.deleteMany({ where: { pathId } })
-    await prisma.learningPath.delete({ where: { id: pathId } })
+    const linkedAgentSessions = await prisma.learningSession.findMany({
+      where: {
+        userId,
+        vaultId: path.vaultId,
+        OR: [
+          { domain: pathId },
+          { domain: '__agent__', metadata: { contains: pathId } },
+        ],
+      },
+      select: { id: true, domain: true, metadata: true },
+    })
+    const linkedSessionIds = linkedAgentSessions
+      .filter((session) => session.domain === pathId || parsePathSessionMetadata(session.metadata).pathId === pathId)
+      .map((session) => session.id)
 
-    return c.json({ success: true })
+    await prisma.$transaction(async (tx) => {
+      if (linkedSessionIds.length > 0) {
+        await tx.learningMessage.deleteMany({ where: { sessionId: { in: linkedSessionIds } } })
+        await tx.learningSession.deleteMany({
+          where: {
+            id: { in: linkedSessionIds },
+            userId,
+            vaultId: path.vaultId,
+          },
+        })
+      }
+      // Cascade delete steps first (SQLite doesn't always cascade reliably)
+      await tx.learningPathStep.deleteMany({ where: { pathId } })
+      await tx.learningPath.delete({ where: { id: pathId } })
+    })
+
+    return c.json({ success: true, deletedSessionIds: linkedSessionIds })
   })
 
   // POST /api/learning/memory — 搜索/检索知识卡片
@@ -1203,15 +1284,12 @@ ${conversationText}
     if (!vault) return c.json({ success: true, profile: null })
 
     try {
-      const cacheStr = vault.profileCache
-      if (cacheStr) {
-        const profile = JSON.parse(cacheStr)
-        if (profile._ns === 'learning' && profile.dimensions) {
-          return c.json({ success: true, profile })
-        }
+      const cachedProfile = getProfileCacheEntry<Record<string, unknown>>(vault.profileCache, 'educationProfile')
+      if (cachedProfile?.data?.dimensions) {
+        return c.json({ success: true, profile: cachedProfile.data })
       }
-    } catch (e) {
-      // profileCache 无效或命名空间不匹配，返回初始值
+    } catch {
+      // profileCache 无效，返回初始值
     }
 
     // 如果缓存不存在，返回初始画像
@@ -1253,15 +1331,15 @@ ${conversationText}
       const { EducationProfileAnalyzer } = await import('@/server/core/learning/education-profile')
       const analyzer = new EducationProfileAnalyzer()
 
-      // 读取当前画像（仅限 learning 命名空间）
-      let currentProfile = null
+      // 读取当前学习画像分区
+      let currentProfile: Record<string, unknown> | null = null
       try {
-        const parsed = vault.profileCache ? JSON.parse(vault.profileCache) : null
-        if (parsed?._ns === 'learning' && parsed?.dimensions) {
-          currentProfile = parsed
+        const cachedProfile = getProfileCacheEntry<Record<string, unknown>>(vault.profileCache, 'educationProfile')
+        if (cachedProfile?.data?.dimensions) {
+          currentProfile = cachedProfile.data
         }
-      } catch (e) {
-        // 缓存损坏或命名空间不匹配，重新创建
+      } catch {
+        // 缓存损坏，重新创建
       }
 
       // 分析会话数据
@@ -1271,19 +1349,19 @@ ${conversationText}
       const mergedProfile = {
         ...currentProfile,
         ...updates,
-        sessionCount: (currentProfile?.sessionCount || 0) + 1,
+        sessionCount: (typeof currentProfile?.sessionCount === 'number' ? currentProfile.sessionCount : 0) + 1,
         updatedAt: Date.now(),
       }
 
       // 保存到数据库
+      const vaultWithLatestCache = await prisma.vault.findUnique({
+        where: { id: vault.id },
+        select: { profileCache: true },
+      })
       await prisma.vault.update({
         where: { id: vault.id },
         data: {
-          profileCache: JSON.stringify({
-            _ns: 'learning',
-            ...mergedProfile,
-            updatedAt: new Date().toISOString(),
-          }),
+          profileCache: setProfileCacheEntry(vaultWithLatestCache?.profileCache ?? vault.profileCache, 'educationProfile', mergedProfile),
           updatedAt: new Date(),
         },
       })
@@ -1296,7 +1374,7 @@ ${conversationText}
   })
 
   // GET /api/learning/path/:pathId/progress — 引擎计算的路径进度
-  .get('/path/:pathId/progress', async (c) => {
+  .get('/path/:pathId/progress', zValidator('query', vaultQuerySchema), async (c) => {
     const userId = c.get('userId') as string
     const pathId = c.req.param('pathId')
 
@@ -1306,7 +1384,7 @@ ${conversationText}
         include: { steps: { orderBy: { order: 'asc' } } },
       })
 
-      if (!path || path.userId !== userId) {
+      if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) {
         return c.json({ success: false, error: 'PATH_NOT_FOUND' }, 404)
       }
 
@@ -1341,7 +1419,7 @@ ${conversationText}
   })
 
   // GET /api/learning/path-adjustments — 获取路径调整历史和进度
-  .get('/path-adjustments', async (c) => {
+  .get('/path-adjustments', zValidator('query', pathAdjustmentsQuerySchema), async (c) => {
     const userId = c.get('userId') as string
     const pathId = c.req.query('pathId')
 
@@ -1361,7 +1439,7 @@ ${conversationText}
         },
       })
 
-      if (!path || path.userId !== userId) {
+      if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) {
         return c.json({ success: false, error: 'PATH_NOT_FOUND' }, 404)
       }
 
@@ -1429,7 +1507,7 @@ ${conversationText}
   })
 
   // POST /api/learning/path/:pathId/adjustment/:adjustmentId/accept — 接受路径调整
-  .post('/path/:pathId/adjustment/:adjustmentId/accept', zValidator('json', z.object({
+  .post('/path/:pathId/adjustment/:adjustmentId/accept', zValidator('query', vaultQuerySchema), zValidator('json', z.object({
     feedback: z.string().optional(),
   })), async (c) => {
     const userId = c.get('userId') as string
@@ -1445,21 +1523,22 @@ ${conversationText}
         include: { steps: { orderBy: { order: 'asc' } } },
       })
 
-      if (!path || path.userId !== userId) {
+      if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) {
         return c.json({ success: false, error: 'PATH_NOT_FOUND' }, 404)
       }
 
       const enginePath = buildEnginePath(pathId, userId, path)
-      const accepted = pathAdjustmentEngine.acceptAdjustment(enginePath, adjustmentId, feedback)
-
-      if (!accepted) {
-        return c.json({ success: false, error: 'ADJUSTMENT_NOT_FOUND' }, 404)
-      }
-
-      // Update the Prisma adjustment record with acceptance metadata
       const adjustmentRecord = await prisma.pathAdjustmentHistory.findFirst({
         where: { pathId, id: adjustmentId },
       })
+
+      const accepted = pathAdjustmentEngine.acceptAdjustment(enginePath, adjustmentId, feedback)
+      if (!adjustmentRecord && !accepted) {
+        return c.json({ success: false, error: 'ADJUSTMENT_NOT_FOUND' }, 404)
+      }
+
+      // Update the Prisma adjustment record with acceptance metadata. The DB is
+      // the source of truth; the in-memory engine may be empty after a restart.
       if (adjustmentRecord) {
         const existingFeedback = adjustmentRecord.feedback ? JSON.parse(adjustmentRecord.feedback) : {}
         await prisma.pathAdjustmentHistory.update({
@@ -1670,6 +1749,7 @@ ${document}`
       relations?: { from: string; to: string; type: string }[]
     }
     try {
+      const aiManager = await getAiManager()
       const response = await aiManager.callAPI(
         '你是知识萃取专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
         [{ role: 'user' as const, content: parsePrompt }],
@@ -1790,6 +1870,7 @@ ${document}`
 主题：${topic}
 难度：beginner`
 
+      const aiManager = await getAiManager()
       const pathResponse = await aiManager.callAPI(
         '你是课程设计专家。直接返回 JSON。',
         [{ role: 'user' as const, content: pathPrompt }],
@@ -1952,5 +2033,42 @@ function safeParseJsonArray(raw: string | null | undefined): string[] {
     return Array.isArray(parsed) ? parsed : []
   } catch {
     return []
+  }
+}
+
+function parsePathSessionMetadata(metadata?: string | null): {
+  cardId?: string
+  cardType?: string
+  threadStatus?: string
+  pathId?: string
+  pathTitle?: string
+  stepId?: string
+  stepTitle?: string
+  archivedAt?: string
+} {
+  if (!metadata) return {}
+  try {
+    const parsed = JSON.parse(metadata) as {
+      cardId?: unknown
+      cardType?: unknown
+      threadStatus?: unknown
+      pathId?: unknown
+      pathTitle?: unknown
+      stepId?: unknown
+      stepTitle?: unknown
+      archivedAt?: unknown
+    }
+    return {
+      cardId: typeof parsed.cardId === 'string' ? parsed.cardId : undefined,
+      cardType: typeof parsed.cardType === 'string' ? parsed.cardType : undefined,
+      threadStatus: typeof parsed.threadStatus === 'string' ? parsed.threadStatus : undefined,
+      pathId: typeof parsed.pathId === 'string' ? parsed.pathId : undefined,
+      pathTitle: typeof parsed.pathTitle === 'string' ? parsed.pathTitle : undefined,
+      stepId: typeof parsed.stepId === 'string' ? parsed.stepId : undefined,
+      stepTitle: typeof parsed.stepTitle === 'string' ? parsed.stepTitle : undefined,
+      archivedAt: typeof parsed.archivedAt === 'string' ? parsed.archivedAt : undefined,
+    }
+  } catch {
+    return {}
   }
 }

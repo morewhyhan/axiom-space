@@ -192,19 +192,11 @@ export default function FileTree() {
     const name = newSpaceName.trim()
     if (!name || createCluster.isPending) return
     try {
-      const result = await createCluster.mutateAsync({ name, color: newSpaceColor }) as {
-        success?: boolean
-        cluster?: { id: string; name: string }
-        error?: string
-      }
-      if (!result.success || !result.cluster) {
-        toast.error(result.error || '创建知识空间失败')
-        return
-      }
+      const result = await createCluster.mutateAsync({ name, color: newSpaceColor })
       setNewSpaceName('')
       setShowNewSpace(false)
       setGroupMode('cluster')
-      setExpanded((prev) => new Set(prev).add(result.cluster!.id))
+      setExpanded((prev) => new Set(prev).add(result.cluster.id))
       toast.success(`知识空间「${result.cluster.name}」已创建`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '创建知识空间失败')

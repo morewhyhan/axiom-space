@@ -153,7 +153,7 @@ export class DbAdapter implements IFileStorage {
         }
 
         return upserted
-      })
+      }, { timeout: 30_000 })
 
       return { success: true }
     } catch (err: unknown) {

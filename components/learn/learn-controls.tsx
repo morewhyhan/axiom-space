@@ -5,6 +5,7 @@ import { useLearningPaths, useGeneratePath, useDeletePath, useImportDocument } f
 import type { ImportDocumentResult } from '@/hooks/use-learning'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import type { LearningPath } from '@/hooks/use-learning'
+import { toast } from 'sonner'
 
 export default function LearnControls() {
   const { data, loading } = useLearningPaths()
@@ -47,10 +48,15 @@ export default function LearnControls() {
 
   const handleDelete = async (e: React.MouseEvent, pathId: string) => {
     e.stopPropagation()
+    const path = paths.find((item) => item.id === pathId)
+    if (!window.confirm(`确定删除「${path?.name || '这条路径'}」？相关任务线程也会一起移除。`)) return
     try {
       await deletePath.mutateAsync(pathId)
       if (selectedPathId === pathId) setSelectedPathId(null)
-    } catch {}
+      toast.success('路径已删除')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '删除路径失败')
+    }
   }
 
   const handleImportDocument = async () => {

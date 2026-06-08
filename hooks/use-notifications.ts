@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAppStore } from '@/stores/mode-store'
+import { client } from '@/lib/api-client'
 
 export interface AppNotification {
   type: 'toast' | 'profile' | 'card' | 'skill' | 'graph'
@@ -24,7 +25,7 @@ export function useNotifications() {
       eventSourceRef.current.close()
     }
 
-    const es = new EventSource(`/api/events/stream`)
+    const es = new EventSource(`/api/events/stream?vid=${encodeURIComponent(currentVaultId)}`)
     eventSourceRef.current = es
 
     es.addEventListener('notification', (event) => {
@@ -51,8 +52,9 @@ export function useNotifications() {
 
   const dismissAll = useCallback(() => {
     setUnreadCount(0)
-    fetch('/api/events/dismiss', { method: 'POST' }).catch(() => {})
-  }, [])
+    if (!currentVaultId) return
+    client.api.events.dismiss.$post({ query: { vid: currentVaultId } }).catch(() => {})
+  }, [currentVaultId])
 
   return { notifications, unreadCount, dismissAll }
 }

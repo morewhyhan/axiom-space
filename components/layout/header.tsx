@@ -22,11 +22,11 @@ export default function Header() {
   const [vaultOpen, setVaultOpen] = useState(false)
   const vaultRef = useRef<HTMLDivElement>(null)
 
-  const { recentActivity, stats } = useDashboardStats()
+  const { recentActivity } = useDashboardStats()
   const { notifications: realNotifs, unreadCount, dismissAll } = useNotifications()
 
   // Build notifications from real activity data
-  const notifications = (recentActivity ?? []).slice(0, 4).map((a: RecentActivity, i: number) => {
+  const notifications = (recentActivity ?? []).slice(0, 4).map((a: RecentActivity) => {
     const typeMap: Record<string, { dot: string; label: string; detail: string }> = {
       permanent: { dot: 'purple', label: '知识固化', detail: `「${a.title}」→ Permanent` },
       fleeting: { dot: 'cyan', label: '灵感捕获', detail: `「${a.title}」已创建` },
@@ -147,7 +147,7 @@ export default function Header() {
                 useAppStore.getState().setMode('dashboard')
               }}>VIEW ALL</button>
             </div>
-            {realNotifs.length > 0 ? realNotifs.map((n, i) => {
+            {realNotifs.length > 0 ? realNotifs.map((n) => {
               const dotMap: Record<string, string> = { toast: 'cyan', profile: 'purple', card: 'pink', skill: 'purple', graph: 'cyan' }
               const dot = dotMap[n.type] || 'purple'
               const label = n.type.charAt(0).toUpperCase() + n.type.slice(1)
@@ -155,8 +155,8 @@ export default function Header() {
               return (
                 <div key={n.id} className="notif-item"><span className={`notif-dot ${dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.message} · {time}</div></div></div>
               )
-            }) : notifications.length > 0 ? notifications.map((n: { dot: string; label: string; detail: string; time: string }, i: number) => (
-              <div key={i} className="notif-item"><span className={`notif-dot ${n.dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{n.label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.detail} · {n.time}</div></div></div>
+            }) : notifications.length > 0 ? notifications.map((n: { dot: string; label: string; detail: string; time: string }) => (
+              <div key={`${n.label}-${n.detail}-${n.time}`} className="notif-item"><span className={`notif-dot ${n.dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{n.label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.detail} · {n.time}</div></div></div>
             )) : (
               <div className="notif-item"><span className="notif-dot purple"></span><div><div className="text-white/40" style={{ fontSize: 'var(--f10)' }}>暂无新活动</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>创建知识卡片后，活动将在此显示</div></div></div>
             )}

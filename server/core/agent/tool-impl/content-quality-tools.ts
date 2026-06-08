@@ -5,7 +5,7 @@
  * 包括格式验证、完整性检查、重复检测等。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '../agent-context';

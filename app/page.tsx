@@ -37,7 +37,6 @@ const LandingPage = dynamic(() => import('@/components/landing/landing-page'))
 export default function Home() {
   const mode = useAppStore((s) => s.mode)
   const graphLayoutMode = useAppStore((s) => s.graphLayoutMode)
-  const setGraphLayoutMode = useAppStore((s) => s.setGraphLayoutMode)
   const modal = useAppStore((s) => s.modal)
   const openModal = useAppStore((s) => s.openModal)
   const closeModal = useCallback(() => {
@@ -123,11 +122,15 @@ export default function Home() {
         const vaultsRes = await client.api.vaults.$get()
         const vaultsData = await vaultsRes.json() as { success: boolean; vaults: Array<{ id: string; name: string; cardCount: number }> }
         if (cancelled) return
+        if (!vaultsRes.ok || !vaultsData.success) throw new Error('加载知识库失败')
 
         if (vaultsData.success && vaultsData.vaults.length === 0) {
           const createRes = await client.api.vaults.$post({ json: { name: 'My Vault' } })
-          const createData = await createRes.json() as { success: boolean; vault: { id: string; name: string } }
+          const createData = await createRes.json() as { success: boolean; vault?: { id: string; name: string }; error?: string }
           if (cancelled) return
+          if (!createRes.ok || !createData.success || !createData.vault) {
+            throw new Error(createData.error || '创建默认知识库失败')
+          }
           if (createData.success && createData.vault) {
             useAppStore.getState().setVaults([{ id: createData.vault.id, name: createData.vault.name, cardCount: 0 }])
             useAppStore.getState().setCurrentVaultId(createData.vault.id)
@@ -208,15 +211,28 @@ export default function Home() {
   useEffect(() => {
     if (!showApp || !currentVaultId) return
     if (prevVaultId.current && prevVaultId.current !== currentVaultId) {
-      // P0 FIX: Reset Agent session when switching vaults to avoid cross-vault confusion
+      // Reset vault-scoped UI state to avoid cross-vault stale focus/cache.
       const agentStore = useAgentStore.getState()
+      agentStore._abortStream()
       agentStore._setSessionId(null)
       agentStore._setMessages([])
       agentStore._setError(null)
+      agentStore._setCurrentProgress('')
+
+      const appStore = useAppStore.getState()
+      appStore.clearSelectedNode()
+      appStore.setSelectedPathId(null)
+      appStore.setActiveLearningStepId(null)
+
+      queryClient.removeQueries({ queryKey: ['card-links'] })
+      queryClient.removeQueries({ queryKey: ['rag-card-status'] })
+      queryClient.removeQueries({ queryKey: ['rag-related-cards'] })
+      queryClient.removeQueries({ queryKey: ['path-adjustments'] })
+      queryClient.removeQueries({ queryKey: ['engine-progress'] })
 
       const vaultName = vaults.find(v => v.id === currentVaultId)?.name || '知识库'
       toast(`已切换到「${vaultName}」`, {
-        description: 'Agent 会话已重置，数据正在加载...',
+        description: '当前聚焦和会话已重置，数据正在加载...',
         duration: 3000,
         style: { fontSize: '11px', background: 'rgba(34,211,238,0.15)', border: '1px solid rgba(34,211,238,0.3)' },
       })
@@ -225,25 +241,65 @@ export default function Home() {
       setShowLoading(true)
     }
     prevVaultId.current = currentVaultId
-  }, [currentVaultId, showApp, vaults])
+  }, [currentVaultId, queryClient, showApp, vaults])
+
+  useEffect(() => {
+    const handleCardDeleted = (event: Event) => {
+      const detail = (event as CustomEvent<{ cardId?: string; deletedSessionIds?: string[] }>).detail ?? {}
+      queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['card-links'] })
+      if (detail.cardId) {
+        queryClient.removeQueries({ queryKey: ['rag-card-status', currentVaultId, detail.cardId] })
+        queryClient.removeQueries({ queryKey: ['rag-related-cards', currentVaultId, detail.cardId] })
+      }
+
+      const agentStore = useAgentStore.getState()
+      const currentSession = agentStore.sessions.find((session) => session.id === agentStore.sessionId)
+      if (
+        currentSession?.cardId === detail.cardId ||
+        detail.deletedSessionIds?.includes(agentStore.sessionId ?? '')
+      ) {
+        agentStore._abortStream()
+        agentStore._setSessionId(null)
+        agentStore._setMessages([])
+        agentStore._setError(null)
+      }
+      void agentStore.loadSessions()
+
+      const selected = useAppStore.getState().selectedNode
+      if (selected?.id === detail.cardId) useAppStore.getState().clearSelectedNode()
+    }
+
+    window.addEventListener('axiom:card-deleted', handleCardDeleted)
+    return () => window.removeEventListener('axiom:card-deleted', handleCardDeleted)
+  }, [currentVaultId, queryClient])
 
   // Prefetch card content when a node is selected
   const selectedNode = useAppStore((s) => s.selectedNode)
+  const selectedNodeId = selectedNode?.id
+  const selectedNodeTitle = selectedNode?.title ?? ''
   const setSelectedNode = useAppStore((s) => s.setSelectedNode)
   const setPrefetchedCard = useAppStore((s) => s.setPrefetchedCard)
   useEffect(() => {
-    if (!selectedNode) return
+    if (!selectedNodeId) return
     let cancelled = false
     ;client.api.vault.card[':id']
-      .$get({ param: { id: selectedNode.id } })
+      .$get({ param: { id: selectedNodeId }, query: { vid: currentVaultId ?? undefined } })
       .then((res) => res.json() as Promise<{ success: boolean; card: { content: string; title: string } }>)
       .then((data: { success: boolean; card: { content: string; title: string } }) => {
         if (cancelled) return
         if (data.success) {
           setPrefetchedCard({
-            id: selectedNode.id,
+            id: selectedNodeId,
             content: data.card.content || '',
-            title: data.card.title || selectedNode.title,
+            title: data.card.title || selectedNodeTitle,
           })
         }
       })
@@ -251,7 +307,7 @@ export default function Home() {
         if (!cancelled) console.warn('[Home] failed to prefetch card:', err)
       })
     return () => { cancelled = true }
-  }, [selectedNode?.id, currentVaultId, setPrefetchedCard])
+  }, [selectedNodeId, selectedNodeTitle, currentVaultId, setPrefetchedCard])
 
   // ── Search handler ──
   const handleSearch = useCallback(async (q: string) => {
@@ -274,8 +330,8 @@ export default function Home() {
       let contentResults: { id: string; title: string; snippet: string }[] = []
       if (titleResults.length < 5) {
         try {
-          const contentRes = await client.api.vault.search.$get({ query: { q } })
-          const contentData = await contentRes.json() as { success: boolean; results?: Array<{ path: string; title: string; content: string }> }
+          const contentRes = await client.api.vault.search.$get({ query: { q, ...(currentVaultId ? { vid: currentVaultId } : {}) } })
+          const contentData = await contentRes.json() as { success: boolean; results?: Array<{ path: string; title: string; content?: string; snippet?: string }> }
           // Content search returns { path, title, content } — use title for dedup
           // since the two APIs use different ID formats (UUID vs file path).
           const knownTitles = new Set(titleResults.map((r) => r.title))
@@ -285,7 +341,7 @@ export default function Home() {
             .map((r) => ({
               id: r.path || r.title || '',
               title: r.title || r.path || 'Untitled',
-              snippet: (r.content || r.title || '').slice(0, 100),
+              snippet: (r.snippet || r.content || r.title || '').slice(0, 100),
             }))
         } catch { /* content search is best-effort */ }
       }
@@ -375,7 +431,10 @@ export default function Home() {
           vaultId: currentVaultId,
         },
       })
-      const data = await res.json()
+      const data = await res.json() as { success?: boolean; error?: string }
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `创建失败 (${res.status})`)
+      }
       if (data.success) {
         // The card's title in DB comes from safeTitle (extracted from file path)
         const dbTitle = safeTitle
@@ -386,6 +445,10 @@ export default function Home() {
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['card-links'] })
         // Wait for data + one render frame, then focus camera on the new node
         queryClient.refetchQueries({ queryKey: ['galaxy', currentVaultId] }).then(() => {
           requestAnimationFrame(() => {
@@ -405,8 +468,10 @@ export default function Home() {
       }
     } catch (err) {
       console.warn('[Home] failed to create card:', err)
+      toast.error(err instanceof Error ? err.message : '创建卡片失败')
+    } finally {
+      setCreating(false)
     }
-    setCreating(false)
   }
 
   // Preload all mode panel JS chunks during idle time
@@ -442,8 +507,8 @@ export default function Home() {
     const hints: Record<GraphLayoutMode, string> = {
       galaxy: '拖拽旋转 · 滚轮缩放 · 星团总览',
       flat: '拖拽平移 · 滚轮缩放 · 关系网络',
-      radial: '拖拽平移 · 滚轮缩放 · 环形连线',
-      concentric: '拖拽平移 · 滚轮缩放 · 邻域外扩',
+      radial: '轻微旋转 · 拖拽平移 · 环形连线',
+      concentric: '中心旋转 · 点击换心 · 邻域外扩',
       layered: '拖拽旋转 · 滚轮缩放 · 层级依赖',
       matrix: '拖拽旋转 · 滚轮缩放 · 分类矩阵',
       'task-flow': '拖拽平移 · 滚轮缩放 · 行动序列',
@@ -468,10 +533,12 @@ export default function Home() {
     ?? learningData?.paths?.[0]
     ?? null
   const learningPathSteps = activeLearningPath?.steps?.map(s => ({
-    id: s.id,
+    id: s.cardId ?? s.id,
+    cardId: s.cardId,
     index: s.index,
     name: s.name,
     status: s.status,
+    mastery: s.mastery,
   })) ?? []
 
   return (
@@ -489,7 +556,6 @@ export default function Home() {
           <button id="reset-view-btn" onClick={() => {
             const resetFn = useGalaxyActions.getState().actions.resetCameraView
             if (resetFn) resetFn()
-            setGraphLayoutMode('galaxy')
           }}>⊙ RESET VIEW</button>
 
           {!immersive && <div className="relative z-10 flex flex-col h-screen pointer-events-none">

@@ -5,7 +5,7 @@
  * 进度追踪、学习报告生成等。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId, getCurrentUserId } from '../agent-context';

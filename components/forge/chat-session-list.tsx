@@ -69,6 +69,7 @@ export default function ChatSessionList() {
   const [query, setQuery] = useState('')
   const [view, setView] = useState<ViewMode>('tasks')
   const [showArchivedTasks, setShowArchivedTasks] = useState(false)
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
 
   useEffect(() => { loadSessions() }, [loadSessions])
 
@@ -176,6 +177,22 @@ export default function ChatSessionList() {
       setSelectedNode(null)
     }
     await switchSession(session.id)
+  }
+
+  const handleDeleteConversation = async (session: SessionSummary) => {
+    if (deletingSessionId) return
+    const confirmed = window.confirm(`确定删除「${session.title || '这段对话'}」？此操作不可撤销。`)
+    if (!confirmed) return
+
+    setDeletingSessionId(session.id)
+    try {
+      await deleteSession(session.id)
+      toast.success('会话已删除')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '删除会话失败')
+    } finally {
+      setDeletingSessionId(null)
+    }
   }
 
   return (
@@ -303,8 +320,9 @@ export default function ChatSessionList() {
                     session={session}
                     active={session.id === sessionId}
                     archived={isArchivedSession(session)}
+                    deleting={deletingSessionId === session.id}
                     onOpen={() => void handleOpenConversation(session)}
-                    onDelete={() => deleteSession(session.id)}
+                    onDelete={() => void handleDeleteConversation(session)}
                   />
                 ))
               )}
@@ -464,14 +482,16 @@ function ConversationCard({
   session,
   active,
   archived = false,
+  deleting = false,
   onOpen,
   onDelete,
 }: {
   session: SessionSummary
   active: boolean
   archived?: boolean
-  onOpen: () => void
-  onDelete?: () => void
+  deleting?: boolean
+  onOpen: () => void | Promise<void>
+  onDelete?: () => void | Promise<void>
 }) {
   const isThread = !!session.cardId
   const type = session.cardType || 'fleeting'
@@ -480,12 +500,15 @@ function ConversationCard({
     : 'text-cyan-300/80 border-cyan-400/20 bg-cyan-400/8'
   return (
     <div
-      className={`group relative cursor-pointer rounded-xl border p-3 transition-all ${
+      className={`group relative rounded-xl border p-3 transition-all ${deleting ? 'cursor-wait opacity-55' : 'cursor-pointer'} ${
         active
           ? 'border-pink-400/30 bg-pink-400/[0.08] shadow-[0_0_18px_rgba(244,114,182,0.08)]'
           : 'border-white/6 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.045]'
       }`}
-      onClick={onOpen}
+      onClick={() => {
+        if (!deleting) void onOpen()
+      }}
+      aria-busy={deleting}
     >
       <div className="flex items-start gap-3">
         <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${typeTone}`}>
@@ -535,10 +558,11 @@ function ConversationCard({
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-white/30 transition-colors hover:border-white/20 hover:text-white/55"
+            className="inline-flex items-center gap-1 rounded-md border border-white/10 px-2 py-1 text-white/30 transition-colors hover:border-white/20 hover:text-white/55 disabled:cursor-not-allowed disabled:opacity-35"
+            disabled={deleting}
             onClick={(event) => {
               event.stopPropagation()
-              onOpen()
+              void onOpen()
             }}
             title="打开"
           >
@@ -546,10 +570,11 @@ function ConversationCard({
           </button>
           {onDelete && (
             <button
-              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white/12 opacity-0 transition-all hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100"
+              className="inline-flex h-6 w-6 items-center justify-center rounded-md text-white/12 opacity-0 transition-all hover:bg-red-500/15 hover:text-red-300 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-35"
+              disabled={deleting}
               onClick={(event) => {
                 event.stopPropagation()
-                onDelete()
+                void onDelete()
               }}
               title="删除线程"
             >

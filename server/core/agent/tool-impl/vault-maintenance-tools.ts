@@ -5,7 +5,7 @@
  * 包括清理破损链接、合并重复卡片、重建索引、导入导出等。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '../agent-context';

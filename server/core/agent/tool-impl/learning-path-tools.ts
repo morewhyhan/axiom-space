@@ -5,7 +5,7 @@
  * 支持个性化的学习计划和进度追踪。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId, getCurrentUserId } from '../agent-context';

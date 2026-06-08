@@ -6,6 +6,8 @@ export interface GalaxyNode {
   clusterName: string | null
   clusterColor: string | null
   tags: string[]
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface GalaxyEdge {

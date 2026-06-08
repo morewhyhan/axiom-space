@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
 import { useAppStore } from '@/stores/mode-store'
+import { useAgentStore } from '@/stores/agent-store'
 
 export interface LearningStep {
   index: number
@@ -62,7 +63,7 @@ async function fetchLearningPaths(vaultId?: string | null, topic?: string): Prom
   if (topic) params.topic = topic
   const res = await client.api.learning.paths.$get({ query: params })
   const data = await res.json() as ApiResult<{ paths: LearningPath[]; activePath: string | null; activeStep: number }>
-  if (!data.success) return { paths: [], activePath: null, activeStep: 0 }
+  if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch learning paths (${res.status})` : data.error || `Failed to fetch learning paths (${res.status})`)
   return { paths: data.paths, activePath: data.activePath, activeStep: data.activeStep }
 }
 
@@ -91,7 +92,9 @@ export function useGeneratePath() {
 
   return useMutation({
     mutationFn: async (params: GeneratePathParams) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning.generate.$post({
+        query: { vid: currentVaultId },
         json: { ...params },
       })
       const data = await res.json() as ApiResult<{ path: LearningPath }>
@@ -116,6 +119,8 @@ export function useGeneratePath() {
       // Generating a path creates cards & edges in the knowledge graph
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
     },
   })
@@ -127,8 +132,10 @@ export function useExecuteStep() {
 
   return useMutation({
     mutationFn: async (params: { pathId: string; stepId: string }) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning.path[':pathId'].execute.$post({
         param: { pathId: params.pathId },
+        query: { vid: currentVaultId },
         json: { stepId: params.stepId },
       })
       const data = await res.json() as ApiResult<{ session: { id: string; stepId: string; cardId?: string | null } }>
@@ -140,6 +147,9 @@ export function useExecuteStep() {
       // Executing a step may create a card — refresh galaxy + dashboard
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      void useAgentStore.getState().loadSessions()
     },
   })
 }
@@ -156,8 +166,10 @@ export function useUpdateStepProgress() {
       mastery?: number
       sessionId?: string
     }) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning.path[':pathId'].step[':stepId'].progress.$post({
         param: { pathId: params.pathId, stepId: params.stepId },
+        query: { vid: currentVaultId },
         json: { status: params.status, mastery: params.mastery, sessionId: params.sessionId },
       })
       const data = await res.json() as ApiResult<{ doneCount: number; totalSteps: number; evaluation: { passed: boolean; feedback: string; mastery: number } | null; cardUpgraded: boolean }>
@@ -167,8 +179,12 @@ export function useUpdateStepProgress() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      void useAgentStore.getState().loadSessions()
     },
   })
 }
@@ -179,13 +195,33 @@ export function useDeletePath() {
 
   return useMutation({
     mutationFn: async (pathId: string) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning.path[':pathId'].$delete({
         param: { pathId },
+        query: { vid: currentVaultId },
       })
-      const data = await res.json() as { success: boolean }
-      if (!data.success) throw new Error('Delete failed')
+      const data = await res.json() as ApiResult<{ deletedSessionIds?: string[] }>
+      if (!data.success) throw new Error(data.error || 'Delete failed')
+      return data
     },
-    onSuccess: (_data, pathId) => {
+    onSuccess: (data, pathId) => {
+      const appStore = useAppStore.getState()
+      const agentStore = useAgentStore.getState()
+      const currentSession = agentStore.sessions.find((session) => session.id === agentStore.sessionId)
+      if (
+        currentSession?.pathId === pathId ||
+        data.deletedSessionIds?.includes(agentStore.sessionId ?? '')
+      ) {
+        agentStore._abortStream()
+        agentStore._setSessionId(null)
+        agentStore._setMessages([])
+        agentStore._setError(null)
+      }
+      if (appStore.selectedPathId === pathId) {
+        appStore.setSelectedPathId(null)
+        appStore.setActiveLearningStepId(null)
+      }
+      void agentStore.loadSessions()
       // Remove the deleted path from cache instantly
       const queryKey = ['learning-paths', currentVaultId, undefined]
       queryClient.setQueryData(queryKey, (old: LearningPathsData | undefined) => {
@@ -198,6 +234,14 @@ export function useDeletePath() {
       })
       // Background refetch to ensure server-consistent data
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['path-adjustments', currentVaultId, pathId] })
+      queryClient.invalidateQueries({ queryKey: ['engine-progress', currentVaultId, pathId] })
     },
   })
 }
@@ -208,8 +252,10 @@ export function useArchivePath() {
 
   return useMutation({
     mutationFn: async (params: { pathId: string; archived: boolean }) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning.path[':pathId'].$patch({
         param: { pathId: params.pathId },
+        query: { vid: currentVaultId },
         json: { status: params.archived ? 'archived' : 'active' },
       })
       const data = await res.json() as ApiResult<{ path: { id: string; status: string } }>
@@ -220,6 +266,9 @@ export function useArchivePath() {
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+      void useAgentStore.getState().loadSessions()
     },
   })
 }
@@ -237,7 +286,9 @@ export function useImportDocument() {
 
   return useMutation({
     mutationFn: async (params: { document: string; topic: string; sourceTitle?: string }) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning['import-document'].$post({
+        query: { vid: currentVaultId },
         json: params,
       })
       const data = await res.json() as ApiResult<ImportDocumentResult>
@@ -247,8 +298,12 @@ export function useImportDocument() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      void useAgentStore.getState().loadSessions()
     },
   })
 }
@@ -268,7 +323,7 @@ export function useLearningProfile() {
     queryFn: async () => {
       const res = await client.api.learning.profile.$get({ query: { vid: currentVaultId } })
       const data = await res.json() as ApiResult<{ profile: LearningProfile }>
-      if (!data.success) return null
+      if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch learning profile (${res.status})` : data.error || `Failed to fetch learning profile (${res.status})`)
       return data.profile
     },
     enabled: !!currentVaultId,
@@ -276,7 +331,7 @@ export function useLearningProfile() {
     gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: false,
   })
-  return { profile: query.data ?? null, loading: query.isLoading }
+  return { profile: query.data ?? null, loading: query.isLoading, error: query.error?.message ?? null }
 }
 
 export interface MemorySearchResult {
@@ -289,13 +344,15 @@ export interface MemorySearchResult {
 }
 
 export function useMemorySearch() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
   return useMutation({
     mutationFn: async (params: { query: string; limit?: number }) => {
       const res = await client.api.learning.memory.$post({
+        query: { ...(currentVaultId ? { vid: currentVaultId } : {}) },
         json: { query: params.query, limit: params.limit || 10 },
       })
       const data = await res.json() as ApiResult<{ results: MemorySearchResult[] }>
-      if (!data.success) return []
+      if (!res.ok || !data.success) throw new Error(data.success ? `Memory search failed (${res.status})` : data.error || `Memory search failed (${res.status})`)
       return data.results
     },
   })
@@ -340,7 +397,7 @@ export function useEducationProfile() {
     queryFn: async () => {
       const res = await client.api.learning['education-profile'].$get({ query: { vid: currentVaultId } })
       const data = await res.json() as ApiResult<{ profile: EducationProfile }>
-      if (!data.success) return null
+      if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch education profile (${res.status})` : data.error || `Failed to fetch education profile (${res.status})`)
       return data.profile
     },
     enabled: !!currentVaultId,
@@ -361,7 +418,9 @@ export function useUpdateEducationProfile() {
 
   return useMutation({
     mutationFn: async (params: { sessionData: unknown; userHistory?: unknown[] }) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning['update-profile'].$post({
+        query: { vid: currentVaultId },
         json: params,
       })
       const data = await res.json() as ApiResult<{ profile: EducationProfile }>
@@ -391,13 +450,13 @@ export function usePathAdjustments(pathId?: string) {
     queryKey: ['path-adjustments', currentVaultId, pathId],
     queryFn: async () => {
       const res = await client.api.learning['path-adjustments'].$get({
-        query: { pathId: pathId || '', vid: currentVaultId },
+        query: { pathId: pathId || '', vid: currentVaultId ?? undefined },
       })
       const data = await res.json() as ApiResult<PathAdjustmentData>
-      if (!data.success) return null
+      if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch path adjustments (${res.status})` : data.error || `Failed to fetch path adjustments (${res.status})`)
       return data
     },
-    enabled: !!pathId,
+    enabled: !!currentVaultId && !!pathId,
   })
   return {
     data: query.data ?? null,
@@ -416,17 +475,20 @@ export interface EngineProgress {
 }
 
 export function useEngineProgress(pathId?: string) {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+
   return useQuery({
-    queryKey: ['engine-progress', pathId],
+    queryKey: ['engine-progress', currentVaultId, pathId],
     queryFn: async () => {
       const res = await client.api.learning.path[':pathId'].progress.$get({
         param: { pathId: pathId || '' },
+        query: { vid: currentVaultId ?? undefined },
       })
       const data = await res.json() as ApiResult<{ progress: EngineProgress }>
-      if (!data.success) return null
+      if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch engine progress (${res.status})` : data.error || `Failed to fetch engine progress (${res.status})`)
       return data.progress
     },
-    enabled: !!pathId,
+    enabled: !!currentVaultId && !!pathId,
     refetchInterval: 300_000,
   })
 }
@@ -438,8 +500,10 @@ export function useAcceptAdjustment() {
 
   return useMutation({
     mutationFn: async (params: { pathId: string; adjustmentId: string; feedback?: string }) => {
+      if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning.path[':pathId'].adjustment[':adjustmentId'].accept.$post({
         param: { pathId: params.pathId, adjustmentId: params.adjustmentId },
+        query: { vid: currentVaultId },
         json: { feedback: params.feedback },
       })
       const data = await res.json() as ApiResult<Record<string, never>>
@@ -447,8 +511,8 @@ export function useAcceptAdjustment() {
       return data
     },
     onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['path-adjustments', variables.pathId] })
-      queryClient.invalidateQueries({ queryKey: ['engine-progress', variables.pathId] })
+      queryClient.invalidateQueries({ queryKey: ['path-adjustments', currentVaultId, variables.pathId] })
+      queryClient.invalidateQueries({ queryKey: ['engine-progress', currentVaultId, variables.pathId] })
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
     },
   })
@@ -488,7 +552,7 @@ export function usePushResources() {
     queryFn: async () => {
       const res = await client.api.learning['push-resources'].$get({ query: { vid: currentVaultId } })
       const data = await res.json() as ApiResult<PushResourcesData>
-      if (!data.success) return { records: [], nextPushTime: null }
+      if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch push resources (${res.status})` : data.error || `Failed to fetch push resources (${res.status})`)
       return data
     },
     enabled: !!currentVaultId,
@@ -538,8 +602,8 @@ export function useMarkPushRead() {
         param: { pushId },
         query: { vid: currentVaultId },
       })
-      const data = await res.json() as { success: boolean }
-      if (!data.success) throw new Error('Mark read failed')
+      const data = await res.json() as ApiResult<Record<string, never>>
+      if (!data.success) throw new Error(data.error || 'Mark read failed')
       return data
     },
     onSuccess: () => {

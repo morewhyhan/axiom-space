@@ -5,7 +5,7 @@
  * 计算概念间的关系强度等。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '../agent-context';

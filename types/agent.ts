@@ -27,9 +27,9 @@ import type {
   ToolResultMessage as PiToolResultMessage,
   Static,
   TSchema,
-} from '@mariozechner/pi-ai';
+} from '@/server/core/agent/pi-ai.js';
 
-export { Type } from '@mariozechner/pi-ai';
+export { Type } from '@/server/core/agent/pi-ai.js';
 export type { Static, TSchema };
 
 export type Message = PiUserMessage | PiAssistantMessage | PiToolResultMessage;
@@ -95,6 +95,7 @@ export interface AxiomAgentConfig {
   toolExecution?: ToolExecutionMode;
   apiKey?: string;
   userId?: string;
+  vaultId?: string;
   oracleId?: string;
   maxRetries?: number;
   retryDelay?: number;

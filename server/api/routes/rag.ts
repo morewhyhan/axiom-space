@@ -12,6 +12,11 @@ import {
   syncVaultToLightRAG,
 } from '@/server/core/rag/lightrag-service'
 
+const vaultQuerySchema = z.object({ vid: z.string().optional() })
+const relatedQuerySchema = vaultQuerySchema.extend({
+  limit: z.coerce.number().int().positive().max(12).optional(),
+})
+
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
   .get('/status', async (c) => {
@@ -34,45 +39,46 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const summary = await syncVaultToLightRAG(vault.id, limit ?? 200)
     return c.json({ success: true, summary })
   })
-  .post('/card/:id/sync', async (c) => {
+  .post('/card/:id/sync', zValidator('query', vaultQuerySchema), async (c) => {
     const userId = c.get('userId') as string
     const cardId = c.req.param('id')
+    const expectedVaultId = c.req.query('vid')
     const card = await prisma.card.findUnique({
       where: { id: cardId },
-      include: { vault: { select: { userId: true } } },
+      include: { vault: { select: { id: true, userId: true } } },
     })
-    if (!card || card.vault.userId !== userId) {
+    if (!card || card.vault.userId !== userId || (expectedVaultId && card.vault.id !== expectedVaultId)) {
       return c.json({ success: false, error: 'Card not found' }, 404)
     }
 
     const result = await syncCardToLightRAG(cardId)
     return c.json({ success: result.status === 'indexed' || result.status === 'disabled', result })
   })
-  .get('/card/:id/status', async (c) => {
+  .get('/card/:id/status', zValidator('query', vaultQuerySchema), async (c) => {
     const userId = c.get('userId') as string
     const cardId = c.req.param('id')
+    const expectedVaultId = c.req.query('vid')
     const card = await prisma.card.findUnique({
       where: { id: cardId },
-      include: { vault: { select: { userId: true } } },
+      include: { vault: { select: { id: true, userId: true } } },
     })
-    if (!card || card.vault.userId !== userId) {
+    if (!card || card.vault.userId !== userId || (expectedVaultId && card.vault.id !== expectedVaultId)) {
       return c.json({ success: false, error: 'Card not found' }, 404)
     }
 
     const status = await getLightRAGCardStatus(cardId)
     return c.json({ success: true, status })
   })
-  .get('/card/:id/related', zValidator('query', z.object({
-    limit: z.coerce.number().int().positive().max(12).optional(),
-  })), async (c) => {
+  .get('/card/:id/related', zValidator('query', relatedQuerySchema), async (c) => {
     const userId = c.get('userId') as string
     const cardId = c.req.param('id')
     const { limit } = c.req.valid('query')
+    const expectedVaultId = c.req.query('vid')
     const card = await prisma.card.findUnique({
       where: { id: cardId },
       include: { vault: { select: { id: true, userId: true } } },
     })
-    if (!card || card.vault.userId !== userId) {
+    if (!card || card.vault.userId !== userId || (expectedVaultId && card.vault.id !== expectedVaultId)) {
       return c.json({ success: false, error: 'Card not found' }, 404)
     }
 

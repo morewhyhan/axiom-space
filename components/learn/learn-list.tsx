@@ -7,7 +7,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { toast } from 'sonner'
 
 export default function LearnList() {
-  const { data, loading, refetch } = useLearningPaths()
+  const { data, refetch } = useLearningPaths()
   const executeStep = useExecuteStep()
   const updateProgress = useUpdateStepProgress()
   const agentSessionId = useAgentStore(s => s.sessionId)
@@ -103,8 +103,8 @@ export default function LearnList() {
       } else {
         toast.success('步骤已标记为完成')
       }
-    } catch (e: any) {
-      toast.error(e?.message || '标记失败')
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '标记失败')
     }
   }
 

@@ -5,7 +5,7 @@
  * 生成摘要、识别前置条件等，辅助知识图谱的构建。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { aiManager } from '../../ai/AIManager';
 

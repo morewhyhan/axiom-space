@@ -99,12 +99,12 @@ export default function ForgeEditor() {
   const [resourceLoading, setResourceLoading] = useState(false)
 
   // Undo stack: snapshots of content before each change
-  const [undoStack, setUndoStack] = useState<string[]>([])
+  const [, setUndoStack] = useState<string[]>([])
   const undoCountRef = useRef(0)
   const MAX_UNDO = 50
 
   // Wiki-link autocomplete state
-  const [wikiQuery, setWikiQuery] = useState('')
+  const [, setWikiQuery] = useState('')
   const [wikiSuggestions, setWikiSuggestions] = useState<WikiSuggestion[]>([])
   const [wikiActive, setWikiActive] = useState(false)
   const [wikiIdx, setWikiIdx] = useState(0)
@@ -112,19 +112,22 @@ export default function ForgeEditor() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const selectedNode = useAppStore((state) => state.selectedNode)
+  const selectedNodeId = selectedNode?.id
+  const selectedNodeTitle = selectedNode?.title ?? ''
   const clearSelectedNode = useAppStore((state) => state.clearSelectedNode)
   const prefetchedCard = useAppStore((state) => state.prefetchedCard)
   const currentVaultId = useAppStore((state) => state.currentVaultId)
   const queryClient = useQueryClient()
   const readContainerRef = useRef<HTMLDivElement>(null)
   const ragStatusQuery = useQuery({
-    queryKey: ['rag-card-status', selectedNode?.id],
-    enabled: !!selectedNode?.id,
+    queryKey: ['rag-card-status', currentVaultId, selectedNode?.id],
+    enabled: !!currentVaultId && !!selectedNode?.id,
     queryFn: async (): Promise<RagCardStatus> => {
       if (!selectedNode?.id) throw new Error('No card selected')
       const res = await (client.api.rag.card[':id'].status.$get as (args: {
         param: { id: string }
-      }) => Promise<Response>)({ param: { id: selectedNode.id } })
+        query: { vid?: string }
+      }) => Promise<Response>)({ param: { id: selectedNode.id }, query: { vid: currentVaultId ?? undefined } })
       const data = await res.json() as { success: boolean; status?: RagCardStatus; error?: string }
       if (!data.success || !data.status) throw new Error(data.error || 'Failed to load RAG status')
       return data.status
@@ -135,14 +138,14 @@ export default function ForgeEditor() {
     },
   })
   const relatedCardsQuery = useQuery({
-    queryKey: ['rag-related-cards', selectedNode?.id],
-    enabled: !!selectedNode?.id && ragStatusQuery.data?.status === 'indexed',
+    queryKey: ['rag-related-cards', currentVaultId, selectedNode?.id],
+    enabled: !!currentVaultId && !!selectedNode?.id && ragStatusQuery.data?.status === 'indexed',
     queryFn: async (): Promise<RelatedRagCard[]> => {
       if (!selectedNode?.id) return []
       const res = await (client.api.rag.card[':id'].related.$get as (args: {
         param: { id: string }
-        query?: { limit?: string }
-      }) => Promise<Response>)({ param: { id: selectedNode.id }, query: { limit: '6' } })
+        query: { limit?: string; vid?: string }
+      }) => Promise<Response>)({ param: { id: selectedNode.id }, query: { limit: '6', vid: currentVaultId ?? undefined } })
       const data = await res.json() as { success: boolean; cards?: RelatedRagCard[]; error?: string }
       if (!data.success) throw new Error(data.error || 'Failed to load related cards')
       return data.cards ?? []
@@ -276,7 +279,7 @@ export default function ForgeEditor() {
 
   // Fetch card content when selected node changes
   useEffect(() => {
-    if (!selectedNode) {
+    if (!selectedNodeId) {
       setCardContent('')
       setCardTitle(null)
       setDirty(false)
@@ -285,11 +288,11 @@ export default function ForgeEditor() {
       return
     }
 
-    setCardTitle(selectedNode.title)
+    setCardTitle(selectedNodeTitle)
     setLastSavedAt(null)
 
     // Use prefetched content if available (instant, no API call)
-    if (prefetchedCard?.id === selectedNode.id) {
+    if (prefetchedCard?.id === selectedNodeId) {
       setCardContent(prefetchedCard.content)
       setCardTitle(prefetchedCard.title)
       setDirty(false)
@@ -304,13 +307,14 @@ export default function ForgeEditor() {
     ;(async () => {
       try {
         const res = await client.api.vault.card[':id'].$get({
-          param: { id: selectedNode.id },
+          param: { id: selectedNodeId },
+          query: { vid: currentVaultId ?? undefined },
         })
         const data = await res.json() as { success: boolean; card?: { content: string; title: string }; error?: string }
         if (cancelled) return
         if (data.success) {
           setCardContent((data.card?.content || ''))
-          setCardTitle((data.card?.title || selectedNode.title))
+          setCardTitle((data.card?.title || selectedNodeTitle))
           setDirty(false)
         }
       } catch (err) {
@@ -320,7 +324,7 @@ export default function ForgeEditor() {
       }
     })()
     return () => { cancelled = true }
-  }, [selectedNode?.id, prefetchedCard, currentVaultId])
+  }, [selectedNodeId, selectedNodeTitle, prefetchedCard, currentVaultId])
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
@@ -433,7 +437,7 @@ export default function ForgeEditor() {
         query: currentVaultId ? { vid: currentVaultId } : undefined,
       })
       const data: { success: boolean; card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }; error?: string } = await res.json()
-      if (data.success) {
+      if (res.ok && data.success) {
         setDirty(false)
         setUndoStack([])
         const now = new Date()
@@ -452,12 +456,12 @@ export default function ForgeEditor() {
         queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
         // Invalidate all card-links — saving this card may affect backlinks on other cards
         queryClient.invalidateQueries({ queryKey: ['card-links'] })
-        queryClient.invalidateQueries({ queryKey: ['rag-card-status', selectedNode.id] })
-        queryClient.invalidateQueries({ queryKey: ['rag-related-cards', selectedNode.id] })
+        queryClient.invalidateQueries({ queryKey: ['rag-card-status', currentVaultId, selectedNode.id] })
+        queryClient.invalidateQueries({ queryKey: ['rag-related-cards', currentVaultId, selectedNode.id] })
         queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
       } else {
         // Keep dirty so the user can retry; surface server-side reason.
-        toast.error(`保存失败: ${data?.error || '未知错误'}`)
+        toast.error(`保存失败: ${data?.error || `HTTP ${res.status}`}`)
       }
     } catch (err) {
       console.warn('[ForgeEditor] failed to save:', err)
@@ -473,18 +477,20 @@ export default function ForgeEditor() {
       toast('正在重新同步知识库...', { duration: 2000 })
       const res = await (client.api.rag.card[':id'].sync.$post as (args: {
         param: { id: string }
-      }) => Promise<Response>)({ param: { id: selectedNode.id } })
+        query: { vid?: string }
+      }) => Promise<Response>)({ param: { id: selectedNode.id }, query: { vid: currentVaultId ?? undefined } })
       const data = await res.json() as { success: boolean; result?: { status?: string; error?: string }; error?: string }
-      if (!data.success) {
-        toast.error(data.result?.error || data.error || '重新同步失败')
+      if (!res.ok || !data.success) {
+        toast.error(data.result?.error || data.error || `重新同步失败 (${res.status})`)
       } else {
         toast.success(data.result?.status === 'indexed' ? '知识库已同步' : '同步任务已更新')
       }
-      queryClient.invalidateQueries({ queryKey: ['rag-card-status', selectedNode.id] })
+      queryClient.invalidateQueries({ queryKey: ['rag-card-status', currentVaultId, selectedNode.id] })
+      queryClient.invalidateQueries({ queryKey: ['rag-related-cards', currentVaultId, selectedNode.id] })
     } catch (err) {
       toast.error(`重新同步失败: ${(err as Error)?.message || '网络异常'}`)
     }
-  }, [selectedNode, queryClient])
+  }, [selectedNode, currentVaultId, queryClient])
 
   // Ctrl+S to save (use ref to avoid re-registration on every keystroke)
   const handleSaveRef = useRef(handleSave)
@@ -504,17 +510,22 @@ export default function ForgeEditor() {
         query: currentVaultId ? { vid: currentVaultId } : undefined,
       })
       const data: { success: boolean; card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }; error?: string } = await res.json()
-      if (data.success) {
+      if (res.ok && data.success) {
         toast.success('已升级为永久卡片')
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
         // Update local node type
         useAppStore.getState().setSelectedNode({
           ...selectedNode,
           type: 'permanent',
         })
         useAgentStore.getState().loadSessions()
+      } else {
+        toast.error(`升级失败: ${data.error || `HTTP ${res.status}`}`)
       }
     } catch (err) {
       toast.error(`升级失败: ${(err as Error)?.message || '网络异常'}`)
@@ -539,13 +550,18 @@ export default function ForgeEditor() {
           vaultId: currentVaultId ?? undefined,
         },
       })
-      const data = await res.json()
-      if (data.success) {
+      const data = await res.json() as { success?: boolean; error?: string }
+      if (res.ok && data.success) {
         toast.success('灵感卡片已创建')
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['card-links'] })
+        queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
       } else {
-        toast.error(`创建失败: ${data?.error || '未知错误'}`)
+        toast.error(`创建失败: ${data?.error || `HTTP ${res.status}`}`)
       }
     } catch (err) {
       toast.error(`创建失败: ${(err as Error)?.message || '网络异常'}`)
@@ -595,8 +611,10 @@ export default function ForgeEditor() {
         try {
           const params = new URLSearchParams({ title })
           if (currentVaultId) params.set('vid', currentVaultId)
-          const res = await fetch(`/api/vault/resolve-link?${params}`)
-          const data = await res.json()
+          const res = await client.api.vault['resolve-link'].$get({
+            query: Object.fromEntries(params.entries()),
+          })
+          const data = await res.json() as { success: boolean; card?: { id: string; title: string; type?: string } | null; error?: string }
           if (data.success && data.card) {
             useAppStore.getState().setSelectedNode({
               id: data.card.id,
@@ -607,7 +625,7 @@ export default function ForgeEditor() {
           } else {
             toast.error(`Card "${title}" not found`)
           }
-        } catch (err) {
+        } catch {
           toast.error(`Failed to navigate to "${title}"`)
         }
       })()
@@ -675,19 +693,38 @@ export default function ForgeEditor() {
                 style={{ fontSize: 'var(--f10)' }}
                 onClick={async () => {
                   if (!selectedNode || !window.confirm('确定删除这张卡片？此操作不可撤销。')) return
+                  const deletedCardId = selectedNode.id
                   try {
                     const res = await client.api.vault['card'][':id'].$delete({
-                      param: { id: selectedNode.id },
+                      param: { id: deletedCardId },
+                      query: { vid: currentVaultId ?? undefined },
                     })
-                    const data: { success: boolean; error?: string } = await res.json()
-                    if (data.success) {
+                    const data: { success: boolean; error?: string; deletedSessionIds?: string[] } = await res.json()
+                    if (res.ok && data.success) {
+                      const agentStore = useAgentStore.getState()
+                      const currentSession = agentStore.sessions.find((session) => session.id === agentStore.sessionId)
+                      if (currentSession?.cardId === deletedCardId || data.deletedSessionIds?.includes(agentStore.sessionId ?? '')) {
+                        agentStore._abortStream()
+                        agentStore._setSessionId(null)
+                        agentStore._setMessages([])
+                        agentStore._setError(null)
+                      }
+                      await agentStore.loadSessions()
                       toast.success('卡片已删除')
                       clearSelectedNode()
                       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
                       queryClient.invalidateQueries({ queryKey: ['dashboard', currentVaultId] })
                       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
                       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+                      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
                       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+                      queryClient.invalidateQueries({ queryKey: ['card-links'] })
+                      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+                      queryClient.removeQueries({ queryKey: ['rag-card-status', currentVaultId, deletedCardId] })
+                      queryClient.removeQueries({ queryKey: ['rag-related-cards', currentVaultId, deletedCardId] })
+                      window.dispatchEvent(new CustomEvent('axiom:card-deleted', {
+                        detail: { cardId: deletedCardId, deletedSessionIds: data.deletedSessionIds ?? [] },
+                      }))
                     } else {
                       toast.error(`删除失败: ${data?.error || '未知错误'}`)
                     }

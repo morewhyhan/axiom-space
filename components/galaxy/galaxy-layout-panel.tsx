@@ -3,22 +3,44 @@
 import { toast } from 'sonner'
 import { useAppStore, useGalaxyActions, type GraphLayoutMode } from '@/stores/mode-store'
 
-const LAYOUT_MODES: Array<{
+type LayoutItem = {
   mode: GraphLayoutMode
   label: string
   code: string
   title: string
-}> = [
-  { mode: 'galaxy', label: '星系', code: 'MODULE', title: '星团围绕核心，星团内节点绕中心分布' },
-  { mode: 'flat', label: '平面', code: 'FORCE', title: '全部压平，有关系的节点互相靠近' },
-  { mode: 'radial', label: '环形', code: 'CHORD', title: '节点围成环，连线从圆内穿过' },
-  { mode: 'concentric', label: '同心', code: 'HOPS', title: '以选中节点为中心，一跳二跳向外扩散' },
-  { mode: 'layered', label: '分层', code: 'DAG', title: '按抽象层级和对象类型一层一层排开' },
-  { mode: 'matrix', label: '矩阵', code: 'GRID', title: '按星团、类型、关系度落入三维格子' },
-  { mode: 'task-flow', label: '任务流', code: 'QUEUE', title: '按学习路径或行动优先级排成队列' },
-  { mode: 'timeline', label: '时间线', code: 'TIME', title: '按稳定时间顺序铺开，类型分轨' },
-  { mode: 'mastery', label: '地形', code: 'STATE', title: '平面关系不变，高度表达掌握状态' },
-  { mode: 'evidence', label: '证据', code: 'RAG', title: '知识点在上，资料和证据类节点向下挂载' },
+}
+
+const LAYOUT_GROUPS: Array<{ title: string; items: LayoutItem[] }> = [
+  {
+    title: '总览',
+    items: [
+      { mode: 'galaxy', label: '星系', code: 'MODULE', title: '看整个知识宇宙和星团结构' },
+    ],
+  },
+  {
+    title: '关系',
+    items: [
+      { mode: 'flat', label: '平面', code: 'FORCE', title: '看真实连接，有关系的节点互相靠近' },
+      { mode: 'radial', label: '环形', code: 'CHORD', title: '看跨主题连接和桥接节点' },
+      { mode: 'concentric', label: '同心', code: 'HOPS', title: '以选中节点为中心，看一跳二跳邻域' },
+    ],
+  },
+  {
+    title: '学习',
+    items: [
+      { mode: 'layered', label: '分层', code: 'DAG', title: '看资料、灵感、结论之间的沉淀层级' },
+      { mode: 'task-flow', label: '任务流', code: 'QUEUE', title: '按学习路径或行动优先级排成队列' },
+      { mode: 'evidence', label: '证据', code: 'RAG', title: '看结论背后的资料和证据支撑' },
+    ],
+  },
+  {
+    title: '分析',
+    items: [
+      { mode: 'matrix', label: '矩阵', code: 'GRID', title: '按星团、类型、关系度做分类比较' },
+      { mode: 'timeline', label: '时间线', code: 'TIME', title: '按时间顺序查看知识演化' },
+      { mode: 'mastery', label: '地形', code: 'STATE', title: '用高度表达掌握状态或成熟度' },
+    ],
+  },
 ]
 
 function setCanvasLayout(mode: GraphLayoutMode): boolean {
@@ -56,28 +78,35 @@ export default function GalaxyLayoutPanel() {
       </section>
 
       <section className="min-h-0 flex-1 overflow-y-auto no-scrollbar rounded-2xl border border-white/8 bg-white/[0.012] px-2.5 py-2.5">
-        <div className="grid grid-cols-1 gap-1.5">
-          {LAYOUT_MODES.map((item) => {
-            const active = item.mode === layoutMode
-            return (
-              <button
-                key={item.mode}
-                title={item.title}
-                onClick={() => handleLayout(item.mode)}
-                className={[
-                  'group w-full rounded-lg border px-2.5 py-2 text-left transition-colors',
-                  active
-                    ? 'border-cyan-400/40 bg-cyan-400/12 text-white'
-                    : 'border-white/8 bg-white/[0.018] text-white/45 hover:border-white/16 hover:bg-white/[0.04] hover:text-white/75',
-                ].join(' ')}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="mono whitespace-nowrap" style={{ fontSize: 'var(--f9)' }}>{item.label}</span>
-                  <span className={`mono whitespace-nowrap ${active ? 'text-cyan-200/70' : 'text-white/18 group-hover:text-white/32'}`} style={{ fontSize: 'var(--f10)' }}>{item.code}</span>
-                </div>
-              </button>
-            )
-          })}
+        <div className="space-y-3">
+          {LAYOUT_GROUPS.map((group) => (
+            <div key={group.title}>
+              <div className="mono text-white/25 mb-1.5 px-1" style={{ fontSize: 'var(--f10)' }}>{group.title}</div>
+              <div className="grid grid-cols-1 gap-1.5">
+                {group.items.map((item) => {
+                  const active = item.mode === layoutMode
+                  return (
+                    <button
+                      key={item.mode}
+                      title={item.title}
+                      onClick={() => handleLayout(item.mode)}
+                      className={[
+                        'group w-full rounded-lg border px-2.5 py-2 text-left transition-colors',
+                        active
+                          ? 'border-cyan-400/40 bg-cyan-400/12 text-white'
+                          : 'border-white/8 bg-white/[0.018] text-white/45 hover:border-white/16 hover:bg-white/[0.04] hover:text-white/75',
+                      ].join(' ')}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="mono whitespace-nowrap" style={{ fontSize: 'var(--f9)' }}>{item.label}</span>
+                        <span className={`mono whitespace-nowrap ${active ? 'text-cyan-200/70' : 'text-white/18 group-hover:text-white/32'}`} style={{ fontSize: 'var(--f10)' }}>{item.code}</span>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </section>
     </aside>

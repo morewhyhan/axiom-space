@@ -21,8 +21,10 @@ export interface AxiomCompat {
   ls(dir: string): Promise<{ success: boolean; entries?: any[]; error?: string }>
   rename(oldPath: string, newPath: string): Promise<{ success: boolean; error?: string }>
   editFile(path: string, oldStr: string, newStr: string): Promise<{ success: boolean; error?: string }>
-  grep(pattern: string, filePath: string): Promise<{ success: boolean; lines?: string[]; error?: string }>
-  find(dir: string, pattern: string): Promise<{ success: boolean; files?: string[]; error?: string }>
+  grep(pattern: string, filePath: string): Promise<{ success: boolean; lines?: string[]; matches?: Array<{ line: number; content: string }>; count?: number; error?: string }>
+  find(dir: string, pattern: string): Promise<{ success: boolean; files?: string[]; count?: number; error?: string }>
+  loadCard(vaultPath: string, cardPath: string): Promise<{ success: boolean; card?: any; error?: string }>
+  updateCard(vaultPath: string, cardPath: string, card: any, content: string): Promise<{ success: boolean; error?: string }>
 
   createFleeing(vaultPath: string, item: any, content: string, oldTitle?: string): Promise<{ success: boolean; actualTitle?: string }>
   createPermanent(vaultPath: string, item: any, content: string, oldTitle?: string): Promise<{ success: boolean; actualTitle?: string }>
@@ -62,17 +64,72 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
     async grep(pattern: string, filePath: string) {
       const read = await storage.readFile(filePath)
       if (!read.success || !read.content) return { success: false, error: read.error }
-      const lines = read.content.split('\n').filter(l => l.includes(pattern))
-      return { success: true, lines }
+      let matcher: RegExp | null = null
+      try {
+        matcher = new RegExp(pattern, 'i')
+      } catch {
+        matcher = null
+      }
+      const matches = read.content
+        .split('\n')
+        .map((content, index) => ({ line: index + 1, content }))
+        .filter(({ content }) => matcher ? matcher.test(content) : content.includes(pattern))
+      return { success: true, lines: matches.map((m) => m.content), matches, count: matches.length }
     },
 
     async find(dir: string, pattern: string) {
       const list = await storage.listDir(dir)
       if (!list.success) return { success: false, error: list.error }
+      let matcher: RegExp | null = null
+      try {
+        matcher = new RegExp(pattern, 'i')
+      } catch {
+        matcher = null
+      }
       const files = (list.entries || [])
-        .filter(e => !e.isDirectory && e.name.includes(pattern))
+        .filter(e => !e.isDirectory && (matcher ? matcher.test(e.name) : e.name.includes(pattern)))
         .map(e => e.path)
-      return { success: true, files }
+      return { success: true, files, count: files.length }
+    },
+
+    async loadCard(_vp: string, cardPath: string) {
+      const read = await storage.readFile(cardPath)
+      if (!read.success) return { success: false, error: read.error || 'Card not found' }
+
+      const { prisma } = await import('@/lib/db')
+      const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const vid = getCurrentVaultId()
+      const dbCard = vid
+        ? await prisma.card.findUnique({ where: { vaultId_path: { vaultId: vid, path: cardPath } } })
+        : null
+      const content = read.content || dbCard?.content || ''
+      const wikilinks = Array.from(content.matchAll(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g))
+        .map((match) => match[1]?.trim())
+        .filter(Boolean)
+      return {
+        success: true,
+        card: {
+          ...(dbCard || {}),
+          path: cardPath,
+          title: dbCard?.title || cardPath.split('/').pop()?.replace(/\.md$/, '') || '',
+          content,
+          links: { to: Array.from(new Set(wikilinks)), from: [] },
+        },
+      }
+    },
+
+    async updateCard(_vp: string, cardPath: string, card: any, content: string) {
+      let nextContent = content || card?.content || ''
+      const outgoing = Array.isArray(card?.links?.to) ? card.links.to : []
+      for (const target of outgoing) {
+        const cleanTarget = String(target || '').trim()
+        if (!cleanTarget) continue
+        const linkPattern = new RegExp(`\\[\\[${cleanTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`)
+        if (!linkPattern.test(nextContent)) {
+          nextContent += `${nextContent.endsWith('\n') ? '' : '\n'}\n[[${cleanTarget}]]`
+        }
+      }
+      return storage.writeFile(cardPath, nextContent, card?.type)
     },
 
     // ── 卡片操作（DB 直查，不写 YAML frontmatter）──

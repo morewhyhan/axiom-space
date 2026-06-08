@@ -14,7 +14,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Copy, Download, ChevronDown, ChevronUp, Play, Maximize2, X, FileText, Presentation, ListChecks, Image as ImageIcon, Network, BookOpen } from 'lucide-react';
+import { Copy, Download, ChevronDown, ChevronUp, Play, Maximize2, X, FileText, Presentation, ListChecks, Image as ImageIcon, Network, BookOpen, Code2 } from 'lucide-react';
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown';
 
 interface CodeCardProps {
@@ -406,6 +406,7 @@ const RESOURCE_ICON: Record<string, React.ComponentType<{ className?: string }>>
   mindmap: Network,
   diagram: Network,
   quiz: ListChecks,
+  code: Code2,
   svg: ImageIcon,
   video: Play,
   docx: FileText,
@@ -420,6 +421,7 @@ const RESOURCE_MIME: Record<string, string> = {
   svg: 'image/svg+xml',
   video: 'text/html',
   document: 'text/markdown',
+  code: 'text/markdown',
   mindmap: 'text/plain',
   diagram: 'text/plain',
   quiz: 'application/json',
@@ -446,12 +448,12 @@ function ResourcePreview({ item, expanded = false }: { item: GeneratedResourceIt
   const markdown = useMemo(() => {
     if (!content) return '<p style="color:var(--text-dim);font-style:italic;">资源内容为空</p>';
     if (isMermaid) return parseMD(`\`\`\`mermaid\n${content}\n\`\`\``);
-    if (item.type === 'document') return parseMD(content);
+    if (item.type === 'document' || item.type === 'code') return parseMD(content);
     return '';
   }, [content, isMermaid, item.type]);
 
   useEffect(() => {
-    if (ref.current && (isMermaid || item.type === 'document')) {
+    if (ref.current && (isMermaid || item.type === 'document' || item.type === 'code')) {
       renderMermaidBlocks(ref.current);
     }
   }, [markdown, isMermaid, item.type]);
@@ -518,7 +520,7 @@ function ResourcePreview({ item, expanded = false }: { item: GeneratedResourceIt
     }
   }
 
-  if (item.type === 'document' || isMermaid) {
+  if (item.type === 'document' || item.type === 'code' || isMermaid) {
     return (
       <div
         ref={ref}

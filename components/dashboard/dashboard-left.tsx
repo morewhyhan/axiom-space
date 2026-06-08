@@ -3,6 +3,7 @@
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { useAppStore } from '@/stores/mode-store'
 import { useState, useEffect } from 'react'
+import { client } from '@/lib/api-client'
 
 function CountUp({ end, duration = 1000, loading = false }: { end: number; duration?: number; loading?: boolean }) {
   const [count, setCount] = useState(0)
@@ -38,7 +39,7 @@ export default function DashboardLeft() {
     let mounted = true
     const check = async () => {
       try {
-        const res = await fetch('/api/agent/health')
+        const res = await client.api.agent.health.$get()
         const data = await res.json()
         if (mounted) setAgentOnline(data.status === 'ok')
       } catch { if (mounted) setAgentOnline(false) }

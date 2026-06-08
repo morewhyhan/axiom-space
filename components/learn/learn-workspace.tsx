@@ -73,7 +73,7 @@ export default function LearnWorkspace() {
   const setSelectedNode = useAppStore((s) => s.setSelectedNode)
   const setMode = useAppStore((s) => s.setMode)
 
-  const paths = data?.paths ?? []
+  const paths = useMemo(() => data?.paths ?? [], [data?.paths])
   const [createPanelOpen, setCreatePanelOpen] = useState(false)
   const [createMode, setCreateMode] = useState<CreateMode>('ai')
   const [topic, setTopic] = useState('')
@@ -98,7 +98,7 @@ export default function LearnWorkspace() {
     [data?.activePath, paths, selectedPathId],
   )
 
-  const currentSteps = currentPath?.steps ?? []
+  const currentSteps = useMemo(() => currentPath?.steps ?? [], [currentPath?.steps])
   const currentStep = useMemo(() => {
     if (!currentSteps.length) return null
     return currentSteps.find((step) => step.id === activeLearningStepId) ?? getNextStep(currentSteps)
@@ -248,6 +248,8 @@ export default function LearnWorkspace() {
 
   const handleDeletePath = async (pathId: string) => {
     if (pathId === '__unassigned_tasks__' || pathId === '__fleeting_inbox__') return
+    const path = paths.find((item) => item.id === pathId)
+    if (!window.confirm(`确定删除「${path?.name || '这条路径'}」？相关任务线程也会一起移除。`)) return
     try {
       await deletePath.mutateAsync(pathId)
       if (selectedPathId === pathId) {

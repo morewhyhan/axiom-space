@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   Check,
   Files,
@@ -51,10 +51,13 @@ export default function PanelBar() {
   const setChatPanelOpen = useAppStore((s) => s.setChatPanelOpen)
   const [open, setOpen] = useState(false)
 
-  const isVisible = (id: PanelId) => panelLayout.left.includes(id) || panelLayout.right.includes(id)
+  const isVisible = useCallback(
+    (id: PanelId) => panelLayout.left.includes(id) || panelLayout.right.includes(id),
+    [panelLayout.left, panelLayout.right],
+  )
   const visiblePanels = useMemo(
     () => (['sessionList', 'fileTree', 'editor'] as PanelId[]).filter(isVisible),
-    [panelLayout.left, panelLayout.right],
+    [isVisible],
   )
   const openCount = visiblePanels.length + (chatPanelOpen ? 1 : 0)
 

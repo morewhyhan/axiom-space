@@ -37,7 +37,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
     const cards = await prisma.card.findMany({
       where: { vaultId: vault.id },
-      select: { id: true, title: true, type: true, clusterId: true, tags: true, cluster: { select: { name: true, color: true } } },
+      select: { id: true, title: true, type: true, clusterId: true, tags: true, createdAt: true, updatedAt: true, cluster: { select: { name: true, color: true } } },
     })
     return c.json({
       success: true,
@@ -45,6 +45,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
         id: card.id, title: card.title, type: card.type, clusterId: card.clusterId,
         clusterName: card.cluster?.name ?? null, clusterColor: card.cluster?.color ?? null,
         tags: card.tags ? safeParseTags(card.tags) : [],
+        createdAt: card.createdAt.toISOString(),
+        updatedAt: card.updatedAt.toISOString(),
       })),
     })
   })

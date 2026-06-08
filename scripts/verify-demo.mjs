@@ -33,8 +33,8 @@ if (await signInButton.isVisible().catch(() => false)) {
   if (await maybeLink.isVisible().catch(() => false)) await maybeLink.click()
 }
 
-await page.getByLabel(/email/i).fill('demo@axiom.space')
-await page.getByLabel(/password/i).fill('demo123456')
+await page.getByLabel(/邮箱|email/i).fill('demo@axiom.space')
+await page.getByLabel(/密码|password/i).fill('demo123456')
 await shot('02-login-filled.png')
 
 const submit = page.getByRole('button', { name: /sign in|log in|登录/i }).last()

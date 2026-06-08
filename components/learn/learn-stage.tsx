@@ -45,14 +45,12 @@ export default function LearnStage() {
     const setInternalEdgesVisible = actions.setInternalEdgesVisible as ((v: boolean) => void) | undefined
     const setExternalEdgesVisible = actions.setExternalEdgesVisible as ((v: boolean) => void) | undefined
     const setCometsVisible = actions.setCometsVisible as ((v: boolean) => void) | undefined
-    const setMilkyWay = actions.setMilkyWay as ((v: boolean) => void) | undefined
     const setAutoRotate = actions.setAutoRotate as ((v: boolean) => void) | undefined
 
     if (focusMode) {
       setInternalEdgesVisible?.(false)
       setExternalEdgesVisible?.(false)
       setCometsVisible?.(false)
-      setMilkyWay?.(false)
       setAutoRotate?.(false)
       if (isLearningPathVisible && !isLearningPathVisible() && toggleLearningPath) {
         toggleLearningPath()
@@ -61,7 +59,6 @@ export default function LearnStage() {
       setInternalEdgesVisible?.(true)
       setExternalEdgesVisible?.(true)
       setCometsVisible?.(true)
-      setMilkyWay?.(true)
       setAutoRotate?.(true)
       if (isLearningPathVisible && isLearningPathVisible() && toggleLearningPath) {
         toggleLearningPath()
@@ -76,13 +73,11 @@ export default function LearnStage() {
       const setInternalEdgesVisible = actions.setInternalEdgesVisible as ((v: boolean) => void) | undefined
       const setExternalEdgesVisible = actions.setExternalEdgesVisible as ((v: boolean) => void) | undefined
       const setCometsVisible = actions.setCometsVisible as ((v: boolean) => void) | undefined
-      const setMilkyWay = actions.setMilkyWay as ((v: boolean) => void) | undefined
       const setAutoRotate = actions.setAutoRotate as ((v: boolean) => void) | undefined
 
       setInternalEdgesVisible?.(true)
       setExternalEdgesVisible?.(true)
       setCometsVisible?.(true)
-      setMilkyWay?.(true)
       setAutoRotate?.(true)
       if (isLearningPathVisible && isLearningPathVisible() && toggleLearningPath) {
         toggleLearningPath()

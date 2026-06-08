@@ -7,6 +7,7 @@ import { Hono } from 'hono'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
+import { getProfileCacheEntry, setProfileCacheEntry } from '../profile-cache'
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
@@ -18,20 +19,22 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const vid = vault.id
 
   // ── Try loading cached profile from vault.profileCache ──
+  let profileCacheRaw: string | null = null
   try {
     const vaultWithCache = await prisma.vault.findUnique({
       where: { id: vid },
       select: { profileCache: true },
     })
-    if (vaultWithCache?.profileCache) {
-      const cachedProfile = JSON.parse(vaultWithCache.profileCache)
-      if (cachedProfile?.cognitionStats) {
-        const age = Date.now() - (cachedProfile.updatedAt || 0)
+    profileCacheRaw = vaultWithCache?.profileCache ?? null
+    if (profileCacheRaw) {
+      const cachedProfile = getProfileCacheEntry<Record<string, unknown>>(profileCacheRaw, 'cognition')
+      if (cachedProfile?.data) {
+        const age = Date.now() - cachedProfile.updatedAt
         if (age < 300_000) { // fresh within 5 minutes
           return c.json({
+            ...cachedProfile.data,
             success: true,
             cached: true,
-            ...cachedProfile.cognitionStats,
           })
         }
       }
@@ -221,13 +224,14 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
   // ── Persist computed stats to vault.profileCache ──
   try {
+    const vaultWithLatestCache = await prisma.vault.findUnique({
+      where: { id: vid },
+      select: { profileCache: true },
+    })
     await prisma.vault.update({
       where: { id: vid },
       data: {
-        profileCache: JSON.stringify({
-          updatedAt: Date.now(),
-          cognitionStats: responseBody,
-        }),
+        profileCache: setProfileCacheEntry(vaultWithLatestCache?.profileCache ?? profileCacheRaw, 'cognition', responseBody),
       },
     })
   } catch (err: unknown) {

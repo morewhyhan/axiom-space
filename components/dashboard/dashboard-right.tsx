@@ -6,6 +6,7 @@ import { useCognition } from '@/hooks/use-cognition'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import { toast } from 'sonner'
 import type { GrowthPoint, RecentActivity } from '@/types/dashboard'
+import { client } from '@/lib/api-client'
 
 type FocusMode = 'overview' | 'by-cluster' | 'zen' | 'recent'
 type MetricsMode = 'all' | 'perm' | 'fleet' | 'orphans'
@@ -43,14 +44,14 @@ export default function DashboardRight() {
     let mounted = true
     const check = async () => {
       try {
-        const res = await fetch('/api/agent/health')
+        const res = await client.api.agent.health.$get()
         const data = await res.json()
         if (mounted) setAgentOnline(data.status === 'ok')
       } catch { if (mounted) setAgentOnline(false) }
     }
     const checkStatus = async () => {
       try {
-        const res = await fetch('/api/agent/status')
+        const res = await client.api.agent.status.$get()
         const data = await res.json()
         if (mounted && data.success) setAgentModel(data.status?.model ?? null)
       } catch { /* non-critical */ }

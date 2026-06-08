@@ -11,6 +11,7 @@
 
 import { prisma } from '@/lib/db'
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context'
+import { getProfileCacheEntry, setProfileCacheEntry } from '@/server/api/profile-cache'
 
 export interface UserProfile {
   updatedAt: number
@@ -48,9 +49,9 @@ export async function loadUserProfile(_vaultPath?: string): Promise<UserProfile 
       select: { profileCache: true },
     })
     if (vault?.profileCache) {
-      const parsed = JSON.parse(vault.profileCache)
-      if (parsed && typeof parsed === 'object') {
-        return parsed as UserProfile
+      const entry = getProfileCacheEntry<UserProfile>(vault.profileCache, 'agentProfile')
+      if (entry?.data && typeof entry.data === 'object') {
+        return entry.data as UserProfile
       }
     }
   } catch {
@@ -69,10 +70,15 @@ export async function saveUserProfile(_vaultPath?: string, profile?: UserProfile
       const vaultId = await resolveVaultId()
       if (!vaultId) return
 
+      const vault = await prisma.vault.findUnique({
+        where: { id: vaultId },
+        select: { profileCache: true },
+      })
+
       await prisma.vault.update({
         where: { id: vaultId },
         data: {
-          profileCache: JSON.stringify(profile ?? createDefaultProfile()),
+          profileCache: setProfileCacheEntry(vault?.profileCache, 'agentProfile', profile ?? createDefaultProfile()),
         },
       })
     } catch (e) {

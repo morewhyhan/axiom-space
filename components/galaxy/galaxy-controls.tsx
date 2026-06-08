@@ -1,16 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, type ChangeEvent } from 'react'
 import { useGalaxyData, useCreateCluster, useUpdateCluster, useDeleteCluster, useAssignCardCluster } from '@/hooks/use-galaxy'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import { toast } from 'sonner'
 
-const PLANAR_LAYOUTS = new Set(['flat', 'radial', 'concentric', 'task-flow', 'timeline'])
+const STATIC_LAYOUTS = new Set(['flat', 'layered', 'matrix', 'task-flow', 'timeline', 'mastery', 'evidence'])
+type CanvasAction = (...args: unknown[]) => unknown
 
 /** Call a Three.js canvas bridge function; warn the user if the canvas hasn't mounted yet. */
-function callCanvas<T extends (...args: any[]) => any>(name: string, args: Parameters<T>): boolean {
+function callCanvas(name: string, args: unknown[]): boolean {
   const storeName = name.replace(/^__/, '')
-  const fn = useGalaxyActions.getState().actions[storeName] as T | undefined
+  const actions = useGalaxyActions.getState().actions as Record<string, CanvasAction | undefined>
+  const fn = actions[storeName]
   if (typeof fn !== 'function') {
     toast.error('Galaxy 画布尚未就绪，请稍后再试')
     return false
@@ -35,15 +37,12 @@ export default function GalaxyControls() {
   const [autoRotate, setAutoRotate] = useState(true)
   const [rotateSpeed, setRotateSpeed] = useState(0.2)
   const [bloom, setBloom] = useState(1.4)
-  const [cometSpeed, setCometSpeed] = useState(1)
-  const [milkyWay, setMilkyWay] = useState(true)
   const hoverAttention = useAppStore((s) => s.graphHoverAttention)
   const setHoverAttention = useAppStore((s) => s.setGraphHoverAttention)
   const layoutMode = useAppStore((s) => s.graphLayoutMode)
   const setLayoutMode = useAppStore((s) => s.setGraphLayoutMode)
   const [intEdges, setIntEdges] = useState(false)
   const [extEdges, setExtEdges] = useState(false)
-  const [cometsVis, setCometsVis] = useState(true)
   const [filterPerm, setFilterPerm] = useState(true)
   const [filterFleet, setFilterFleet] = useState(true)
   const [filterLit, setFilterLit] = useState(true)
@@ -73,12 +72,10 @@ export default function GalaxyControls() {
       const ar = acts.getAutoRotate?.() as boolean | undefined; if (ar !== undefined) setAutoRotate(ar);
       const sr = acts.getRotateSpeed?.() as number | undefined; if (sr !== undefined) setRotateSpeed(sr);
       const bl = acts.getBloom?.() as number | undefined; if (bl !== undefined) setBloom(bl);
-      const cs = acts.getCometSpeed?.() as number | undefined; if (cs !== undefined) setCometSpeed(cs);
-      const mw = acts.getMilkyWay?.() as boolean | undefined; if (mw !== undefined) setMilkyWay(mw);
       const ha = acts.getHoverAttention?.() as boolean | undefined; if (ha !== undefined) setHoverAttention(ha);
       const lm = acts.getLayoutMode?.() as typeof layoutMode | undefined; if (lm !== undefined) setLayoutMode(lm);
       // Did any of the reads succeed?  Stop polling.
-      if (ar !== undefined || sr !== undefined || bl !== undefined || cs !== undefined || mw !== undefined || ha !== undefined || lm !== undefined) return;
+      if (ar !== undefined || sr !== undefined || bl !== undefined || ha !== undefined || lm !== undefined) return;
       attempts++;
       if (attempts < maxAttempts) timerId = setTimeout(poll, 200);
     };
@@ -87,28 +84,28 @@ export default function GalaxyControls() {
   }, [layoutMode, setHoverAttention, setLayoutMode])
 
   const toggleAutoRotate = () => {
-    if (PLANAR_LAYOUTS.has(layoutMode)) {
+    if (STATIC_LAYOUTS.has(layoutMode)) {
       setAutoRotate(false)
       return
     }
     const v = !autoRotate
     if (callCanvas('__setAutoRotate', [v])) setAutoRotate(v)
   }
-  const handleSpeed = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setRotateSpeed', [v])) setRotateSpeed(v) }
-  const handleBloom = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setBloom', [v])) setBloom(v) }
-  const handleComet = (e: any) => { const v = parseFloat(e.target.value); if (callCanvas('__setCometSpeed', [v])) setCometSpeed(v) }
-  const toggleMilkyWay = () => { const v = !milkyWay; if (callCanvas('__setMilkyWay', [v])) setMilkyWay(v) }
+  const handleSpeed = (e: ChangeEvent<HTMLInputElement>) => { const v = parseFloat(e.target.value); if (callCanvas('__setRotateSpeed', [v])) setRotateSpeed(v) }
+  const handleBloom = (e: ChangeEvent<HTMLInputElement>) => { const v = parseFloat(e.target.value); if (callCanvas('__setBloom', [v])) setBloom(v) }
   const toggleHoverAttention = () => {
     const v = !hoverAttention
     setHoverAttention(v)
     callCanvas('__setHoverAttention', [v])
   }
   const toggleIntEdges = () => { const v = !intEdges; if (callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
-  const toggleCometsVis = () => { const v = !cometsVis; if (callCanvas('__setCometsVisible', [v])) setCometsVis(v) }
   const toggleExtEdges = () => { const v = !extEdges; if (callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
-  const toggleType = (type: string, state: boolean, setter: any) => { const v = !state; if (callCanvas('__setNodeTypeVisible', [type, v])) setter(v) }
+  const toggleType = (type: string, state: boolean, setter: (value: boolean) => void) => { const v = !state; if (callCanvas('__setNodeTypeVisible', [type, v])) setter(v) }
   const resetView = () => {
-    if (callCanvas('__resetCameraView', [])) setLayoutMode('galaxy')
+    if (callCanvas('__resetCameraView', [])) {
+      const lm = useGalaxyActions.getState().actions.getLayoutMode?.() as typeof layoutMode | undefined
+      if (lm) setLayoutMode(lm)
+    }
   }
   const fitSelection = () => { callCanvas('__fitSelection', []) }
 
@@ -157,7 +154,7 @@ export default function GalaxyControls() {
   const clusters = galaxyData?.clusters ?? []
   const allNodes = galaxyData?.nodes ?? []
   const unattachedNodes = allNodes.filter(n => !n.clusterId)
-  const autoRotateOn = autoRotate && !PLANAR_LAYOUTS.has(layoutMode)
+  const autoRotateOn = autoRotate && !STATIC_LAYOUTS.has(layoutMode)
 
   return (
     <aside
@@ -195,14 +192,8 @@ export default function GalaxyControls() {
             <div className="flex justify-between mono mb-1.5" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">BLOOM</span><span className="opacity-60">{bloom.toFixed(1)}</span></div>
             <input type="range" min="0" max="2.5" step="0.1" value={bloom} onChange={handleBloom} className="orbit-slider cursor-pointer" />
           </div>
-          <div>
-            <div className="flex justify-between mono mb-1.5" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">COMET SPEED</span><span className="opacity-60">{cometSpeed.toFixed(1)}</span></div>
-            <input type="range" min="0" max="3" step="0.1" value={cometSpeed} onChange={handleComet} className="orbit-slider cursor-pointer" />
-          </div>
           {[
             { label: '悬停聚焦', val: hoverAttention, fn: toggleHoverAttention },
-            { label: '彗星', val: cometsVis, fn: toggleCometsVis },
-            { label: '银河带', val: milkyWay, fn: toggleMilkyWay },
             { label: '内部连线', val: intEdges, fn: toggleIntEdges },
             { label: '外部连线', val: extEdges, fn: toggleExtEdges },
           ].map((item) => (

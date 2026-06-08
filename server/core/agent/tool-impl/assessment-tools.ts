@@ -5,7 +5,7 @@
  * 实现自适应学习等。
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { aiManager } from '../../ai/AIManager';
 import { getCurrentVaultId } from '../agent-context';

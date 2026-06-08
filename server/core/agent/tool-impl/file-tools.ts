@@ -5,7 +5,7 @@
 import path from 'node:path'
 import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { getShellHookAllowlist } from "@/server/core/agent/security/ShellHookAllowlist";
 import { getVaultPath, resolvePath } from "./helpers";

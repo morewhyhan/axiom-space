@@ -4,7 +4,7 @@
 
 import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 const axiom = createAxiomCompat(getFileStorage());
 
 import { createTool, toolRegistry } from "../tools";

@@ -2,7 +2,7 @@
  * AXIOM 内置工具 - 记忆操作
  */
 
-import { Type } from "@mariozechner/pi-ai";
+import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath } from "./helpers";
 import { getCurrentAgent, getCurrentVaultId } from '@/server/core/agent/agent-context';

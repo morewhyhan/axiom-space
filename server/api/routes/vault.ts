@@ -8,10 +8,11 @@ import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { prisma } from '@/lib/db'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
-import archiver from 'archiver'
 import { requireAuth } from '../middleware/auth'
 import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
 import { runWithAgentContext } from '@/server/core/agent/agent-context'
+
+const vaultQuerySchema = z.object({ vid: z.string().optional() })
 
 /** Defensive JSON.parse — never lets a corrupt tags column 500 the request. */
 export function safeParseTags(raw: string | null | undefined): string[] {
@@ -22,6 +23,34 @@ export function safeParseTags(raw: string | null | undefined): string[] {
   } catch {
     return []
   }
+}
+
+type ResourceManifestItem = {
+  path?: unknown
+  mp4Path?: unknown
+}
+
+function parseResourceManifest(content?: string | null): ResourceManifestItem[] {
+  if (!content) return []
+  const match = content.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
+  if (!match?.[1]) return []
+  try {
+    const parsed = JSON.parse(match[1]) as unknown
+    return Array.isArray(parsed) ? parsed.filter(Boolean) as ResourceManifestItem[] : []
+  } catch {
+    return []
+  }
+}
+
+function resourcePathPrefixes(paths: string[]): string[] {
+  const prefixes = new Set<string>()
+  for (const path of paths) {
+    const parts = path.split('/').filter(Boolean)
+    if (parts.length >= 2 && parts[0] === 'resources') {
+      prefixes.add(`${parts[0]}/${parts[1]}/`)
+    }
+  }
+  return Array.from(prefixes)
 }
 
 const app = new Hono<{ Variables: { userId: string } }>()
@@ -119,16 +148,21 @@ const app = new Hono<{ Variables: { userId: string } }>()
   if (!query) return c.json({ success: false, error: 'q required' }, 400)
 
   const storage = getFileStorage(userId)
-  const result = await storage.search(query)
+  const vaultId = c.req.query('vid') || undefined
+  const result = vaultId
+    ? await runWithAgentContext({ userId, vaultId }, () => storage.search(query))
+    : await storage.search(query)
+  if (!result.success) return c.json(result, 400)
   // Unwrap results array so frontend receives the array directly
   return c.json({ success: true, results: result.results ?? result })
 })
 
 // GET /api/vault/card/:id — 通过 UUID 获取单张卡片完整内容
-.get('/card/:id', async (c) => {
+.get('/card/:id', zValidator('query', vaultQuerySchema), async (c) => {
   const userId = c.get('userId') as string
 
   const id = c.req.param('id')
+  const expectedVaultId = c.req.query('vid')
   const card = await prisma.card.findUnique({
     where: { id },
     include: { cluster: { select: { name: true, color: true } } },
@@ -139,6 +173,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
   // Verify ownership via vault
   const vault = await prisma.vault.findUnique({ where: { id: card.vaultId } })
   if (!vault || vault.userId !== userId) return c.json({ success: false, error: 'Forbidden' }, 403)
+  if (expectedVaultId && card.vaultId !== expectedVaultId) {
+    return c.json({ success: false, error: 'Card not found in current vault' }, 404)
+  }
 
   return c.json({
     success: true,
@@ -158,7 +195,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
 })
 
 // PUT /api/vault/card/:id — 通过 UUID 更新卡片内容
-.put('/card/:id', zValidator('json', z.object({
+.put('/card/:id', zValidator('query', vaultQuerySchema), zValidator('json', z.object({
   content: z.string(),
   title: z.string().optional(),
 	  type: z.string().optional(),
@@ -166,6 +203,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const userId = c.get('userId') as string
 
   const id = c.req.param('id')
+  const expectedVaultId = c.req.query('vid')
   const { content, title, type } = c.req.valid('json')
 
   // Verify card ownership
@@ -175,6 +213,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
   })
   if (!card) return c.json({ success: false, error: 'Card not found' }, 404)
   if (card.vault.userId !== userId) return c.json({ success: false, error: 'Forbidden' }, 403)
+  if (expectedVaultId && card.vaultId !== expectedVaultId) {
+    return c.json({ success: false, error: 'Card not found in current vault' }, 404)
+  }
 
   // Update card content and sync wiki-link edges atomically
   const updated = await prisma.$transaction(async (tx) => {
@@ -253,9 +294,10 @@ const app = new Hono<{ Variables: { userId: string } }>()
 })
 
 // GET /api/vault/card/:id/links — 获取卡片的双向链接信息
-.get('/card/:id/links', async (c) => {
+.get('/card/:id/links', zValidator('query', vaultQuerySchema), async (c) => {
   const userId = c.get('userId') as string
   const id = c.req.param('id')
+  const expectedVaultId = c.req.query('vid')
 
   const card = await prisma.card.findUnique({
     where: { id },
@@ -265,6 +307,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
   const vault = await prisma.vault.findUnique({ where: { id: card.vaultId } })
   if (!vault || vault.userId !== userId) return c.json({ success: false, error: 'Forbidden' }, 403)
+  if (expectedVaultId && card.vaultId !== expectedVaultId) {
+    return c.json({ success: false, error: 'Card not found in current vault' }, 404)
+  }
 
   // 并行查询 outgoing / incoming edges (限定 vault 防止串库)
   const [outgoingEdges, incomingEdges] = await Promise.all([
@@ -342,26 +387,88 @@ const app = new Hono<{ Variables: { userId: string } }>()
 })
 
 // DELETE /api/vault/card/:id — 通过 UUID 删除卡片
-.delete('/card/:id', async (c) => {
+.delete('/card/:id', zValidator('query', vaultQuerySchema), async (c) => {
   const userId = c.get('userId') as string
 
   const id = c.req.param('id')
+  const expectedVaultId = c.req.query('vid')
 
   // Verify card ownership
   const card = await prisma.card.findUnique({
     where: { id },
-    select: { vaultId: true, vault: { select: { userId: true } } },
+    select: { vaultId: true, type: true, content: true, vault: { select: { userId: true } } },
   })
   if (!card) return c.json({ success: false, error: 'Card not found' }, 404)
   if (card.vault.userId !== userId) return c.json({ success: false, error: 'Forbidden' }, 403)
+  if (expectedVaultId && card.vaultId !== expectedVaultId) {
+    return c.json({ success: false, error: 'Card not found in current vault' }, 404)
+  }
 
-  // Delete card + associated edges in a transaction (限定 vault 防止串库)
-  await prisma.$transaction([
-    prisma.edge.deleteMany({ where: { OR: [{ sourceId: id }, { targetId: id }], vaultId: card.vaultId } }),
-    prisma.card.delete({ where: { id } }),
-  ])
+  const linkedAgentSessions = await prisma.learningSession.findMany({
+    where: {
+      userId,
+      vaultId: card.vaultId,
+      domain: '__agent__',
+      metadata: { contains: id },
+    },
+    select: { id: true, metadata: true },
+  })
+  const linkedAgentSessionIds = linkedAgentSessions
+    .filter((session) => parseThreadMetadata(session.metadata).cardId === id)
+    .map((session) => session.id)
 
-  return c.json({ success: true })
+  const manifest = card.type === 'literature' ? parseResourceManifest(card.content) : []
+  const manifestResourcePaths = Array.from(new Set(manifest.flatMap((item) => {
+    const paths: string[] = []
+    if (typeof item.path === 'string') paths.push(item.path)
+    if (typeof item.mp4Path === 'string') paths.push(item.mp4Path)
+    return paths
+  })))
+  const resourcePrefixes = resourcePathPrefixes(manifestResourcePaths)
+  const resourceCards = manifestResourcePaths.length > 0 || resourcePrefixes.length > 0
+    ? await prisma.card.findMany({
+      where: {
+        vaultId: card.vaultId,
+        OR: [
+          ...(manifestResourcePaths.length > 0 ? [{ path: { in: manifestResourcePaths } }] : []),
+          ...resourcePrefixes.map((prefix) => ({ path: { startsWith: prefix } })),
+        ],
+      },
+      select: { id: true },
+    })
+    : []
+  const resourceCardIds = resourceCards.map((resourceCard) => resourceCard.id).filter((resourceId) => resourceId !== id)
+  const cardIdsToDelete = [id, ...resourceCardIds]
+
+  // Delete card, graph edges, and card-bound workspace threads atomically.
+  await prisma.$transaction(async (tx) => {
+    if (linkedAgentSessionIds.length > 0) {
+      await tx.learningMessage.deleteMany({ where: { sessionId: { in: linkedAgentSessionIds } } })
+      await tx.learningSession.deleteMany({
+        where: {
+          id: { in: linkedAgentSessionIds },
+          userId,
+          vaultId: card.vaultId,
+          domain: '__agent__',
+        },
+      })
+    }
+    await tx.edge.deleteMany({
+      where: {
+        OR: [
+          { sourceId: { in: cardIdsToDelete } },
+          { targetId: { in: cardIdsToDelete } },
+        ],
+        vaultId: card.vaultId,
+      },
+    })
+    if (resourceCardIds.length > 0) {
+      await tx.card.deleteMany({ where: { id: { in: resourceCardIds }, vaultId: card.vaultId } })
+    }
+    await tx.card.delete({ where: { id } })
+  })
+
+  return c.json({ success: true, deletedSessionIds: linkedAgentSessionIds, deletedResourceCardIds: resourceCardIds })
 })
 
 // GET /api/vault/export — 下载全部卡片为 zip（兼容 Obsidian）
@@ -370,34 +477,29 @@ const app = new Hono<{ Variables: { userId: string } }>()
 // Buffer.concat path.
 .get('/export', async (c) => {
   const userId = c.get('userId') as string
+  const vaultId = c.req.query('vid')
+
+  if (vaultId) {
+    const vault = await prisma.vault.findUnique({ where: { id: vaultId } })
+    if (!vault || vault.userId !== userId) return c.json({ success: false, error: 'Forbidden' }, 403)
+  }
 
   const cards = await prisma.card.findMany({
-    where: { vault: { userId } },
+    where: vaultId ? { vaultId } : { vault: { userId } },
     select: { path: true, content: true },
   })
 
-  const archive = archiver('zip', { zlib: { level: 9 } })
+  const zip = buildStoreZip(cards.map((card) => ({
+    name: sanitizeZipPath(card.path),
+    content: card.content,
+  })))
 
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      archive.on('data', (chunk: Buffer) => controller.enqueue(new Uint8Array(chunk)))
-      archive.on('end', () => controller.close())
-      archive.on('error', (err: Error) => controller.error(err))
-      for (const card of cards) {
-        archive.append(card.content, { name: card.path })
-      }
-      archive.finalize().catch((err) => controller.error(err))
-    },
-    cancel() {
-      archive.abort()
-    },
-  })
-
-  return new Response(stream, {
+  return new Response(zip, {
     status: 200,
     headers: {
       'Content-Type': 'application/zip',
       'Content-Disposition': 'attachment; filename="vault-export.zip"',
+      'Content-Length': String(zip.byteLength),
     },
   })
 })
@@ -428,3 +530,90 @@ function parseThreadMetadata(metadata?: string | null): {
 }
 
 export default app
+
+type ZipEntry = {
+  name: string
+  content: string
+}
+
+function sanitizeZipPath(path: string): string {
+  return path
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((part) => part && part !== '.' && part !== '..')
+    .join('/') || 'untitled.md'
+}
+
+function buildStoreZip(entries: ZipEntry[]): Uint8Array {
+  const localParts: Buffer[] = []
+  const centralParts: Buffer[] = []
+  let offset = 0
+
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name, 'utf8')
+    const content = Buffer.from(entry.content, 'utf8')
+    const crc = crc32(content)
+
+    const localHeader = Buffer.alloc(30)
+    localHeader.writeUInt32LE(0x04034b50, 0)
+    localHeader.writeUInt16LE(20, 4)
+    localHeader.writeUInt16LE(0x0800, 6)
+    localHeader.writeUInt16LE(0, 8)
+    localHeader.writeUInt16LE(0, 10)
+    localHeader.writeUInt16LE(0, 12)
+    localHeader.writeUInt32LE(crc, 14)
+    localHeader.writeUInt32LE(content.length, 18)
+    localHeader.writeUInt32LE(content.length, 22)
+    localHeader.writeUInt16LE(name.length, 26)
+    localHeader.writeUInt16LE(0, 28)
+
+    localParts.push(localHeader, name, content)
+
+    const centralHeader = Buffer.alloc(46)
+    centralHeader.writeUInt32LE(0x02014b50, 0)
+    centralHeader.writeUInt16LE(20, 4)
+    centralHeader.writeUInt16LE(20, 6)
+    centralHeader.writeUInt16LE(0x0800, 8)
+    centralHeader.writeUInt16LE(0, 10)
+    centralHeader.writeUInt16LE(0, 12)
+    centralHeader.writeUInt16LE(0, 14)
+    centralHeader.writeUInt32LE(crc, 16)
+    centralHeader.writeUInt32LE(content.length, 20)
+    centralHeader.writeUInt32LE(content.length, 24)
+    centralHeader.writeUInt16LE(name.length, 28)
+    centralHeader.writeUInt16LE(0, 30)
+    centralHeader.writeUInt16LE(0, 32)
+    centralHeader.writeUInt16LE(0, 34)
+    centralHeader.writeUInt16LE(0, 36)
+    centralHeader.writeUInt32LE(0, 38)
+    centralHeader.writeUInt32LE(offset, 42)
+    centralParts.push(centralHeader, name)
+
+    offset += localHeader.length + name.length + content.length
+  }
+
+  const centralSize = centralParts.reduce((sum, part) => sum + part.length, 0)
+  const end = Buffer.alloc(22)
+  end.writeUInt32LE(0x06054b50, 0)
+  end.writeUInt16LE(0, 4)
+  end.writeUInt16LE(0, 6)
+  end.writeUInt16LE(entries.length, 8)
+  end.writeUInt16LE(entries.length, 10)
+  end.writeUInt32LE(centralSize, 12)
+  end.writeUInt32LE(offset, 16)
+  end.writeUInt16LE(0, 20)
+
+  const parts: Uint8Array[] = [...localParts, ...centralParts, end].map((part) => Uint8Array.from(part))
+  return Uint8Array.from(Buffer.concat(parts))
+}
+
+function crc32(buffer: Buffer): number {
+  let crc = 0xffffffff
+  for (const byte of buffer) {
+    crc ^= byte
+    for (let i = 0; i < 8; i++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
