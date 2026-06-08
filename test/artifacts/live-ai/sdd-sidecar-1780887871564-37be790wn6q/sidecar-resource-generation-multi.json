@@ -1,0 +1,74 @@
+{
+  "runId": "sdd-sidecar-1780887871564-37be790wn6q",
+  "capturedAt": "2026-06-08T03:06:27.723Z",
+  "provider": "deepseek",
+  "modelId": "deepseek-v4-flash",
+  "baseUrl": "https://api.deepseek.com",
+  "topic": "Graph Search Basics",
+  "literatureTitle": "Graph Search Basics",
+  "results": [
+    {
+      "type": "mindmap",
+      "status": "completed",
+      "fileName": "mindmap.md",
+      "resourcePath": "resources/Graph-Search-Basics/mindmap.md",
+      "contentLength": 346,
+      "contentPreview": "mindmap\n  root((Graph Search Basics))\n    核心概念\n      [顶点 Vertex]\n      [边 Edge]\n      [有向图 vs 无向图]\n      [加权图 vs 无权图]\n      [路径与环]\n    搜索算法\n      [BFS 广度优先]\n      [DFS 深度优先]\n      [迭代加深搜索]\n      [双向搜索]\n    复杂度与性能\n      [时间复杂度]\n      [空间复杂度]\n      [完备性与最优性]\n      [启发式搜索]\n    应用场景\n      [迷宫求解]\n      [",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM 思维导图生成专家。请根据以下内容生成一张 Mermaid mindmap。\n\n要求：\n1. 使用 Mermaid mindmap 语法，根节点为 ((学习主题))\n2. 至少 4 个一级分支，每分支至少 3 个叶子节点\n3. 输出纯 Mermaid mindmap 代码块，以 ```mermaid 开头\n\n格式参考：\n```mermaid\nmindmap\n  root((主题))\n    分支A\n      [子概念1]\n      [子概念2]\n```",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "```mermaid\nmindmap\n  root((Graph Search Basics))\n    核心概念\n      [顶点 Vertex]\n      [边 Edge]\n      [有向图 vs 无向图]\n      [加权图 vs 无权图]\n      [路径与环]\n    搜索算法\n      [BFS 广度优先]\n      [DFS 深度优先]\n      [迭代加深搜索]\n      [双向搜索]\n    复杂度与性能\n      [时间复杂度]\n      [空间复杂度]\n      [完备性与最优性]\n      [启发式搜索]\n    应用场景\n      [迷宫求解]\n      [社交网络分析]\n      [网络爬虫]\n      [拓扑排序]\n      [连通分量]\n```"
+      }
+    },
+    {
+      "type": "quiz",
+      "status": "completed",
+      "fileName": "quiz.md",
+      "resourcePath": "resources/Graph-Search-Basics/quiz.md",
+      "contentLength": 2019,
+      "contentPreview": "[\n  {\n    \"type\": \"choice\",\n    \"question\": \"在表示稀疏图时，通常更推荐使用哪种存储结构？\",\n    \"options\": [\n      \"A. 邻接矩阵，因为它支持O(1)的边查询\",\n      \"B. 邻接表，因为它节省空间且便于遍历邻接节点\",\n      \"C. 邻接矩阵，因为它实现简单\",\n      \"D. 邻接表，因为它能直接存储权重信息\"\n    ],\n    \"answer\": \"B\",\n    \"explanation\": \"稀疏图的边数远少于节点数平方，邻接矩阵会浪费大量空间（O(n²)），而邻接表只存储实际存在的边（O(",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM 练习题库生成专家。请根据以下内容生成一套练习题。\n\n要求：\n1. 至少 5 道题，覆盖基础概念理解（3 题）+ 进阶应用分析（2 题）\n2. 输出严格 JSON 数组格式，不要加任何其他文字\n3. 每题包含：type, question, options, answer, explanation\n\n输出格式：\n[\n  {\n    \"type\": \"choice\",\n    \"question\": \"以下关于X的描述，正确的是？\",\n    \"options\": [\"A. ...\", \"B. ...\", \"C. ...\", \"D. ...\"],\n    \"answer\": \"B\",\n    \"explanation\": \"选项B正确，因为...\"\n  }\n]",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "[\n  {\n    \"type\": \"choice\",\n    \"question\": \"在表示稀疏图时，通常更推荐使用哪种存储结构？\",\n    \"options\": [\n      \"A. 邻接矩阵，因为它支持O(1)的边查询\",\n      \"B. 邻接表，因为它节省空间且便于遍历邻接节点\",\n      \"C. 邻接矩阵，因为它实现简单\",\n      \"D. 邻接表，因为它能直接存储权重信息\"\n    ],\n    \"answer\": \"B\",\n    \"explanation\": \"稀疏图的边数远少于节点数平方，邻接矩阵会浪费大量空间（O(n²)），而邻接表只存储实际存在的边（O(n+e)），且遍历邻接节点的时间与度数成正比，因此更推荐邻接表。尽管邻接矩阵查询边存在性更快，但总体空间开销在稀疏场景下劣势明显。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"关于深度优先搜索（DFS）和广度优先搜索（BFS）的描述，错误的是？\",\n    \"options\": [\n      \"A. DFS使用栈（或递归）实现，BFS使用队列实现\",\n      \"B. 在无向图中，两者都能正确遍历所有连通节点\",\n      \"C. BFS总是比DFS更快找到目标节点\",\n      \"D. DFS可以用于检测图中是否存在环\"\n    ],\n    \"answer\": \"C\",\n    \"explanation\": \"BFS和DFS的速度取决于目标位置和图的形状。BFS保证找到最短路径（无权图），但DFS不一定更快；若目标深埋于深层，BFS可能需要扩展大量节点，而DFS可能迅速到达。因此“总是”这一说法过于绝对，是错误的。A、B、D均为正确描述。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"在无向图DFS中，使用 visited 数组标记已访问节点的主要目的是？\",\n    \"options\": [\n      \"A. 记录每个节点被访问的时间戳\",\n      \"B. 避免重复访问同一节点，防止无限循环\",\n      \"C. 统计图中连通分量的数量\",\n      \"D. 实现路径回溯\"\n    ],\n    \"answer\": \"B\",\n    \"explanation\": \"无向图中可能存在环，若不标记已访问节点，DFS会沿着环反复访问相同节点，导致无限递归或栈溢出。visited 数组用于标记已访问的节点，确保每个节点只被处理一次，从而避免无限循环。A中的时间戳是额外功能，C和D是visited数组的衍生用途，但核心目的是避免重复访问。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"在一个无权有向图中，想要计算从起点s到所有其他节点的最短路径长度，以下哪种搜索策略最合适？\",\n    \"options\": [\n      \"A. 深度优先搜索（DFS），因为可以快速探索深层路径\",\n      \"B. 广度优先搜索（BFS），因为按层扩展保证首次访问即为最短距离\",\n      \"C. 迭代加深搜索（IDS），结合深度限制和BFS优点\",\n      \"D. A*搜索，利用启发式函数加速\"\n    ],\n    \"answer\": \"B\",\n    \"explanation\": \"在无权图中，BFS 按照节点到起点的距离分层扩展，首次访问某个节点时经过的路径一定是最短路径（边数为最少）。DFS 不能保证最短，可能找到更长的路径。IDS 可用于有限资源场景，但效率不如直接 BFS。A* 需要启发式函数，适用于加权图或有特殊需求，对于无权图 BFS 简单高效。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"给定一个有向图，以下哪种方法不能用于检测图中是否存在环？\",\n    \"options\": [\n      \"A. 拓扑排序（Kahn算法）：若排序后节点数少于总节点数，则存在环\",\n      \"B. DFS并维护递归栈：若发现回边（指向当前栈中节点），则存在环\",\n      \"C. 并查集（Union-Find）：检查每条边的两个端点是否已在同一集合\",\n      \"D. 迭代地删除入度为0的节点（类似Kahn算法）\"\n    ],\n    \"answer\": \"C\",\n    \"explanation\": \"并查集主要用于无向图的连通性检测和环检测（判断两个节点是否已在同一集合），但不适用于有向图的环检测，因为并查集无法处理方向性。拓扑排序（A和D本质相同）和DFS递归栈法都是经典的有向图环检测方法。因此C方法不能用于有向图环检测。\"\n  }\n]"
+      }
+    },
+    {
+      "type": "code",
+      "status": "completed",
+      "fileName": "practice-code.md",
+      "resourcePath": "resources/Graph-Search-Basics/practice-code.md",
+      "contentLength": 3395,
+      "contentPreview": "## 练习目标\n\n在本练习中，你将实现两种基本的图搜索算法：**广度优先搜索（BFS）** 和 **深度优先搜索（DFS）**。你将使用邻接表表示图，并编写函数来遍历图中的所有节点，输出访问顺序。通过本练习，你将理解 BFS 和 DFS 的不同遍历策略及其应用场景。\n\n## 初始代码\n\n以下是一个简单的图类，使用字典存储邻接表。请完成 `bfs` 和 `dfs` 方法的实现。\n\n```python\nclass Graph:\n    def __init__(self):\n        # 使用字典保存邻接表，键为节点，值为邻居节点列表\n        self.adj = {}\n\n    d",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM 代码实操资源生成专家。请根据以下内容生成一个可以直接练习的代码案例。\n\n要求：\n1. 输出 Markdown，必须包含以下章节：\n   ## 练习目标\n   ## 初始代码\n   ## 任务要求\n   ## 测试样例\n   ## 参考实现\n   ## 讲解\n2. 至少包含 2 个 fenced code block，优先使用 TypeScript、Python 或伪代码中最贴近主题的一种\n3. 练习必须可操作，不要只给概念解释\n4. 输出纯 Markdown，不要加前言",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "## 练习目标\n\n在本练习中，你将实现两种基本的图搜索算法：**广度优先搜索（BFS）** 和 **深度优先搜索（DFS）**。你将使用邻接表表示图，并编写函数来遍历图中的所有节点，输出访问顺序。通过本练习，你将理解 BFS 和 DFS 的不同遍历策略及其应用场景。\n\n## 初始代码\n\n以下是一个简单的图类，使用字典存储邻接表。请完成 `bfs` 和 `dfs` 方法的实现。\n\n```python\nclass Graph:\n    def __init__(self):\n        # 使用字典保存邻接表，键为节点，值为邻居节点列表\n        self.adj = {}\n\n    def add_edge(self, u, v):\n        # 添加无向边 u-v\n        if u not in self.adj:\n            self.adj[u] = []\n        if v not in self.adj:\n            self.adj[v] = []\n        self.adj[u].append(v)\n        self.adj[v].append(u)\n\n    def bfs(self, start):\n        # 广度优先搜索，返回访问顺序列表\n        visited = set()\n        result = []\n        from collections import deque\n        # TODO: 实现 BFS\n        pass\n\n    def dfs(self, start):\n        # 深度优先搜索，返回访问顺序列表\n        visited = set()\n        result = []\n        # TODO: 实现 DFS（递归或迭代均可）\n        pass\n```\n\n## 任务要求\n\n1. 在 `Graph` 类中补全 `bfs` 方法，使用队列实现广度优先搜索。\n2. 在 `Graph` 类中补全 `dfs` 方法，使用栈（或递归）实现深度优先搜索。\n3. 两种函数都从 `start` 节点开始遍历，并返回一个列表，其中包含按照搜索顺序访问的所有节点。\n4. 注意处理图中可能存在的孤立节点（但题目给定的起始节点保证属于图的一部分）。\n5. 你不需要修改已有代码，只需填充 `TODO` 部分。\n\n## 测试样例\n\n假设我们有以下图：\n\n```\n0 -- 1 -- 2\n|    |\n3 -- 4\n```\n\n构建代码：\n\n```python\ng = Graph()\nedges = [(0,1), (0,3), (1,2), (1,4), (3,4)]\nfor u, v in edges:\n    g.add_edge(u, v)\n```\n\n- 从节点 `0` 开始 BFS，可能的输出为 `[0, 1, 3, 2, 4]`（或同层顺序不同的结果，但必须符合广度优先规则）。\n- 从节点 `0` 开始 DFS，可能的输出为 `[0, 1, 2, 4, 3]`（假设使用迭代栈且按邻居顺序入栈，不同实现结果可能不同，但必须是深度优先）。\n\n测试代码：\n\n```python\ndef test_graph_search():\n    g = Graph()\n    edges = [(0,1), (0,3), (1,2), (1,4), (3,4)]\n    for u, v in edges:\n        g.add_edge(u, v)\n\n    bfs_result = g.bfs(0)\n    print(\"BFS:\", bfs_result)\n    # 检查 BFS 是否满足：1) 所有节点都被访问 2) 顺序符合宽度优先\n    # 简单验证：0 为第一个，然后 1 和 3 在 2 和 4 之前\n    assert bfs_result[0] == 0\n    # 对 BFS 结果的层数进行大致判断（这里仅做简单断言）\n    assert 1 in bfs_result[1:3] and 3 in bfs_result[1:3]\n\n    dfs_result = g.dfs(0)\n    print(\"DFS:\", dfs_result)\n    # 深度优先：0 第一个，然后访问 1 的某个分支直到尽头\n    assert dfs_result[0] == 0\n    # 至少验证所有节点都在结果中\n    assert set(dfs_result) == {0,1,2,3,4}\n\n    print(\"All tests passed!\")\n\ntest_graph_search()\n```\n\n运行测试代码，如果输出 `All tests passed!` 则实现正确。\n\n## 参考实现\n\n```python\nfrom collections import deque\n\nclass Graph:\n    def __init__(self):\n        self.adj = {}\n\n    def add_edge(self, u, v):\n        if u not in self.adj:\n            self.adj[u] = []\n        if v not in self.adj:\n            self.adj[v] = []\n        self.adj[u].append(v)\n        self.adj[v].append(u)\n\n    def bfs(self, start):\n        visited = set([start])\n        result = [start]\n        queue = deque([start])\n        while queue:\n            node = queue.popleft()\n            for neighbor in self.adj.get(node, []):\n                if neighbor not in visited:\n                    visited.add(neighbor)\n                    result.append(neighbor)\n                    queue.append(neighbor)\n        return result\n\n    def dfs(self, start):\n        visited = set()\n        result = []\n        # 使用栈模拟递归\n        stack = [start]\n        while stack:\n            node = stack.pop()\n            if node not in visited:\n                visited.add(node)\n                result.append(node)\n                # 将邻居逆序入栈，以模拟自然的深度优先顺序（先访问第一个邻居）\n                for neighbor in reversed(self.adj.get(node, [])):\n                    if neighbor not in visited:\n                        stack.append(neighbor)\n        return result\n```\n\n## 讲解\n\n### 广度优先搜索 (BFS)\n\n- **核心思想**：使用队列，先访问离起点最近的节点，再逐层向外扩展。\n- **实现细节**：从起点开始"
+      }
+    },
+    {
+      "type": "diagram",
+      "status": "failed",
+      "error": "Missing mermaid keyword",
+      "fileName": "diagram.mmd",
+      "resourcePath": "resources/Graph-Search-Basics/diagram.mmd",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM Mermaid 图表生成专家。请根据以下内容生成一个 Mermaid 图表。\n\n要求：\n1. 选择最合适的图表类型：flowchart / sequenceDiagram / classDiagram / pie / stateDiagram / gantt\n2. 至少 6 个节点，结构完整\n3. 输出纯 Mermaid 代码块，以 ```mermaid 开头\n\n格式参考：\n```mermaid\nflowchart TD\n  A[概念] --> B[子概念]\n```",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "```mermaid\nflowchart TD\n  A[Graph Search Basics]\n  A --> B[BFS]\n  A --> C[DFS]\n  B --> D[Queue Data Structure]\n  B --> E[Shortest Path in Unweighted Graphs]\n  C --> F[Stack or Recursion]\n  C --> G[Backtracking & Maze Solving]\n  D --> H[Level Order Traversal]\n```"
+      }
+    },
+    {
+      "type": "svg",
+      "status": "failed",
+      "error": "DeepSeek returned empty content",
+      "fileName": "diagram.svg",
+      "resourcePath": "resources/Graph-Search-Basics/diagram.svg",
+      "transcript": {
+        "systemPrompt": "",
+        "userPrompt": "",
+        "response": ""
+      }
+    }
+  ]
+}

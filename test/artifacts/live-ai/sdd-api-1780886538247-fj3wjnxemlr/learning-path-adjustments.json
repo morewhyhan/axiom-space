@@ -1,0 +1,37 @@
+{
+  "runId": "sdd-api-1780886538247-fj3wjnxemlr",
+  "capturedAt": "2026-06-08T02:48:10.572Z",
+  "vaultId": "4bd9f819-789b-43db-87c3-d2a0e60f0481",
+  "pathId": "1dcf68bf-0803-4e20-9a83-a21d4c67a89b",
+  "response": {
+    "success": true,
+    "path": {
+      "id": "1dcf68bf-0803-4e20-9a83-a21d4c67a89b",
+      "topic": "Adjustment Topic",
+      "totalSteps": 1,
+      "completedSteps": 1,
+      "progress": 100
+    },
+    "adjustmentHistory": [
+      {
+        "id": "b27a180b-31f7-40b2-bc1c-c5f4a4fd0eeb",
+        "adjustmentId": "b27a180b-31f7-40b2-bc1c-c5f4a4fd0eeb",
+        "appliedAt": 1780886890545,
+        "trigger": "assessment",
+        "triggeredBy": "assessment",
+        "adjustment": {
+          "type": "add_review",
+          "concept": "Adjustment Step",
+          "description": "掌握度 50%，建议复习\"Adjustment Step\"相关概念",
+          "reason": "评估分数低于60%，需要加强复习"
+        },
+        "assessmentRef": {
+          "toolName": "code_challenge",
+          "score": 50,
+          "maxScore": 100
+        },
+        "feedback": "用户仅表示能够解释，但没有提供任何实际内容，无法判断其掌握程度。请用户用具体定义、例子或应用来展示对Adjustment Step的理解。"
+      }
+    ]
+  }
+}

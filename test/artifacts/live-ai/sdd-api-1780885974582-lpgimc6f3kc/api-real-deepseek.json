@@ -1,0 +1,82 @@
+{
+  "runId": "sdd-api-1780885974582-lpgimc6f3kc",
+  "capturedAt": "2026-06-08T02:33:45.855Z",
+  "apiKeyPresent": true,
+  "model": "deepseek-chat",
+  "systemPrompt": "You extract structured learning content from a document. Return JSON only, no markdown, no explanation. The JSON object must contain title, concepts, fleetingCards, and relations. The exact schema is: {\"title\":\"string\",\"concepts\":[{\"name\":\"string\",\"description\":\"string\"}],\"fleetingCards\":[{\"title\":\"string\",\"content\":\"string\",\"linksTo\":[\"string\"]}],\"relations\":[{\"from\":\"string\",\"to\":\"string\",\"type\":\"prerequisite|related|derived\"}]}",
+  "userPrompt": "Extract a compact JSON object from the document below.\nRules:\n- title must be a string\n- concepts must contain 1-4 items and each item must have name and description\n- fleetingCards must contain 1-4 items and each item must have title, content, and linksTo\n- relations may be empty but each item must have from, to, and type\n- linksTo must reference concept names that exist in concepts\n- use the exact field names in the schema above\n\nTopic: Zeta Graph\nSource title: Zeta Graph Primer\n\nDocument:\n# Zeta Graph\n\nZeta Graph uses ownership, borrowing, and lifetime rules to keep memory safe.\nThe document explicitly introduces one core concept and one supporting example.\n\n## Ownership\nOwnership decides which value is responsible for releasing memory.\n\n## Borrowing\nBorrowing allows temporary access without transferring ownership.",
+  "rawResponse": "{\n  \"title\": \"Zeta Graph Primer\",\n  \"concepts\": [\n    {\"name\": \"Ownership\", \"description\": \"Ownership decides which value is responsible for releasing memory.\"},\n    {\"name\": \"Borrowing\", \"description\": \"Borrowing allows temporary access without transferring ownership.\"}\n  ],\n  \"fleetingCards\": [\n    {\n      \"title\": \"Ownership\",\n      \"content\": \"Ownership decides which value is responsible for releasing memory.\",\n      \"linksTo\": [\"Ownership\"]\n    },\n    {\n      \"title\": \"Borrowing\",\n      \"content\": \"Borrowing allows temporary access without transferring ownership.\",\n      \"linksTo\": [\"Borrowing\"]\n    }\n  ],\n  \"relations\": [\n    {\"from\": \"Borrowing\", \"to\": \"Ownership\", \"type\": \"related\"}\n  ]\n}",
+  "cleanedResponse": "{\n  \"title\": \"Zeta Graph Primer\",\n  \"concepts\": [\n    {\"name\": \"Ownership\", \"description\": \"Ownership decides which value is responsible for releasing memory.\"},\n    {\"name\": \"Borrowing\", \"description\": \"Borrowing allows temporary access without transferring ownership.\"}\n  ],\n  \"fleetingCards\": [\n    {\n      \"title\": \"Ownership\",\n      \"content\": \"Ownership decides which value is responsible for releasing memory.\",\n      \"linksTo\": [\"Ownership\"]\n    },\n    {\n      \"title\": \"Borrowing\",\n      \"content\": \"Borrowing allows temporary access without transferring ownership.\",\n      \"linksTo\": [\"Borrowing\"]\n    }\n  ],\n  \"relations\": [\n    {\"from\": \"Borrowing\", \"to\": \"Ownership\", \"type\": \"related\"}\n  ]\n}",
+  "parsed": {
+    "title": "Zeta Graph Primer",
+    "concepts": [
+      {
+        "name": "Ownership",
+        "description": "Ownership decides which value is responsible for releasing memory."
+      },
+      {
+        "name": "Borrowing",
+        "description": "Borrowing allows temporary access without transferring ownership."
+      }
+    ],
+    "fleetingCards": [
+      {
+        "title": "Ownership",
+        "content": "Ownership decides which value is responsible for releasing memory.",
+        "linksTo": [
+          "Ownership"
+        ]
+      },
+      {
+        "title": "Borrowing",
+        "content": "Borrowing allows temporary access without transferring ownership.",
+        "linksTo": [
+          "Borrowing"
+        ]
+      }
+    ],
+    "relations": [
+      {
+        "from": "Borrowing",
+        "to": "Ownership",
+        "type": "related"
+      }
+    ]
+  },
+  "normalized": {
+    "title": "Zeta Graph Primer",
+    "concepts": [
+      {
+        "name": "Ownership",
+        "description": "Ownership decides which value is responsible for releasing memory."
+      },
+      {
+        "name": "Borrowing",
+        "description": "Borrowing allows temporary access without transferring ownership."
+      }
+    ],
+    "fleetingCards": [
+      {
+        "title": "Ownership",
+        "content": "Ownership decides which value is responsible for releasing memory.",
+        "linksTo": [
+          "Ownership"
+        ]
+      },
+      {
+        "title": "Borrowing",
+        "content": "Borrowing allows temporary access without transferring ownership.",
+        "linksTo": [
+          "Borrowing"
+        ]
+      }
+    ],
+    "relations": [
+      {
+        "from": "Borrowing",
+        "to": "Ownership",
+        "type": "related"
+      }
+    ]
+  }
+}
