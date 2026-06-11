@@ -8,6 +8,12 @@ import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
 import { safeParseTags } from './vault'
 
+function sanitizeClusterColor(color: unknown): string | undefined {
+  if (typeof color !== 'string') return undefined
+  const trimmed = color.trim()
+  return /^#[0-9a-fA-F]{6}$/.test(trimmed) ? trimmed : undefined
+}
+
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
 
@@ -60,14 +66,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       where: { vaultId: vault.id },
       select: { id: true, sourceId: true, targetId: true, weight: true, type: true },
     })
-    const seen = new Set<string>()
-    const deduped = edges.filter(e => {
-      const key = [e.sourceId, e.targetId].sort().join('::')
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    return c.json({ success: true, edges: deduped })
+    return c.json({ success: true, edges })
   })
 
   // ── CLUSTER CRUD ────────────────────────────────────────────────
@@ -75,6 +74,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   .post('/clusters', async (c) => {
     const userId = c.get('userId') as string
     if (!userId) return c.json({ success: false, error: 'Unauthorized' }, 401)
+    if (!c.req.query('vid')) return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'No vault' })
 
@@ -94,7 +94,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       data: {
         vaultId: vault.id,
         name: name.trim(),
-        color: color || undefined,
+        color: sanitizeClusterColor(color),
         position: (last?.position ?? -1) + 1,
       },
     })
@@ -104,6 +104,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   .put('/clusters/:id', async (c) => {
     const userId = c.get('userId') as string
     if (!userId) return c.json({ success: false, error: 'Unauthorized' }, 401)
+    if (!c.req.query('vid')) return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'No vault' })
 
@@ -117,7 +118,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
-        ...(color !== undefined ? { color } : {}),
+        ...(color !== undefined ? { color: sanitizeClusterColor(color) } : {}),
       },
     })
     return c.json({ success: true, cluster: { id: cluster.id, name: cluster.name, color: cluster.color, position: cluster.position } })
@@ -126,6 +127,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   .delete('/clusters/:id', async (c) => {
     const userId = c.get('userId') as string
     if (!userId) return c.json({ success: false, error: 'Unauthorized' }, 401)
+    if (!c.req.query('vid')) return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'No vault' })
 
@@ -144,6 +146,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   .put('/cards/:id/cluster', async (c) => {
     const userId = c.get('userId') as string
     if (!userId) return c.json({ success: false, error: 'Unauthorized' }, 401)
+    if (!c.req.query('vid')) return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'No vault' })
 
@@ -164,6 +167,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   .delete('/cards/:id/cluster', async (c) => {
     const userId = c.get('userId') as string
     if (!userId) return c.json({ success: false, error: 'Unauthorized' }, 401)
+    if (!c.req.query('vid')) return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'No vault' })
 

@@ -57,23 +57,34 @@ async function ensureVault(userId: string, name: string) {
   })
 }
 
-async function resetVaultGraph(vaultId: string) {
+async function resetVaultGraph(vaultId: string, userId: string) {
   await prisma.$transaction([
+    prisma.agentConfirmationToken.deleteMany({ where: { vaultId } }),
+    prisma.agentAuditLog.deleteMany({ where: { vaultId } }),
+    prisma.domainEvent.deleteMany({ where: { vaultId } }),
+    prisma.promotionAttempt.deleteMany({ where: { vaultId } }),
+    prisma.assessmentResult.deleteMany({ where: { vaultId } }),
+    prisma.cardRevision.deleteMany({ where: { vaultId } }),
+    prisma.notificationReceipt.deleteMany({ where: { vaultId } }),
+    prisma.resourceGenerationJob.deleteMany({ where: { vaultId } }),
+    prisma.sourceDocumentChunk.deleteMany({ where: { sourceDocument: { is: { vaultId } } } }),
+    prisma.sourceDocument.deleteMany({ where: { vaultId } }),
+    prisma.ragDocumentIndex.deleteMany({ where: { vaultId } }),
+    prisma.pushRecord.deleteMany({ where: { OR: [{ vaultId }, { userId, vaultId: null }] } }),
     prisma.edge.deleteMany({ where: { vaultId } }),
+    prisma.pathAdjustmentHistory.deleteMany({
+      where: { path: { vaultId } },
+    }),
     prisma.learningPathStep.deleteMany({
       where: { path: { vaultId } },
     }),
     prisma.learningPath.deleteMany({ where: { vaultId } }),
+    prisma.learningSession.deleteMany({ where: { vaultId } }),
     prisma.agentSession.deleteMany({ where: { vaultId } }),
     prisma.vaultMemory.deleteMany({ where: { vaultId } }),
     prisma.vaultCapability.deleteMany({ where: { vaultId } }),
-    prisma.EducationProfileHistory.deleteMany({ where: { vaultId } }),
-    prisma.PathAdjustmentHistory.deleteMany({
-      where: { path: { vaultId } },
-    }),
-    prisma.PushRecord.deleteMany({
-      where: { userId: { not: '' } },
-    }),
+    prisma.vaultSkill.deleteMany({ where: { vaultId } }),
+    prisma.educationProfileHistory.deleteMany({ where: { vaultId } }),
     prisma.cluster.deleteMany({ where: { vaultId } }),
     prisma.card.deleteMany({ where: { vaultId } }),
   ])
@@ -331,7 +342,7 @@ async function seedVault(vaultId: string) {
     updatedAt: Date.now() - 6 * 60 * 60 * 1000,
   }
 
-  await prisma.EducationProfileHistory.create({
+  await prisma.educationProfileHistory.create({
     data: {
       vaultId,
       profile: JSON.stringify(profile),
@@ -366,9 +377,10 @@ async function seedVault(vaultId: string) {
   ]
 
   for (const p of pushRecord) {
-    await prisma.PushRecord.create({
+    await prisma.pushRecord.create({
       data: {
         userId: (await prisma.vault.findUnique({ where: { id: vaultId }, select: { userId: true } }))!.userId,
+        vaultId,
         resources: JSON.stringify(p.resources),
         trigger: p.trigger,
         reason: p.reason,
@@ -430,8 +442,8 @@ async function main() {
   const mainVault = await ensureVault(user.id, 'Demo Vault')
   const sideVault = await ensureVault(user.id, 'Side Vault')
 
-  await resetVaultGraph(mainVault.id)
-  await resetVaultGraph(sideVault.id)
+  await resetVaultGraph(mainVault.id, user.id)
+  await resetVaultGraph(sideVault.id, user.id)
 
   await seedVault(mainVault.id)
   await seedVault(sideVault.id)

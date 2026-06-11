@@ -8,7 +8,7 @@ export default function ProfileBar() {
   const userName = data?.user?.name ?? '学习者'
   const userInitial = userName.charAt(0).toUpperCase()
   const stats = data?.stats ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 }
-  const totalCards = stats.mastered + stats.pendingReview
+  const totalCards = stats.totalCards ?? stats.mastered + stats.pendingReview
   const isEmpty = totalCards === 0
 
   return (

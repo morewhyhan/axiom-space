@@ -6,6 +6,7 @@
  */
 
 import { getAgentContext } from '@/server/core/agent/agent-context';
+import { redactSecrets } from '@/server/core/agent/security/SecretRedactor';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -35,6 +36,14 @@ export interface AuditEntry {
 
 const MAX_BUFFER_SIZE = 1000;
 
+function redactDetails(details: Record<string, unknown>): Record<string, unknown> {
+  try {
+    return JSON.parse(redactSecrets(JSON.stringify(details || {}))) as Record<string, unknown>;
+  } catch {
+    return { redacted: true };
+  }
+}
+
 export class AuditLogger {
   private buffer: AuditEntry[] = [];
   private minLevel: LogLevel;
@@ -54,7 +63,11 @@ export class AuditLogger {
   log(entry: Omit<AuditEntry, 'timestamp'>): void {
     if (entry.level < this.minLevel) return;
 
-    const stored = { ...entry, timestamp: new Date().toISOString() };
+    const stored = {
+      ...entry,
+      details: redactDetails(entry.details || {}),
+      timestamp: new Date().toISOString(),
+    };
     this.buffer.push(stored);
 
     // 缓冲区满时丢弃最旧条目

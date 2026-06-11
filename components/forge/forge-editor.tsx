@@ -19,8 +19,18 @@ type ResourceManifestItem = {
   type: string
   title: string
   path: string
+  ref?: string
   mp4Path?: string
+  mp4Ref?: string
   fileName: string
+  status?: string
+  source?: string
+  sourceObjectType?: string
+  sourceObjectId?: string
+  sourcePath?: string
+  sourceTitle?: string
+  contentHash?: string
+  generatedAt?: string
 }
 
 type RagCardStatusValue = 'pending' | 'indexing' | 'indexed' | 'failed' | 'disabled'
@@ -250,8 +260,18 @@ export default function ForgeEditor() {
             type: item.type,
             title: item.title,
             path: item.path,
+            ref: item.ref,
             mp4Path: item.mp4Path,
+            mp4Ref: item.mp4Ref,
             fileName: item.fileName,
+            status: item.status,
+            source: item.source,
+            sourceObjectType: item.sourceObjectType,
+            sourceObjectId: item.sourceObjectId,
+            sourcePath: item.sourcePath,
+            sourceTitle: item.sourceTitle,
+            contentHash: item.contentHash,
+            generatedAt: item.generatedAt,
             content: data.success ? data.content : undefined,
             videoUrl,
           } satisfies GeneratedResourceItem
@@ -436,7 +456,12 @@ export default function ForgeEditor() {
         json: { content: cardContent, title: cardTitle || undefined },
         query: currentVaultId ? { vid: currentVaultId } : undefined,
       })
-      const data: { success: boolean; card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }; error?: string } = await res.json()
+      const data: {
+        success: boolean
+        card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }
+        error?: string
+        missingElements?: string[]
+      } = await res.json()
       if (res.ok && data.success) {
         setDirty(false)
         setUndoStack([])
@@ -509,7 +534,12 @@ export default function ForgeEditor() {
         json: { content: cardContent, title: cardTitle || undefined, type: 'permanent' },
         query: currentVaultId ? { vid: currentVaultId } : undefined,
       })
-      const data: { success: boolean; card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }; error?: string } = await res.json()
+      const data: {
+        success: boolean
+        card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }
+        error?: string
+        missingElements?: string[]
+      } = await res.json()
       if (res.ok && data.success) {
         toast.success('已升级为永久卡片')
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
@@ -525,7 +555,8 @@ export default function ForgeEditor() {
         })
         useAgentStore.getState().loadSessions()
       } else {
-        toast.error(`升级失败: ${data.error || `HTTP ${res.status}`}`)
+        const missing = data.missingElements?.length ? `，缺少：${data.missingElements.join(', ')}` : ''
+        toast.error(`升级失败: ${data.error || `HTTP ${res.status}`}${missing}`)
       }
     } catch (err) {
       toast.error(`升级失败: ${(err as Error)?.message || '网络异常'}`)

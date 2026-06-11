@@ -82,8 +82,17 @@ async function getMermaid(): Promise<MermaidModule> {
   return mermaidModule!;
 }
 
-// 唯一 ID 计数器
-let mermaidIdCounter = 0;
+// Mermaid ID must be deterministic across SSR and client hydration.
+// A module-level counter causes React hydration mismatches because the server
+// and browser can parse markdown in different orders.
+function stableMermaidId(text: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `mermaid-${(hash >>> 0).toString(36)}`;
+}
 
 // 创建 Marked 实例，配置自定义渲染
 const markedInstance = new Marked();
@@ -95,7 +104,7 @@ markedInstance.use({
 
       // Mermaid 图表：输出占位 div，后续异步渲染
       if (language === 'mermaid') {
-        const id = `mermaid-${++mermaidIdCounter}`;
+        const id = stableMermaidId(text);
         const escaped = text
           .replace(/&/g, '&amp;')
           .replace(/</g, '&lt;')
@@ -206,7 +215,7 @@ export async function renderMermaidBlocks(container: HTMLElement): Promise<void>
       const src = decodeURIComponent(div.getAttribute('data-mermaid-src') || '');
       if (!src) continue;
 
-      const id = div.getAttribute('data-mermaid-id') || `mermaid-${++mermaidIdCounter}`;
+      const id = div.getAttribute('data-mermaid-id') || stableMermaidId(src);
 
       try {
         const { svg } = await mermaid.render(id, src);

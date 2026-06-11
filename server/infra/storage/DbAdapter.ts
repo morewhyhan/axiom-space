@@ -12,6 +12,7 @@ import type { IFileStorage, ReadResult, WriteResult, ListResult, DeleteResult, S
 import { prisma } from '@/lib/db'
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context'
 import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
+import { assertCardType, inferCardTypeFromPath } from '@/server/core/domain/contracts'
 
 export class DbAdapter implements IFileStorage {
   private resolvedUserId: string
@@ -67,7 +68,7 @@ export class DbAdapter implements IFileStorage {
     if (ctxVaultId) {
       const vault = await prisma.vault.findUnique({ where: { id: ctxVaultId } });
       if (vault?.userId === this.userId) return vault.id;
-      // fall through if vault id is invalid or doesn't belong to this user
+      return null;
     }
     const vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
@@ -81,6 +82,7 @@ export class DbAdapter implements IFileStorage {
     if (ctxVaultId) {
       const vault = await prisma.vault.findUnique({ where: { id: ctxVaultId } });
       if (vault?.userId === this.userId) return vault.id;
+      throw new Error('Vault not found or not owned by current user')
     }
     let vault = await prisma.vault.findFirst({
       where: { userId: this.userId },
@@ -117,10 +119,7 @@ export class DbAdapter implements IFileStorage {
       const vaultId = await this.ensureVaultId()
 
       // 从路径推断 type (如果没提供)
-      const type = cardType
-        ?? (filePath.startsWith('literature/') ? 'literature'
-          : filePath.startsWith('permanent/') ? 'permanent'
-          : 'fleeting')
+      const type = cardType ? assertCardType(cardType) : inferCardTypeFromPath(filePath)
 
       // 从路径提取 title
       const title = filePath.replace(/\.md$/, '').split('/').pop() || 'untitled'
@@ -135,9 +134,11 @@ export class DbAdapter implements IFileStorage {
         // Sync [[WikiLink]] edges atomically with the card write
         const titles = parseWikiLinks(content)
         const resolved = await Promise.all(
-          titles.map((t) => resolveWikiLinkTitle(prisma, vaultId, t)),
+          titles.map((t) => resolveWikiLinkTitle(tx, vaultId, t)),
         )
-        const targets = resolved.filter(Boolean) as { id: string }[]
+        const targets = Array.from(
+          new Map((resolved.filter(Boolean) as { id: string }[]).map((target) => [target.id, target])).values(),
+        )
 
         await tx.edge.deleteMany({ where: { sourceId: upserted.id, type: 'wikilink' } })
         if (targets.length > 0) {

@@ -1,0 +1,41 @@
+{
+  "runId": "sdd-api-1781157917162-rgrcwh8jn9",
+  "capturedAt": "2026-06-11T06:11:23.460Z",
+  "vaultId": "175bf7a3-fffa-46de-9997-e1a31471514f",
+  "pathId": "734f4383-accf-43c9-a341-ca2face150bb",
+  "response": {
+    "success": true,
+    "path": {
+      "id": "734f4383-accf-43c9-a341-ca2face150bb",
+      "topic": "Adjustment Topic",
+      "totalSteps": 1,
+      "completedSteps": 0,
+      "progress": 0
+    },
+    "adjustmentHistory": [
+      {
+        "id": "e583da29-e11d-4b03-9c02-363f9a2ae0b2",
+        "adjustmentId": "e583da29-e11d-4b03-9c02-363f9a2ae0b2",
+        "appliedAt": 1781158283428,
+        "trigger": "assessment",
+        "triggeredBy": "assessment",
+        "adjustment": {
+          "type": "add_review",
+          "concept": "Adjustment Step",
+          "description": "掌握度 50%，建议复习\"Adjustment Step\"相关概念",
+          "reason": "评估未通过，需要补充复习和练习"
+        },
+        "assessmentRef": {
+          "toolName": "learning_step_assessment",
+          "score": 50,
+          "maxScore": 100,
+          "evidence": [
+            "I am still confused. I cannot define the concept, cannot give an example, and do not know how to apply it."
+          ],
+          "clientContext": []
+        },
+        "feedback": "用户承认完全无法定义、举例或应用该概念，显然未掌握。"
+      }
+    ]
+  }
+}

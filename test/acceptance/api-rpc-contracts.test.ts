@@ -10,12 +10,14 @@ import dashboardRoutes from '@/server/api/routes/dashboard'
 import cognitionRoutes from '@/server/api/routes/cognition'
 import ragRoutes from '@/server/api/routes/rag'
 import { prisma } from '@/lib/db'
+import { auth } from '@/lib/auth'
 import { syncEdgesFromContent } from '@/lib/wiki-links'
 import { writeLiveAiArtifact } from './live-ai-artifacts'
-
-process.env.DEV_MODE = 'true'
+import { parseSetCookieHeader } from 'better-auth/cookies'
 
 const runId = `sdd-api-${Date.now()}-${Math.random().toString(36).slice(2)}`
+const apiTestPassword = 'AxiomApiTestPassword123!'
+let activeAuthCookie = ''
 const app = new Hono()
   .basePath('/api')
   .onError(handleError)
@@ -67,7 +69,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
       method: 'PUT',
       body: {
         title: 'Source Updated',
-        content: '# Source Updated\n\n[[目标概念]]',
+        content: permanentCardContent('Source Updated', '[[目标概念]]'),
         type: 'permanent',
       },
     })
@@ -189,10 +191,21 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
     assert.equal(metadata.pathId, path.id)
     assert.equal(metadata.stepId, path.steps[0].id)
     assert.equal(metadata.cardId, execute.body.session.cardId)
+    await prisma.card.update({
+      where: { id: execute.body.session.cardId },
+      data: { content: learningCardContent('API Concept') },
+    })
+    await prisma.learningMessage.create({
+      data: {
+        sessionId: execute.body.session.id,
+        role: 'user',
+        content: masteredEvidence('API Concept'),
+      },
+    })
 
     const progress = await apiJson(`/api/learning/path/${path.id}/step/${path.steps[0].id}/progress?vid=${vault.id}`, {
       method: 'POST',
-      body: { status: 'completed', mastery: 80, sessionId: execute.body.session.id },
+      body: { status: 'learning', mastery: 20, sessionId: execute.body.session.id },
     })
     assert.equal(progress.status, 200)
     assert.equal(progress.body.success, true)
@@ -201,13 +214,19 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
       where: { id: path.id },
       include: { steps: true },
     })
-    assert.equal(refreshedPath.steps[0].status, 'completed')
+    assert.equal(refreshedPath.steps[0].status, 'learning')
+    assert.equal(refreshedPath.steps[0].mastery, 20)
 
     await cleanupVault(vault.id)
   })
 
   await t.test('learning progress is recalculated from persisted step states and unlocks the next eligible step', async () => {
     const { user, vault } = await createApiVault('learning-progress')
+    const firstCard = await createCard(vault.id, 'progress-step-1.md', 'Progress Step 1')
+    await prisma.card.update({
+      where: { id: firstCard.id },
+      data: { content: learningCardContent('Concept 1') },
+    })
     const path = await prisma.learningPath.create({
       data: {
         userId: user.id,
@@ -217,7 +236,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
         totalSteps: 2,
         steps: {
           create: [
-            { order: 1, title: 'Progress Step 1', concept: 'Concept 1', status: 'available' },
+            { order: 1, title: 'Progress Step 1', concept: 'Concept 1', status: 'learning', cardId: firstCard.id },
             { order: 2, title: 'Progress Step 2', concept: 'Concept 2', status: 'locked' },
           ],
         },
@@ -227,9 +246,27 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
 
     const firstStep = path.steps[0]
     const secondStep = path.steps[1]
+    const session = await prisma.learningSession.create({
+      data: {
+        userId: user.id,
+        vaultId: vault.id,
+        domain: '__agent__',
+        concept: firstStep.title,
+        status: 'active',
+        phase: 'explore',
+        metadata: JSON.stringify({ pathId: path.id, stepId: firstStep.id, cardId: firstCard.id }),
+      },
+    })
+    await prisma.learningMessage.create({
+      data: {
+        sessionId: session.id,
+        role: 'user',
+        content: masteredEvidence('Concept 1'),
+      },
+    })
     const progress = await apiJson(`/api/learning/path/${path.id}/step/${firstStep.id}/progress?vid=${vault.id}`, {
       method: 'POST',
-      body: { status: 'completed', mastery: 72 },
+      body: { status: 'completed', mastery: 72, sessionId: session.id },
     })
 
     assert.equal(progress.status, 200)
@@ -243,8 +280,8 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
     })
     assert.equal(refreshedPath.doneSteps, 1)
     assert.equal(refreshedPath.status, 'active')
-    assert.equal(refreshedPath.steps[0].status, 'completed')
-    assert.equal(refreshedPath.steps[0].mastery, 72)
+    assert.equal(refreshedPath.steps[0].status, 'mastered')
+    assert.ok(refreshedPath.steps[0].mastery >= 70)
     assert.equal(refreshedPath.steps[1].id, secondStep.id)
     assert.equal(refreshedPath.steps[1].status, 'available')
 
@@ -324,7 +361,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
       method: 'PUT',
       body: {
         title: promotedCard.title,
-        content: `${promotedCard.content}\n\n## 定义\n可说明。\n\n## 例子\n可举例。`,
+        content: permanentCardContent(promotedCard.title ?? 'Promotion Source', '[[Promotion Other]]'),
         type: 'permanent',
       },
     })
@@ -528,6 +565,87 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
     await prisma.user.deleteMany({ where: { id: otherUser.id } })
   })
 
+  await t.test('cross-vault RAG endpoints enforce strict vault isolation and reject foreign cards', async () => {
+    // Create two vaults under the same user
+    const { vault: vaultA } = await createApiVault('rag-iso-a')
+    const vaultB = await prisma.vault.create({
+      data: {
+        id: `${runId}-rag-iso-b`,
+        name: 'RAG Iso B',
+        userId: vaultA.userId,
+      },
+    })
+
+    const tokenA = `RAG-ISO-${runId}-VAULT-A-UNIQUE`
+    const tokenB = `RAG-ISO-${runId}-VAULT-B-UNIQUE`
+
+    const cardA = await prisma.card.create({
+      data: {
+        vaultId: vaultA.id,
+        path: `${runId}/iso-a.md`,
+        title: 'Isolation Card A',
+        content: `# Vault A Content\n\nThis card belongs to vault A. ${tokenA}`,
+        type: 'permanent',
+      },
+    })
+    const cardB = await prisma.card.create({
+      data: {
+        vaultId: vaultB.id,
+        path: `${runId}/iso-b.md`,
+        title: 'Isolation Card B',
+        content: `# Vault B Content\n\nThis card belongs to vault B. ${tokenB}`,
+        type: 'permanent',
+      },
+    })
+
+    // 1. Cross-vault RAG sync must be rejected (vault A cannot sync vault B's card)
+    const crossSyncA = await apiJson(`/api/rag/card/${cardB.id}/sync?vid=${vaultA.id}`, { method: 'POST' })
+    assert.notEqual(crossSyncA.status, 200, 'cross-vault rag sync must be rejected')
+    assert.equal(JSON.stringify(crossSyncA.body).includes(tokenB), false, 'error must not leak target card content')
+
+    // 2. Cross-vault RAG sync in reverse direction also rejected
+    const crossSyncB = await apiJson(`/api/rag/card/${cardA.id}/sync?vid=${vaultB.id}`, { method: 'POST' })
+    assert.notEqual(crossSyncB.status, 200, 'reverse cross-vault rag sync must be rejected')
+
+    // 3. Cross-vault RAG card status must be rejected
+    const crossStatus = await apiJson(`/api/rag/card/${cardB.id}/status?vid=${vaultA.id}`)
+    assert.notEqual(crossStatus.status, 200, 'cross-vault rag card status must be rejected')
+    assert.equal(JSON.stringify(crossStatus.body).includes(tokenB), false, 'error must not leak target card content')
+
+    // 4. Cross-vault RAG card status reverse direction
+    const crossStatusB = await apiJson(`/api/rag/card/${cardA.id}/status?vid=${vaultB.id}`)
+    assert.notEqual(crossStatusB.status, 200, 'reverse cross-vault rag card status must be rejected')
+
+    // 5. RAG status per vault is scoped and enabled
+    const statusA = await apiJson(`/api/rag/status?vid=${vaultA.id}`)
+    assert.equal(statusA.status, 200)
+    assert.equal(statusA.body.success, true)
+    assert.equal(statusA.body.status.enabled, true)
+
+    const statusB = await apiJson(`/api/rag/status?vid=${vaultB.id}`)
+    assert.equal(statusB.status, 200)
+    assert.equal(statusB.body.success, true)
+    assert.equal(statusB.body.status.enabled, true)
+
+    // 6. Cross-vault memory search must be vault-scoped
+    const searchA = await apiJson(`/api/learning/memory?vid=${vaultA.id}`, {
+      method: 'POST',
+      body: { query: tokenA, topK: 5 },
+    })
+    assert.equal(searchA.status, 200)
+
+    // Memory results from vault A must not include vault B content
+    if (searchA.body.success && Array.isArray(searchA.body.entries)) {
+      const leakB = searchA.body.entries.some(
+        (entry: { content?: string }) => entry.content?.includes(tokenB),
+      )
+      assert.equal(leakB, false, 'vault A memory search must not leak vault B content')
+    }
+
+    await cleanupVault(vaultA.id)
+    await cleanupVault(vaultB.id)
+  })
+
   await t.test('real DeepSeek extraction can seed the real LightRAG index and be queried back', async () => {
     const { vault } = await createApiVault('import-document-real')
     const document = [
@@ -573,7 +691,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
           tags: JSON.stringify(['Zeta Graph', 'core']),
         },
       })
-      conceptCards.push({ id: card.id, title: card.title })
+      conceptCards.push({ id: card.id, title: card.title ?? concept.name })
     }
 
     for (const fleeting of extracted.fleetingCards) {
@@ -654,7 +772,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
             order: 1,
             title: 'Adjustment Step',
             concept: 'Adjustment Concept',
-            status: 'available',
+            status: 'learning',
             cardId: pathCard.id,
           },
         },
@@ -677,7 +795,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
       data: {
         sessionId: session.id,
         role: 'user',
-        content: 'I can explain this step in my own words.',
+        content: 'I am still confused. I cannot define the concept, cannot give an example, and do not know how to apply it.',
       },
     })
 
@@ -685,8 +803,9 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
       method: 'POST',
       body: { status: 'completed', mastery: 50, sessionId: session.id },
     })
-    assert.equal(progress.status, 200)
-    assert.equal(progress.body.success, true)
+    assert.equal(progress.status, 422)
+    assert.equal(progress.body.success, false)
+    assert.equal(progress.body.error, 'ASSESSMENT_FAILED')
 
     const adjustments = await apiJson(`/api/learning/path-adjustments?vid=${vault.id}&pathId=${path.id}`)
     assert.equal(adjustments.status, 200)
@@ -918,15 +1037,18 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
 })
 
 async function createApiVault(label: string) {
-  let user = await prisma.user.findFirst({ orderBy: { createdAt: 'asc' } })
-  if (!user) {
-    user = await prisma.user.create({
-      data: {
-        email: `${runId}-${label}@example.com`,
-        name: `SDD API ${label}`,
-      },
-    })
-  }
+  const email = `${runId}-${label}@example.com`
+  const signedUp = await auth.api.signUpEmail({
+    body: {
+      email,
+      password: apiTestPassword,
+      name: `SDD API ${label}`,
+    },
+    headers: new Headers({ origin: 'http://localhost:3000' }),
+    returnHeaders: true,
+  })
+  const user = await prisma.user.findUniqueOrThrow({ where: { email } })
+  activeAuthCookie = cookieHeaderFromSetCookie(signedUp.headers)
 
   const vault = await prisma.vault.create({
     data: {
@@ -936,6 +1058,15 @@ async function createApiVault(label: string) {
   })
 
   return { user, vault }
+}
+
+function cookieHeaderFromSetCookie(headers: Headers) {
+  const setCookie = headers.get('set-cookie')
+  if (!setCookie) throw new Error('Better Auth sign-up did not return a session cookie')
+  const cookies = parseSetCookieHeader(setCookie)
+  return Array.from(cookies.entries())
+    .map(([name, cookie]) => `${name}=${cookie.value}`)
+    .join('; ')
 }
 
 function createCard(vaultId: string, path: string, title: string) {
@@ -950,6 +1081,46 @@ function createCard(vaultId: string, path: string, title: string) {
   })
 }
 
+function permanentCardContent(title: string, relation: string) {
+  return `# ${title}
+
+## 定义
+${title} 是指一个可以被清晰解释、复用和验证的知识概念，它需要说明核心含义和适用边界。
+
+## 例子
+例如，学习者可以用自己的话解释 ${title}，再给出一个具体案例来证明自己真正理解。
+
+## 关系
+这个概念与 ${relation} 存在关联关系，也可以和前置知识、相邻主题或对比概念一起理解。
+
+## 应用
+在实践场景中，${title} 可以用于整理知识、指导决策，并帮助后续学习路径落地。`
+}
+
+function masteredEvidence(concept: string) {
+  return `我已经掌握 ${concept}。
+定义：${concept} 是把一个学习目标拆成可验证步骤的概念，核心是先说明含义，再检查证据是否满足标准。
+例子：例如在 API 学习中，我会先创建请求，再读取响应状态和响应体，用具体结果证明链路正确。
+关系：它和前置知识、相邻概念、结果验证都有关系；没有证据就不能说已经完成。
+应用：实际使用时，我会把 ${concept} 用在学习路径推进中，只有能解释定义、举例、说明关系并落地应用时才标记完成。`
+}
+
+function learningCardContent(concept: string) {
+  return `# ${concept}
+
+## 定义
+${concept} 是一个用于学习路径评估的概念，要求学习者能说明含义、边界和验证方式。
+
+## 例子
+例如，学习者完成一个 API 步骤后，需要说清请求、响应、状态码和数据变化，不能只说“我懂了”。
+
+## 关系
+${concept} 与前置知识、学习会话、卡片证据和路径进度有关，评估时要把这些来源联系起来。
+
+## 应用
+在实际应用中，${concept} 用来决定步骤是否可以完成、后续步骤是否可以解锁，以及是否需要生成复习建议。`
+}
+
 async function apiJson(path: string, init: { method?: string; body?: unknown } = {}) {
   const response = await apiRaw(path, init)
   const text = await response.text()
@@ -958,9 +1129,12 @@ async function apiJson(path: string, init: { method?: string; body?: unknown } =
 }
 
 function apiRaw(path: string, init: { method?: string; body?: unknown } = {}) {
+  const headers = new Headers()
+  if (init.body) headers.set('content-type', 'application/json')
+  if (activeAuthCookie) headers.set('cookie', activeAuthCookie)
   return app.request(path, {
     method: init.method ?? 'GET',
-    headers: init.body ? { 'content-type': 'application/json' } : undefined,
+    headers,
     body: init.body ? JSON.stringify(init.body) : undefined,
   })
 }

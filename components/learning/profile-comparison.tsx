@@ -52,7 +52,8 @@ export default function ProfileComparison() {
   if (!profile || !profile.dimensions) {
     return (
       <div className="glass-panel p-6 rounded-2xl">
-        <p className="mono text-white/40 text-center">教育画像数据加载中...</p>
+        <p className="mono text-white/40 text-center">暂无教育画像</p>
+        <p className="mono text-white/20 text-sm mt-2 text-center">完成学习任务或评估后，这里会显示基于证据生成的 6 维能力画像。</p>
       </div>
     )
   }

@@ -6,18 +6,20 @@
  * using the existing learningSession / learningMessage Prisma models.
  */
 import { prisma } from '@/lib/db'
-import { getCurrentUserId } from '@/server/core/agent/agent-context'
+import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context'
 import type { TrajectoryEntry } from '../pattern/PatternDetector'
 
 export class PrismaLearningAdapter {
   private vaultPath: string
   private userId: string
+  private vaultId: string | null
   private expiryWatcher: ReturnType<typeof setInterval> | null = null
   private onExpiry: ((session: any) => Promise<void>) | null = null
 
-  constructor(config: { dataPath?: string; userId?: string }) {
+  constructor(config: { dataPath?: string; userId?: string; vaultId?: string | null }) {
     this.vaultPath = config.dataPath ?? ''
     this.userId = config.userId ?? getCurrentUserId() ?? ''
+    this.vaultId = config.vaultId ?? getCurrentVaultId() ?? null
   }
 
   /** Initialize the adapter (idempotent) */
@@ -31,9 +33,15 @@ export class PrismaLearningAdapter {
     // Check every 60 seconds for expired sessions
     this.expiryWatcher = setInterval(async () => {
       try {
-        if (!this.userId) return
+        if (!this.userId || !this.vaultId) return
         const expired = await prisma.learningSession.findMany({
-          where: { userId: this.userId, status: 'active', updatedAt: { lt: new Date(Date.now() - 3600_000) } },
+          where: {
+            userId: this.userId,
+            vaultId: this.vaultId,
+            domain: '__agent__',
+            status: 'active',
+            updatedAt: { lt: new Date(Date.now() - 3600_000) },
+          },
           include: { messages: true },
         })
         for (const session of expired) {
@@ -59,6 +67,21 @@ export class PrismaLearningAdapter {
     }
   }
 
+  private parseMetadata(metadata?: string | null): { threadStatus?: string } {
+    if (!metadata) return {}
+    try {
+      const parsed = JSON.parse(metadata) as { threadStatus?: unknown }
+      return typeof parsed?.threadStatus === 'string' ? { threadStatus: parsed.threadStatus } : {}
+    } catch {
+      return {}
+    }
+  }
+
+  private isUsableSession(session?: { status?: string | null; metadata?: string | null } | null): boolean {
+    const metadata = this.parseMetadata(session?.metadata)
+    return !!session && session.status !== 'completed' && metadata.threadStatus !== 'archived'
+  }
+
   /** Close the adapter */
   async close(): Promise<void> {
     this.stopExpiryWatcher()
@@ -81,17 +104,26 @@ export class PrismaLearningAdapter {
    */
   async appendTrajectory(entry: TrajectoryEntry): Promise<void> {
     let session = await prisma.learningSession.findFirst({
-      where: { id: entry.session_id, userId: this.userId },
+      where: {
+        id: entry.session_id,
+        userId: this.userId,
+        domain: '__agent__',
+      },
     })
+    if (session && !this.isUsableSession(session)) session = null
 
     if (!session) {
       session = await prisma.learningSession.findFirst({
-        where: { userId: this.userId, status: 'active' },
+        where: {
+          userId: this.userId,
+          domain: '__agent__',
+          status: 'active',
+        },
         orderBy: { updatedAt: 'desc' },
       })
     }
 
-    if (session) {
+    if (session && this.isUsableSession(session)) {
       await prisma.learningMessage.create({
         data: {
           sessionId: session.id,

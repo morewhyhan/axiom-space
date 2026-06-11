@@ -34,6 +34,13 @@ const Header = dynamic(() => import('@/components/layout/header'))
 const BottomBar = dynamic(() => import('@/components/layout/bottom-bar'))
 const LandingPage = dynamic(() => import('@/components/landing/landing-page'))
 
+const createCardTypes = ['fleeting', 'literature', 'permanent'] as const
+type CreateCardType = typeof createCardTypes[number]
+
+function isCreateCardType(type: string): type is CreateCardType {
+  return (createCardTypes as readonly string[]).includes(type)
+}
+
 export default function Home() {
   const mode = useAppStore((s) => s.mode)
   const graphLayoutMode = useAppStore((s) => s.graphLayoutMode)
@@ -74,14 +81,12 @@ export default function Home() {
   // ── New card state ──
   const [newCardTitle, setNewCardTitle] = useState('')
   const [newCardContent, setNewCardContent] = useState('')
-  const [newCardType, setNewCardType] = useState('fleeting')
+  const [newCardType, setNewCardType] = useState<CreateCardType>('fleeting')
   const [creating, setCreating] = useState(false)
   const cardTypeOptions = useMemo(() => {
-    const labels: Record<string, string> = { fleeting: '灵感', literature: '文献', permanent: '永久' }
-    const existingTypes = Array.from(new Set((galaxyData?.nodes ?? []).map((node) => node.type).filter(Boolean)))
-    const types = Array.from(new Set(['fleeting', 'literature', 'permanent', ...existingTypes]))
-    return types.map((type) => ({ id: type, label: labels[type] ?? type }))
-  }, [galaxyData?.nodes])
+    const labels: Record<CreateCardType, string> = { fleeting: '灵感', literature: '文献', permanent: '永久' }
+    return createCardTypes.map((type) => ({ id: type, label: labels[type] }))
+  }, [])
 
   // ── Load vaults only when logged in ──
   const vaults = useAppStore((s) => s.vaults)
@@ -124,21 +129,6 @@ export default function Home() {
         if (cancelled) return
         if (!vaultsRes.ok || !vaultsData.success) throw new Error('加载知识库失败')
 
-        if (vaultsData.success && vaultsData.vaults.length === 0) {
-          const createRes = await client.api.vaults.$post({ json: { name: 'My Vault' } })
-          const createData = await createRes.json() as { success: boolean; vault?: { id: string; name: string }; error?: string }
-          if (cancelled) return
-          if (!createRes.ok || !createData.success || !createData.vault) {
-            throw new Error(createData.error || '创建默认知识库失败')
-          }
-          if (createData.success && createData.vault) {
-            useAppStore.getState().setVaults([{ id: createData.vault.id, name: createData.vault.name, cardCount: 0 }])
-            useAppStore.getState().setCurrentVaultId(createData.vault.id)
-          }
-          setVaultsLoaded(true)
-          return
-        }
-
         if (vaultsData.success && vaultsData.vaults.length > 0) {
           useAppStore.getState().setVaults(vaultsData.vaults)
           const persistedId = useAppStore.getState().currentVaultId
@@ -146,8 +136,20 @@ export default function Home() {
           if (!stillExists) {
             useAppStore.getState().setCurrentVaultId(vaultsData.vaults[0].id)
           }
+          setVaultsLoaded(true)
+          return
         }
+
+        const createRes = await client.api.vaults.$post({ json: { name: 'My Vault' } })
+        const createData = await createRes.json() as { success: boolean; vault?: { id: string; name: string }; error?: string }
+        if (cancelled) return
+        if (!createRes.ok || !createData.success || !createData.vault) {
+          throw new Error(createData.error || '创建默认知识库失败')
+        }
+        useAppStore.getState().setVaults([{ id: createData.vault.id, name: createData.vault.name, cardCount: 0 }])
+        useAppStore.getState().setCurrentVaultId(createData.vault.id)
         setVaultsLoaded(true)
+        return
       } catch (err) {
         if (!cancelled) console.warn('[Home] failed to load vaults:', err)
       }
@@ -155,28 +157,24 @@ export default function Home() {
     return () => { cancelled = true }
   }, [isLoggedIn])
 
-  const dataReady = !galaxyLoading && galaxyData !== null
+  const workspaceReady = !!currentVaultId
 
-  // Progress: 0% → auth OK (15%) → vaults loaded (45%) → galaxy loaded (100%)
+  // Progress: get the user into the workspace once a vault is selected.
+  // Heavy graph data continues loading in the background.
   const loadProgress = !authPending && isLoggedIn
-    ? galaxyData && !galaxyLoading ? 100
-      : currentVaultId ? 45
+    ? workspaceReady ? 100
       : 15
     : 0
 
   const loadStatusText = !authPending && isLoggedIn
-    ? galaxyData && !galaxyLoading ? '准备就绪'
-      : currentVaultId ? '正在加载知识图谱数据...'
+    ? workspaceReady ? '进入工作台，知识图谱后台同步中...'
       : '正在加载知识库...'
     : ''
 
   const handleEnterApp = () => {
     setLoadError(false)
-    if (dataReady) {
-      setShowApp(true)
-    } else {
-      setShowLoading(true)
-    }
+    setShowApp(true)
+    setShowLoading(false)
   }
 
   useEffect(() => {
@@ -188,23 +186,24 @@ export default function Home() {
     })
   }, [mode])
 
-  // When loading overlay is active and data arrives → dismiss
+  // When loading overlay is active and a vault is selected → dismiss.
+  // Do not block the workspace on graph/RAG/dashboard data.
   useEffect(() => {
-    if (showLoading && dataReady) {
+    if (showLoading && workspaceReady) {
       setLoadError(false)
-      const t = setTimeout(() => setShowLoading(false), 600)
+      const t = setTimeout(() => setShowLoading(false), 300)
       return () => clearTimeout(t)
     }
-  }, [showLoading, dataReady])
+  }, [showLoading, workspaceReady])
 
-  // Loading timeout — auto-dismiss after 15s with error
+  // Loading timeout — only the vault selection itself can block entry.
   useEffect(() => {
     if (!showLoading || loadError) return
     const t = setTimeout(() => {
-      if (!dataReady) setLoadError(true)
-    }, 15000)
+      if (!workspaceReady) setLoadError(true)
+    }, 6000)
     return () => clearTimeout(t)
-  }, [showLoading, dataReady, loadError])
+  }, [showLoading, workspaceReady, loadError])
 
   // ── Vault switch while in-app ──
   const prevVaultId = useRef<string | null>(null)
@@ -229,6 +228,8 @@ export default function Home() {
       queryClient.removeQueries({ queryKey: ['rag-related-cards'] })
       queryClient.removeQueries({ queryKey: ['path-adjustments'] })
       queryClient.removeQueries({ queryKey: ['engine-progress'] })
+
+      agentStore.loadSessions().catch(() => {})
 
       const vaultName = vaults.find(v => v.id === currentVaultId)?.name || '知识库'
       toast(`已切换到「${vaultName}」`, {
@@ -338,11 +339,15 @@ export default function Home() {
           contentResults = (contentData?.results ?? [])
             .filter((r) => !knownTitles.has(r.title || ''))
             .slice(0, 10 - titleResults.length)
-            .map((r) => ({
-              id: r.path || r.title || '',
-              title: r.title || r.path || 'Untitled',
-              snippet: (r.snippet || r.content || r.title || '').slice(0, 100),
-            }))
+            .map((r) => {
+              const node = galaxyData?.nodes.find((item) => item.id === r.path || item.title === r.title)
+              return {
+                id: node?.id || '',
+                title: r.title || r.path || 'Untitled',
+                snippet: (r.snippet || r.content || r.title || '').slice(0, 100),
+              }
+            })
+            .filter((r) => !!r.id)
         } catch { /* content search is best-effort */ }
       }
 
@@ -373,7 +378,7 @@ export default function Home() {
       setSearchResults([])
     }
     finally { setSearching(false) }
-  }, [currentVaultId, memorySearch])
+  }, [currentVaultId, galaxyData?.nodes, memorySearch])
 
   // ── Keyboard shortcuts ──
   useEffect(() => {
@@ -405,7 +410,8 @@ export default function Home() {
     if (!newCardTitle.trim() || !currentVaultId) return
     setCreating(true)
     try {
-      const cardType = (typeOverride || newCardType).trim() || 'fleeting'
+      const requestedType = (typeOverride || newCardType).trim() || 'fleeting'
+      const cardType: CreateCardType = isCreateCardType(requestedType) ? requestedType : 'fleeting'
       // Sanitize title to a safe filename slug — strip path separators, dot-only
       // segments, and any char outside a conservative whitelist. Prevents the
       // user accidentally (or maliciously) writing to "../../foo.md" or
@@ -502,7 +508,6 @@ export default function Home() {
     }
   }, [])
 
-  const showLoadingHint = isLoggedIn && !authPending && (galaxyLoading || !galaxyData)
   const graphLayoutHint = useMemo(() => {
     const hints: Record<GraphLayoutMode, string> = {
       galaxy: '拖拽旋转 · 滚轮缩放 · 星团总览',
@@ -774,13 +779,6 @@ export default function Home() {
                           </button>
                         ))}
                       </div>
-                      <input
-                        type="text"
-                        className="axiom-input mt-2"
-                        placeholder="自定义类型，例如：问题 / 项目 / 概念"
-                        value={newCardType}
-                        onChange={e => setNewCardType(e.target.value)}
-                      />
                     </div>
                     <div>
                       <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>Content</span>
@@ -1054,7 +1052,12 @@ export default function Home() {
 
       {/* ── Landing Page ── */}
       <div className={`landing-stage ${showApp ? 'landing-stage-exit' : ''}`}>
-        <LandingPage showLoadingHint={showLoadingHint} isLoggedIn={isLoggedIn} vaultsLoaded={vaultsLoaded} onEnterApp={handleEnterApp} />
+        <LandingPage
+          showLoadingHint={isLoggedIn && !authPending && (galaxyLoading || !galaxyData)}
+          isLoggedIn={authPending ? undefined : isLoggedIn}
+          vaultsLoaded={vaultsLoaded}
+          onEnterApp={handleEnterApp}
+        />
       </div>
     </>
   )

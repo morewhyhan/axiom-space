@@ -11,6 +11,7 @@ import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { emitNotification } from '../notification-bus';
 import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
+import { clampEdgeWeight, normalizeEdgeType } from '@/server/core/domain/contracts';
 const axiom = createAxiomCompat(getFileStorage());
 
 const createFleeingCardTool = createTool(
@@ -106,19 +107,17 @@ const createPermanentCardTool = createTool(
       const missingElements = Object.entries(qualityChecks)
         .filter(([, v]) => !v)
         .map(([k]) => k.replace('has', '').toLowerCase());
-      const qualityWarnings: string[] = [];
       if (missingElements.length > 0) {
-        qualityWarnings.push(`⚠️ 内容缺少以下要素: ${missingElements.join(', ')}`);
+        return {
+          content: [{ type: 'text', text: `永久卡片创建被拒绝：内容缺少 ${missingElements.join(', ')}。请补齐定义、例子、关联和应用后再创建。` }],
+          details: { error: 'PERMANENT_CARD_QUALITY_FAILED', missingElements, quality_checks: qualityChecks },
+        };
       }
 
       const result = await (axiom as any).createPermanent?.(vaultPath, params, params.content);
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
         const contentParts = [`永久卡片已创建: ${params.title} (${cardPath})`];
-        if (qualityWarnings.length > 0) {
-          contentParts.push('');
-          contentParts.push(...qualityWarnings);
-        }
         console.log(`[Event] axiom:toast — card: 创建永久卡片: ${params.title}`);
         const permVaultId = getCurrentVaultId();
         if (permVaultId) {
@@ -333,7 +332,8 @@ const deleteSkillTool = createTool(
   '删除用户自定义的 Skill。系统内置 Skill 不可删除。',
   Type.Object({
     skillName: Type.String({ description: '要删除的 Skill 名称' }),
-    force: Type.Optional(Type.Boolean({ description: '设为 true 可跳过确认直接删除' })),
+    force: Type.Optional(Type.Boolean({ description: '确认后由系统设置为 true，模型不可用它跳过确认' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行删除时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -342,10 +342,32 @@ const deleteSkillTool = createTool(
 
       // Confirmation gate (对标 D-14)
       if (!params.force) {
+        const confirmation = createConfirmationToken('delete_skill', params.skillName);
         console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
         return {
           content: [{ type: 'text', text: `请确认是否删除 Skill "${params.skillName}"。确认后我将执行操作。` }],
-          details: { awaitingConfirmation: true },
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            skillName: params.skillName,
+            target: params.skillName,
+          },
+        };
+      }
+
+      if (!consumeConfirmationToken('delete_skill', params.skillName, params.confirmationToken)) {
+        const confirmation = createConfirmationToken('delete_skill', params.skillName);
+        return {
+          content: [{ type: 'text', text: `删除 Skill "${params.skillName}" 需要重新确认。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            skillName: params.skillName,
+            target: params.skillName,
+            error: 'Invalid or missing confirmationToken',
+          },
         };
       }
 
@@ -411,7 +433,7 @@ const deleteCardTool = createTool(
   '删除 Vault 中的卡片（文献、灵感卡片、永久卡片）。默认软删除（移动到 .axiom/trash/，可恢复）。',
   Type.Object({
     cardPath: Type.String({ description: '要删除的卡片路径（相对于 Vault 根目录，如 "permanent/concept.md"）' }),
-    force: Type.Optional(Type.Boolean({ description: '设为 true 可跳过确认直接删除' })),
+    force: Type.Optional(Type.Boolean({ description: '确认后由系统设置为 true，模型不可用它跳过确认' })),
     confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行删除时必须提供。' })),
   }),
   async (_id, params) => {
@@ -632,8 +654,8 @@ const addGraphEdgeTool = createTool(
         };
       }
 
-      const edgeType = params.type || 'related';
-      const strength = params.strength ?? 0.8;
+      const edgeType = normalizeEdgeType(params.type);
+      const strength = clampEdgeWeight(params.strength, 0.8);
       const existingEdge = await prisma.edge.findFirst({
         where: { vaultId, sourceId: sourceCard.id, targetId: targetCard.id, type: edgeType },
       });

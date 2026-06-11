@@ -641,18 +641,28 @@ export class ChatOrchestrator {
 
     try {
       const { prisma } = await import('@/lib/db')
-      const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const { getCurrentUserId, getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const { emitDomainEvent } = await import('@/server/core/domain/events')
       const vid = getCurrentVaultId()
       if (!vid) return
+      const userId = getCurrentUserId()
       const title = `对话笔记 ${new Date().toLocaleDateString()}`
-      await prisma.card.create({
+      const card = await prisma.card.create({
         data: {
           vaultId: vid,
-          path: `permanent/${title}.md`,
+          path: `fleeting/${title}-${Date.now().toString(36)}.md`,
           title,
-          content: `# ${title}\n\n> 来源：对话生成\n\n${context}`,
-          type: 'permanent',
+          content: `# ${title}\n\n> 来源：对话生成。请在 Forge 中补齐定义、例子、关联和应用后再升级为永久卡片。\n\n${context}`,
+          type: 'fleeting',
         },
+      })
+      void emitDomainEvent({
+        userId,
+        vaultId: vid,
+        aggregateType: 'card',
+        aggregateId: card.id,
+        eventType: 'CardCreated',
+        payload: { path: card.path, title: card.title, type: card.type, source: 'chat' },
       })
     } catch (err) {
       console.warn("[ChatOrchestrator] generateCardFromChat failed:", err);

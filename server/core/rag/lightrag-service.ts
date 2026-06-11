@@ -266,7 +266,10 @@ export async function queryLightRAGContext(params: {
       topK: params.topK,
     })
     const answer = extractRagAnswer(raw)
-    const references = await enrichRagReferences(extractRagReferences(raw), params.vaultId)
+    const references = mergeRagReferences(
+      await enrichRagReferences(extractRagReferences(raw), params.vaultId),
+      await findLocalIndexedReferences(params.vaultId, params.query, params.topK ?? 6),
+    )
     return { enabled: true, answer, references, raw }
   } catch (error) {
     return {
@@ -481,10 +484,11 @@ function extractRagReferences(raw: unknown): RagReference[] {
 }
 
 async function enrichRagReferences(references: RagReference[], vaultId: string): Promise<RagReference[]> {
-  const cardIds = references
+  const scopedReferences = references.filter((reference) => !reference.vaultId || reference.vaultId === vaultId)
+  const cardIds = scopedReferences
     .map((reference) => reference.cardId)
     .filter((cardId): cardId is string => !!cardId)
-  if (cardIds.length === 0) return references
+  if (cardIds.length === 0) return scopedReferences
 
   const cards = await prisma.card.findMany({
     where: { vaultId, id: { in: [...new Set(cardIds)] } },
@@ -492,12 +496,49 @@ async function enrichRagReferences(references: RagReference[], vaultId: string):
   })
   const cardMap = new Map(cards.map((card) => [card.id, card]))
 
-  return references.map((reference) => {
+  return scopedReferences.flatMap((reference) => {
     const card = reference.cardId ? cardMap.get(reference.cardId) : null
-    return card
-      ? { ...reference, title: card.title, type: card.type }
-      : reference
+    if (reference.cardId && !card) return []
+    return [card ? { ...reference, title: card.title, type: card.type } : reference]
   })
+}
+
+async function findLocalIndexedReferences(vaultId: string, query: string, limit: number): Promise<RagReference[]> {
+  const q = query.trim()
+  if (!q) return []
+  const cards = await prisma.card.findMany({
+    where: {
+      vaultId,
+      ragIndexes: { some: { provider: PROVIDER, status: 'indexed' } },
+      OR: [
+        { title: { contains: q, mode: 'insensitive' } },
+        { path: { contains: q, mode: 'insensitive' } },
+        { content: { contains: q, mode: 'insensitive' } },
+      ],
+    },
+    select: { id: true, title: true, type: true },
+    take: Math.max(1, Math.min(limit, 12)),
+  })
+  return cards.map((card) => ({
+    referenceId: `local:${card.id}`,
+    filePath: buildLightRAGDocumentId(vaultId, card.id),
+    cardId: card.id,
+    vaultId,
+    title: card.title,
+    type: card.type,
+  }))
+}
+
+function mergeRagReferences(primary: RagReference[], fallback: RagReference[]): RagReference[] {
+  const seen = new Set<string>()
+  const merged: RagReference[] = []
+  for (const reference of [...primary, ...fallback]) {
+    const key = reference.cardId || reference.filePath || reference.referenceId
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(reference)
+  }
+  return merged
 }
 
 function parseAxiomDocumentId(filePath: string): { vaultId: string; cardId: string } | null {

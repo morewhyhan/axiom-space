@@ -19,6 +19,8 @@
   -> 画像和下一步路径更新
 ```
 
+![AXIOM Space MVP 范围闭环图](./assets/mvp-scope-loop.png)
+
 MVP 的核心验证点是：
 
 - 用户是否接受 AI 主动引导，而不是只要答案。

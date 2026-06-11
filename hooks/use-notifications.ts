@@ -19,6 +19,14 @@ export function useNotifications() {
 
   useEffect(() => {
     if (!currentVaultId) return
+    let cancelled = false
+
+    client.api.events.unread.$get({ query: { vid: currentVaultId } })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && typeof data.count === 'number') setUnreadCount(data.count)
+      })
+      .catch(() => {})
 
     // Close previous connection
     if (eventSourceRef.current) {
@@ -30,12 +38,15 @@ export function useNotifications() {
 
     es.addEventListener('notification', (event) => {
       try {
-        const data = JSON.parse(event.data) as Omit<AppNotification, 'id'>
+        const data = JSON.parse(event.data) as Omit<AppNotification, 'id'> & { id?: string }
         const notif: AppNotification = {
           ...data,
-          id: `notif_${data.timestamp}`,
+          id: typeof data.id === 'string' ? data.id : event.lastEventId || `notif_${data.timestamp}`,
         }
-        setNotifications(prev => [notif, ...prev].slice(0, 50))
+        setNotifications(prev => {
+          if (prev.some((item) => item.id === notif.id)) return prev
+          return [notif, ...prev].slice(0, 50)
+        })
         setUnreadCount(prev => prev + 1)
       } catch {}
     })
@@ -45,16 +56,18 @@ export function useNotifications() {
     }
 
     return () => {
+      cancelled = true
       es.close()
       eventSourceRef.current = null
     }
   }, [currentVaultId])
 
   const dismissAll = useCallback(() => {
+    const ids = notifications.map((notification) => notification.id)
     setUnreadCount(0)
     if (!currentVaultId) return
-    client.api.events.dismiss.$post({ query: { vid: currentVaultId } }).catch(() => {})
-  }, [currentVaultId])
+    client.api.events.dismiss.$post({ query: { vid: currentVaultId }, json: { ids } }).catch(() => {})
+  }, [currentVaultId, notifications])
 
   return { notifications, unreadCount, dismissAll }
 }

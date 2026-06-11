@@ -1,0 +1,14 @@
+{
+  "runId": "sdd-hyperframes-1781043342047-or5kt8okd7",
+  "capturedAt": "2026-06-09T22:16:17.765Z",
+  "lengths": {
+    "docx": 24507,
+    "pdf": 24982,
+    "pptx": 53532
+  },
+  "headers": {
+    "docx": "504b0304",
+    "pdf": "25504446",
+    "pptx": "504b0304"
+  }
+}

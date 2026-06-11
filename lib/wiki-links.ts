@@ -12,9 +12,15 @@
  * - 不存在的标题 →  dangling link，不创建 edge
  */
 
-import type { PrismaClient } from '@prisma/client'
+import type { Prisma, PrismaClient } from '@prisma/client'
 
 const WIKILINK_RE = /\[\[([^\]]+)\]\]/g
+
+function hasTransaction(
+  prisma: PrismaClient | Prisma.TransactionClient,
+): prisma is PrismaClient {
+  return '$transaction' in prisma
+}
 
 /**
  * 从卡片内容中提取所有唯一的 [[WikiLink]] 标题
@@ -40,7 +46,7 @@ export function parseWikiLinks(content: string): string[] {
  * @returns 匹配到的卡片 id + title，无匹配返回 null
  */
 export async function resolveWikiLinkTitle(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   vaultId: string,
   title: string,
 ): Promise<{ id: string; title: string; type: string } | null> {
@@ -76,7 +82,7 @@ export async function resolveWikiLinkTitle(
  * 每次保存时全量重建，保证 edge 与内容完全一致。
  */
 export async function syncEdgesFromContent(
-  prisma: PrismaClient,
+  prisma: PrismaClient | Prisma.TransactionClient,
   cardId: string,
   vaultId: string,
   content: string,
@@ -89,10 +95,11 @@ export async function syncEdgesFromContent(
   )
 
   // 过滤掉未解析的（dangling）
-  const targets: { id: string }[] = resolved.filter(Boolean) as { id: string }[]
+  const targets = Array.from(
+    new Map((resolved.filter(Boolean) as { id: string }[]).map((target) => [target.id, target])).values(),
+  )
 
-  // 事务：删除旧 wikilink edge + 插入新的
-  await prisma.$transaction(async (tx) => {
+  const replaceEdges = async (tx: PrismaClient | Prisma.TransactionClient) => {
     // 删除所有由本卡片发出的 wikilink 类型 edge
     await tx.edge.deleteMany({
       where: { sourceId: cardId, type: 'wikilink' },
@@ -110,5 +117,12 @@ export async function syncEdgesFromContent(
         })),
       })
     }
-  })
+  }
+
+  if (hasTransaction(prisma)) {
+    await prisma.$transaction(async (tx) => replaceEdges(tx))
+    return
+  }
+
+  await replaceEdges(prisma)
 }

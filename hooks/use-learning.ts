@@ -73,10 +73,11 @@ export function useLearningPaths(topic?: string) {
     queryKey: ['learning-paths', currentVaultId, topic],
     queryFn: () => fetchLearningPaths(currentVaultId, topic),
     enabled: !!currentVaultId,
-    refetchInterval: 300_000, // periodic sync for step progress
-    staleTime: 2 * 60 * 1000,
+    refetchInterval: 60_000, // periodic sync for step progress/background updates
+    staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   return {
     data: query.data ?? { paths: [], activePath: null, activeStep: 0 },
@@ -138,7 +139,7 @@ export function useExecuteStep() {
         query: { vid: currentVaultId },
         json: { stepId: params.stepId },
       })
-      const data = await res.json() as ApiResult<{ session: { id: string; stepId: string; cardId?: string | null } }>
+      const data = await res.json() as ApiResult<{ session: { id: string; stepId: string; cardId?: string | null; cardType?: string | null } }>
       if (!data.success) throw new Error(data.error || 'Execute failed')
       return data.session
     },
@@ -165,15 +166,29 @@ export function useUpdateStepProgress() {
       status: string
       mastery?: number
       sessionId?: string
+      evidence?: string[]
     }) => {
       if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning.path[':pathId'].step[':stepId'].progress.$post({
         param: { pathId: params.pathId, stepId: params.stepId },
         query: { vid: currentVaultId },
-        json: { status: params.status, mastery: params.mastery, sessionId: params.sessionId },
+        json: { status: params.status, mastery: params.mastery, sessionId: params.sessionId, evidence: params.evidence },
       })
-      const data = await res.json() as ApiResult<{ doneCount: number; totalSteps: number; evaluation: { passed: boolean; feedback: string; mastery: number } | null; cardUpgraded: boolean }>
-      if (!data.success) throw new Error(data.error || 'Progress update failed')
+      const data = await res.json() as ApiResult<{ doneCount: number; totalSteps: number; evaluation: { passed: boolean; feedback: string; mastery: number } | null; cardUpgraded: boolean; promotionRequired?: boolean }> & {
+        evaluation?: { passed: boolean; feedback: string; mastery: number }
+      }
+      if (!data.success) {
+        if (data.error === 'ASSESSMENT_FAILED' && data.evaluation) {
+          return {
+            doneCount: 0,
+            totalSteps: 0,
+            evaluation: data.evaluation,
+            cardUpgraded: false,
+            promotionRequired: false,
+          }
+        }
+        throw new Error(data.error || 'Progress update failed')
+      }
       return data
     },
     onSuccess: () => {
@@ -327,9 +342,10 @@ export function useLearningProfile() {
       return data.profile
     },
     enabled: !!currentVaultId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   return { profile: query.data ?? null, loading: query.isLoading, error: query.error?.message ?? null }
 }
@@ -396,13 +412,15 @@ export function useEducationProfile() {
     queryKey: ['education-profile', currentVaultId],
     queryFn: async () => {
       const res = await client.api.learning['education-profile'].$get({ query: { vid: currentVaultId } })
-      const data = await res.json() as ApiResult<{ profile: EducationProfile }>
+      const data = await res.json() as ApiResult<{ profile: EducationProfile | null; status?: 'empty'; evidence?: unknown[] }>
       if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch education profile (${res.status})` : data.error || `Failed to fetch education profile (${res.status})`)
       return data.profile
     },
     enabled: !!currentVaultId,
-    refetchInterval: false, // 画像只在手动编辑或会话结束时更新，不需要轮询
-    staleTime: 5 * 60 * 1000,
+    refetchInterval: false,
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   return {
     profile: query.data ?? null,
@@ -417,7 +435,7 @@ export function useUpdateEducationProfile() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (params: { sessionData: unknown; userHistory?: unknown[] }) => {
+    mutationFn: async (params: { sessionData: unknown; userHistory?: unknown[]; evidence?: string[] }) => {
       if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning['update-profile'].$post({
         query: { vid: currentVaultId },
@@ -489,7 +507,10 @@ export function useEngineProgress(pathId?: string) {
       return data.progress
     },
     enabled: !!currentVaultId && !!pathId,
-    refetchInterval: 300_000,
+    refetchInterval: 30_000,
+    staleTime: 10 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
 }
 
@@ -519,9 +540,12 @@ export function useAcceptAdjustment() {
 }
 
 export interface PushableResource {
-  resourceId: string
+  id?: string
+  resourceId?: string
   type: 'document' | 'mindmap' | 'quiz' | 'code' | 'diagram' | 'video'
   title: string
+  description?: string
+  content?: string
   topic: string
   difficulty: 'beginner' | 'intermediate' | 'advanced'
   estimatedMinutes: number
@@ -556,7 +580,10 @@ export function usePushResources() {
       return data
     },
     enabled: !!currentVaultId,
-    refetchInterval: 300_000, // 每 5 分钟刷新一次
+    refetchInterval: 60_000,
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   return {
     data: query.data ?? { records: [], nextPushTime: null },

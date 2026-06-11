@@ -218,7 +218,11 @@ export function createAgentServices(config: AxiomAgentConfig = {}): AgentService
 
   // ── 11. Database & learning subsystems ──────────────────
   const database = new PrismaLearningAdapter(
-    { dataPath: normalizedConfig.dataPath },
+    {
+      dataPath: normalizedConfig.dataPath,
+      userId: normalizedConfig.userId,
+      vaultId: normalizedConfig.vaultId || null,
+    },
   );
 
   const patternExtractor = new PatternExtractorAdapter({

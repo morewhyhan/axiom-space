@@ -491,6 +491,34 @@ body {
 .forge-chat-input:focus { border-color: rgba(244,114,182,0.3); }
 .forge-chat-input::placeholder { color: rgba(255,255,255,0.15); }
 
+.forge-oracle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid rgba(244,114,182,0.22);
+    background: rgba(244,114,182,0.09);
+    color: rgba(251,207,232,0.82);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-family: var(--font-jetbrains-mono), monospace;
+    font-size: var(--f8);
+    letter-spacing: 0.08em;
+    transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+.forge-oracle-btn:hover {
+    border-color: rgba(244,114,182,0.38);
+    background: rgba(244,114,182,0.14);
+    color: rgba(255,255,255,0.9);
+}
+.forge-oracle-btn span {
+    color: rgba(251,207,232,0.5);
+}
+.forge-oracle-btn strong {
+    color: rgba(255,255,255,0.78);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
 .cognition-radar {
     width: 220px;
     height: 220px;

@@ -56,16 +56,28 @@ export interface CognitionData {
   skills: CognitionSkill[]
   thinkingPattern: ThinkingPattern
   strengths: string[]
+  strengthEvidence?: Array<{ label: string; evidence: EvidenceRef[] }>
   growthEdges: string[]
+  growthEdgeEvidence?: Array<{ label: string; evidence: EvidenceRef[] }>
   timeDistribution: TimeDistribution[]
   knowledgeStructure: KnowledgeNode[]
   nextActions: string[]
+  nextActionItems?: Array<{ text: string; targetType: string; targetId: string; evidence: EvidenceRef[] }>
+}
+
+export interface EvidenceRef {
+  sourceObjectType: string
+  sourceObjectId: string
+  summary: string
 }
 
 export interface Observation {
   id: string
   text: string
   category: string
+  evidence?: EvidenceRef[]
+  sourceObjectType?: string
+  sourceObjectId?: string
   createdAt: string
 }
 
@@ -77,6 +89,9 @@ export interface KnowledgeGap {
   severity: 'high' | 'medium' | 'low'
   cardId?: string | null
   clusterId?: string | null
+  sourceObjectType?: string
+  sourceObjectId?: string
+  evidence?: EvidenceRef[]
 }
 
 async function fetchCognition(vaultId?: string | null): Promise<CognitionData | null> {
@@ -93,10 +108,13 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     skills: data.skills as CognitionData['skills'] ?? [],
     thinkingPattern: data.thinkingPattern as CognitionData['thinkingPattern'] ?? { text: '', highlights: [], detail: '' },
     strengths: data.strengths as CognitionData['strengths'] ?? [],
+    strengthEvidence: data.strengthEvidence as CognitionData['strengthEvidence'] ?? [],
     growthEdges: data.growthEdges as CognitionData['growthEdges'] ?? [],
+    growthEdgeEvidence: data.growthEdgeEvidence as CognitionData['growthEdgeEvidence'] ?? [],
     timeDistribution: data.timeDistribution as CognitionData['timeDistribution'] ?? [],
     knowledgeStructure: data.knowledgeStructure as CognitionData['knowledgeStructure'] ?? [],
     nextActions: data.nextActions as CognitionData['nextActions'] ?? [],
+    nextActionItems: data.nextActionItems as CognitionData['nextActionItems'] ?? [],
   }
 }
 
@@ -126,9 +144,10 @@ export function useCognition() {
     queryKey: ['cognition', currentVaultId],
     queryFn: () => fetchCognition(currentVaultId),
     enabled: !!currentVaultId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   return {
     data: query.data ?? null,
@@ -144,9 +163,10 @@ export function useObservations() {
     queryKey: ['observations', currentVaultId],
     queryFn: () => fetchObservations(currentVaultId),
     enabled: !!currentVaultId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   return {
     observations: query.data ?? [],
@@ -162,8 +182,9 @@ export function useKnowledgeGaps() {
     queryKey: ['knowledge-gaps', currentVaultId],
     queryFn: () => fetchKnowledgeGaps(currentVaultId),
     enabled: !!currentVaultId,
-    staleTime: 60 * 1000,
-    refetchOnWindowFocus: false,
+    staleTime: 15 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
   return {
     gaps: query.data ?? [],

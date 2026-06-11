@@ -7,7 +7,11 @@ import { prisma } from '@/lib/db'
 import { resolveAiConfig } from '@/lib/ai-config'
 import { runWithAgentContext } from '@/server/core/agent/agent-context'
 import { ResourceGenerationOrchestrator } from '@/server/core/agent/ResourceGenerationOrchestrator'
-import { ResourceGenerationState, RESOURCE_FILE_MAP } from '@/server/core/agent/ResourceGenerationState'
+import {
+  ResourceGenerationState,
+  RESOURCE_FILE_MAP,
+  type ResourceType,
+} from '@/server/core/agent/ResourceGenerationState'
 import { emitNotification } from '@/server/core/agent/notification-bus'
 import { writeLiveAiArtifact } from './live-ai-artifacts'
 
@@ -160,6 +164,7 @@ test('Sidecar contracts keep RAG, resources, jobs, and notifications separate fr
         const path = resourcePathFor(literatureTitle, fileName)
         await getFileStorage().writeFile(path, content)
       },
+      skipMp4Render: true,
     })
 
     const topic = 'Graph Search Basics'
@@ -222,15 +227,18 @@ test('Sidecar contracts keep RAG, resources, jobs, and notifications separate fr
     const model = resolveAiConfig().model
     const topic = 'Graph Search Basics'
     const literatureTitle = 'Graph Search Basics'
-    const requestedTypes = ['mindmap', 'quiz', 'code', 'diagram', 'svg'] as const
+    const requestedTypes: ResourceType[] = ['mindmap', 'quiz', 'code', 'diagram', 'svg', 'video']
     const results: Array<{
-      type: string
+      type: ResourceType
       status: string
       error?: string
       fileName: string
       resourcePath: string
       contentLength?: number
       contentPreview?: string
+      qualitySignal?: string
+      qualityScore?: number
+      qualityIssues?: string[]
       transcript: { systemPrompt: string; userPrompt: string; response: string }
     }> = []
 
@@ -239,7 +247,8 @@ test('Sidecar contracts keep RAG, resources, jobs, and notifications separate fr
       const transcripts: Array<{ systemPrompt: string; userPrompt: string; response: string }> = []
       const orchestrator = new ResourceGenerationOrchestrator(state, {
         callLLM: async (systemPrompt, userMessage) => {
-          const response = await callDeepSeekJson(systemPrompt, userMessage, model)
+          const isSvg = systemPrompt.includes('SVG') || systemPrompt.includes('<svg')
+          const response = await callDeepSeekJson(systemPrompt, userMessage, model, isSvg ? 4096 : 8192, isSvg ? 30_000 : 120_000)
           transcripts.push({ systemPrompt, userPrompt: userMessage, response })
           return response
         },
@@ -256,6 +265,7 @@ test('Sidecar contracts keep RAG, resources, jobs, and notifications separate fr
           const path = resourcePathFor(literatureTitle, fileName)
           await getFileStorage().writeFile(path, content)
         },
+        skipMp4Render: true,
       })
 
       const generationResult = await runWithAgentContext({ userId: user.id, vaultId: vault.id }, async () => {
@@ -271,13 +281,18 @@ test('Sidecar contracts keep RAG, resources, jobs, and notifications separate fr
         })
         assert.equal(resourceFile.success, true, resourceFile.error)
         assert.ok((resourceFile.content ?? '').length > 0)
+        const content = String(resourceFile.content ?? '')
+        const quality = evaluateResourceQuality(requestedType, content)
         results.push({
           type: requestedType,
           status,
           fileName: RESOURCE_FILE_MAP[requestedType],
           resourcePath,
-          contentLength: (resourceFile.content ?? '').length,
-          contentPreview: String(resourceFile.content ?? '').slice(0, 300),
+          contentLength: content.length,
+          contentPreview: content.slice(0, 300),
+          qualitySignal: quality.signal,
+          qualityScore: quality.score,
+          qualityIssues: quality.issues,
           transcript: transcripts[0] ?? { systemPrompt: '', userPrompt: '', response: '' },
         })
       } else {
@@ -287,6 +302,9 @@ test('Sidecar contracts keep RAG, resources, jobs, and notifications separate fr
           error,
           fileName: RESOURCE_FILE_MAP[requestedType],
           resourcePath,
+          qualitySignal: 'not-generated',
+          qualityScore: 0,
+          qualityIssues: [error || 'Resource was not generated'],
           transcript: transcripts[0] ?? { systemPrompt: '', userPrompt: '', response: '' },
         })
       }
@@ -337,11 +355,12 @@ async function cleanupUser(userId: string) {
   await prisma.user.deleteMany({ where: { id: userId } })
 }
 
-async function callDeepSeekJson(systemPrompt: string, userPrompt: string, model: { baseUrl: string; apiKey: string; modelId: string }): Promise<string> {
+async function callDeepSeekJson(systemPrompt: string, userPrompt: string, model: { baseUrl: string; apiKey: string; modelId: string }, maxTokens = 8192, timeoutMs = 120_000): Promise<string> {
   const url = `${model.baseUrl.replace(/\/+$/, '')}/chat/completions`
   let lastError: unknown
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      const isSvg = systemPrompt.includes('SVG') || systemPrompt.includes('<svg')
       const payload = JSON.stringify({
         model: model.modelId,
         messages: [
@@ -349,18 +368,19 @@ async function callDeepSeekJson(systemPrompt: string, userPrompt: string, model:
           { role: 'user', content: userPrompt },
         ],
         temperature: 0,
-        max_tokens: 1400,
+        max_tokens: maxTokens,
+        ...(isSvg ? { reasoning_effort: 'low' } : {}),
       })
-      const { stdout } = await execFileAsync('curl', [
-        '-sS',
-        '-X', 'POST',
-        url,
-        '--noproxy', '*',
-        '-H', 'Content-Type: application/json',
-        '-H', `Authorization: Bearer ${model.apiKey}`,
-        '--data-raw', payload,
-      ])
-      const body = JSON.parse(stdout) as { choices?: Array<{ message?: { content?: string } }> }
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${model.apiKey}` },
+        body: payload,
+        signal: controller.signal,
+      })
+      clearTimeout(timer)
+      const body = await resp.json() as { choices?: Array<{ message?: { content?: string } }> }
       const content = body.choices?.[0]?.message?.content?.trim() || ''
       if (!content) throw new Error('DeepSeek returned empty content')
       return content
@@ -379,4 +399,96 @@ async function delay(ms: number) {
 function resourcePathFor(literatureTitle: string, fileName: string) {
   const sanitized = literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')
   return `resources/${sanitized}/${fileName}`
+}
+
+function evaluateResourceQuality(type: ResourceType, content: string): { signal: string; score: number; issues: string[] } {
+  const normalized = content.toLowerCase()
+  const issues: string[] = []
+
+  if (type === 'video') {
+    const hasVideoTag = normalized.includes('<video')
+      || normalized.includes('canvas')
+      || normalized.includes('scene')
+      || normalized.includes('animation')
+    if (!hasVideoTag) issues.push('Missing video/canvas/scene/animation marker')
+    return quality(hasVideoTag ? 'video-html-ready' : 'missing-video-markup', issues)
+  }
+
+  if (type === 'svg') {
+    const hasSvgTag = normalized.includes('<svg') && normalized.includes('</svg>')
+    if (!hasSvgTag) issues.push('Missing <svg> or </svg> tag')
+    if (normalized.includes('自动降级 svg')) issues.push('Used deterministic SVG fallback')
+    return quality(hasSvgTag ? 'svg-tag-contains' : 'missing-svg-tag', issues)
+  }
+
+  if (type === 'diagram') {
+    const validTypes = ['flowchart', 'sequenceDiagram', 'classDiagram', 'pie', 'stateDiagram', 'gantt', 'erDiagram', 'journey', 'gitGraph', 'graph']
+    const hasValidType = validTypes.some((dt) => normalized.includes(dt.toLowerCase()))
+    if (!hasValidType) issues.push('Missing valid Mermaid diagram type')
+    const nodeCount = (content.match(/\[[^\]]+\]|\([^)]+\)|\{[^}]+\}/g) || []).length
+    if (nodeCount < 6) issues.push(`Diagram has too few visible nodes (${nodeCount}, min 6)`)
+    return quality(hasValidType ? 'mermaid-preserved' : 'missing-mermaid-keyword', issues)
+  }
+
+  if (type === 'mindmap') {
+    if (!normalized.includes('mindmap')) issues.push('Missing mindmap keyword')
+    const topLevelBranches = content.split('\n').filter((line) => /^ {4}\S/.test(line)).length
+    if (topLevelBranches < 4) issues.push(`Mindmap has too few top-level branches (${topLevelBranches}, min 4)`)
+  }
+
+  if (type === 'quiz') {
+    const quizIssues = evaluateQuizQuality(content)
+    issues.push(...quizIssues)
+  }
+
+  if (type === 'code') {
+    const required = ['## 练习目标', '## 初始代码', '## 任务要求', '## 测试样例', '## 参考实现', '## 讲解']
+    const missing = required.filter((section) => !content.includes(section))
+    if (missing.length > 0) issues.push(`Missing sections: ${missing.join(', ')}`)
+    const codeBlockCount = (content.match(/```/g) || []).length / 2
+    if (codeBlockCount < 2) issues.push(`Too few code blocks (${codeBlockCount}, min 2)`)
+  }
+
+  if (content.trim().length <= 200) issues.push(`Content too short (${content.trim().length}, min 200)`)
+  return quality(content.trim().length > 200 ? 'readable-content' : 'too-short-content', issues)
+}
+
+function evaluateQuizQuality(content: string): string[] {
+  const issues: string[] = []
+  try {
+    const quiz = JSON.parse(content) as Array<{ question?: string; options?: unknown[]; answer?: string; explanation?: string }>
+    if (!Array.isArray(quiz)) return ['Quiz content is not a JSON array']
+    if (quiz.length < 5) issues.push(`Quiz has too few questions (${quiz.length}, min 5)`)
+    const seenQuestions = new Set<string>()
+    quiz.forEach((item, index) => {
+      const label = `Question ${index + 1}`
+      const question = String(item.question ?? '').trim()
+      if (!question) issues.push(`${label} missing question`)
+      if (seenQuestions.has(question)) issues.push(`${label} duplicates another question`)
+      seenQuestions.add(question)
+      const options = Array.isArray(item.options) ? item.options.map((option) => String(option).trim()) : []
+      if (options.length < 4) issues.push(`${label} has too few options`)
+      if (new Set(options).size !== options.length) issues.push(`${label} has duplicate options`)
+      const answer = String(item.answer ?? '').trim()
+      const optionLabels = options.map((option) => option.match(/^([A-Z])[\.\s:：]/)?.[1]).filter(Boolean)
+      if (/^[A-Z]$/.test(answer) && optionLabels.length > 0 && !optionLabels.includes(answer)) {
+        issues.push(`${label} answer ${answer} does not match options`)
+      }
+      const combined = [question, answer, item.explanation, ...options].join('\n')
+      if (/(我需重新检查|重新检查|笔误|复制错误|答案设为|应该是|可能是正确|不确定|I need to|mistake|typo)/i.test(combined)) {
+        issues.push(`${label} contains self-correction or uncertain wording`)
+      }
+    })
+  } catch {
+    issues.push('Quiz content is not valid JSON')
+  }
+  return issues
+}
+
+function quality(signal: string, issues: string[]) {
+  return {
+    signal,
+    score: Math.max(0, 100 - issues.length * 20),
+    issues,
+  }
 }

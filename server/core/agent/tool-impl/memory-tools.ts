@@ -236,7 +236,20 @@ const writeMemoryTool = createTool(
         data: {
           vaultId,
           key,
-          value: params.content,
+          value: JSON.stringify({
+            content: params.content,
+            target: params.target,
+            sourceObjectType: 'agentTool',
+            sourceObjectId: 'write_memory',
+            evidence: [
+              {
+                sourceObjectType: 'agentTool',
+                sourceObjectId: 'write_memory',
+                summary: `Agent memory write (${params.target})`,
+              },
+            ],
+            timestamp: Date.now(),
+          }),
           category: params.target === 'user' ? 'preference' : 'context',
         },
       });

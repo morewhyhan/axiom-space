@@ -43,6 +43,8 @@ const ENV_ASSIGN_PATTERN = /(?:API_KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|A
 // ===== Authorization Header =====
 const AUTH_HEADER_PATTERN = /Authorization:\s*Bearer\s+[^\s,}]+/gi;
 const AUTH_HEADER_BASIC_PATTERN = /Authorization:\s*Basic\s+[^\s,}]+/gi;
+const AUTH_HEADER_JSON_PATTERN = /(["']Authorization["']\s*:\s*["']Bearer\s+)[^"']+(["'])/gi;
+const AUTH_HEADER_CLI_PATTERN = /(-H\s+["']?Authorization:\s*Bearer\s+)[^"'\s]+(["']?)/gi;
 const GENERIC_SECRET_HEADER_PATTERN = /(^|\n)([A-Za-z0-9-]*(?:api-key|apikey|token|secret|credential|password)[A-Za-z0-9-]*\s*:\s*)[^\s,}]+/gi;
 
 // ===== JWT Token =====
@@ -115,6 +117,10 @@ export function redactSecrets(text: string): string {
   result = result.replace(AUTH_HEADER_PATTERN, 'Authorization: Bearer ***');
   AUTH_HEADER_BASIC_PATTERN.lastIndex = 0;
   result = result.replace(AUTH_HEADER_BASIC_PATTERN, 'Authorization: Basic ***');
+  AUTH_HEADER_JSON_PATTERN.lastIndex = 0;
+  result = result.replace(AUTH_HEADER_JSON_PATTERN, '$1***$2');
+  AUTH_HEADER_CLI_PATTERN.lastIndex = 0;
+  result = result.replace(AUTH_HEADER_CLI_PATTERN, '$1***$2');
   GENERIC_SECRET_HEADER_PATTERN.lastIndex = 0;
   result = result.replace(GENERIC_SECRET_HEADER_PATTERN, '$1$2***');
 

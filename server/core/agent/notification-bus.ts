@@ -6,6 +6,7 @@ export interface NotificationEvent {
   type: 'toast' | 'profile' | 'card' | 'skill' | 'graph'
   message: string
   timestamp: number
+  id?: string
 }
 
 export type ResourceProgressStatus =
@@ -33,6 +34,10 @@ export interface ResourceProgressEvent {
 
 const resourceProgressListeners = new Map<string, Set<(event: ResourceProgressEvent) => void>>()
 
+function resourceJobKey(event: Pick<ResourceProgressEvent, 'topic' | 'resourceType' | 'label'>): string {
+  return `${event.topic || 'untitled'}::${event.resourceType || 'resource'}::${event.label || ''}`
+}
+
 export function subscribeResourceProgress(
   vaultId: string,
   listener: (event: ResourceProgressEvent) => void,
@@ -51,6 +56,7 @@ export function emitResourceProgress(
   event: Omit<ResourceProgressEvent, 'timestamp'>,
 ): void {
   const payload = { ...event, timestamp: Date.now() }
+  void persistResourceProgress(vaultId, payload)
   const listeners = resourceProgressListeners.get(vaultId)
   if (!listeners) return
   for (const listener of listeners) {
@@ -65,15 +71,59 @@ export function emitResourceProgress(
 export async function emitNotification(vaultId: string, event: Omit<NotificationEvent, 'timestamp'>): Promise<void> {
   const { prisma } = await import('@/lib/db')
   try {
-    await prisma.vaultMemory.create({
+    const timestamp = Date.now()
+    const memory = await prisma.vaultMemory.create({
       data: {
         vaultId,
-        key: `notif_${event.type}_${Date.now()}`,
-        value: JSON.stringify({ ...event, timestamp: Date.now() }),
+        key: `notif_${event.type}_${timestamp}`,
+        value: JSON.stringify({ ...event, timestamp }),
         category: 'notification',
       },
     })
+    await prisma.vaultMemory.update({
+      where: { id: memory.id },
+      data: {
+        value: JSON.stringify({ ...event, timestamp, id: memory.id }),
+      },
+    }).catch(() => {})
   } catch (err) {
     // Non-fatal — notification storage is best-effort
+  }
+}
+
+async function persistResourceProgress(vaultId: string, event: ResourceProgressEvent): Promise<void> {
+  const { prisma } = await import('@/lib/db')
+  try {
+    const key = resourceJobKey(event)
+    const existing = await prisma.resourceGenerationJob.findFirst({
+      where: {
+        vaultId,
+        metadata: { contains: `"jobKey":"${key.replace(/"/g, '\\"')}"` },
+      },
+      orderBy: { updatedAt: 'desc' },
+    })
+    const data = {
+      vaultId,
+      topic: event.topic || 'untitled',
+      resourceType: event.resourceType || 'resource',
+      label: event.label || event.resourceType || 'resource',
+      status: event.status,
+      progress: Math.max(0, Math.min(100, Math.round(event.progress || 0))),
+      message: event.message || '',
+      path: event.path,
+      fileName: event.fileName,
+      error: event.error,
+      metadata: JSON.stringify({ jobKey: key, lastEventAt: event.timestamp }),
+    }
+    if (existing) {
+      await prisma.resourceGenerationJob.update({
+        where: { id: existing.id },
+        data,
+      })
+    } else {
+      await prisma.resourceGenerationJob.create({ data })
+    }
+  } catch {
+    // Progress persistence is best-effort and must never break generation.
   }
 }

@@ -12,6 +12,17 @@ import { queryLightRAGContext } from '@/server/core/rag/lightrag-service'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
 import { getProfileCacheEntry, setProfileCacheEntry } from '../profile-cache'
+import { createHash } from 'crypto'
+import {
+  STEP_STATUSES,
+  assertStepStatus,
+  canTransitionStepStatus,
+  normalizeDifficulty,
+  normalizeEdgeType,
+  sanitizeOrder,
+  type StepStatus,
+} from '@/server/core/domain/contracts'
+import { emitDomainEvent, recordAssessmentResult, recordSourceDocument } from '@/server/core/domain/events'
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
 const pathAdjustmentsQuerySchema = vaultQuerySchema.extend({ pathId: z.string().optional() })
@@ -135,7 +146,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       return c.json({ success: true, paths, activePath: activePath?.id ?? null, activeStep: Math.max(0, activeStep) })
     }
 
-    // 2. Fallback: cluster-based paths → persist as learningPath so execute/progress endpoints work
+    // 2. Fallback: cluster-based virtual paths. GET must remain read-only.
     const clusters = await prisma.cluster.findMany({
       where: { vaultId: vid },
       include: {
@@ -151,112 +162,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       ? clusters.filter(cl => cl.name.toLowerCase().includes(topic))
       : clusters
 
-    const difficultyLabel = (cardCount: number, permRatio: number) => {
-      if (permRatio > 0.6) return '进阶'
-      if (cardCount > 5) return '综合'
-      return '基础'
-    }
-
-    // Persist each cluster as a learningPath so endpoints work
-    const fallbackPaths: Array<{
-  id: string; name: string; description: string | null; topic: string; difficulty: string;
-  source: string; status: string; steps: Array<{
-    id: string; order: number; title: string; status: string; description: string | null;
-    concept: string | null; mastery: number; estimatedMinutes: number | null;
-    prerequisites: string | null;
-  }>; totalSteps: number; doneSteps: number;
-}> = []
-    for (const cl of filteredClusters) {
-      const cards = cl.cards
-      if (cards.length === 0) continue
-      const permCards = cards.filter(c => c.type === 'permanent')
-
-      // Create or find existing path for this cluster
-      let lp = await prisma.learningPath.findFirst({
-        where: { vaultId: vid, userId, topic: cl.name, source: 'graph' },
-      })
-      if (!lp) {
-        lp = await prisma.learningPath.create({
-          data: {
-            vaultId: vid,
-            userId,
-            name: `${cl.name}学习路径`,
-            topic: cl.name,
-            source: 'graph',
-            difficulty: difficultyLabel(cards.length, permCards.length / Math.max(cards.length, 1)),
-            totalSteps: cards.length,
-            doneSteps: permCards.length,
-            status: 'active',
-          },
-        })
-      }
-
-      // Create steps if missing
-      const existingSteps = await prisma.learningPathStep.findMany({
-        where: { pathId: lp.id },
-        select: { title: true },
-      })
-      const existingTitles = new Set(existingSteps.map(s => s.title))
-
-      for (let idx = 0; idx < cards.length; idx++) {
-        const card = cards[idx]
-        if (existingTitles.has(card.title || '')) continue
-
-        let status: string = 'available'
-        let mastery = 0
-        if (card.type === 'permanent') {
-          status = 'completed'
-          mastery = Math.min(100, Math.round(70 + (card.content?.length ?? 0) / 20))
-        }
-        await prisma.learningPathStep.create({
-          data: {
-            pathId: lp.id,
-            cardId: card.id,
-            title: card.title || `卡片 ${idx + 1}`,
-            description: card.type === 'permanent' ? '已固化知识' : '待深化理解',
-            order: idx + 1,
-            status,
-            mastery,
-          },
-        })
-      }
-
-      // Re-fetch with steps
-      const full = await prisma.learningPath.findUnique({
-        where: { id: lp.id },
-        include: { steps: { orderBy: { order: 'asc' } } },
-      })
-      if (full) fallbackPaths.push(full)
-    }
-
-    const paths = fallbackPaths.map(p => ({
-      id: p.id,
-      name: p.name,
-      description: p.description,
-      topic: p.topic,
-      color: '#ff4466',
-      difficulty: p.difficulty,
-      source: p.source,
-      status: p.status,
-      steps: (p.steps as unknown[]).map((s: unknown) => ({
-        index: (s as { order: number }).order,
-        id: (s as { id: string }).id,
-        cardId: (s as { cardId: string | null }).cardId,
-        name: (s as { title: string }).title,
-        status: (s as { status: string }).status as string,
-        desc: ((s as { description: string | null }).description) || '',
-        concept: (s as { concept: string | null }).concept || undefined,
-        chapter: (s as { chapter?: string | null }).chapter || undefined,
-        mastery: (s as { mastery: number }).mastery,
-        estimatedMinutes: (s as { estimatedMinutes: number | null }).estimatedMinutes || undefined,
-        prerequisites: safeParseJsonArray((s as { prerequisites: string | null }).prerequisites),
-      })),
-      totalCount: p.totalSteps,
-      doneCount: p.doneSteps,
-      progress: p.totalSteps > 0 ? Math.round((p.doneSteps / p.totalSteps) * 100) : 0,
-      createdAt: (p as { createdAt?: Date }).createdAt,
-      updatedAt: (p as { updatedAt?: Date }).updatedAt,
-    }))
+    const paths = buildVirtualGraphPaths(filteredClusters)
     const inboxPath = await buildUnassignedTaskPath(vid, topic)
     if (inboxPath) paths.unshift(inboxPath)
 
@@ -282,7 +188,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const body = await c.req.json().catch(() => ({}))
     const topic = (body.topic as string)?.trim()
     const material = (body.material as string)?.slice(0, 5000) || ''
-    const level = (body.level as string) || 'beginner'
+    const level = normalizeDifficulty(body.level)
     const mode = (body.mode as string) || 'full'
     const batchSize = Math.min(20, Math.max(3, (body.batchSize as number) || 3))
     const previousPathId = (body.previousPathId as string) || undefined
@@ -381,10 +287,19 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
         const parsed = JSON.parse(cleaned)
         const concepts: Array<{ title: string; content: string; tags: string[]; linksTo: string[] }> = parsed.concepts || []
 
-        // Create Card records for each concept
+        // Create or reuse Card records for each concept
         const createdCards: Array<{ id: string; title: string }> = []
         const usedPathsBatch = new Set<string>()
         for (const c of concepts) {
+          const existingCard = await prisma.card.findFirst({
+            where: { vaultId: vid, title: c.title, type: { in: ['fleeting', 'permanent'] } },
+            select: { id: true, title: true },
+          })
+          if (existingCard) {
+            createdCards.push({ id: existingCard.id, title: existingCard.title || c.title })
+            continue
+          }
+
           let safeTitle = c.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100)
           let candidatePath = `${safeTitle}.md`
           let counter = 1
@@ -429,15 +344,18 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
           for (const linkTitle of (c.linksTo || [])) {
             const targetId = titleToCard.get(linkTitle)
             if (targetId && sourceId !== targetId) {
-              await prisma.edge.create({
-                data: {
-                  vaultId: vid,
-                  sourceId,
-                  targetId,
-                  type: 'related',
-                  weight: 1,
-                },
-              }).catch(() => { /* duplicate edge, skip */ })
+              const existingEdge = await prisma.edge.findFirst({ where: { vaultId: vid, sourceId, targetId, type: 'related' } })
+              if (!existingEdge) {
+                await prisma.edge.create({
+                  data: {
+                    vaultId: vid,
+                    sourceId,
+                    targetId,
+                    type: 'related',
+                    weight: 1,
+                  },
+                })
+              }
             }
           }
         }
@@ -450,7 +368,7 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
             name: `${topic}概念图谱`,
             topic,
             description: `批量生成了 ${createdCards.length} 个概念节点及其关联`,
-            difficulty: level as string,
+            difficulty: level,
             totalSteps: createdCards.length,
             source: 'ai',
             steps: {
@@ -594,19 +512,35 @@ Generate a learning path for "${topic}" at ${level} level.`
       // Validate & normalize
       const rawSteps = parsed.steps || []
       const limitedSteps = mode === 'progressive' ? rawSteps.slice(0, stepLimit) : rawSteps.slice(0, 10)
-      const steps = limitedSteps.map((s, i) => ({
-        order: s.order ?? i + 1,
-        title: String(s.title || `Step ${i + 1}`).slice(0, 100),
-        description: String(s.description || '').slice(0, 500) || null,
-        concept: s.concept?.slice(0, 200) || null,
-        chapter: (s.chapter as string | undefined)?.slice(0, 100) || null,
-        estimatedMinutes: Math.min(120, Math.max(5, s.estimatedMinutes ?? 15)),
-      }))
+      const usedOrders = new Set<number>()
+      const steps = limitedSteps.map((s, i) => {
+        let order = Number.isFinite(Number(s.order)) ? Math.trunc(Number(s.order)) : i + 1
+        if (order < 1) order = i + 1
+        while (usedOrders.has(order)) order += 1
+        usedOrders.add(order)
+        return {
+          order,
+          title: String(s.title || `Step ${i + 1}`).slice(0, 100),
+          description: String(s.description || '').slice(0, 500) || null,
+          concept: s.concept?.slice(0, 200) || null,
+          chapter: (s.chapter as string | undefined)?.slice(0, 100) || null,
+          estimatedMinutes: Math.min(120, Math.max(5, s.estimatedMinutes ?? 15)),
+        }
+      })
 
-      // Create Card records for each step FIRST so we can link cardId
-      const cardRecords: Array<{ id: string; title: string; order: number }> = []
+      // Create or reuse Card records for each step FIRST so we can link cardId
+      const cardRecords: Array<{ id: string; title: string }> = []
       const usedPaths = new Set<string>()
       for (const s of steps) {
+        const existingCard = await prisma.card.findFirst({
+          where: { vaultId: vid, title: s.title, type: { in: ['fleeting', 'permanent'] } },
+          select: { id: true, title: true },
+        })
+        if (existingCard) {
+          cardRecords.push({ id: existingCard.id, title: existingCard.title || s.title })
+          continue
+        }
+
         let safeTitle = s.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100)
         // Deduplicate: if two steps have the same sanitized title, append a counter
         let candidatePath = `${safeTitle}.md`
@@ -640,7 +574,7 @@ Generate a learning path for "${topic}" at ${level} level.`
           }
           throw err
         })
-        cardRecords.push({ id: card.id, title: card.title || '', order: s.order })
+        cardRecords.push({ id: card.id, title: card.title || '' })
       }
 
       // Save to DB
@@ -663,7 +597,7 @@ Generate a learning path for "${topic}" at ${level} level.`
               description: s.description,
               concept: s.concept,
               estimatedMinutes: s.estimatedMinutes,
-              cardId: cardRecords.find(c => c.order === s.order)?.id || null,
+              cardId: cardRecords[i]?.id || null,
               status: i === 0 ? 'available' : 'locked',
             })),
           },
@@ -822,11 +756,22 @@ Generate a learning path for "${topic}" at ${level} level.`
 
     if (!stepId) return c.json({ success: false, error: 'STEP_ID_REQUIRED' }, 400)
 
-    const path = await prisma.learningPath.findUnique({ where: { id: pathId } })
+    let effectivePathId = pathId
+    let effectiveStepId = stepId
+    let path = await prisma.learningPath.findUnique({ where: { id: pathId } })
+    if (!path && isVirtualGraphPathId(pathId)) {
+      const vault = await resolveVault(c, userId)
+      if (vault && matchesRequestedVault(c, vault.id)) {
+        const materialized = await materializeVirtualGraphPath(userId, vault.id, pathId, stepId)
+        path = materialized.path
+        effectivePathId = materialized.path?.id ?? pathId
+        effectiveStepId = materialized.stepId ?? stepId
+      }
+    }
     if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) return c.json({ success: false, error: 'Path not found' }, 404)
 
-    const step = await prisma.learningPathStep.findUnique({ where: { id: stepId } })
-    if (!step || step.pathId !== pathId) return c.json({ success: false, error: 'Step not found' }, 404)
+    const step = await prisma.learningPathStep.findUnique({ where: { id: effectiveStepId } })
+    if (!step || step.pathId !== effectivePathId) return c.json({ success: false, error: 'Step not found' }, 404)
 
     if (step.status === 'locked') {
       return c.json({ success: false, error: 'Step is locked', currentStatus: step.status }, 400)
@@ -850,39 +795,41 @@ Generate a learning path for "${topic}" at ${level} level.`
       })
       cardId = card.id
       await prisma.learningPathStep.update({
-        where: { id: stepId },
+        where: { id: effectiveStepId },
         data: { cardId: card.id },
       })
     }
 
-    // Update step status
-    await prisma.learningPathStep.update({
-      where: { id: stepId },
-      data: { status: 'learning' },
-    })
+    if (step.status !== 'learning') {
+      await prisma.learningPathStep.update({
+        where: { id: effectiveStepId },
+        data: { status: 'learning' },
+      })
+    }
 
-    // Create a learning session for tracking
-    const session = await prisma.learningSession.create({
-      data: {
-        userId,
-        vaultId: path.vaultId,
-        domain: pathId,
-        concept: step.title,
-        status: 'active',
-        phase: 'explore',
-        metadata: JSON.stringify({
-          cardId,
-          pathId,
-          stepId,
-          pathTitle: path.name || path.topic || undefined,
-          stepTitle: step.title,
-        }),
-      },
+    const stepCard = await prisma.card.findFirst({
+      where: { id: cardId, vaultId: path.vaultId },
+      select: { id: true, title: true, type: true },
+    })
+    if (!stepCard) return c.json({ success: false, error: 'Card not found' }, 404)
+
+    const sessionMetadata = {
+      cardId,
+      pathId: effectivePathId,
+      stepId: effectiveStepId,
+      pathTitle: path.name || path.topic || undefined,
+      stepTitle: step.title,
+    }
+    const session = await ensureLearningAgentThread({
+      userId,
+      vaultId: path.vaultId,
+      card: stepCard,
+      metadata: sessionMetadata,
     })
 
     return c.json({
       success: true,
-      session: { id: session.id, stepId: step.id, cardId, pathId, pathTitle: path.name || path.topic || null },
+      session: { id: session.id, stepId: effectiveStepId, cardId, cardType: stepCard.type, pathId: effectivePathId, pathTitle: path.name || path.topic || null },
     })
   })
 
@@ -893,41 +840,96 @@ Generate a learning path for "${topic}" at ${level} level.`
       status: z.string(),
       mastery: z.number().optional(),
       sessionId: z.string().optional(),
+      evidence: z.array(z.string()).optional(),
     })),
     async (c) => {
     const userId = c.get('userId') as string
     const pathId = c.req.param('pathId')
     const stepId = c.req.param('stepId')
-    const { status, mastery = 0, sessionId } = c.req.valid('json')
+    const { status, mastery = 0, sessionId, evidence = [] } = c.req.valid('json')
 
-    if (!status) return c.json({ success: false, error: 'STATUS_REQUIRED' }, 400)
-    const validStatuses = ['locked', 'available', 'learning', 'completed', 'mastered']
-    if (!validStatuses.includes(status)) return c.json({ success: false, error: 'INVALID_STATUS' }, 400)
+    let requestedStatus: StepStatus
+    try {
+      requestedStatus = assertStepStatus(status)
+    } catch {
+      return c.json({ success: false, error: 'INVALID_STATUS' }, 400)
+    }
 
     const path = await prisma.learningPath.findUnique({ where: { id: pathId } })
     if (!path || path.userId !== userId || !matchesRequestedVault(c, path.vaultId)) return c.json({ success: false, error: 'Path not found' }, 404)
 
     const step = await prisma.learningPathStep.findUnique({ where: { id: stepId } })
     if (!step || step.pathId !== pathId) return c.json({ success: false, error: 'Step not found' }, 404)
+    let currentStatus: StepStatus
+    try {
+      currentStatus = assertStepStatus(step.status)
+    } catch {
+      return c.json({ success: false, error: 'INVALID_CURRENT_STATUS' }, 409)
+    }
+    if (!canTransitionStepStatus(currentStatus, requestedStatus)) {
+      return c.json({ success: false, error: 'INVALID_STEP_TRANSITION', from: currentStatus, to: requestedStatus }, 409)
+    }
+
+    const clientEvidence: string[] = evidence.map((item) => item.trim()).filter(Boolean)
+    let sessionEvidence: string[] = []
+    let effectiveSessionId = sessionId
+    if (sessionId) {
+      const session = await prisma.learningSession.findFirst({
+        where: { id: sessionId, userId, vaultId: path.vaultId, domain: '__agent__', metadata: { contains: stepId } },
+        select: { id: true, metadata: true },
+      })
+      if (!session) return c.json({ success: false, error: 'SESSION_NOT_FOUND' }, 404)
+      const metadata = parsePathSessionMetadata(session.metadata)
+      if (metadata.cardId !== step.cardId || metadata.pathId !== pathId || metadata.stepId !== stepId || metadata.threadStatus === 'archived') {
+        return c.json({ success: false, error: 'SESSION_NOT_BOUND_TO_STEP' }, 409)
+      }
+    } else if (step.cardId) {
+      const session = await prisma.learningSession.findFirst({
+        where: {
+          userId,
+          vaultId: path.vaultId,
+          domain: '__agent__',
+          metadata: { contains: stepId },
+          status: { not: 'completed' },
+        },
+        orderBy: { updatedAt: 'desc' },
+        select: { id: true, metadata: true },
+      })
+      if (session) {
+        const metadata = parsePathSessionMetadata(session.metadata)
+        if (metadata.cardId === step.cardId && metadata.pathId === pathId && metadata.stepId === stepId && metadata.threadStatus !== 'archived') {
+          effectiveSessionId = session.id
+        }
+      }
+    }
 
     // ── AI Evaluation when marking as completed ──
     let evaluation: { passed: boolean; feedback: string; mastery: number } | null = null
 
-    if ((status === 'completed' || status === 'mastered') && step.cardId && sessionId) {
+    if (requestedStatus === 'completed' || requestedStatus === 'mastered') {
+      if (!step.cardId) return c.json({ success: false, error: 'CARD_REQUIRED' }, 409)
+      if (!effectiveSessionId) {
+        return c.json({ success: false, error: 'EVIDENCE_REQUIRED' }, 400)
+      }
       try {
         // Read the card content for context
-        const card = await prisma.card.findUnique({ where: { id: step.cardId } })
+        const card = step.cardId ? await prisma.card.findUnique({ where: { id: step.cardId } }) : null
         const cardContent = card?.content?.slice(0, 1000) || step.title
 
         // Read recent messages from the agent session
         const recentMessages = await prisma.learningMessage.findMany({
-          where: { sessionId },
+          where: { sessionId: effectiveSessionId },
           orderBy: { timestamp: 'desc' },
           take: 20,
           select: { role: true, content: true },
         })
+        const userEvidence = recentMessages.filter((m) => m.role === 'user').map((m) => m.content.trim()).filter(Boolean)
+        if (userEvidence.length === 0) {
+          return c.json({ success: false, error: 'EVIDENCE_REQUIRED' }, 400)
+        }
+        sessionEvidence = userEvidence
 
-        if (recentMessages.length > 0) {
+        if (sessionEvidence.length > 0) {
           const conversationText = recentMessages
             .reverse()
             .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content.slice(0, 500)}`)
@@ -977,51 +979,41 @@ ${conversationText}
             mastery: Math.min(100, Math.max(0, parsed.mastery || 50)),
             feedback: String(parsed.feedback || '').slice(0, 300),
           }
+          void recordAssessmentResult({
+            userId,
+            vaultId: path.vaultId,
+            pathId,
+            stepId,
+            cardId: step.cardId,
+            sessionId: effectiveSessionId,
+            concept: step.title,
+            passed: evaluation.passed,
+            mastery: evaluation.mastery,
+            feedback: evaluation.feedback,
+            evidence: sessionEvidence.slice(0, 10),
+            clientContext: clientEvidence.slice(0, 10),
+          })
 
-          // ── Auto-upgrade card if passed ──
+          // ── Save assessment observation; promotion remains a separate gated flow. ──
           if (evaluation.passed) {
-            const upgradedCard = await prisma.card.update({
-              where: { id: step.cardId },
-              data: { type: 'permanent' },
-            })
-            const cardThreadSessions = await prisma.learningSession.findMany({
-              where: {
-                userId,
-                vaultId: upgradedCard.vaultId,
-                domain: '__agent__',
-                metadata: { contains: upgradedCard.id },
-              },
-              select: { id: true, metadata: true },
-            })
-            await Promise.all(
-              cardThreadSessions
-                .filter((session) => parsePathSessionMetadata(session.metadata).cardId === upgradedCard.id)
-                .map((session) => prisma.learningSession.update({
-                  where: { id: session.id },
-                  data: {
-                    status: 'completed',
-                    phase: 'archived',
-                    metadata: JSON.stringify({
-                      ...parsePathSessionMetadata(session.metadata),
-                      cardId: upgradedCard.id,
-                      cardType: 'permanent',
-                      threadStatus: 'archived',
-                      archivedAt: new Date().toISOString(),
-                    }),
-                  },
-                })),
-            )
-
-            // Save observation to vaultMemory
             await prisma.vaultMemory.create({
               data: {
-                vaultId: upgradedCard.vaultId,
+                vaultId: path.vaultId,
                 key: `eval_${stepId}_${Date.now()}`,
                 value: JSON.stringify({
                   concept: step.title,
                   passed: true,
                   mastery: evaluation.mastery,
                   feedback: evaluation.feedback,
+                  category: 'assessment',
+                  sourceObjectType: 'learningSession',
+                  sourceObjectId: effectiveSessionId,
+                  evidence: sessionEvidence.slice(0, 5).map((item, index) => ({
+                    sourceObjectType: 'learningSession',
+                    sourceObjectId: effectiveSessionId,
+                    summary: `evidence ${index + 1}: ${item}`,
+                  })),
+                  clientContext: clientEvidence.slice(0, 5),
                 }),
                 category: 'observation',
               },
@@ -1029,77 +1021,57 @@ ${conversationText}
           }
         }
       } catch (err: unknown) {
-        console.warn('[Learning] AI evaluation failed, proceeding without:', err instanceof Error ? err.message : String(err))
-        // Don't block progress update if AI eval fails
-        evaluation = { passed: false, feedback: 'AI 评估暂时不可用，步骤已标记为完成。', mastery }
+        console.warn('[Learning] AI evaluation failed:', err instanceof Error ? err.message : String(err))
+        return c.json({ success: false, error: 'ASSESSMENT_UNAVAILABLE' }, 503)
+      }
+      if (!evaluation) return c.json({ success: false, error: 'EVIDENCE_REQUIRED' }, 400)
+      if (!evaluation.passed) {
+        await createAssessmentAdjustmentRecord({
+          pathId,
+          stepTitle: step.title,
+          evaluation,
+          sessionEvidence,
+          clientEvidence,
+        })
+        return c.json({ success: false, error: 'ASSESSMENT_FAILED', evaluation }, 422)
       }
     }
 
     // Update step
     const finalMastery = evaluation?.mastery ?? mastery
-    const finalStatus = evaluation?.passed ? 'mastered' : status
+    const finalStatus: StepStatus = evaluation?.passed ? 'mastered' : requestedStatus
     await prisma.learningPathStep.update({
       where: { id: stepId },
       data: { status: finalStatus, mastery: Math.min(100, Math.max(0, finalMastery)) },
     })
-    if (sessionId && (finalStatus === 'completed' || finalStatus === 'mastered')) {
-      await prisma.learningSession.updateMany({
-        where: { id: sessionId, userId, vaultId: path.vaultId },
-        data: { status: 'completed', phase: 'completed' },
-      }).catch((err: unknown) => {
-        console.warn('[Learning] Failed to complete learning session:', err instanceof Error ? err.message : String(err))
-      })
-    }
+    void emitDomainEvent({
+      userId,
+      vaultId: path.vaultId,
+      aggregateType: 'learningPathStep',
+      aggregateId: stepId,
+      eventType: finalStatus === 'completed' || finalStatus === 'mastered' ? 'StepCompleted' : 'StepUpdated',
+      payload: {
+        pathId,
+        cardId: step.cardId,
+        title: step.title,
+        status: finalStatus,
+        mastery: Math.min(100, Math.max(0, finalMastery)),
+        assessment: evaluation ? {
+          passed: evaluation.passed,
+          mastery: evaluation.mastery,
+          feedback: evaluation.feedback,
+        } : null,
+      },
+    })
 
     // ── Path adjustment: write adjustment history record ──
-    if (evaluation) {
-      const scorePercentage = evaluation.mastery
-      let adjustmentType: string
-      let adjustmentData: Record<string, unknown>
-
-      if (scorePercentage < 60) {
-        adjustmentType = 'add_review'
-        adjustmentData = {
-          type: 'add_review',
-          concept: step.title,
-          description: `掌握度 ${scorePercentage}%，建议复习"${step.title}"相关概念`,
-          reason: `评估分数低于60%，需要加强复习`,
-        }
-      } else if (scorePercentage >= 95) {
-        adjustmentType = 'skip_ahead'
-        adjustmentData = {
-          type: 'skip_ahead',
-          concept: step.title,
-          description: `掌握度 ${scorePercentage}%，可以跳过后续相关步骤`,
-          reason: `评估分数达到95%以上，可以加速学习`,
-        }
-      } else {
-        adjustmentType = 'adjust_difficulty'
-        adjustmentData = {
-          type: 'adjust_difficulty',
-          concept: step.title,
-          description: `掌握度 ${scorePercentage}%，继续正常学习进度`,
-          reason: `评估分数在60-95%之间，保持当前节奏`,
-        }
-      }
-
-      await prisma.pathAdjustmentHistory.create({
-        data: {
-          pathId,
-          adjustment: JSON.stringify(adjustmentData),
-          trigger: 'assessment',
-          appliedAt: new Date(),
-          feedback: JSON.stringify({
-            assessmentRef: {
-              toolName: 'code_challenge',
-              score: evaluation.mastery,
-              maxScore: 100,
-            },
-            userFeedback: evaluation.feedback,
-          }),
-        },
-      }).catch((err: unknown) => {
-        console.warn('[Learning] Failed to create adjustment record:', err instanceof Error ? err.message : String(err))
+    if (evaluation && sessionEvidence.length > 0) {
+      await createAssessmentAdjustmentRecord({
+        pathId,
+        stepTitle: step.title,
+        evaluation,
+        sessionEvidence,
+        clientEvidence,
       })
     }
 
@@ -1167,7 +1139,8 @@ ${conversationText}
       doneCount,
       totalSteps,
       evaluation,
-      cardUpgraded: evaluation?.passed ?? false,
+      cardUpgraded: false,
+      promotionRequired: evaluation?.passed ?? false,
     })
   })
 
@@ -1292,25 +1265,7 @@ ${conversationText}
       // profileCache 无效，返回初始值
     }
 
-    // 如果缓存不存在，返回初始画像
-    const initialProfile = {
-      userId,
-      dimensions: {
-        depth: { score: 0, confidence: 0, evidence: [] },
-        breadth: { score: 0, confidence: 0, evidence: [] },
-        connection: { score: 0, confidence: 0, evidence: [] },
-        expression: { score: 0, confidence: 0, evidence: [] },
-        application: { score: 0, confidence: 0, evidence: [] },
-        learning_pace: { score: 0, confidence: 0, evidence: [] },
-      },
-      updateHistory: [],
-      sessionCount: 0,
-      totalLearningMinutes: 0,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    }
-
-    return c.json({ success: true, profile: initialProfile })
+    return c.json({ success: true, profile: null, status: 'empty', evidence: [] })
   })
 
   // POST /api/learning/update-profile — 更新学习画像（会话结束时调用）
@@ -1322,9 +1277,21 @@ ${conversationText}
     const body = await c.req.json().catch(() => ({}))
     const sessionData = body.sessionData as Record<string, unknown>
     const userHistory = (body.userHistory as Record<string, unknown>[]) || []
+    const requestedEvidence = Array.isArray(body.evidence)
+      ? body.evidence.map((item: unknown) => String(item).trim()).filter(Boolean)
+      : []
 
     if (!sessionData) {
       return c.json({ success: false, error: 'SESSION_DATA_REQUIRED' }, 400)
+    }
+    const sessionEvidence = [
+      ...requestedEvidence,
+      typeof sessionData.sessionId === 'string' ? `session:${sessionData.sessionId}` : '',
+      Array.isArray(sessionData.messages) && sessionData.messages.length > 0 ? `messages:${sessionData.messages.length}` : '',
+      typeof sessionData.assessmentScore === 'number' ? `assessment:${sessionData.assessmentScore}` : '',
+    ].filter(Boolean)
+    if (sessionEvidence.length === 0) {
+      return c.json({ success: false, error: 'EVIDENCE_REQUIRED' }, 400)
     }
 
     try {
@@ -1349,6 +1316,7 @@ ${conversationText}
       const mergedProfile = {
         ...currentProfile,
         ...updates,
+        evidence: sessionEvidence,
         sessionCount: (typeof currentProfile?.sessionCount === 'number' ? currentProfile.sessionCount : 0) + 1,
         updatedAt: Date.now(),
       }
@@ -1358,15 +1326,40 @@ ${conversationText}
         where: { id: vault.id },
         select: { profileCache: true },
       })
-      await prisma.vault.update({
-        where: { id: vault.id },
-        data: {
-          profileCache: setProfileCacheEntry(vaultWithLatestCache?.profileCache ?? vault.profileCache, 'educationProfile', mergedProfile),
-          updatedAt: new Date(),
+      await prisma.$transaction([
+        prisma.vault.update({
+          where: { id: vault.id },
+          data: {
+            profileCache: setProfileCacheEntry(vaultWithLatestCache?.profileCache ?? vault.profileCache, 'educationProfile', mergedProfile),
+            updatedAt: new Date(),
+          },
+        }),
+        prisma.educationProfileHistory.create({
+          data: {
+            vaultId: vault.id,
+            profile: JSON.stringify(mergedProfile),
+            snapshot: JSON.stringify({
+              sessionCount: mergedProfile.sessionCount,
+              evidence: sessionEvidence.slice(0, 10),
+              updatedAt: mergedProfile.updatedAt,
+            }),
+          },
+        }),
+      ])
+      void emitDomainEvent({
+        userId,
+        vaultId: vault.id,
+        aggregateType: 'educationProfile',
+        aggregateId: vault.id,
+        eventType: 'ProfileUpdated',
+        payload: {
+          sessionCount: mergedProfile.sessionCount,
+          evidence: sessionEvidence.slice(0, 10),
+          updatedAt: mergedProfile.updatedAt,
         },
       })
 
-      return c.json({ success: true, profile: mergedProfile })
+      return c.json({ success: true, profile: mergedProfile, evidence: sessionEvidence })
     } catch (error) {
       console.error('Failed to update profile:', error)
       return c.json({ success: false, error: 'PROFILE_UPDATE_FAILED' }, 500)
@@ -1462,29 +1455,6 @@ ${conversationText}
         }
       })
 
-      // Merge engine in-memory adjustments (non-fatal)
-      try {
-        const enginePath = buildEnginePath(path.id, userId, path)
-        const engineHistory = pathAdjustmentEngine.getAdjustmentHistory(enginePath)
-        if (engineHistory.length > 0) {
-          const dbIds = new Set(adjustmentHistory.map((a: { adjustmentId?: string; id?: string }) => a.adjustmentId || a.id))
-          for (const ea of engineHistory) {
-            if (!dbIds.has(ea.adjustmentId)) {
-              adjustmentHistory.push({
-                id: ea.adjustmentId,
-                adjustmentId: ea.adjustmentId,
-                appliedAt: ea.appliedAt,
-                triggeredBy: ea.triggeredBy,
-                adjustment: ea.adjustment,
-                assessmentRef: ea.assessmentRef || null,
-                feedback: ea.userFeedback || null,
-                _fromEngine: true,
-              } as unknown as (typeof adjustmentHistory)[number])
-            }
-          }
-        }
-      } catch { /* non-fatal */ }
-
       // 计算进度信息
       const completedSteps = path.steps.filter(s => s.status === 'completed').length
       const progress = path.totalSteps > 0 ? Math.round((completedSteps / path.totalSteps) * 100) : 0
@@ -1537,6 +1507,86 @@ ${conversationText}
         return c.json({ success: false, error: 'ADJUSTMENT_NOT_FOUND' }, 404)
       }
 
+      const appliedChanges: string[] = []
+      let parsedAdjustment: Record<string, unknown> | null = null
+      if (adjustmentRecord?.adjustment) {
+        try {
+          const parsed = JSON.parse(adjustmentRecord.adjustment)
+          if (parsed && typeof parsed === 'object') parsedAdjustment = parsed as Record<string, unknown>
+        } catch {}
+      }
+
+      if (parsedAdjustment?.type === 'add_review') {
+        const lastOrder = path.steps.reduce((max, step) => Math.max(max, step.order), 0)
+        const concept = typeof parsedAdjustment.concept === 'string' && parsedAdjustment.concept.trim()
+          ? parsedAdjustment.concept.trim()
+          : path.topic
+        const reviewStep = await prisma.learningPathStep.create({
+          data: {
+            pathId,
+            order: lastOrder + 1,
+            title: `复习：${concept}`,
+            description: typeof parsedAdjustment.description === 'string'
+              ? parsedAdjustment.description
+              : `回顾并重新解释「${concept}」。`,
+            concept,
+            chapter: '复习',
+            status: 'available',
+            mastery: 0,
+            estimatedMinutes: 15,
+          },
+        })
+        await prisma.learningPath.update({
+          where: { id: pathId },
+          data: { totalSteps: path.totalSteps + 1 },
+        })
+        appliedChanges.push(`created_review_step:${reviewStep.id}`)
+      }
+
+      if (parsedAdjustment?.type === 'skip_ahead') {
+        const nextLocked = path.steps.find((step) => step.status === 'locked')
+        if (nextLocked) {
+          await prisma.learningPathStep.update({
+            where: { id: nextLocked.id },
+            data: { status: 'available' },
+          })
+          appliedChanges.push(`unlocked_step:${nextLocked.id}`)
+        }
+      }
+
+      if (parsedAdjustment?.type === 'adjust_difficulty') {
+        const concept = typeof parsedAdjustment.concept === 'string' ? parsedAdjustment.concept.trim() : ''
+        const anchorStep = concept
+          ? path.steps.find((step) => step.title === concept || step.concept === concept)
+          : null
+        const nextLocked = path.steps.find((step) =>
+          step.status === 'locked' && (!anchorStep || step.order > anchorStep.order)
+        )
+        if (nextLocked) {
+          await prisma.learningPathStep.update({
+            where: { id: nextLocked.id },
+            data: {
+              status: 'available',
+              estimatedMinutes: Math.max(10, Math.min(30, nextLocked.estimatedMinutes || 15)),
+            },
+          })
+          appliedChanges.push(`paced_unlock_step:${nextLocked.id}`)
+        }
+
+        const laterLocked = path.steps.filter((step) =>
+          step.status === 'locked' &&
+          step.id !== nextLocked?.id &&
+          (!anchorStep || step.order > anchorStep.order)
+        )
+        if (laterLocked.length > 0) {
+          await prisma.learningPathStep.updateMany({
+            where: { id: { in: laterLocked.map((step) => step.id) } },
+            data: { estimatedMinutes: 15 },
+          })
+          appliedChanges.push(`normalized_estimates:${laterLocked.length}`)
+        }
+      }
+
       // Update the Prisma adjustment record with acceptance metadata. The DB is
       // the source of truth; the in-memory engine may be empty after a restart.
       if (adjustmentRecord) {
@@ -1548,12 +1598,13 @@ ${conversationText}
               ...existingFeedback,
               acceptedAt: Date.now(),
               userFeedback: feedback || null,
+              appliedChanges,
             }),
           },
         }).catch(() => { /* non-fatal */ })
       }
 
-      return c.json({ success: true })
+      return c.json({ success: true, appliedChanges })
     } catch (error) {
       console.error('[Learning] Failed to accept adjustment:', error)
       return c.json({ success: false, error: 'ACCEPT_FAILED' }, 500)
@@ -1701,11 +1752,46 @@ ${conversationText}
     const document = (body.document as string)?.trim()
     const topic = (body.topic as string)?.trim()
     const sourceTitle = (body.sourceTitle as string)?.trim() || topic
+    const source = ((body.source as string) || (body.citation as string) || (body.sourceTitle as string) || '').trim()
 
     if (!document || !topic) return c.json({ success: false, error: 'DOCUMENT_AND_TOPIC_REQUIRED' }, 400)
     if (document.length > 50000) return c.json({ success: false, error: 'DOCUMENT_TOO_LONG' }, 400)
+    if (!source) return c.json({ success: false, error: 'SOURCE_REQUIRED' }, 400)
 
     const vid = vault.id
+    const contentHash = createHash('sha256').update(document).digest('hex')
+    void recordSourceDocument({
+      userId,
+      vaultId: vid,
+      title: sourceTitle || topic,
+      source,
+      contentHash,
+      document,
+      metadata: { topic },
+    })
+    const existingImportCards = await prisma.card.findMany({
+      where: { vaultId: vid, content: { contains: `contentHash: ${contentHash}` } },
+      select: { id: true, title: true, type: true },
+      take: 50,
+    })
+    if (existingImportCards.length > 0) {
+      return c.json({
+        success: true,
+        stats: { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: existingImportCards.length, errors: 0 },
+        importResult: {
+          source,
+          sourceTitle,
+          contentHash,
+          created: 0,
+          skipped: existingImportCards.length,
+          errors: [],
+          duplicate: true,
+        },
+        docTitle: sourceTitle,
+        concepts: existingImportCards.filter((card) => card.type === 'fleeting').map((card) => card.title).filter(Boolean),
+        pathId: null,
+      })
+    }
 
     // ── Step 1: AI 解析文档 ──────────────────────────────────────────
     const parsePrompt = `你是一个知识萃取专家。将以下文档解析为结构化的知识卡片体系。
@@ -1778,20 +1864,29 @@ ${document}`
       })
     }
 
-    const stats = { permanent: 0, fleeting: 0, literature: 0, edges: 0 }
+    const stats = { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: 0, errors: 0 }
+    const errors: Array<{ item: string; error: string }> = []
     const conceptNames: string[] = []
 
-    // ── Step 3: 批量创建 permanent 卡片 ───────────────────────────────
+    // ── Step 3: 批量创建 extracted concept fleeting 卡片 ─────────────
     for (const concept of parsed.concepts) {
-      const content = `## ${concept.name}\n\n${concept.description}\n\n---\n_从「${docTitle}」自动生成_`
+      const content = `## ${concept.name}\n\n${concept.description}\n\n---\nsource: ${source}\nsourceTitle: ${docTitle}\ncontentHash: ${contentHash}\n_从「${docTitle}」自动生成_`
       const path = `${clusterName}/${concept.name.replace(/[/\\]/g, '_')}.md`
-      await prisma.card.upsert({
-        where: { vaultId_path: { vaultId: vid, path } },
-        update: { content, type: 'permanent', clusterId: cluster.id },
-        create: { vaultId: vid, clusterId: cluster.id, path, title: concept.name, content, type: 'permanent', tags: JSON.stringify([topic, 'core']) },
-      })
-      conceptNames.push(concept.name)
-      stats.permanent++
+      try {
+        const existing = await prisma.card.findUnique({ where: { vaultId_path: { vaultId: vid, path } }, select: { id: true } })
+        await prisma.card.upsert({
+          where: { vaultId_path: { vaultId: vid, path } },
+          update: { content, type: 'fleeting', clusterId: cluster.id },
+          create: { vaultId: vid, clusterId: cluster.id, path, title: concept.name, content, type: 'fleeting', tags: JSON.stringify([topic, 'core', 'extracted-concept', 'imported']) },
+        })
+        conceptNames.push(concept.name)
+        stats.fleeting++
+        if (existing) stats.skipped++
+        else stats.created++
+      } catch (err) {
+        stats.errors++
+        errors.push({ item: concept.name, error: err instanceof Error ? err.message : String(err) })
+      }
     }
 
     // ── Step 4: 批量创建 fleeting 卡片（带 WikiLink） ──────────────────
@@ -1799,25 +1894,36 @@ ${document}`
       const linksSection = fc.linksTo && fc.linksTo.length > 0
         ? '\n\n**关联概念：** ' + [...new Set(fc.linksTo)].map(t => `[[${t}]]`).join('、')
         : ''
-      const content = `## ${fc.title}\n\n${fc.content}${linksSection}\n\n---\n_从「${docTitle}」自动生成_`
+      const content = `## ${fc.title}\n\n${fc.content}${linksSection}\n\n---\nsource: ${source}\nsourceTitle: ${docTitle}\ncontentHash: ${contentHash}\n_从「${docTitle}」自动生成_`
       const path = `${clusterName}/${fc.title.replace(/[/\\]/g, '_')}.md`
-      await prisma.card.upsert({
-        where: { vaultId_path: { vaultId: vid, path } },
-        update: { content, type: 'fleeting', clusterId: cluster.id },
-        create: { vaultId: vid, clusterId: cluster.id, path, title: fc.title, content, type: 'fleeting', tags: JSON.stringify([topic, 'idea']) },
-      })
-      stats.fleeting++
+      try {
+        const existing = await prisma.card.findUnique({ where: { vaultId_path: { vaultId: vid, path } }, select: { id: true } })
+        await prisma.card.upsert({
+          where: { vaultId_path: { vaultId: vid, path } },
+          update: { content, type: 'fleeting', clusterId: cluster.id },
+          create: { vaultId: vid, clusterId: cluster.id, path, title: fc.title, content, type: 'fleeting', tags: JSON.stringify([topic, 'idea', 'imported']) },
+        })
+        stats.fleeting++
+        if (existing) stats.skipped++
+        else stats.created++
+      } catch (err) {
+        stats.errors++
+        errors.push({ item: fc.title, error: err instanceof Error ? err.message : String(err) })
+      }
     }
 
     // ── Step 5: 创建 literature 卡片 ──────────────────────────────────
-    const litContent = `## ${docTitle}\n\n> 本文档由 import-document 导入。\n\n**主题：** ${topic}\n\n**核心概念：** ${conceptNames.map(n => `[[${n}]]`).join('、')}\n\n---\n_自动生成文献记录_`
+    const litContent = `## ${docTitle}\n\n> 本文档由 import-document 导入。\n\n**主题：** ${topic}\n**来源：** ${source}\n**内容哈希：** ${contentHash}\n\n**核心概念：** ${conceptNames.map(n => `[[${n}]]`).join('、')}\n\n---\n\n${document.slice(0, 12000)}\n\n---\n_自动生成文献记录_`
     const litPath = `${clusterName}/${docTitle.replace(/[/\\]/g, '_')}.md`
+    const existingLit = await prisma.card.findUnique({ where: { vaultId_path: { vaultId: vid, path: litPath } }, select: { id: true } })
     await prisma.card.upsert({
       where: { vaultId_path: { vaultId: vid, path: litPath } },
       update: { content: litContent, type: 'literature', clusterId: cluster.id },
-      create: { vaultId: vid, clusterId: cluster.id, path: litPath, title: docTitle, content: litContent, type: 'literature', tags: JSON.stringify([topic, 'reference']) },
+      create: { vaultId: vid, clusterId: cluster.id, path: litPath, title: docTitle, content: litContent, type: 'literature', tags: JSON.stringify([topic, 'reference', 'imported']) },
     })
     stats.literature++
+    if (existingLit) stats.skipped++
+    else stats.created++
 
     // ── Step 6: 同步 WikiLink → edges ────────────────────────────────
     const cardsWithLinks = await prisma.card.findMany({
@@ -1837,10 +1943,21 @@ ${document}`
       const sourceId = cardIdByName.get(rel.from)
       const targetId = cardIdByName.get(rel.to)
       if (!sourceId || !targetId) continue
-      const existing = await prisma.edge.findFirst({ where: { vaultId: vid, sourceId, targetId, type: rel.type } })
+      let edgeType: string
+      try {
+        edgeType = normalizeEdgeType(rel.type)
+      } catch (err) {
+        stats.errors++
+        errors.push({ item: `${rel.from}->${rel.to}`, error: err instanceof Error ? err.message : String(err) })
+        continue
+      }
+      const existing = await prisma.edge.findFirst({ where: { vaultId: vid, sourceId, targetId, type: edgeType } })
       if (!existing) {
-        await prisma.edge.create({ data: { vaultId: vid, sourceId, targetId, type: rel.type, weight: 1.0 } })
+        await prisma.edge.create({ data: { vaultId: vid, sourceId, targetId, type: edgeType, weight: 1.0 } })
         stats.edges++
+        stats.created++
+      } else {
+        stats.skipped++
       }
     }
 
@@ -1880,13 +1997,18 @@ ${document}`
       const pathMatch = pathCleaned.match(/\{[\s\S]*\}/)
       if (pathMatch) {
         const pathData = JSON.parse(pathMatch[0])
+        const rawSteps = Array.isArray(pathData.steps) ? pathData.steps : []
         const learningPath = await prisma.learningPath.create({
-          data: { userId, vaultId: vid, name: pathData.name || `${topic} 学习路径`, topic, description: pathData.description || '', difficulty: pathData.difficulty || 'beginner', source: 'ai', status: 'active', totalSteps: (pathData.steps || []).length },
+          data: { userId, vaultId: vid, name: pathData.name || `${topic} 学习路径`, topic, description: pathData.description || '', difficulty: normalizeDifficulty(pathData.difficulty), source: 'import-document', status: 'active', totalSteps: rawSteps.length },
         })
-        for (const step of pathData.steps || []) {
+        const usedOrders = new Set<number>()
+        for (const [index, step] of rawSteps.entries()) {
           const matchingCard = allCards.find(c => c.title === step.concept)
+          let order = sanitizeOrder(step.order, index + 1)
+          while (usedOrders.has(order)) order++
+          usedOrders.add(order)
           await prisma.learningPathStep.create({
-            data: { pathId: learningPath.id, order: step.order, title: step.title, description: step.description, concept: step.concept, chapter: step.chapter || '基础', status: step.order === 1 ? 'available' : 'locked', estimatedMinutes: step.estimatedMinutes || 15, cardId: matchingCard?.id || null },
+            data: { pathId: learningPath.id, order, title: step.title, description: step.description, concept: step.concept, chapter: step.chapter || '基础', status: index === 0 ? 'available' : 'locked', estimatedMinutes: step.estimatedMinutes || 15, cardId: matchingCard?.id || null },
           })
         }
         pathId = learningPath.id
@@ -1896,10 +2018,34 @@ ${document}`
       // Non-fatal: cards were still created
     }
 
+    void emitDomainEvent({
+      userId,
+      vaultId: vid,
+      aggregateType: 'documentImport',
+      aggregateId: pathId || contentHash,
+      eventType: 'DocumentImported',
+      payload: {
+        source,
+        sourceTitle: docTitle,
+        contentHash,
+        conceptCount: conceptNames.length,
+        pathId,
+        stats,
+      },
+    })
+
     // ── Step 9: 返回结果 ─────────────────────────────────────────────
     return c.json({
       success: true,
       stats,
+      importResult: {
+        source,
+        sourceTitle: docTitle,
+        contentHash,
+        created: stats.created,
+        skipped: stats.skipped,
+        errors,
+      },
       docTitle,
       concepts: conceptNames,
       pathId,
@@ -1921,6 +2067,131 @@ ${document}`
   })
 
 export default app
+
+const VIRTUAL_GRAPH_PATH_PREFIX = '__graph_virtual__:'
+const VIRTUAL_GRAPH_STEP_PREFIX = '__graph_step__:'
+
+function isVirtualGraphPathId(pathId: string): boolean {
+  return pathId.startsWith(VIRTUAL_GRAPH_PATH_PREFIX)
+}
+
+function parseVirtualGraphPathId(pathId: string): string | null {
+  return isVirtualGraphPathId(pathId) ? pathId.slice(VIRTUAL_GRAPH_PATH_PREFIX.length) || null : null
+}
+
+function parseVirtualGraphStepId(stepId: string): { clusterId: string; cardId: string } | null {
+  if (!stepId.startsWith(VIRTUAL_GRAPH_STEP_PREFIX)) return null
+  const [, clusterId, cardId] = stepId.split(':')
+  return clusterId && cardId ? { clusterId, cardId } : null
+}
+
+function graphDifficultyLabel(cardCount: number, permRatio: number): string {
+  if (permRatio > 0.6) return '进阶'
+  if (cardCount > 5) return '综合'
+  return '基础'
+}
+
+function buildVirtualGraphPaths(clusters: Array<{
+  id: string
+  name: string
+  cards: Array<{ id: string; title: string | null; type: string; content: string | null; createdAt: Date }>
+}>) {
+  return clusters
+    .filter((cluster) => cluster.cards.length > 0)
+    .map((cluster) => {
+      const permCards = cluster.cards.filter((card) => card.type === 'permanent')
+      const doneCount = permCards.length
+      const totalCount = cluster.cards.length
+      return {
+        id: `${VIRTUAL_GRAPH_PATH_PREFIX}${cluster.id}`,
+        name: `${cluster.name}学习路径`,
+        description: '基于当前知识图谱生成的推荐路径，执行时才会写入数据库。',
+        topic: cluster.name,
+        color: '#ff4466',
+        difficulty: graphDifficultyLabel(totalCount, doneCount / Math.max(totalCount, 1)),
+        source: 'graph_virtual',
+        status: 'active',
+        steps: cluster.cards.map((card, index) => {
+          const completed = card.type === 'permanent'
+          return {
+            index: index + 1,
+            id: `${VIRTUAL_GRAPH_STEP_PREFIX}${cluster.id}:${card.id}`,
+            cardId: card.id,
+            name: card.title || `卡片 ${index + 1}`,
+            status: completed ? 'completed' as const : 'available' as const,
+            desc: completed ? '已固化知识' : '待深化理解',
+            concept: card.title || undefined,
+            chapter: cluster.name,
+            mastery: completed ? Math.min(100, Math.round(70 + (card.content?.length ?? 0) / 20)) : 0,
+            estimatedMinutes: 10,
+            prerequisites: [],
+          }
+        }),
+        totalCount,
+        doneCount,
+        progress: totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0,
+        createdAt: cluster.cards[0]?.createdAt,
+        updatedAt: cluster.cards[cluster.cards.length - 1]?.createdAt,
+      }
+    })
+}
+
+async function materializeVirtualGraphPath(userId: string, vaultId: string, virtualPathId: string, virtualStepId: string): Promise<{
+  path: Awaited<ReturnType<typeof prisma.learningPath.findUnique>>
+  stepId: string | null
+}> {
+  const clusterId = parseVirtualGraphPathId(virtualPathId)
+  if (!clusterId) return { path: null, stepId: null }
+
+  const cluster = await prisma.cluster.findFirst({
+    where: { id: clusterId, vaultId },
+    include: {
+      cards: {
+        select: { id: true, title: true, type: true, content: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  })
+  if (!cluster || cluster.cards.length === 0) return { path: null, stepId: null }
+
+  const permCards = cluster.cards.filter((card) => card.type === 'permanent')
+  const path = await prisma.learningPath.create({
+    data: {
+      vaultId,
+      userId,
+      name: `${cluster.name}学习路径`,
+      topic: cluster.name,
+      source: 'graph',
+      difficulty: graphDifficultyLabel(cluster.cards.length, permCards.length / Math.max(cluster.cards.length, 1)),
+      totalSteps: cluster.cards.length,
+      doneSteps: permCards.length,
+      status: 'active',
+      steps: {
+        create: cluster.cards.map((card, index) => {
+          const completed = card.type === 'permanent'
+          return {
+            cardId: card.id,
+            title: card.title || `卡片 ${index + 1}`,
+            description: completed ? '已固化知识' : '待深化理解',
+            order: index + 1,
+            concept: card.title || null,
+            chapter: cluster.name,
+            status: completed ? 'completed' : 'available',
+            mastery: completed ? Math.min(100, Math.round(70 + (card.content?.length ?? 0) / 20)) : 0,
+          }
+        }),
+      },
+    },
+    include: { steps: { orderBy: { order: 'asc' } } },
+  })
+
+  const parsedStep = parseVirtualGraphStepId(virtualStepId)
+  const targetStep = parsedStep
+    ? path.steps.find((step) => step.cardId === parsedStep.cardId)
+    : path.steps.find((step) => step.status === 'available') ?? path.steps[0]
+
+  return { path, stepId: targetStep?.id ?? null }
+}
 
 /** Build an engine-compatible LearningPath from Prisma records */
 function buildEnginePath(pathId: string, userId: string, path: {
@@ -2036,6 +2307,122 @@ function safeParseJsonArray(raw: string | null | undefined): string[] {
   }
 }
 
+async function ensureLearningAgentThread(params: {
+  userId: string
+  vaultId: string
+  card: { id: string; title: string | null; type: string }
+  metadata: {
+    cardId: string
+    pathId: string
+    stepId: string
+    pathTitle?: string
+    stepTitle?: string
+  }
+}) {
+  const archived = params.card.type === 'permanent'
+  const possibleSessions = await prisma.learningSession.findMany({
+    where: {
+      userId: params.userId,
+      vaultId: params.vaultId,
+      domain: '__agent__',
+      metadata: { contains: params.card.id },
+    },
+    orderBy: { updatedAt: 'desc' },
+  })
+  const existing = possibleSessions.find((session) => parsePathSessionMetadata(session.metadata).cardId === params.card.id)
+
+  if (!archived) {
+    await prisma.learningSession.updateMany({
+      where: { userId: params.userId, vaultId: params.vaultId, domain: '__agent__', status: 'active' },
+      data: { status: 'paused' },
+    })
+  }
+
+  const metadata = {
+    ...(existing ? parsePathSessionMetadata(existing.metadata) : {}),
+    ...params.metadata,
+    cardType: params.card.type,
+    sessionKind: 'card-thread',
+    threadStatus: archived ? 'archived' : 'active',
+    ...(archived ? { archivedAt: new Date().toISOString() } : {}),
+  }
+
+  if (existing) {
+    return prisma.learningSession.update({
+      where: { id: existing.id },
+      data: {
+        status: archived ? 'completed' : 'active',
+        phase: archived ? 'archived' : 'card-thread',
+        concept: params.card.title || params.metadata.stepTitle || '卡片线程',
+        metadata: JSON.stringify(metadata),
+      },
+    })
+  }
+
+  return prisma.learningSession.create({
+    data: {
+      userId: params.userId,
+      vaultId: params.vaultId,
+      domain: '__agent__',
+      concept: params.card.title || params.metadata.stepTitle || '卡片线程',
+      status: archived ? 'completed' : 'active',
+      phase: archived ? 'archived' : 'card-thread',
+      metadata: JSON.stringify(metadata),
+    },
+  })
+}
+
+async function createAssessmentAdjustmentRecord(params: {
+  pathId: string
+  stepTitle: string
+  evaluation: { passed: boolean; feedback: string; mastery: number }
+  sessionEvidence: string[]
+  clientEvidence?: string[]
+}) {
+  const scorePercentage = params.evaluation.mastery
+  const adjustmentData = scorePercentage < 60
+    ? {
+        type: 'add_review',
+        concept: params.stepTitle,
+        description: `掌握度 ${scorePercentage}%，建议复习"${params.stepTitle}"相关概念`,
+        reason: '评估未通过，需要补充复习和练习',
+      }
+    : scorePercentage >= 95
+      ? {
+          type: 'skip_ahead',
+          concept: params.stepTitle,
+          description: `掌握度 ${scorePercentage}%，可以跳过后续相关步骤`,
+          reason: '评估分数达到95%以上，可以加速学习',
+        }
+      : {
+          type: 'adjust_difficulty',
+          concept: params.stepTitle,
+          description: `掌握度 ${scorePercentage}%，继续正常学习进度`,
+          reason: '评估分数在60-95%之间，保持当前节奏',
+        }
+
+  await prisma.pathAdjustmentHistory.create({
+    data: {
+      pathId: params.pathId,
+      adjustment: JSON.stringify(adjustmentData),
+      trigger: 'assessment',
+      appliedAt: new Date(),
+      feedback: JSON.stringify({
+        assessmentRef: {
+          toolName: 'learning_step_assessment',
+          score: params.evaluation.mastery,
+          maxScore: 100,
+          evidence: params.sessionEvidence.slice(0, 5),
+          clientContext: params.clientEvidence?.slice(0, 5) ?? [],
+        },
+        userFeedback: params.evaluation.feedback,
+      }),
+    },
+  }).catch((err: unknown) => {
+    console.warn('[Learning] Failed to create adjustment record:', err instanceof Error ? err.message : String(err))
+  })
+}
+
 function parsePathSessionMetadata(metadata?: string | null): {
   cardId?: string
   cardType?: string
@@ -2044,6 +2431,7 @@ function parsePathSessionMetadata(metadata?: string | null): {
   pathTitle?: string
   stepId?: string
   stepTitle?: string
+  sessionKind?: string
   archivedAt?: string
 } {
   if (!metadata) return {}
@@ -2056,6 +2444,7 @@ function parsePathSessionMetadata(metadata?: string | null): {
       pathTitle?: unknown
       stepId?: unknown
       stepTitle?: unknown
+      sessionKind?: unknown
       archivedAt?: unknown
     }
     return {
@@ -2066,6 +2455,7 @@ function parsePathSessionMetadata(metadata?: string | null): {
       pathTitle: typeof parsed.pathTitle === 'string' ? parsed.pathTitle : undefined,
       stepId: typeof parsed.stepId === 'string' ? parsed.stepId : undefined,
       stepTitle: typeof parsed.stepTitle === 'string' ? parsed.stepTitle : undefined,
+      sessionKind: typeof parsed.sessionKind === 'string' ? parsed.sessionKind : undefined,
       archivedAt: typeof parsed.archivedAt === 'string' ? parsed.archivedAt : undefined,
     }
   } catch {

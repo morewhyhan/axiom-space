@@ -102,10 +102,10 @@ export default function DashboardLeft() {
         <div>
           <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f8)' }}>STATUS</span>
           <div className="text-[13px] leading-tight text-white/90 font-bold mt-0.5">
-            {loading ? 'Loading...' : !stats ? 'No data — seed the database' : agentOnline ? 'System stable — learning active' : 'Agent offline — check connection'}
+            {loading ? 'Loading...' : !stats ? 'No data in this vault yet' : agentOnline ? 'System stable — learning active' : 'Agent offline — check connection'}
           </div>
           <p className="text-white/30 leading-snug mt-0.5" style={{ fontSize: 'var(--f10)' }}>
-            {!stats ? "Run `npx tsx scripts/seed-cs408.ts` to populate."
+            {!stats ? 'Create or import cards to populate this workspace.'
               : agentOnline ? 'Knowledge base healthy. Agent online. All connections nominal.'
               : 'Knowledge base loaded but Agent unreachable. Some features may be limited.'}
           </p>

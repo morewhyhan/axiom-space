@@ -18,6 +18,7 @@ interface ConceptRecord {
   accessCount: number
   weakAreas: string[]
   strongAreas: string[]
+  evidence: string[]
 }
 
 async function resolveVaultId(): Promise<string | null> {
@@ -59,8 +60,9 @@ export class CapabilityTrackingProvider extends MemoryProvider {
           masteryLevel: { type: 'number', description: '掌握程度 0-100' },
           weakAreas: { type: 'string', description: '薄弱环节描述' },
           strongAreas: { type: 'string', description: '掌握较好的方面' },
+          evidence: { type: 'string', description: '本次掌握度判断的依据，不能为空' },
         },
-        required: ['concept', 'masteryLevel'],
+        required: ['concept', 'masteryLevel', 'evidence'],
       },
     }]
   }
@@ -76,6 +78,7 @@ export class CapabilityTrackingProvider extends MemoryProvider {
       if (existing) {
         existing.accessCount++
         existing.lastAccessed = Date.now()
+        existing.evidence.push(userContent.slice(0, 300))
       } else {
         this.capabilities.set(concept, {
           conceptId: concept,
@@ -86,6 +89,7 @@ export class CapabilityTrackingProvider extends MemoryProvider {
           accessCount: 1,
           weakAreas: [],
           strongAreas: [],
+          evidence: [userContent.slice(0, 300)],
         })
       }
     }
@@ -128,12 +132,14 @@ export class CapabilityTrackingProvider extends MemoryProvider {
     return []
   }
 
-  async updateMastery(concept: string, level: number): Promise<void> {
+  async updateMastery(concept: string, level: number, evidence?: string): Promise<void> {
+    if (!evidence?.trim()) return
     const record = this.capabilities.get(concept)
     if (record) {
       record.masteryLevel = level
       record.status = level >= 80 ? 'mastered' : level >= 30 ? 'learning' : 'known'
       record.lastAccessed = Date.now()
+      record.evidence.push(evidence.trim().slice(0, 300))
       await this._save()
     }
   }
@@ -150,8 +156,12 @@ export class CapabilityTrackingProvider extends MemoryProvider {
           status: r.status as ConceptRecord['status'],
           lastAccessed: r.lastAccessed.getTime(),
           accessCount: r.accessCount,
-          weakAreas: JSON.parse(r.weakAreas || '[]'),
-          strongAreas: JSON.parse(r.strongAreas || '[]'),
+          weakAreas: JSON.parse(r.weakAreas || '[]').filter((item: unknown) => typeof item === 'string') as string[],
+          strongAreas: JSON.parse(r.strongAreas || '[]').filter((item: unknown) => typeof item === 'string') as string[],
+          evidence: [
+            ...JSON.parse(r.weakAreas || '[]').filter((item: unknown) => typeof item === 'object').map((item: any) => String(item.evidence || '')).filter(Boolean),
+            ...JSON.parse(r.strongAreas || '[]').filter((item: unknown) => typeof item === 'object').map((item: any) => String(item.evidence || '')).filter(Boolean),
+          ],
         })
       }
     } catch { /* 首次启动无数据 */ }
@@ -170,7 +180,7 @@ export class CapabilityTrackingProvider extends MemoryProvider {
             status: record.status,
             accessCount: record.accessCount,
             weakAreas: JSON.stringify(record.weakAreas),
-            strongAreas: JSON.stringify(record.strongAreas),
+            strongAreas: JSON.stringify([...record.strongAreas, { evidence: record.evidence.slice(-5) }]),
           },
           update: {
             masteryLevel: record.masteryLevel,
@@ -178,7 +188,7 @@ export class CapabilityTrackingProvider extends MemoryProvider {
             lastAccessed: new Date(record.lastAccessed),
             accessCount: record.accessCount,
             weakAreas: JSON.stringify(record.weakAreas),
-            strongAreas: JSON.stringify(record.strongAreas),
+            strongAreas: JSON.stringify([...record.strongAreas, { evidence: record.evidence.slice(-5) }]),
           },
         })
       }

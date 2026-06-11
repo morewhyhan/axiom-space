@@ -19,6 +19,7 @@ export interface OrchestratorDeps {
   resourceExists: (type: ResourceType, literatureTitle: string) => Promise<boolean>;
   saveResource: (type: ResourceType, literatureTitle: string, content: string) => Promise<void>;
   saveResourceFile?: (literatureTitle: string, fileName: string, content: string) => Promise<void>;
+  skipMp4Render?: boolean;
   onProgress?: (event: {
     type: ResourceType;
     status: 'queued' | 'generating' | 'validating' | 'saving' | 'ready' | 'rendering' | 'completed' | 'failed';
@@ -82,14 +83,15 @@ const RESOURCE_PROMPTS: Record<ResourceType, string> = {
 1. 使用 Mermaid mindmap 语法，根节点为 ((学习主题))
 2. 至少 4 个一级分支，每分支至少 3 个叶子节点
 3. 输出纯 Mermaid mindmap 代码块，以 \`\`\`mermaid 开头
+4. 子节点直接写文本，不要使用 [] 方括号，不要使用 & / < > 等特殊符号
 
 格式参考：
 \`\`\`mermaid
 mindmap
   root((主题))
     分支A
-      [子概念1]
-      [子概念2]
+      子概念1
+      子概念2
 \`\`\``,
 
   quiz: `你是 AXIOM 练习题库生成专家。请根据以下内容生成一套练习题。
@@ -98,6 +100,8 @@ mindmap
 1. 至少 5 道题，覆盖基础概念理解（3 题）+ 进阶应用分析（2 题）
 2. 输出严格 JSON 数组格式，不要加任何其他文字
 3. 每题包含：type, question, options, answer, explanation
+4. 每题只能有一个正确答案，answer 必须对应 options 里的选项编号
+5. 禁止重复选项、重复题目、模型自我纠错、笔误说明或不确定表达
 
 输出格式：
 [
@@ -131,20 +135,14 @@ mindmap
 2. 每个场景包含 2-5 个元素（text/code/shape）
 3. 总时长控制在 30-90 秒
 
-以严格 JSON 格式返回：
+用 \`\`\`json 代码块包裹，以严格 JSON 格式返回：
 {
   "scenes": [{ "id": "intro", "duration": 6, "backgroundColor": "#f0f4f8", "elements": [...] }],
   "width": 1920, "height": 1080, "fps": 30
 }`,
 
-  svg: `你是 AXIOM SVG 图表生成专家。请根据以下内容生成一个 SVG 矢量图。
+  svg: `You are an SVG expert. Create an SVG diagram. Output inside \`\`\`svg code block. Include <svg> tags with proper namespace. Use 800x600 viewBox. Include at least 6 elements (rect, circle, text, line) with Chinese labels.`,
 
-要求：
-1. 输出纯 SVG XML（以 <svg 开头，</svg> 结尾），不要 Markdown 包裹
-2. 尺寸 800×600，viewBox="0 0 800 600"
-3. 使用中文字体 font-family="system-ui, sans-serif"
-4. 配色：主色 #6366f1 / #a855f7 / #22d3ee / #22c55e
-5. 输出纯 SVG，不要加解释文字`,
 
   diagram: `你是 AXIOM Mermaid 图表生成专家。请根据以下内容生成一个 Mermaid 图表。
 
@@ -225,6 +223,8 @@ function validateResource(type: ResourceType, content: string): string | null {
         if (arr.length < 3) return `Need at least 3 questions, got ${arr.length}`;
         for (let i = 0; i < arr.length; i++) {
           if (!arr[i].question || !arr[i].answer) return `Question ${i + 1} missing question/answer`;
+          const issue = validateQuizQuestion(arr[i], i);
+          if (issue) return issue;
         }
       } catch { return 'Quiz is not valid JSON'; }
       break;
@@ -256,7 +256,9 @@ function validateResource(type: ResourceType, content: string): string | null {
     }
     case 'diagram': {
       if (len < 100) return `Too short (${len} chars, min 100)`;
-      if (!text.includes('mermaid')) return 'Missing mermaid keyword';
+      const validDiagramTypes = ['flowchart', 'sequenceDiagram', 'classDiagram', 'pie', 'stateDiagram', 'gantt', 'erDiagram', 'journey', 'gitGraph', 'graph'];
+      const hasValidType = validDiagramTypes.some((dt) => text.includes(dt));
+      if (!hasValidType) return `Missing valid Mermaid diagram type (got: ${text.slice(0, 50)})`;
       break;
     }
     case 'docx': case 'pdf': {
@@ -326,7 +328,13 @@ export class ResourceGenerationOrchestrator {
         }
 
         const prompt = RESOURCE_PROMPTS[type];
-        let content = await this.deps.callLLM(prompt, context);
+        let content: string;
+        try {
+          content = await this.deps.callLLM(prompt, context);
+        } catch (error: any) {
+          if (type !== 'svg') throw error;
+          content = this.buildFallbackSvg(topic);
+        }
         let cleaned = this.cleanOutput(type, content);
 
         this.deps.onProgress?.({
@@ -335,7 +343,11 @@ export class ResourceGenerationOrchestrator {
           progress: 55,
           message: '正在校验生成结果',
         });
-        const validationError = validateResource(type, cleaned);
+        let validationError = validateResource(type, cleaned);
+        if (type === 'svg' && validationError) {
+          cleaned = this.buildFallbackSvg(topic);
+          validationError = validateResource(type, cleaned);
+        }
         if (validationError) {
           this.state.failGenerating(type, validationError);
           this.deps.onProgress?.({
@@ -422,7 +434,7 @@ export class ResourceGenerationOrchestrator {
           path: resourcePath,
           fileName: RESOURCE_FILE_MAP[type],
         });
-        if (type === 'video' && videoConfig) {
+        if (type === 'video' && videoConfig && !this.deps.skipMp4Render) {
           void this.renderAndSaveMp4(videoConfig, literatureTitle, type).catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
             this.deps.onProgress?.({
@@ -470,21 +482,77 @@ export class ResourceGenerationOrchestrator {
     if (type === 'mindmap' || type === 'diagram') {
       const mmMatch = text.match(/```(?:mermaid)?\s*\n?([\s\S]*?)```/);
       if (mmMatch) text = mmMatch[1].trim();
+      if (type === 'mindmap') text = this.sanitizeMindmap(text);
     }
     if (type === 'quiz') {
       const jsonMatch = text.match(/(\[[\s\S]*\])/);
       if (jsonMatch) text = jsonMatch[1].trim();
     }
     if (type === 'video') {
+      // 支持 markdown 代码块包裹：```json ... ```
+      const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/);
+      if (fenceMatch) text = fenceMatch[1].trim();
+      // 从内容中提取 JSON 对象
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) text = jsonMatch[0].trim();
     }
     if (type === 'svg') {
+      // 支持 markdown 代码块包裹：```svg/html/xml ... ```
+      const fenceMatch = text.match(/```(?:svg|html|xml)?\s*\n?([\s\S]*?)```/);
+      if (fenceMatch) text = fenceMatch[1].trim();
+      // 从 HTML 或纯文本中提取 <svg>...</svg>
       const svgMatch = text.match(/(<svg[\s\S]*?<\/svg>)/);
       if (svgMatch) text = svgMatch[1].trim();
     }
 
     return text.trim();
+  }
+
+  private sanitizeMindmap(raw: string): string {
+    return raw
+      .split('\n')
+      .map((line) => {
+        if (!line.trim()) return line;
+        const indent = line.match(/^\s*/)?.[0] ?? '';
+        const trimmed = line.trim();
+        if (trimmed === 'mindmap' || trimmed.startsWith('root((')) return line;
+        return indent + trimmed
+          .replace(/^\[|\]$/g, '')
+          .replace(/[\[\]<>]/g, '')
+          .replace(/&/g, 'and')
+          .replace(/\//g, ' or ')
+          .replace(/[()]/g, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      })
+      .join('\n');
+  }
+
+  private buildFallbackSvg(topic: string): string {
+    const safeTopic = escapeXml(topic || 'Learning Topic');
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="800" height="600">
+  <rect width="800" height="600" rx="24" fill="#f8fafc"/>
+  <text x="400" y="58" text-anchor="middle" font-family="Microsoft YaHei, Arial, sans-serif" font-size="26" font-weight="700" fill="#172033">${safeTopic}</text>
+  <text x="400" y="88" text-anchor="middle" font-family="Microsoft YaHei, Arial, sans-serif" font-size="15" fill="#526179">自动降级 SVG 图解</text>
+  <g stroke="#355070" stroke-width="3" fill="none">
+    <line x1="400" y1="145" x2="205" y2="260"/>
+    <line x1="400" y1="145" x2="400" y2="280"/>
+    <line x1="400" y1="145" x2="595" y2="260"/>
+    <line x1="205" y1="260" x2="290" y2="420"/>
+    <line x1="400" y1="280" x2="400" y2="420"/>
+    <line x1="595" y1="260" x2="510" y2="420"/>
+  </g>
+  <g font-family="Microsoft YaHei, Arial, sans-serif" font-size="17" font-weight="700" text-anchor="middle">
+    <circle cx="400" cy="145" r="52" fill="#355070"/><text x="400" y="151" fill="#fff">主题</text>
+    <circle cx="205" cy="260" r="48" fill="#6d597a"/><text x="205" y="266" fill="#fff">概念</text>
+    <circle cx="400" cy="280" r="48" fill="#b56576"/><text x="400" y="286" fill="#fff">方法</text>
+    <circle cx="595" cy="260" r="48" fill="#e56b6f"/><text x="595" y="266" fill="#fff">应用</text>
+    <rect x="235" y="395" width="110" height="58" rx="14" fill="#eaac8b"/><text x="290" y="431" fill="#172033">证据</text>
+    <rect x="345" y="395" width="110" height="58" rx="14" fill="#f3c677"/><text x="400" y="431" fill="#172033">练习</text>
+    <rect x="455" y="395" width="110" height="58" rx="14" fill="#84a98c"/><text x="510" y="431" fill="#172033">复盘</text>
+  </g>
+  <text x="400" y="530" text-anchor="middle" font-family="Microsoft YaHei, Arial, sans-serif" font-size="14" fill="#526179">AI SVG 生成失败时使用模板兜底，保证资源可预览且结构完整。</text>
+</svg>`;
   }
 
   private async runGuardrails(type: ResourceType, content: string): Promise<GuardrailReport> {
@@ -580,4 +648,32 @@ export class ResourceGenerationOrchestrator {
   private resourceDir(literatureTitle: string): string {
     return `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
   }
+}
+
+function validateQuizQuestion(question: any, index: number): string | null {
+  const prefix = `Question ${index + 1}`;
+  const options = Array.isArray(question.options) ? question.options.map((option: unknown) => String(option).trim()) : [];
+  if (options.length < 4) return `${prefix} needs at least 4 options`;
+  if (new Set(options).size !== options.length) return `${prefix} has duplicate options`;
+
+  const answer = String(question.answer ?? '').trim();
+  const optionLabels = options.map((option: string) => option.match(/^([A-Z])[\.\s:：]/)?.[1]).filter(Boolean);
+  if (/^[A-Z]$/.test(answer) && optionLabels.length > 0 && !optionLabels.includes(answer)) {
+    return `${prefix} answer ${answer} does not match options`;
+  }
+
+  const combined = [question.question, question.answer, question.explanation, ...options].join('\n');
+  if (/(我需重新检查|重新检查|笔误|复制错误|答案设为|应该是|可能是正确|不确定|I need to|mistake|typo)/i.test(combined)) {
+    return `${prefix} contains self-correction or uncertain wording`;
+  }
+  return null;
+}
+
+function escapeXml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }

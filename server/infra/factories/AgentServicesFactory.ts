@@ -25,6 +25,7 @@ import type { IAgentInfrastructure } from '@/server/core/agent/pipeline/interfac
 
 export interface AgentServicesFactoryConfig {
   vaultPath?: string;
+  vaultId?: string;
   userId?: string;
   config?: Partial<AxiomAgentConfig>;
 }
@@ -50,7 +51,7 @@ export function createServerAgentServices(cfg: AgentServicesFactoryConfig = {}) 
   const fileStorage = getFileStorage(cfg.userId)
 
   // Learning facade — wired to Prisma for persistence
-  const database = new PrismaLearningAdapter({ dataPath: cfg.vaultPath, userId: cfg.userId });
+  const database = new PrismaLearningAdapter({ dataPath: cfg.vaultPath, userId: cfg.userId, vaultId: cfg.vaultId });
   const patternExtractor = new PatternExtractorAdapter({
     trajectoryPath: `${cfg.vaultPath || ''}/trajectories`,
   });

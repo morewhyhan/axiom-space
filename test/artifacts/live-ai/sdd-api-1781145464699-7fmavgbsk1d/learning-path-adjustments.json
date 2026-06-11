@@ -1,0 +1,37 @@
+{
+  "runId": "sdd-api-1781145464699-7fmavgbsk1d",
+  "capturedAt": "2026-06-11T02:45:46.868Z",
+  "vaultId": "9827ec34-4f55-451d-92b4-78a981979a74",
+  "pathId": "9a319ebc-b946-4d06-90d8-368edc3d3618",
+  "response": {
+    "success": true,
+    "path": {
+      "id": "9a319ebc-b946-4d06-90d8-368edc3d3618",
+      "topic": "Adjustment Topic",
+      "totalSteps": 1,
+      "completedSteps": 1,
+      "progress": 100
+    },
+    "adjustmentHistory": [
+      {
+        "id": "d76813f4-5eb6-4f2f-a7bd-f3ad1f1f8eed",
+        "adjustmentId": "d76813f4-5eb6-4f2f-a7bd-f3ad1f1f8eed",
+        "appliedAt": 1781145946846,
+        "trigger": "assessment",
+        "triggeredBy": "assessment",
+        "adjustment": {
+          "type": "add_review",
+          "concept": "Adjustment Step",
+          "description": "掌握度 50%，建议复习\"Adjustment Step\"相关概念",
+          "reason": "评估分数低于60%，需要加强复习"
+        },
+        "assessmentRef": {
+          "toolName": "code_challenge",
+          "score": 50,
+          "maxScore": 100
+        },
+        "feedback": "用户仅声称可以解释，但未给出任何实际内容，无法判断其对概念的掌握程度。"
+      }
+    ]
+  }
+}

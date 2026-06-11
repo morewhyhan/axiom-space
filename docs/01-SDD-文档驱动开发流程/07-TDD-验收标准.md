@@ -88,6 +88,8 @@ Vault
   -> 更新 Graph / RAG / Cognition
 ```
 
+![AXIOM Space TDD 验收门图](./assets/tdd-acceptance-gates.png)
+
 ### 3.1 主链路输入输出
 
 | 环节 | 输入 | 输出 | 正确标准 | 错误标准 |

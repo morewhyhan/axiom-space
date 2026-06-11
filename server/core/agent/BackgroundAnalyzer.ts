@@ -10,6 +10,7 @@ import { prisma } from '@/lib/db'
 import { emitNotification } from './notification-bus'
 import { getCurrentVaultId } from './agent-context'
 import type { UserProfile } from '@/server/core/learning/memory/profile-manager'
+import { assertCardType } from '@/server/core/domain/contracts'
 
 const ANALYSIS_PROMPT = `你是后台分析 Agent。分析对话记录，只提取有价值的信息。
 
@@ -70,6 +71,7 @@ interface AnalysisResult {
 export class BackgroundAnalyzer {
   private vaultPath: string = '';
   private lastAnalyzedIndex: number = 0;
+  private latestEvidence: string[] = [];
 
   setVaultPath(path: string) { this.vaultPath = path; }
   reset(index = 0) { this.lastAnalyzedIndex = Math.max(0, index); }
@@ -88,6 +90,11 @@ export class BackgroundAnalyzer {
       (m.role === 'user' || m.role === 'assistant') && m.content && m.content.length > 10
     );
     if (relevant.length === 0) return null;
+    this.latestEvidence = relevant
+      .filter((message) => message.role === 'user')
+      .slice(-3)
+      .map((message) => message.content.trim().slice(0, 300))
+      .filter(Boolean);
 
     const text = relevant.map(m =>
       `[${m.role === 'user' ? '用户' : '助手'}]: ${m.content.slice(0, 500)}`
@@ -100,7 +107,7 @@ export class BackgroundAnalyzer {
       const result: AnalysisResult = JSON.parse(jsonMatch[0]);
 
       if (result.profile && Object.keys(result.profile).length > 0) {
-        await this.applyProfileUpdate(result.profile);
+        await this.applyProfileUpdate(result.profile, this.latestEvidence);
       }
 
       if (result.skills && result.skills.length > 0) {
@@ -109,14 +116,14 @@ export class BackgroundAnalyzer {
           if (conf < 0.5) continue;
           if (!skill.description || skill.description.length < 30) continue;
           if (!skill.name || !skill.category) continue;
-          await this.applySkillUpdate(skill);
+          await this.applySkillUpdate(skill, this.latestEvidence);
         }
       }
 
       if (result.cards && result.cards.length > 0) {
         for (const card of result.cards) {
           if (!card.title || !card.content) continue;
-          await this.applyCardUpdate(card);
+          await this.applyCardUpdate(card, this.latestEvidence);
         }
       }
 
@@ -124,7 +131,7 @@ export class BackgroundAnalyzer {
       if (result.observations && result.observations.length > 0) {
         for (const obsText of result.observations) {
           if (typeof obsText === 'string' && obsText.trim().length > 0) {
-            await this.writeObservation(obsText.trim());
+            await this.writeObservation(obsText.trim(), this.latestEvidence);
           }
         }
       }
@@ -138,14 +145,15 @@ export class BackgroundAnalyzer {
 
   // ── Internal ──
 
-  private async applyProfileUpdate(updates: ProfileUpdate) {
+  private async applyProfileUpdate(updates: ProfileUpdate, evidence: string[]) {
     try {
+      if (evidence.length === 0) return
       // Use DB-backed profile-manager instead of file storage
       const { loadUserProfile, saveUserProfile, mergeProfileUpdate } = await import(
         '@/server/core/learning/memory/profile-manager'
       );
       const existing = (await loadUserProfile(this.vaultPath) ?? {} as UserProfile);
-      const merged = mergeProfileUpdate(existing, updates);
+      const merged = mergeProfileUpdate(existing, { ...updates, evidence });
       await saveUserProfile(this.vaultPath, merged);
       console.log('[Event] axiom:profile-updated');
       const baVaultId = getCurrentVaultId();
@@ -155,8 +163,9 @@ export class BackgroundAnalyzer {
     } catch (err) { console.debug('[BackgroundAnalyzer] Profile update failed:', err); }
   }
 
-  private async applySkillUpdate(skill: SkillUpdate) {
+  private async applySkillUpdate(skill: SkillUpdate, evidence: string[]) {
     try {
+      if (evidence.length === 0) return
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
       const vaultId = getCurrentVaultId()
       if (!vaultId) return
@@ -179,38 +188,51 @@ export class BackgroundAnalyzer {
           tags: JSON.stringify(['auto-extracted']),
           confidence,
           source: 'conversation',
-          evidence: skill.description || '',
+          evidence: evidence.join('\n'),
         },
         update: {
           description: skill.description || '',
           confidence,
+          evidence: evidence.join('\n'),
           demonstratedAt: new Date(),
         },
       })
     } catch (err) { console.debug('[BackgroundAnalyzer] Skill update failed:', err); }
   }
 
-  private async applyCardUpdate(card: CardUpdate) {
+  private async applyCardUpdate(card: CardUpdate, evidence: string[]) {
     try {
+      if (evidence.length === 0) return
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
       const vid = getCurrentVaultId()
       if (!vid) return
 
+      const type = assertCardType(card.type)
+      if (type === 'permanent') {
+        const qualityChecks = [
+          /定义|是|指|means|is a/i.test(card.content),
+          /例如|比如|举例|Example|for example/i.test(card.content),
+          /\[\[.+?\]\]/.test(card.content),
+          /应用|使用|场景|用途|use case/i.test(card.content),
+        ]
+        if (qualityChecks.some((passed) => !passed)) return
+      }
       const safeTitle = card.title.replace(/[/\\:*?"<>|]/g, '-').slice(0, 100)
       await prisma.card.create({
         data: {
           vaultId: vid,
-          path: `${card.type === 'permanent' ? 'permanent' : 'fleeting'}/${safeTitle}.md`,
+          path: `${type === 'permanent' ? 'permanent' : 'fleeting'}/${safeTitle}.md`,
           title: card.title,
-          content: `# ${card.title}\n\n${card.content}`,
-          type: card.type,
+          content: `# ${card.title}\n\n${card.content}\n\n---\nevidence:\n${evidence.map((item) => `- ${item}`).join('\n')}`,
+          type,
         },
       })
     } catch (err) { console.debug('[BackgroundAnalyzer] Card creation failed:', err); }
   }
 
-  private async writeObservation(text: string) {
+  private async writeObservation(text: string, evidence: string[]) {
     try {
+      if (evidence.length === 0) return
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
       const vid = getCurrentVaultId()
       if (!vid) return
@@ -218,7 +240,17 @@ export class BackgroundAnalyzer {
         data: {
           vaultId: vid,
           key: `obs_${Date.now()}`,
-          value: JSON.stringify({ text }),
+          value: JSON.stringify({
+            text,
+            category: 'background-analysis',
+            sourceObjectType: 'derived',
+            sourceObjectId: `background:${Date.now()}`,
+            evidence: evidence.map((item, index) => ({
+              sourceObjectType: 'derived',
+              sourceObjectId: `message:${index}`,
+              summary: item,
+            })),
+          }),
           category: 'observation',
         },
       })

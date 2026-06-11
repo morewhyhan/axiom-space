@@ -53,9 +53,10 @@ export function useGalaxyData() {
       return { nodes, edges, clusters } as GalaxyData
     },
     enabled: !!currentVaultId,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchOnWindowFocus: false,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   })
 
   return { data: query.data ?? null, loading: query.isLoading, error: query.error?.message ?? null }

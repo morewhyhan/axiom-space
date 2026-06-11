@@ -11,6 +11,23 @@ import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '../agent-context';
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage';
 import { getVaultPath, resolvePath } from './helpers';
+import { createHash } from 'node:crypto';
+import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
+import { CARD_TYPES, type CardType, validatePermanentCardContent } from '@/server/core/domain/contracts';
+
+type ParsedImportCard = { title: string; content: string; type: CardType; tags: string[] };
+
+type PendingImportCards = {
+  target: string;
+  vaultId: string;
+  cards: ParsedImportCard[];
+  conflicts: ParsedImportCard[];
+  total: number;
+  createdAt: number;
+};
+
+const pendingImportCards = new Map<string, PendingImportCards>();
+const CARD_TYPE_SET = new Set<string>(CARD_TYPES);
 
 /**
  * 清理破损链接
@@ -22,6 +39,7 @@ const cleanupBrokenLinksTool = createTool(
   Type.Object({
     dry_run: Type.Optional(Type.Boolean({ description: '预览模式，只显示不执行，默认 true' })),
     auto_fix: Type.Optional(Type.Boolean({ description: '自动修复模式（删除无效链接），默认 false' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行自动修复时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -77,6 +95,21 @@ const cleanupBrokenLinksTool = createTool(
 
       let fixedCount = 0;
       if (!isDryRun && params.auto_fix) {
+        const target = cleanupBrokenLinksTarget(vaultId);
+        if (!consumeConfirmationToken('cleanup_broken_links', target, params.confirmationToken)) {
+          const confirmation = createConfirmationToken('cleanup_broken_links', target);
+          return {
+            content: [{ type: 'text', text: `将自动标记 ${fixOperations.length} 个破损链接。请确认后执行。` }],
+            details: {
+              awaitingConfirmation: true,
+              confirmationToken: confirmation.token,
+              expiresAt: confirmation.expiresAt,
+              target,
+              brokenLinkCount: fixOperations.length,
+            },
+          };
+        }
+
         for (const card of cards) {
           const cardOps = fixOperations.filter(op => op.cardId === card.id);
           if (cardOps.length === 0 || !card.content) continue;
@@ -138,6 +171,7 @@ const mergeDuplicateCardsTool = createTool(
     card_b: Type.String({ description: '要合并的卡片 B 的标题或路径' }),
     keep_both: Type.Optional(Type.Boolean({ description: '保留两张卡片（仅在 B 中添加对 A 的引用），默认 false' })),
     preview: Type.Optional(Type.Boolean({ description: '预览合并结果而不实际执行，默认 true' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行合并时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -150,7 +184,7 @@ const mergeDuplicateCardsTool = createTool(
       // 查找两张卡片
       const findCard = async (ident: string) => {
         return prisma.card.findFirst({
-          where: { vaultId, OR: [{ title: { contains: ident } }, { path: { contains: ident.replace(/\.md$/, '') } }] },
+          where: { vaultId, OR: [{ id: ident }, { title: { contains: ident } }, { path: { contains: ident.replace(/\.md$/, '') } }] },
           select: { id: true, title: true, content: true, type: true, path: true },
         });
       };
@@ -208,6 +242,23 @@ ${mergedContent.slice(0, 500)}...
         return { content: [{ type: 'text', text: report }], details: { cardA: cardA.title, cardB: cardB.title, preview: true } };
       }
 
+      const mergeTarget = mergeDuplicateCardsTarget(cardA.id, cardB.id, !!params.keep_both);
+      if (!consumeConfirmationToken('merge_duplicate_cards', mergeTarget, params.confirmationToken)) {
+        const confirmation = createConfirmationToken('merge_duplicate_cards', mergeTarget);
+        return {
+          content: [{ type: 'text', text: `将合并 "${cardB.title}" 到 "${cardA.title}"。请确认后执行。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            target: mergeTarget,
+            cardA: cardA.title,
+            cardB: cardB.title,
+            keep_both: !!params.keep_both,
+          },
+        };
+      }
+
       // 执行合并
       if (params.keep_both) {
         // 仅在 B 中添加指向 A 的引用
@@ -223,21 +274,35 @@ ${mergedContent.slice(0, 500)}...
           data: { content: mergedContent },
         });
 
-        // 更新指向 B 的边为指向 A
-        await prisma.edge.updateMany({
-          where: { vaultId, targetId: cardB.id },
-          data: { targetId: cardA.id },
+        // 更新指向 B 的边为指向 A；若重定向后重复或自环，则删除旧边。
+        const affectedEdges = await prisma.edge.findMany({
+          where: {
+            vaultId,
+            OR: [{ sourceId: cardB.id }, { targetId: cardB.id }],
+          },
         });
-        await prisma.edge.updateMany({
-          where: { vaultId, sourceId: cardB.id },
-          data: { sourceId: cardA.id },
-        });
+        for (const edge of affectedEdges) {
+          const sourceId = edge.sourceId === cardB.id ? cardA.id : edge.sourceId;
+          const targetId = edge.targetId === cardB.id ? cardA.id : edge.targetId;
+          if (sourceId === targetId) {
+            await prisma.edge.delete({ where: { id: edge.id } });
+            continue;
+          }
+          const duplicate = await prisma.edge.findFirst({
+            where: { vaultId, sourceId, targetId, type: edge.type, id: { not: edge.id } },
+            select: { id: true },
+          });
+          if (duplicate) {
+            await prisma.edge.delete({ where: { id: edge.id } });
+          } else {
+            await prisma.edge.update({
+              where: { id: edge.id },
+              data: { sourceId, targetId },
+            });
+          }
+        }
 
-        // 标记 B 为合并状态（软删除）
-        await prisma.card.update({
-          where: { id: cardB.id },
-          data: { content: `> 此卡片已与 [[${cardA.title}]] 合并。\n\n${cardB.content || ''}`, type: 'fleeting' },
-        });
+        await prisma.card.delete({ where: { id: cardB.id } });
       }
 
       return {
@@ -465,6 +530,7 @@ const importCardsTool = createTool(
     format: Type.String({ description: '数据格式: "json"(结构化JSON) / "csv"(CSV) / "markdown"(Markdown文件) / "obsidian"(Obsidian格式)' }),
     default_type: Type.Optional(Type.String({ description: '默认卡片类型: "fleeting" / "permanent" / "literature"，默认 fleeting' })),
     dry_run: Type.Optional(Type.Boolean({ description: '预览模式，只显示不导入，默认 true' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行导入时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -474,78 +540,66 @@ const importCardsTool = createTool(
       }
 
       const isDryRun = params.dry_run !== false;
-      const defaultType = params.default_type || 'fleeting';
-      const parsed: Array<{ title: string; content: string; type: string; tags: string[] }> = [];
+      let parsed: ParsedImportCard[] = [];
+      let conflicts: ParsedImportCard[] = [];
+      let newCards: ParsedImportCard[] = [];
+      let totalParsed = 0;
 
-      // 解析不同格式
-      try {
-        if (params.format === 'json') {
-          const json = JSON.parse(params.data);
-          const cardsArray = json.cards || json.data || (Array.isArray(json) ? json : [json]);
-          for (const item of cardsArray) {
-            if (item.title || item.content) {
-              parsed.push({
-                title: item.title || '导入卡片',
-                content: item.content || '',
-                type: item.type || item.cardType || defaultType,
-                tags: item.tags || [],
-              });
-            }
-          }
-        } else if (params.format === 'csv') {
-          const lines = params.data.split('\n').filter(l => l.trim());
-          const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-          const titleIdx = headers.indexOf('title');
-          const contentIdx = headers.indexOf('content');
-          const typeIdx = headers.indexOf('type');
-
-          for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
-            if (cols.length >= 2) {
-              parsed.push({
-                title: titleIdx >= 0 ? cols[titleIdx] : `导入卡片 ${i}`,
-                content: contentIdx >= 0 ? cols[contentIdx] : cols.join(', '),
-                type: typeIdx >= 0 ? cols[typeIdx] : defaultType,
-                tags: [],
-              });
-            }
-          }
-        } else if (params.format === 'markdown' || params.format === 'obsidian') {
-          // 按 ## 或 --- 分割
-          const sections = params.data.split(/\n(?=# |## |---\n)/);
-          for (const section of sections) {
-            if (!section.trim()) continue;
-            const titleMatch = section.match(/^#+\s+(.+)/m);
-            const title = titleMatch ? titleMatch[1].trim() : '导入卡片';
-            const content = section.trim();
-            parsed.push({ title, content, type: defaultType, tags: [] });
-          }
+      if (params.confirmationToken) {
+        const pending = pendingImportCards.get(params.confirmationToken);
+        if (!pending) {
+          return {
+            content: [{ type: 'text', text: '确认请求已失效，无法恢复待导入的卡片内容。请重新发起导入。' }],
+            details: { error: 'Pending import payload expired' },
+          };
         }
-      } catch (parseErr) {
-        return {
-          content: [{ type: 'text', text: `解析失败: ${(parseErr as Error).message}\n请检查数据格式是否正确。` }],
-          details: { error: `Parse error: ${(parseErr as Error).message}` },
-        };
+        if (!consumeConfirmationToken('import_cards', pending.target, params.confirmationToken)) {
+          return {
+            content: [{ type: 'text', text: '导入卡片需要重新确认。' }],
+            details: { error: 'Invalid or missing confirmationToken' },
+          };
+        }
+        if (pending.vaultId !== vaultId) {
+          return {
+            content: [{ type: 'text', text: '确认请求所属 Vault 与当前 Vault 不一致，已拒绝导入。' }],
+            details: { error: 'Vault mismatch' },
+          };
+        }
+        newCards = pending.cards;
+        conflicts = pending.conflicts;
+        totalParsed = pending.total;
+        parsed = [...newCards, ...conflicts];
+        pendingImportCards.delete(params.confirmationToken);
+      } else {
+        const parsedRaw = parseImportCardsPayload(params.data, params.format, params.default_type || 'fleeting');
+        const normalized = validateParsedImportCards(parsedRaw);
+        if (!normalized.success) {
+          return {
+            content: [{ type: 'text', text: normalized.error }],
+            details: normalized.details,
+          };
+        }
+
+        parsed = normalized.cards;
+        if (parsed.length === 0) {
+          return { content: [{ type: 'text', text: '未能从数据中解析出任何卡片' }], details: { error: 'No cards parsed' } };
+        }
+
+        const existingTitles = new Set(
+          (await prisma.card.findMany({ where: { vaultId }, select: { title: true } }))
+            .map(c => c.title?.toLowerCase()).filter(Boolean)
+        );
+        conflicts = parsed.filter(c => existingTitles.has(c.title.toLowerCase()));
+        newCards = parsed.filter(c => !existingTitles.has(c.title.toLowerCase()));
+        totalParsed = parsed.length;
       }
 
-      if (parsed.length === 0) {
-        return { content: [{ type: 'text', text: '未能从数据中解析出任何卡片' }], details: { error: 'No cards parsed' } };
-      }
-
-      // 冲突检测
-      const existingTitles = new Set(
-        (await prisma.card.findMany({ where: { vaultId }, select: { title: true } }))
-          .map(c => c.title?.toLowerCase()).filter(Boolean)
-      );
-      const conflicts = parsed.filter(c => existingTitles.has(c.title.toLowerCase()));
-      const newCards = parsed.filter(c => !existingTitles.has(c.title.toLowerCase()));
-
-      if (isDryRun) {
+      if (!params.confirmationToken && isDryRun) {
         const report = `
 ## 卡片导入预览
 
 **格式**: ${params.format}
-**总计**: ${parsed.length} 张卡片
+**总计**: ${totalParsed} 张卡片
 **新增**: ${newCards.length} 张
 **冲突**: ${conflicts.length} 张（已存在）
 
@@ -559,7 +613,32 @@ ${conflicts.length > 5 ? `... 还有 ${conflicts.length - 5} 张冲突` : ''}
 
 使用 dry_run=false 执行导入。
 `;
-        return { content: [{ type: 'text', text: report }], details: { total: parsed.length, new: newCards.length, conflicts: conflicts.length, dry_run: true } };
+        return { content: [{ type: 'text', text: report }], details: { total: totalParsed, new: newCards.length, conflicts: conflicts.length, dry_run: true } };
+      }
+
+      if (!params.confirmationToken) {
+        const target = importCardsTarget(vaultId, newCards);
+        const confirmation = createConfirmationToken('import_cards', target);
+        pendingImportCards.set(confirmation.token, {
+          target,
+          vaultId,
+          cards: newCards,
+          conflicts,
+          total: totalParsed,
+          createdAt: Date.now(),
+        });
+        return {
+          content: [{ type: 'text', text: `将导入 ${newCards.length} 张新卡片，跳过 ${conflicts.length} 张冲突卡片。请确认后执行。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            target,
+            total: totalParsed,
+            new: newCards.length,
+            conflicts: conflicts.length,
+          },
+        };
       }
 
       // 执行导入
@@ -573,7 +652,7 @@ ${conflicts.length > 5 ? `... 还有 ${conflicts.length - 5} 张冲突` : ''}
               path: `${card.type}/${safeTitle}.md`,
               title: card.title,
               content: card.content,
-              type: card.type as any,
+              type: card.type,
               tags: JSON.stringify(card.tags),
             },
           });
@@ -585,7 +664,7 @@ ${conflicts.length > 5 ? `... 还有 ${conflicts.length - 5} 张冲突` : ''}
 
       return {
         content: [{ type: 'text', text: `✅ 导入完成: ${imported}/${newCards.length} 张卡片已导入\n${conflicts.length > 0 ? `⚠️ ${conflicts.length} 张卡片因冲突跳过` : ''}` }],
-        details: { imported, total: parsed.length, skipped: conflicts.length },
+        details: { imported, total: totalParsed, skipped: conflicts.length },
       };
     } catch (error) {
       return {
@@ -601,6 +680,127 @@ ${conflicts.length > 5 ? `... 还有 ${conflicts.length - 5} 张冲突` : ''}
  */
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function cleanupBrokenLinksTarget(vaultId: string): string {
+  return `cleanup_broken_links:${vaultId}`;
+}
+
+function mergeDuplicateCardsTarget(cardAId: string, cardBId: string, keepBoth: boolean): string {
+  return `merge_duplicate_cards:${cardAId}:${cardBId}:${keepBoth ? 'keep' : 'merge'}`;
+}
+
+function importCardsTarget(vaultId: string, cards: ParsedImportCard[]): string {
+  const hash = createHash('sha256')
+    .update(JSON.stringify(cards.map(card => [card.title, card.type, card.content.slice(0, 200)])))
+    .digest('hex')
+    .slice(0, 16);
+  return `import_cards:${vaultId}:${hash}:${cards.length}`;
+}
+
+function parseImportCardsPayload(
+  data: string,
+  format: string,
+  defaultType: string,
+): Array<{ title: string; content: string; type: string; tags: string[] }> {
+  const parsed: Array<{ title: string; content: string; type: string; tags: string[] }> = [];
+
+  if (format === 'json') {
+    const json = JSON.parse(data);
+    const cardsArray = json.cards || json.data || (Array.isArray(json) ? json : [json]);
+    for (const item of cardsArray) {
+      if (item.title || item.content) {
+        parsed.push({
+          title: String(item.title || '导入卡片'),
+          content: String(item.content || ''),
+          type: String(item.type || item.cardType || defaultType),
+          tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
+        });
+      }
+    }
+    return parsed;
+  }
+
+  if (format === 'csv') {
+    const lines = data.split('\n').filter(l => l.trim());
+    const headers = (lines[0] || '').split(',').map(h => h.trim().replace(/"/g, ''));
+    const titleIdx = headers.indexOf('title');
+    const contentIdx = headers.indexOf('content');
+    const typeIdx = headers.indexOf('type');
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(',').map(c => c.trim().replace(/"/g, ''));
+      if (cols.length >= 2) {
+        parsed.push({
+          title: titleIdx >= 0 ? cols[titleIdx] : `导入卡片 ${i}`,
+          content: contentIdx >= 0 ? cols[contentIdx] : cols.join(', '),
+          type: typeIdx >= 0 ? cols[typeIdx] : defaultType,
+          tags: [],
+        });
+      }
+    }
+    return parsed;
+  }
+
+  if (format === 'markdown' || format === 'obsidian') {
+    const sections = data.split(/\n(?=# |## |---\n)/);
+    for (const section of sections) {
+      if (!section.trim()) continue;
+      const titleMatch = section.match(/^#+\s+(.+)/m);
+      const title = titleMatch ? titleMatch[1].trim() : '导入卡片';
+      parsed.push({ title, content: section.trim(), type: defaultType, tags: [] });
+    }
+    return parsed;
+  }
+
+  throw new Error(`Unsupported import format: ${format}`);
+}
+
+function validateParsedImportCards(
+  cards: Array<{ title: string; content: string; type: string; tags: string[] }>,
+): { success: true; cards: ParsedImportCard[] } | { success: false; error: string; details: Record<string, unknown> } {
+  const normalized: ParsedImportCard[] = [];
+  const invalidTypes: Array<{ title: string; type: string }> = [];
+  const invalidPermanent: Array<{ title: string; missingElements: string[] }> = [];
+
+  for (const card of cards) {
+    const type = card.type.trim().toLowerCase();
+    if (!CARD_TYPE_SET.has(type)) {
+      invalidTypes.push({ title: card.title, type: card.type });
+      continue;
+    }
+    if (type === 'permanent') {
+      const quality = validatePermanentCardContent(card.content);
+      if (!quality.passed) {
+        invalidPermanent.push({ title: card.title, missingElements: quality.missingElements });
+        continue;
+      }
+    }
+    normalized.push({
+      title: card.title.trim() || '导入卡片',
+      content: card.content || '',
+      type: type as CardType,
+      tags: Array.isArray(card.tags) ? card.tags : [],
+    });
+  }
+
+  if (invalidTypes.length > 0) {
+    return {
+      success: false,
+      error: `导入数据包含非法卡片类型：${invalidTypes.map(item => `${item.title}=${item.type}`).join('、')}`,
+      details: { error: 'INVALID_CARD_TYPE', invalidTypes, allowedTypes: CARD_TYPES },
+    };
+  }
+
+  if (invalidPermanent.length > 0) {
+    return {
+      success: false,
+      error: `导入数据包含不符合永久卡质量门禁的卡片：${invalidPermanent.map(item => `${item.title}(${item.missingElements.join(',')})`).join('、')}`,
+      details: { error: 'PROMOTION_CRITERIA_FAILED', invalidPermanent },
+    };
+  }
+
+  return { success: true, cards: normalized };
 }
 
 export function registerVaultMaintenanceTools(): void {

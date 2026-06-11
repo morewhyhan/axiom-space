@@ -1,0 +1,37 @@
+{
+  "runId": "sdd-api-1781037508082-nk7oowwnfl",
+  "capturedAt": "2026-06-09T20:44:55.525Z",
+  "vaultId": "be52da9f-3676-48cd-88f9-db11c870dff4",
+  "pathId": "ad848be0-6c44-4928-be9a-2f89859594ea",
+  "response": {
+    "success": true,
+    "path": {
+      "id": "ad848be0-6c44-4928-be9a-2f89859594ea",
+      "topic": "Adjustment Topic",
+      "totalSteps": 1,
+      "completedSteps": 1,
+      "progress": 100
+    },
+    "adjustmentHistory": [
+      {
+        "id": "7e741a51-2c12-41bc-9725-48b213269db9",
+        "adjustmentId": "7e741a51-2c12-41bc-9725-48b213269db9",
+        "appliedAt": 1781037895492,
+        "trigger": "assessment",
+        "triggeredBy": "assessment",
+        "adjustment": {
+          "type": "add_review",
+          "concept": "Adjustment Step",
+          "description": "掌握度 10%，建议复习\"Adjustment Step\"相关概念",
+          "reason": "评估分数低于60%，需要加强复习"
+        },
+        "assessmentRef": {
+          "toolName": "code_challenge",
+          "score": 10,
+          "maxScore": 100
+        },
+        "feedback": "用户只表示能解释，但没有提供任何定义、例子或应用，无法判断是否真正掌握。请用户实际解释该步骤。"
+      }
+    ]
+  }
+}

@@ -7,6 +7,7 @@
 import { nanoid } from 'nanoid';
 import { emitNotification } from './notification-bus';
 import { getProfileCacheEntry } from '@/server/api/profile-cache';
+import { emitDomainEvent } from '@/server/core/domain/events';
 
 /**
  * 推送触发器定义
@@ -347,7 +348,7 @@ export class ResourcePushEngine {
 
     // PushTrigger.type -> PushRecord.trigger 映射
     const triggerMap: Record<PushTrigger['type'], string> = {
-      assessment_failed: 'assessment_pass',
+      assessment_failed: 'assessment_failed',
       assessment_excellent: 'assessment_pass',
       path_progressed: 'stage_completion',
       learning_stalled: 'scheduled',
@@ -356,7 +357,7 @@ export class ResourcePushEngine {
     };
 
     // 写入 PushRecord 表
-    await prisma.pushRecord.create({
+    const pushRecord = await prisma.pushRecord.create({
       data: {
         userId: notification.userId,
         vaultId: notification.vaultId,
@@ -368,7 +369,23 @@ export class ResourcePushEngine {
       },
     }).catch((err: any) => {
       console.error(`[ResourcePushEngine] PushRecord 写入失败:`, err?.message);
+      return null;
     });
+    if (pushRecord) {
+      void emitDomainEvent({
+        userId: notification.userId,
+        vaultId: notification.vaultId,
+        aggregateType: 'pushRecord',
+        aggregateId: pushRecord.id,
+        eventType: 'ResourcePushed',
+        payload: {
+          triggerType: notification.triggerType,
+          trigger: triggerMap[notification.triggerType] || 'scheduled',
+          reason: notification.reason,
+          resourceCount: notification.resources.length,
+        },
+      });
+    }
 
     // 推送通知到前端
     try {

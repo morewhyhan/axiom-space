@@ -32,6 +32,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
     limit: z.coerce.number().int().positive().max(1000).optional(),
   })), async (c) => {
     const userId = c.get('userId') as string
+    if (!c.req.query('vid')) {
+      return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
+    }
     const { limit } = c.req.valid('query')
     const vault = await resolveVault(userId, c.req.query('vid'))
     if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
@@ -97,6 +100,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
     topK: z.number().int().positive().max(30).optional(),
   })), async (c) => {
     const userId = c.get('userId') as string
+    if (!c.req.query('vid')) {
+      return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
+    }
     const vault = await resolveVault(userId, c.req.query('vid'))
     if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
 

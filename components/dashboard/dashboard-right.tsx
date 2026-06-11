@@ -26,6 +26,36 @@ function miniGrowthPath(pts: number[]): string {
   return pts.map((v, i) => `${5 + i * (90 / Math.max(pts.length - 1, 1))},${28 - (v / m) * 20}`).join(' ')
 }
 
+function activityLabel(type: string): string {
+  if (type === 'event:CardCreated') return '卡片已创建'
+  if (type === 'event:CardUpdated') return '卡片已更新'
+  if (type === 'event:CardPromoted') return '知识已固化'
+  if (type === 'event:StepCompleted') return '学习步骤完成'
+  if (type === 'event:StepUpdated') return '学习步骤更新'
+  if (type === 'event:ResourcePushed') return '学习资源已推送'
+  if (type === 'event:DocumentImported') return '资料已导入'
+  if (type === 'event:ProfileUpdated') return '学习画像已更新'
+  if (type === 'permanent') return '知识已固化'
+  if (type === 'fleeting') return '灵感已捕获'
+  if (type === 'literature') return '文献已导入'
+  return '活动已记录'
+}
+
+function operationLabel(type: string): string {
+  if (type === 'event:CardCreated') return 'Card created'
+  if (type === 'event:CardUpdated') return 'Card updated'
+  if (type === 'event:CardPromoted') return 'Card promotion confirmed'
+  if (type === 'event:StepCompleted') return 'Step completed'
+  if (type === 'event:StepUpdated') return 'Step updated'
+  if (type === 'event:ResourcePushed') return 'Resource pushed'
+  if (type === 'event:DocumentImported') return 'Document imported'
+  if (type === 'event:ProfileUpdated') return 'Profile updated'
+  if (type === 'permanent') return 'Card handshake confirmed'
+  if (type === 'fleeting') return 'Added fleeting note'
+  if (type === 'literature') return 'Literature imported'
+  return 'Event recorded'
+}
+
 export default function DashboardRight() {
   const { stats, growth, recentActivity, loading } = useDashboardStats()
   const cognition = useCognition()
@@ -245,14 +275,14 @@ export default function DashboardRight() {
           <div className="hud-line"></div>
 
           <div>
-            <span className="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">NOTIFICATIONS</span>
+            <span className="mono text-[8px] opacity-25 uppercase tracking-widest block mb-2.5">RECENT ACTIVITY</span>
             <div className="space-y-2">
               {recentActivity && recentActivity.length > 0 ? recentActivity.slice(0, 3).map((a: RecentActivity, i: number) => (
                 <div key={i} className="flex items-baseline" style={{ fontSize: 'var(--f10)' }}>
                   <span className="opacity-30 mono text-[var(--f7)] flex-shrink-0">{new Date(a.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-                  <span className="text-white/45 ml-2 truncate">{a.type === 'permanent' ? '知识已固化' : a.type === 'fleeting' ? '灵感已捕获' : '文献已导入'}</span>
+                  <span className="text-white/45 ml-2 truncate">{activityLabel(a.type)}</span>
                 </div>
-              )) : <div className="text-white/20 mono" style={{ fontSize: 'var(--f10)' }}>暂无通知</div>}
+              )) : <div className="text-white/20 mono" style={{ fontSize: 'var(--f10)' }}>暂无活动</div>}
             </div>
           </div>
 
@@ -264,7 +294,7 @@ export default function DashboardRight() {
               {recentActivity && recentActivity.length > 0 ? recentActivity.slice(0, 4).map((a: RecentActivity, i: number) => (
                 <div key={i} className="flex items-baseline" style={{ fontSize: 'var(--f10)' }}>
                   <span className="opacity-30 mono text-[var(--f7)] flex-shrink-0">{new Date(a.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-                  <span className="text-white/45 ml-2 truncate">{a.type === 'permanent' ? 'Card handshake confirmed' : a.type === 'fleeting' ? 'Added fleeting note' : 'Literature imported'}</span>
+                  <span className="text-white/45 ml-2 truncate">{operationLabel(a.type)}</span>
                 </div>
               )) : <div className="text-white/20 mono" style={{ fontSize: 'var(--f10)' }}>No operations yet</div>}
             </div>

@@ -562,6 +562,15 @@ export default function ForgeChat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
   const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const oracle = useAppStore((s) => s.oracle)
+  const oracleLabel = ({
+    Oracle: 'AXIOM',
+    default: 'AXIOM',
+    socrates: '苏格拉底',
+    musk: '马斯克',
+    munger: '芒格',
+    wittgenstein: '维特根斯坦',
+  } as Record<string, string>)[oracle] ?? oracle
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -726,6 +735,14 @@ export default function ForgeChat() {
             </div>
           </div>
           <div className="flex gap-2">
+            <button
+              className="forge-oracle-btn"
+              onClick={() => useAppStore.getState().openModal('oracle')}
+              title="切换当前对话的 Oracle"
+            >
+              <span>ORACLE</span>
+              <strong>{oracleLabel}</strong>
+            </button>
             <button className="forge-mini-btn" onClick={clearMessages}>CLEAR</button>
             <button className="forge-mini-btn primary" onClick={() => useAppStore.getState().openModal('newcard')}>NEW CARD</button>
           </div>

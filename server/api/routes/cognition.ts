@@ -7,7 +7,55 @@ import { Hono } from 'hono'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
-import { getProfileCacheEntry, setProfileCacheEntry } from '../profile-cache'
+
+type EvidenceRef = {
+  sourceObjectType: 'card' | 'cluster' | 'ragDocumentIndex' | 'learningSession' | 'vaultMemory' | 'derived'
+  sourceObjectId: string
+  summary: string
+}
+
+function evidenceRef(sourceObjectType: EvidenceRef['sourceObjectType'], sourceObjectId: string, summary: string): EvidenceRef {
+  return { sourceObjectType, sourceObjectId, summary }
+}
+
+function parseObservationValue(raw: string): {
+  text: string
+  category: string
+  evidence: EvidenceRef[]
+  sourceObjectType?: string
+  sourceObjectId?: string
+} {
+  try {
+    const parsed = JSON.parse(raw) as {
+      text?: unknown
+      feedback?: unknown
+      concept?: unknown
+      category?: unknown
+      evidence?: unknown
+      sourceObjectType?: unknown
+      sourceObjectId?: unknown
+    }
+    const text = typeof parsed.text === 'string'
+      ? parsed.text
+      : typeof parsed.feedback === 'string'
+        ? parsed.feedback
+        : typeof parsed.concept === 'string'
+          ? parsed.concept
+          : raw
+    const evidence = Array.isArray(parsed.evidence)
+      ? parsed.evidence.filter((item): item is EvidenceRef => !!item && typeof item === 'object' && typeof (item as EvidenceRef).sourceObjectId === 'string')
+      : []
+    return {
+      text,
+      category: typeof parsed.category === 'string' ? parsed.category : 'general',
+      evidence,
+      sourceObjectType: typeof parsed.sourceObjectType === 'string' ? parsed.sourceObjectType : undefined,
+      sourceObjectId: typeof parsed.sourceObjectId === 'string' ? parsed.sourceObjectId : undefined,
+    }
+  } catch {
+    return { text: raw, category: 'general', evidence: [] }
+  }
+}
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
@@ -17,31 +65,6 @@ const app = new Hono<{ Variables: { userId: string } }>()
   if (!vault) return c.json({ success: true, user: { name: '学习者', joinedAt: new Date().toISOString() }, dimensions: {}, stats: {}, skills: [], thinkingPattern: '', strengths: [], growthEdges: [], timeDistribution: [], knowledgeStructure: [], nextActions: [] })
 
   const vid = vault.id
-
-  // ── Try loading cached profile from vault.profileCache ──
-  let profileCacheRaw: string | null = null
-  try {
-    const vaultWithCache = await prisma.vault.findUnique({
-      where: { id: vid },
-      select: { profileCache: true },
-    })
-    profileCacheRaw = vaultWithCache?.profileCache ?? null
-    if (profileCacheRaw) {
-      const cachedProfile = getProfileCacheEntry<Record<string, unknown>>(profileCacheRaw, 'cognition')
-      if (cachedProfile?.data) {
-        const age = Date.now() - cachedProfile.updatedAt
-        if (age < 300_000) { // fresh within 5 minutes
-          return c.json({
-            ...cachedProfile.data,
-            success: true,
-            cached: true,
-          })
-        }
-      }
-    }
-  } catch {
-    // Cache corrupt — fall through to recompute
-  }
 
   // Fetch all data in parallel
   const [
@@ -148,21 +171,24 @@ const app = new Hono<{ Variables: { userId: string } }>()
     : { text: '开始创建知识卡片以构建你的认知画像。', highlights: [], detail: '' }
 
   // ── Strengths & growth edges ──
-  const strengths: string[] = []
-  const growthEdges: string[] = []
-  if (depth > 0.6) strengths.push('深度理解')
-  if (maxBreadth > 0.5) strengths.push('知识广度')
-  if (connection > 0.4) strengths.push('关联能力')
-  if (expression > 0.6) strengths.push('表达清晰')
-  if (application > 0.4) strengths.push('知识应用')
-  if (crossClusterEdges > 2) strengths.push('跨域关联')
-  if (strengths.length === 0) strengths.push('持续学习中')
+  const strengthItems: Array<{ label: string; evidence: EvidenceRef[] }> = []
+  const growthEdgeItems: Array<{ label: string; evidence: EvidenceRef[] }> = []
+  const vaultEvidence = evidenceRef('derived', vid, `基于 ${n} 张卡片、${e} 条关系和 ${clusterCount} 个星团计算`)
+  if (depth > 0.6) strengthItems.push({ label: '深度理解', evidence: [vaultEvidence] })
+  if (maxBreadth > 0.5) strengthItems.push({ label: '知识广度', evidence: [vaultEvidence] })
+  if (connection > 0.4) strengthItems.push({ label: '关联能力', evidence: [vaultEvidence] })
+  if (expression > 0.6) strengthItems.push({ label: '表达清晰', evidence: [vaultEvidence] })
+  if (application > 0.4) strengthItems.push({ label: '知识应用', evidence: [vaultEvidence] })
+  if (crossClusterEdges > 2) strengthItems.push({ label: '跨域关联', evidence: [vaultEvidence] })
+  if (strengthItems.length === 0) strengthItems.push({ label: '持续学习中', evidence: [vaultEvidence] })
 
-  if (depth < 0.5) growthEdges.push('深化理解')
-  if (maxBreadth < 0.4) growthEdges.push('拓展广度')
-  if (connection < 0.3) growthEdges.push('建立关联')
-  if (expression < 0.5) growthEdges.push('表达深化')
-  if (growthEdges.length === 0) growthEdges.push('探索新领域')
+  if (depth < 0.5) growthEdgeItems.push({ label: '深化理解', evidence: [vaultEvidence] })
+  if (maxBreadth < 0.4) growthEdgeItems.push({ label: '拓展广度', evidence: [vaultEvidence] })
+  if (connection < 0.3) growthEdgeItems.push({ label: '建立关联', evidence: [vaultEvidence] })
+  if (expression < 0.5) growthEdgeItems.push({ label: '表达深化', evidence: [vaultEvidence] })
+  if (growthEdgeItems.length === 0) growthEdgeItems.push({ label: '探索新领域', evidence: [vaultEvidence] })
+  const strengths = strengthItems.map((item) => item.label)
+  const growthEdges = growthEdgeItems.map((item) => item.label)
 
   // ── Domain distribution per cluster ──
   // This is a visible-content weight, not time spent. Avoid presenting inferred
@@ -192,21 +218,27 @@ const app = new Hono<{ Variables: { userId: string } }>()
   })
 
   // ── Next actions ──
-  const nextActions: string[] = []
+  const nextActionItems: Array<{ text: string; targetType: string; targetId: string; evidence: EvidenceRef[] }> = []
   const weakestDim = Object.entries(dimensions).sort((a, b) => a[1] - b[1])
   const dimLabels: Record<string, string> = { depth: '理解深度', breadth: '知识广度', connection: '关联能力', expression: '表达清晰度', application: '知识应用' }
   if (weakestDim.length > 0 && weakestDim[0][1] < 0.7) {
-    nextActions.push(`提升「${dimLabels[weakestDim[0][0]] ?? weakestDim[0][0]}」— 当前 ${Math.round(weakestDim[0][1] * 100)}%`)
+    nextActionItems.push({
+      text: `提升「${dimLabels[weakestDim[0][0]] ?? weakestDim[0][0]}」— 当前 ${Math.round(weakestDim[0][1] * 100)}%`,
+      targetType: 'dimension',
+      targetId: weakestDim[0][0],
+      evidence: [vaultEvidence],
+    })
   }
   if (pendingReview > 0) {
-    nextActions.push(`整理 ${pendingReview} 张 Fleeting 卡片 — 判断是否值得沉淀`)
+    nextActionItems.push({ text: `整理 ${pendingReview} 张 Fleeting 卡片 — 判断是否值得沉淀`, targetType: 'cardType', targetId: 'fleeting', evidence: [vaultEvidence] })
   }
   if (n > 0 && e < n * 0.5) {
-    nextActions.push('发现更多节点间的关联 — 丰富知识网络')
+    nextActionItems.push({ text: '发现更多节点间的关联 — 丰富知识网络', targetType: 'edge', targetId: 'related', evidence: [vaultEvidence] })
   }
-  if (nextActions.length === 0) {
-    nextActions.push('继续创建新知识卡片 — 扩展知识星系')
+  if (nextActionItems.length === 0) {
+    nextActionItems.push({ text: '继续创建新知识卡片 — 扩展知识星系', targetType: 'vault', targetId: vid, evidence: [vaultEvidence] })
   }
+  const nextActions = nextActionItems.map((item) => item.text)
 
   const responseBody = {
     success: true,
@@ -216,26 +248,13 @@ const app = new Hono<{ Variables: { userId: string } }>()
     skills,
     thinkingPattern,
     strengths,
+    strengthEvidence: strengthItems,
     growthEdges,
+    growthEdgeEvidence: growthEdgeItems,
     timeDistribution,
     knowledgeStructure,
     nextActions,
-  }
-
-  // ── Persist computed stats to vault.profileCache ──
-  try {
-    const vaultWithLatestCache = await prisma.vault.findUnique({
-      where: { id: vid },
-      select: { profileCache: true },
-    })
-    await prisma.vault.update({
-      where: { id: vid },
-      data: {
-        profileCache: setProfileCacheEntry(vaultWithLatestCache?.profileCache ?? profileCacheRaw, 'cognition', responseBody),
-      },
-    })
-  } catch (err: unknown) {
-    console.warn('[Cognition] Failed to save profile cache:', err instanceof Error ? err.message : String(err))
+    nextActionItems,
   }
 
   return c.json(responseBody)
@@ -301,6 +320,9 @@ const routes = app
       severity: 'high' | 'medium' | 'low'
       cardId?: string | null
       clusterId?: string | null
+      sourceObjectType: 'card' | 'cluster' | 'ragDocumentIndex'
+      sourceObjectId: string
+      evidence: EvidenceRef[]
     }> = []
 
     for (const cluster of clusters) {
@@ -314,6 +336,9 @@ const routes = app
           detail: `该星团有 ${draft} 张待整理卡片，但还没有稳定沉淀的永久知识。`,
           severity: draft >= 5 ? 'high' : 'medium',
           clusterId: cluster.id,
+          sourceObjectType: 'cluster',
+          sourceObjectId: cluster.id,
+          evidence: [evidenceRef('cluster', cluster.id, `${cluster.name} 有 ${draft} 张非永久卡且 permanent=0`)],
         })
       }
     }
@@ -326,6 +351,9 @@ const routes = app
         detail: '这张卡没有显式连接，建议在 Forge 中补充 WikiLink 或用相关卡片推荐建立关联。',
         severity: card.type === 'permanent' ? 'high' : 'medium',
         cardId: card.id,
+        sourceObjectType: 'card',
+        sourceObjectId: card.id,
+        evidence: [evidenceRef('card', card.id, `卡片 ${card.title || card.id} 没有入边或出边`)],
       })
     }
 
@@ -339,6 +367,9 @@ const routes = app
           : `当前状态为 ${item.status}，AI 对话可能暂时无法召回它。`,
         severity: item.status === 'failed' ? 'high' : 'low',
         cardId: item.cardId,
+        sourceObjectType: 'ragDocumentIndex',
+        sourceObjectId: item.cardId,
+        evidence: [evidenceRef('ragDocumentIndex', item.cardId, `RAG 状态 ${item.status}${item.lastError ? `: ${item.lastError}` : ''}`)],
       })
     }
 
@@ -358,24 +389,15 @@ const routes = app
     return c.json({
       success: true,
       observations: memories.map(m => {
-        // Parse stored JSON value to extract human-readable text
-        let text = m.value
-        let category = 'general'
-        try {
-          const parsed = JSON.parse(m.value)
-          if (parsed && typeof parsed === 'object') {
-            // Priority: text > feedback > concept > raw value
-            text = parsed.text || parsed.feedback || parsed.concept || m.value
-            category = parsed.category || 'general'
-          }
-        } catch {
-          // Plain text, use as-is
-        }
+        const parsed = parseObservationValue(m.value)
 
         return {
           id: m.id,
-          text,
-          category,
+          text: parsed.text,
+          category: parsed.category,
+          evidence: parsed.evidence.length > 0 ? parsed.evidence : [evidenceRef('vaultMemory', m.id, '用户或系统记录的观察')],
+          sourceObjectType: parsed.sourceObjectType ?? 'vaultMemory',
+          sourceObjectId: parsed.sourceObjectId ?? m.id,
           createdAt: m.createdAt.toISOString(),
         }
       }),
@@ -386,19 +408,45 @@ const routes = app
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'Vault not found' })
 
-    const { text, category } = await c.req.json()
+    const { text, category, sourceObjectType, sourceObjectId, evidence } = await c.req.json()
     if (!text || typeof text !== 'string') {
       return c.json({ success: false, error: 'Text is required' })
     }
 
     const cat = category || 'general'
+    const evidenceItems = Array.isArray(evidence)
+      ? evidence.filter((item): item is EvidenceRef => !!item && typeof item === 'object' && typeof (item as EvidenceRef).sourceObjectId === 'string')
+      : []
+    const resolvedSourceObjectType = typeof sourceObjectType === 'string' ? sourceObjectType : 'vaultMemory'
+    const resolvedSourceObjectId = typeof sourceObjectId === 'string' ? sourceObjectId : `manual:${Date.now()}`
+    if (resolvedSourceObjectType === 'card') {
+      const card = await prisma.card.findFirst({ where: { id: resolvedSourceObjectId, vaultId: vault.id }, select: { id: true } })
+      if (!card) return c.json({ success: false, error: 'SOURCE_OBJECT_NOT_FOUND' }, 404)
+    }
+    if (resolvedSourceObjectType === 'cluster') {
+      const cluster = await prisma.cluster.findFirst({ where: { id: resolvedSourceObjectId, vaultId: vault.id }, select: { id: true } })
+      if (!cluster) return c.json({ success: false, error: 'SOURCE_OBJECT_NOT_FOUND' }, 404)
+    }
+    if (resolvedSourceObjectType === 'ragDocumentIndex') {
+      const ragIndex = await prisma.ragDocumentIndex.findFirst({ where: { cardId: resolvedSourceObjectId, vaultId: vault.id }, select: { id: true } })
+      if (!ragIndex) return c.json({ success: false, error: 'SOURCE_OBJECT_NOT_FOUND' }, 404)
+    }
+    if (evidenceItems.length === 0) {
+      evidenceItems.push(evidenceRef('derived', resolvedSourceObjectId, '手动观察记录'))
+    }
     const key = `${cat}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 
     const memory = await prisma.vaultMemory.create({
       data: {
         vaultId: vault.id,
         key,
-        value: text,
+        value: JSON.stringify({
+          text,
+          category: cat,
+          sourceObjectType: resolvedSourceObjectType,
+          sourceObjectId: resolvedSourceObjectId,
+          evidence: evidenceItems,
+        }),
         category: 'observation',
       },
     })
@@ -407,8 +455,11 @@ const routes = app
       success: true,
       observation: {
         id: memory.id,
-        text: memory.value,
-        category: memory.key,
+        text,
+        category: cat,
+        evidence: evidenceItems,
+        sourceObjectType: resolvedSourceObjectType,
+        sourceObjectId: resolvedSourceObjectId,
         createdAt: memory.createdAt.toISOString(),
       },
     })

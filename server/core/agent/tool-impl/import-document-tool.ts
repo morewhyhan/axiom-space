@@ -2,7 +2,7 @@
  * AXIOM 内置工具 - 文档导入知识卡片
  *
  * 接收一篇完整文档（教材章节、论文、文章），AI 自动解析为：
- * - 核心概念 → permanent 卡片
+ * - 核心概念 → extracted fleeting 卡片
  * - 细节知识点 → fleeting 卡片
  * - 来源文献 → literature 卡片
  * - 概念间关联 → 自动建立 WikiLink + edge
@@ -16,6 +16,7 @@ import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId, getCurrentUserId } from '../agent-context';
 import { aiManager } from '../../ai/AIManager';
+import { normalizeEdgeType } from '@/server/core/domain/contracts';
 
 interface ExtractedConcept {
   name: string;
@@ -387,21 +388,21 @@ ${params.document}
         });
       }
 
-      // ── Step 4: 批量创建 permanent 卡片 ───────────────────────────────
+      // ── Step 4: 批量创建 extracted concept fleeting 卡片 ─────────────
 
       const docTitle = parsed.title || params.source_title || params.topic;
-      let createdCount = { permanent: 0, fleeting: 0, literature: 0, edges: 0 };
+      let createdCount = { permanent: 0, fleeting: 0, literature: 0, edges: 0, errors: 0 };
 
       for (const concept of parsed.concepts) {
-        const content = `## ${concept.name}\n\n${concept.description}\n\n---\n_从「${docTitle}」自动生成_`;
+        const content = `## ${concept.name}\n\n${concept.description}\n\n---\nsourceTitle: ${docTitle}\ncontentHash: ${contentHash}\n_从「${docTitle}」自动生成_`;
         const path = `${clusterName}/${concept.name.replace(/[/\\]/g, '_')}.md`;
 
         await prisma.card.upsert({
           where: { vaultId_path: { vaultId, path } },
-          update: { content, type: 'permanent', clusterId: cluster.id },
-          create: { vaultId, clusterId: cluster.id, path, title: concept.name, content, type: 'permanent', tags: JSON.stringify([params.topic, 'core']) },
+          update: { content, type: 'fleeting', clusterId: cluster.id },
+          create: { vaultId, clusterId: cluster.id, path, title: concept.name, content, type: 'fleeting', tags: JSON.stringify([params.topic, 'core', 'extracted-concept', `hash:sha256:${contentHash}`]) },
         });
-        createdCount.permanent++;
+        createdCount.fleeting++;
       }
 
       // ── Step 5: 批量创建 fleeting 卡片（带 WikiLink） ─────────────────
@@ -467,12 +468,19 @@ ${params.document}
         const targetId = cardIdByName.get(rel.to);
         if (!sourceId || !targetId) continue;
 
+        let edgeType: string;
+        try {
+          edgeType = normalizeEdgeType(rel.type);
+        } catch {
+          createdCount.errors++;
+          continue;
+        }
         const existing = await prisma.edge.findFirst({
-          where: { vaultId, sourceId, targetId, type: rel.type },
+          where: { vaultId, sourceId, targetId, type: edgeType },
         });
         if (!existing) {
           await prisma.edge.create({
-            data: { vaultId, sourceId, targetId, type: rel.type, weight: 1.0 },
+            data: { vaultId, sourceId, targetId, type: edgeType, weight: 1.0 },
           });
           createdCount.edges++;
         }
@@ -494,6 +502,7 @@ ${params.document}
 | 🏷️ 知识点（Fleeting） | ${createdCount.fleeting} |
 | 📄 文献记录（Literature） | ${createdCount.literature} |
 | 🔗 关联边（Edges） | ${createdCount.edges} |
+| ⚠️ 跳过错误 | ${createdCount.errors} |
 | **合计** | **${createdCount.permanent + createdCount.fleeting + createdCount.literature} 张卡片** |
 
 ### 核心概念

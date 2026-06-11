@@ -4,6 +4,8 @@ import { Suspense, useState } from 'react'
 import EducationProfileView from '@/components/learning/education-profile-view'
 import PathAdjustmentView from '@/components/learning/path-adjustment-view'
 import PushResourceCard from '@/components/learning/push-resource-card'
+import { useDashboardStats } from '@/hooks/use-dashboard'
+import { useEducationProfile, useLearningPaths, usePushResources } from '@/hooks/use-learning'
 
 // 加载骨架屏
 function LoadingPanel() {
@@ -98,6 +100,17 @@ export default function LearnInsightsPage() {
  * 概览面板组件 - 显示核心指标
  */
 function OverviewPanel() {
+  const { stats, loading: statsLoading } = useDashboardStats()
+  const { data: pathsData, loading: pathsLoading } = useLearningPaths()
+  const { profile, loading: profileLoading } = useEducationProfile()
+  const { data: pushData, loading: pushLoading } = usePushResources()
+  const paths = pathsData.paths ?? []
+  const activePaths = paths.filter((path) => path.status !== 'archived')
+  const completedPaths = paths.filter((path) => path.progress >= 100)
+  const pushRecords = pushData.records ?? []
+  const profileReady = !!profile?.dimensions
+  const loading = statsLoading || pathsLoading || profileLoading || pushLoading
+
   return (
     <div className="space-y-6">
       <div className="glass-panel p-6 rounded-2xl">
@@ -107,26 +120,26 @@ function OverviewPanel() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-gradient-to-br from-purple-500/20 to-purple-500/5 p-4 rounded-lg border border-purple-500/20">
             <p className="text-xs text-purple-300 uppercase mb-1">能力画像</p>
-            <p className="text-2xl font-bold text-purple-300">6 维</p>
-            <p className="text-xs text-white/40 mt-1">实时自动分析</p>
+            <p className="text-2xl font-bold text-purple-300">{loading ? '—' : profileReady ? '已生成' : '未生成'}</p>
+            <p className="text-xs text-white/40 mt-1">{profileReady ? '来自教育画像缓存' : '需要更多学习证据'}</p>
           </div>
 
           <div className="bg-gradient-to-br from-blue-500/20 to-blue-500/5 p-4 rounded-lg border border-blue-500/20">
             <p className="text-xs text-blue-300 uppercase mb-1">任务路径</p>
-            <p className="text-2xl font-bold text-blue-300">动态</p>
-            <p className="text-xs text-white/40 mt-1">智能调整</p>
+            <p className="text-2xl font-bold text-blue-300">{loading ? '—' : activePaths.length}</p>
+            <p className="text-xs text-white/40 mt-1">已完成 {completedPaths.length} 条</p>
           </div>
 
           <div className="bg-gradient-to-br from-green-500/20 to-green-500/5 p-4 rounded-lg border border-green-500/20">
             <p className="text-xs text-green-300 uppercase mb-1">推送资源</p>
-            <p className="text-2xl font-bold text-green-300">个性化</p>
-            <p className="text-xs text-white/40 mt-1">精准推荐</p>
+            <p className="text-2xl font-bold text-green-300">{loading ? '—' : pushRecords.length}</p>
+            <p className="text-xs text-white/40 mt-1">未读 {pushRecords.filter((record) => !record.viewedAt).length} 条</p>
           </div>
 
           <div className="bg-gradient-to-br from-pink-500/20 to-pink-500/5 p-4 rounded-lg border border-pink-500/20">
-            <p className="text-xs text-pink-300 uppercase mb-1">反馈闭环</p>
-            <p className="text-2xl font-bold text-pink-300">完整</p>
-            <p className="text-xs text-white/40 mt-1">持续优化</p>
+            <p className="text-xs text-pink-300 uppercase mb-1">知识卡片</p>
+            <p className="text-2xl font-bold text-pink-300">{loading ? '—' : stats?.totalNodes ?? 0}</p>
+            <p className="text-xs text-white/40 mt-1">永久 {stats?.permanent ?? 0} · 灵感 {stats?.fleeting ?? 0}</p>
           </div>
         </div>
 

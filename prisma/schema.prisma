@@ -107,6 +107,7 @@ model edge {
   @@index([vaultId])
   @@index([sourceId])
   @@index([targetId])
+  @@unique([vaultId, sourceId, targetId, type])
 }
 
 // ═══════════════════════════════════════════════
@@ -168,6 +169,7 @@ model learningPathStep {
   card   card?        @relation(fields: [cardId], references: [id], onDelete: SetNull)
 
   @@index([pathId])
+  @@unique([pathId, order])
 }
 
 // ═══════════════════════════════════════════════
@@ -342,6 +344,7 @@ model user {
   learningSessions       learningSession[]
   learningPaths          learningPath[]
   pushRecords            PushRecord[]
+  notificationReceipts   NotificationReceipt[]
 }
 
 model session {
@@ -378,9 +381,174 @@ model vault {
   educationProfileHistory   EducationProfileHistory[]
   pushRecords               PushRecord[]
   ragDocumentIndexes        ragDocumentIndex[]
+  resourceGenerationJobs    ResourceGenerationJob[]
+  notificationReceipts      NotificationReceipt[]
 
 
   @@index([userId])
+}
+
+// 通知已读/忽略状态 — vaultMemory 保存通知内容，本表保存用户消费状态
+model NotificationReceipt {
+  id          String    @id @default(uuid())
+  userId      String
+  vaultId     String
+  memoryId    String
+  readAt      DateTime?
+  dismissedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user  user  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, memoryId])
+  @@index([userId, vaultId])
+  @@index([vaultId, dismissedAt])
+}
+
+// AI 资源生成任务状态 — SSE 只是传输层，本表是刷新/重启后的事实源
+model ResourceGenerationJob {
+  id           String   @id @default(uuid())
+  vaultId      String
+  topic        String
+  resourceType String
+  label        String
+  status       String
+  progress     Int      @default(0)
+  message      String
+  path         String?
+  fileName     String?
+  error        String?
+  metadata     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@index([vaultId, updatedAt])
+  @@index([vaultId, status])
+  @@index([vaultId, topic, resourceType])
+}
+
+// 高风险操作确认 token — 保存 hash，重启后 confirm/cancel 入口可恢复校验
+model AgentConfirmationToken {
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  userId    String?
+  vaultId   String?
+  toolName  String
+  target    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([userId, vaultId])
+  @@index([expiresAt])
+  @@index([toolName, target])
+}
+
+// Domain Event 事实源 — 记录用户/系统对核心聚合的业务写入
+model domainEvent {
+  id            String   @id @default(uuid())
+  userId        String?
+  vaultId       String?
+  aggregateType String
+  aggregateId   String?
+  eventType     String
+  payload       String
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([vaultId, createdAt])
+  @@index([aggregateType, aggregateId])
+  @@index([eventType])
+}
+
+model promotionAttempt {
+  id              String   @id @default(uuid())
+  userId          String?
+  vaultId         String
+  cardId          String?
+  fromType        String?
+  toType          String
+  status          String   // accepted | rejected
+  missingElements String?
+  qualityChecks   String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId])
+  @@index([vaultId, createdAt])
+  @@index([cardId])
+  @@index([status])
+}
+
+model assessmentResult {
+  id               String   @id @default(uuid())
+  userId           String
+  vaultId          String
+  pathId           String?
+  stepId           String?
+  cardId           String?
+  sessionId        String?
+  concept          String
+  passed           Boolean
+  mastery          Int
+  feedback         String
+  evidence         String?
+  clientContext    String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId, vaultId])
+  @@index([pathId, stepId])
+  @@index([cardId])
+  @@index([sessionId])
+}
+
+model cardRevision {
+  id        String   @id @default(uuid())
+  userId    String?
+  vaultId   String
+  cardId    String
+  title     String?
+  type      String?
+  content   String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([vaultId, cardId])
+  @@index([userId])
+}
+
+model sourceDocument {
+  id          String   @id @default(uuid())
+  userId      String
+  vaultId     String
+  title       String
+  source      String
+  contentHash String
+  metadata    String?
+  createdAt   DateTime @default(now())
+
+  chunks sourceDocumentChunk[]
+
+  @@unique([vaultId, contentHash])
+  @@index([userId, vaultId])
+}
+
+model sourceDocumentChunk {
+  id               String   @id @default(uuid())
+  sourceDocumentId String
+  index            Int
+  content          String
+  headingPath      String?
+  createdAt        DateTime @default(now())
+
+  sourceDocument sourceDocument @relation(fields: [sourceDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceDocumentId, index])
 }
 
 // LightRAG sidecar index state — AXIOM remains the source of truth.

@@ -1,0 +1,91 @@
+{
+  "runId": "sdd-sidecar-1781043164220-vr6lmenby8n",
+  "capturedAt": "2026-06-09T22:15:09.769Z",
+  "provider": "deepseek",
+  "modelId": "deepseek-v4-flash",
+  "baseUrl": "https://api.deepseek.com",
+  "topic": "Graph Search Basics",
+  "literatureTitle": "Graph Search Basics",
+  "results": [
+    {
+      "type": "mindmap",
+      "status": "completed",
+      "fileName": "mindmap.md",
+      "resourcePath": "resources/Graph-Search-Basics/mindmap.md",
+      "contentLength": 759,
+      "contentPreview": "mindmap\n  root((Graph Search Basics))\n    Graph Fundamentals\n      [Definition: G=(V,E)]\n      [Representation: Adjacency Matrix]\n      [Representation: Adjacency List]\n      [Graph Types: Directed/Undirected]\n      [Graph Types: Weighted/Unweighted]\n    Traversal Algorithms\n      [Breadth-First Sea",
+      "qualitySignal": "readable-content",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM 思维导图生成专家。请根据以下内容生成一张 Mermaid mindmap。\n\n要求：\n1. 使用 Mermaid mindmap 语法，根节点为 ((学习主题))\n2. 至少 4 个一级分支，每分支至少 3 个叶子节点\n3. 输出纯 Mermaid mindmap 代码块，以 ```mermaid 开头\n\n格式参考：\n```mermaid\nmindmap\n  root((主题))\n    分支A\n      [子概念1]\n      [子概念2]\n```",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "```mermaid\nmindmap\n  root((Graph Search Basics))\n    Graph Fundamentals\n      [Definition: G=(V,E)]\n      [Representation: Adjacency Matrix]\n      [Representation: Adjacency List]\n      [Graph Types: Directed/Undirected]\n      [Graph Types: Weighted/Unweighted]\n    Traversal Algorithms\n      [Breadth-First Search (BFS)]\n      [Depth-First Search (DFS)]\n      [Recursive vs Iterative]\n      [Time Complexity: O(V+E)]\n      [Space Complexity: O(V)]\n    Applications\n      [Shortest Path (unweighted)]\n      [Connected Components]\n      [Topological Sorting]\n      [Bipartite Graph Detection]\n      [Cycle Detection]\n    Advanced Topics\n      [A* Search]\n      [Bidirectional BFS]\n      [Iterative Deepening DFS]\n      [Memoization in DFS]\n      [Tree vs Graph Traversal]\n```"
+      }
+    },
+    {
+      "type": "quiz",
+      "status": "completed",
+      "fileName": "quiz.md",
+      "resourcePath": "resources/Graph-Search-Basics/quiz.md",
+      "contentLength": 2053,
+      "contentPreview": "[\n  {\n    \"type\": \"choice\",\n    \"question\": \"关于图搜索中的深度优先搜索（DFS）和广度优先搜索（BFS），以下描述正确的是？\",\n    \"options\": [\n      \"A. DFS 总是比 BFS 更快找到目标节点\",\n      \"B. BFS 使用栈作为辅助数据结构，而 DFS 使用队列\",\n      \"C. DFS 适用于查找两个节点之间的最短路径\",\n      \"D. 对于相同的图，DFS 和 BFS 在连通分量数量上可以得出相同的结果\"\n    ],\n    \"answer\": \"D\",\n    \"explanation\":",
+      "qualitySignal": "readable-content",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM 练习题库生成专家。请根据以下内容生成一套练习题。\n\n要求：\n1. 至少 5 道题，覆盖基础概念理解（3 题）+ 进阶应用分析（2 题）\n2. 输出严格 JSON 数组格式，不要加任何其他文字\n3. 每题包含：type, question, options, answer, explanation\n\n输出格式：\n[\n  {\n    \"type\": \"choice\",\n    \"question\": \"以下关于X的描述，正确的是？\",\n    \"options\": [\"A. ...\", \"B. ...\", \"C. ...\", \"D. ...\"],\n    \"answer\": \"B\",\n    \"explanation\": \"选项B正确，因为...\"\n  }\n]",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "[\n  {\n    \"type\": \"choice\",\n    \"question\": \"关于图搜索中的深度优先搜索（DFS）和广度优先搜索（BFS），以下描述正确的是？\",\n    \"options\": [\n      \"A. DFS 总是比 BFS 更快找到目标节点\",\n      \"B. BFS 使用栈作为辅助数据结构，而 DFS 使用队列\",\n      \"C. DFS 适用于查找两个节点之间的最短路径\",\n      \"D. 对于相同的图，DFS 和 BFS 在连通分量数量上可以得出相同的结果\"\n    ],\n    \"answer\": \"D\",\n    \"explanation\": \"选项D正确，因为无论使用DFS还是BFS，只要遍历整个图，最终得到的连通分量数量是一致的。选项A错误，因为DFS不一定比BFS快，取决于图结构和目标位置；选项B倒置了数据结构，BFS用队列，DFS用栈；选项C错误，BFS适用于无权图的最短路径，DFS不保证最短。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"在一个无向图中，使用 BFS 进行遍历时，以下哪种情况表明图中存在环？\",\n    \"options\": [\n      \"A. 访问到一个已访问过的节点，且该节点是当前节点的父节点\",\n      \"B. 访问到一个已访问过的节点，且该节点不是当前节点的父节点\",\n      \"C. BFS 队列为空时仍有未访问节点\",\n      \"D. BFS 过程中发现重复的边\"\n    ],\n    \"answer\": \"B\",\n    \"explanation\": \"选项B正确：在无向图的BFS中，如果遇到一个已经访问过的节点，并且该节点不是当前节点的父节点（即之前通过其他路径访问过），则表明存在环。选项A中父节点的情况是正常的树边，不构成环；选项C表示图不连通；选项D中重复边取决于图的定义，但通常不会单独指示环。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"对于图搜索中的回溯操作，以下哪个说法最准确？\",\n    \"options\": [\n      \"A. 回溯仅在深度优先搜索中使用，广度优先搜索不使用回溯\",\n      \"B. 回溯是指当当前路径无法继续时，返回到上一个节点并尝试其他分支\",\n      \"C. 回溯与递归无关，只适用于迭代实现的搜索\",\n      \"D. 回溯一定会导致算法找到所有解\"\n    ],\n    \"answer\": \"B\",\n    \"explanation\": \"选项B正确：回溯是一种通用的算法思想，在DFS中尤为常见，当无法继续前进时回退到上一节点探索其他分支。选项A错误，BFS通常不涉及回溯（它层层推进）；选项C错误，回溯常与递归（函数调用栈）结合；选项D错误，回溯不一定找到所有解，可能只找第一个或特定解，且如果图无限大可能会陷入循环（若不加剪枝）。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"给定一个加权有向图，每条边的权重为正整数。你需要找到从起点s到终点t的一条路径，使得路径上的总权重最小。以下哪种搜索策略最适合？\",\n    \"options\": [\n      \"A. 深度优先搜索（DFS）\",\n      \"B. 广度优先搜索（BFS）\",\n      \"C. Dijkstra算法（一种带权重的广度优先搜索）\",\n      \"D. 回溯法\"\n    ],\n    \"answer\": \"C\",\n    \"explanation\": \"选项C正确：Dijkstra算法是专门针对非负权重图的最短路径问题，它本质上是带优先队列的BFS，能够保证首次访问节点时得到该节点的最短距离。选项A的DFS不保证最短路径；选项B的BFS只适用于无权图（即权重相等）；选项D的回溯法可能尝试所有路径，效率极低。\"\n  },\n  {\n    \"type\": \"choice\",\n    \"question\": \"在回溯搜索中，如果当前状态已不可能导致合法解（即剪枝），应该采取什么操作？\",\n    \"options\": [\n      \"A. 立即停止整个搜索过程\",\n      \"B. 继续深入搜索以确认无效\",\n      \"C. 回溯到上一个状态并尝试其他分支\",\n      \"D. 将该状态标记为已访问并继续向前\"\n    ],\n    \"answer\": \"C\",\n    \"explanation\": \"选项C正确：剪枝的核心思想是当确定当前分支无法产生解时，立即回溯（即放弃此分支，回到上一级决策点）并尝试其他可能性，从而提高搜索效率。选项A过于激进，可能错失其他分支的合法解；选项B违背剪枝原则，浪费时间；选项D会陷入无效探索。\"\n  }\n]"
+      }
+    },
+    {
+      "type": "code",
+      "status": "failed",
+      "error": "Need at least 2 code blocks, got 1.5",
+      "fileName": "practice-code.md",
+      "resourcePath": "resources/Graph-Search-Basics/practice-code.md",
+      "qualitySignal": "not-generated",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM 代码实操资源生成专家。请根据以下内容生成一个可以直接练习的代码案例。\n\n要求：\n1. 输出 Markdown，必须包含以下章节：\n   ## 练习目标\n   ## 初始代码\n   ## 任务要求\n   ## 测试样例\n   ## 参考实现\n   ## 讲解\n2. 至少包含 2 个 fenced code block，优先使用 TypeScript、Python 或伪代码中最贴近主题的一种\n3. 练习必须可操作，不要只给概念解释\n4. 输出纯 Markdown，不要加前言",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "## 练习目标\n\n本练习旨在帮助您掌握图的两种基本遍历算法：广度优先搜索 (BFS) 和深度优先搜索 (DFS)。您将基于给定的图结构（邻接表实现），分别实现 BFS 和 DFS 来搜索目标节点，并返回从起点到目标节点的路径（如存在）。通过实际编码，理解 BFS 的队列结构（层级扩展）与 DFS 的栈/递归特性（深度优先）之间的差异。\n\n## 初始代码\n\n```python\nfrom collections import deque\n\nclass Graph:\n    def __init__(self):\n        self.adj = {}  # 邻接表: 节点 -> 邻居列表\n\n    def add_edge(self, u, v):\n        \"\"\"添加一条无向边 u-v\"\"\"\n        if u not in self.adj:\n            self.adj[u] = []\n        if v not in self.adj:\n            self.adj[v] = []\n        self.adj[u].append(v)\n        self.adj[v].append(u)\n\n    def bfs(self, start, target):\n        \"\"\"\n        使用广度优先搜索从 start 找到 target，返回路径（节点列表）。\n        如果目标不可达，返回空列表。\n        \"\"\"\n        # 请在此处实现 BFS\n        pass\n\n    def dfs(self, start, target):\n        \"\"\"\n        使用深度优先搜索从 start 找到 target，返回路径（节点列表）。\n        如果目标不可达，返回空列表。\n        \"\"\"\n        # 请在此处实现 DFS\n        pass\n\n# 示例图构造（测试时使用）\nif __name__ == \"__main__\":\n    g = Graph()\n    g.add_edge(1, 2)\n    g.add_edge(1, 3)\n    g.add_edge(2, 4)\n    g.add_edge(2, 5)\n    g.add_edge(3, 6)\n    # 图结构：\n    #     1\n    #    / \\\n    #   2   3\n    #  / \\   \\\n    # 4   5   6\n\n    # 测试 BFS 和 DFS\n    print(\"BFS(1,6):\", g.bfs(1, 6))   # 预期输出 BFS 路径\n    print(\"DFS(1,6):\", g.dfs(1, 6))   # 预期输出 DFS 路径\n```\n\n## 任务要求\n\n1. **实现 `bfs` 方法**：使用队列（`deque`）进行层次遍历。维护 `parent` 字典记录每个节点的前驱节点，以便在找到目标后重构路径。\n2. **实现 `dfs` 方法**：使用递归或显式栈实现深度优先搜索。同样需要记录前驱节点并重构路径。\n3. **路径返回格式**：路径从 `start` 开始，到 `target` 结束，包含这两个端点。如果目标不存在或不可达，返回空列表 `[]`。\n4. **算法正确性**：BFS 应保证找到最短路径（边数最少），DFS 则可能不保证最短，但必须正确找到一条可行路径（若存在）。\n5. **边界情况**：当 `start == target` 时，直接返回 `[start]`。\n\n## 测试样例\n\n使用初始代码中构造的图（1-2, 1-3, 2-4, 2-5, 3-6），执行以下测试：\n\n| 测试用例 | 期望输出 (BFS) | 期望输出 (DFS) |\n|----------|---------------|---------------|\n| `bfs(1,1)`  | `[1]`        | `[1]`        |\n| `bfs(1,6)`  | `[1,3,6]`    | `[1,3,6]`    |\n| `dfs(1,5)`  | `[1,2,5]`    | `[1,2,5]`    |\n| `bfs(1,7)`  | `[]`         | `[]`         |\n| `dfs(4,6)`  | `[4,2,1,3,6]` | `[4,2,1,3,6]` |\n\n注意：DFS 的路径可能因遍历顺序不同而有差异（例如，可选的邻居顺序），但必须合法且连通。测试基准是 BFS 必然返回最短路径，DFS 只要返回一条有效路径即可。若您的 DFS 按节点添加顺序遍历，使用给定的 `add_edge` 添加顺序（2,3 等），上述期望输出可行。\n\n## 参考实现\n\n```python\nfrom collections import deque\n\nclass Graph:\n    def __init__(self):\n        self.adj = {}\n\n    def add_edge(self, u, v):\n        if u not in self.adj:\n            self.adj[u] = []\n        if v not in self.adj:\n            self.adj[v] = []\n        self.adj[u].append(v)\n        self.adj[v].append(u)\n\n    def bfs(self, start, target):\n        if start == target:\n            return [start]\n        if start not in self.adj:\n            return []\n        visited = {start}\n        parent = {start: None}\n        queue = deque"
+      }
+    },
+    {
+      "type": "diagram",
+      "status": "failed",
+      "error": "Missing mermaid keyword",
+      "fileName": "diagram.mmd",
+      "resourcePath": "resources/Graph-Search-Basics/diagram.mmd",
+      "qualitySignal": "not-generated",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM Mermaid 图表生成专家。请根据以下内容生成一个 Mermaid 图表。\n\n要求：\n1. 选择最合适的图表类型：flowchart / sequenceDiagram / classDiagram / pie / stateDiagram / gantt\n2. 至少 6 个节点，结构完整\n3. 输出纯 Mermaid 代码块，以 ```mermaid 开头\n\n格式参考：\n```mermaid\nflowchart TD\n  A[概念] --> B[子概念]\n```",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "```mermaid\nflowchart TD\n  A[图搜索基础] --> B[图表示]\n  A --> C[搜索策略]\n  \n  B --> B1[邻接矩阵]\n  B --> B2[邻接表]\n  \n  C --> D[深度优先搜索 DFS]\n  C --> E[广度优先搜索 BFS]\n  \n  D --> D1[使用栈 或 递归]\n  D1 --> D2[标记已访问节点]\n  D2 --> D3[回溯探索分支]\n  \n  E --> E1[使用队列]\n  E1 --> E2[逐层扩展]\n  E2 --> E3[找到最短路径 无权图]\n  \n  D3 --> F[遍历完成]\n  E3 --> F\n  \n  F --> G[应用: 连通性、拓扑排序、路径查找]\n```"
+      }
+    },
+    {
+      "type": "svg",
+      "status": "failed",
+      "error": "DeepSeek returned empty content",
+      "fileName": "diagram.svg",
+      "resourcePath": "resources/Graph-Search-Basics/diagram.svg",
+      "qualitySignal": "not-generated",
+      "transcript": {
+        "systemPrompt": "",
+        "userPrompt": "",
+        "response": ""
+      }
+    },
+    {
+      "type": "video",
+      "status": "failed",
+      "error": "Video config is not valid JSON",
+      "fileName": "video.html",
+      "resourcePath": "resources/Graph-Search-Basics/video.html",
+      "qualitySignal": "not-generated",
+      "transcript": {
+        "systemPrompt": "你是 AXIOM 教学视频脚本生成专家。请根据以下学习主题，生成一个教学动画视频的场景配置。\n\n要求：\n1. 生成 4-6 个场景\n2. 每个场景包含 2-5 个元素（text/code/shape）\n3. 总时长控制在 30-90 秒\n\n以严格 JSON 格式返回：\n{\n  \"scenes\": [{ \"id\": \"intro\", \"duration\": 6, \"backgroundColor\": \"#f0f4f8\", \"elements\": [...] }],\n  \"width\": 1920, \"height\": 1080, \"fps\": 30\n}",
+        "userPrompt": "学习主题：Graph Search Basics\n用户水平：intermediate",
+        "response": "{\n  \"scenes\": [\n    {\n      \"id\": \"intro\",\n      \"duration\": 8,\n      \"backgroundColor\": \"#1a1a2e\",\n      \"elements\": [\n        { \"type\": \"text\", \"x\": 400, \"y\": 300, \"width\": 1120, \"height\": 200, \"content\": \"Graph Search Basics\", \"fontSize\": 72, \"color\": \"#e94560\", \"fontWeight\": \"bold\" },\n        { \"type\": \"text\", \"x\": 600, \"y\": 500, \"width\": 720, \"height\": 80, \"content\": \"BFS · DFS · Applications\", \"fontSize\": 36, \"color\": \"#ffffff\", \"fontWeight\": \"normal\" },\n        { \"type\": \"shape\", \"x\": 860, \"y\": 580, \"width\": 80, \"height\": 4, \"shape\": \"line\", \"color\": \"#e94560\" }\n      ]\n    },\n    {\n      \"id\": \"graph-definition\",\n      \"duration\": 12,\n      \"backgroundColor\": \"#f0f4f8\",\n      \"elements\": [\n        { \"type\": \"text\", \"x\": 100, \"y\": 50, \"width\": 600, \"height\": 60, \"content\": \"What is a Graph?\", \"fontSize\": 40, \"color\": \"#2d3436\", \"fontWeight\": \"bold\" },\n        { \"type\": \"shape\", \"x\": 200, \"y\": 200, \"width\": 60, \"height\": 60, \"shape\": \"circle\", \"color\": \"#6c5ce7\", \"fillColor\": \"#dfe6e9\" },\n        { \"type\": \"shape\", \"x\": 500, \"y\": 300, \"width\": 60, \"height\": 60, \"shape\": \"circle\", \"color\": \"#6c5ce7\", \"fillColor\": \"#dfe6e9\" },\n        { \"type\": \"shape\", \"x\": 700, \"y\": 150, \"width\": 60, \"height\": 60, \"shape\": \"circle\", \"color\": \"#6c5ce7\", \"fillColor\": \"#dfe6e9\" },\n        { \"type\": \"text\", \"x\": 160, \"y\": 450, \"width\": 800, \"height\": 100, \"content\": \"Nodes (vertices) + Edges (connections)\", \"fontSize\": 28, \"color\": \"#636e72\", \"fontWeight\": \"normal\" }\n      ]\n    },\n    {\n      \"id\": \"bfs\",\n      \"duration\": 15,\n      \"backgroundColor\": \"#ffffff\",\n      \"elements\": [\n        { \"type\": \"text\", \"x\": 100, \"y\": 30, \"width\": 500, \"height\": 60, \"content\": \"Breadth-First Search (BFS)\", \"fontSize\": 36, \"color\": \"#0984e3\", \"fontWeight\": \"bold\" },\n        { \"type\": \"text\", \"x\": 100, \"y\": 100, \"width\": 800, \"height\": 80, \"content\": \"Uses a queue · Explores level by level\", \"fontSize\": 24, \"color\": \"#2d3436\", \"fontWeight\": \"normal\" },\n        { \"type\": \"code\", \"x\": 100, \"y\": 200, \"width\": 600, \"height\": 300, \"content\": \"queue = [start]\\nvisited = {start}\\nwhile queue:\\n    node = queue.pop(0)\\n    for neighbor in graph[node]:\\n        if neighbor not in visited:\\n            visited.add(neighbor)\\n            queue.append(neighbor)\", \"fontSize\": 20, \"color\": \"#2d3436\", \"backgroundColor\": \"#dfe6e9\" },\n        { \"type\": \"shape\", \"x\": 800, \"y\": 200, \"width\": 80, \"height\": 80, \"shape\": \"circle\", \"color\": \"#0984e3\", \"fillColor\": \"#74b9ff\" },\n        { \"type\": \"shape\", \"x\": 950, \"y\": 200, \"width\": 50, \"height\": 50, \"shape\": \"circle\", \"color\": \"#636e72\", \"fillColor\": \"#b2bec3\" }\n      ]\n    },\n    {\n      \"id\": \"dfs\",\n      \"duration\": 15,\n      \"backgroundColor\": \"#ffffff\",\n      \"elements\": [\n        { \"type\": \"text\", \"x\": 100, \"y\": 30, \"width\": 500, \"height\": 60, \"content\": \"Depth-First Search (DFS)\", \"fontSize\": 36, \"color\": \"#e17055\", \"fontWeight\": \"bold\" },\n        { \"type\":"
+      }
+    }
+  ]
+}

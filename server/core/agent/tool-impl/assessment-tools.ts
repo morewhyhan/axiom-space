@@ -98,10 +98,11 @@ D) ${q.options?.[3]}
       try {
         const vaultId = getCurrentVaultId();
         if (vaultId) {
-          await prisma.vaultMemory.upsert({
-            where: { vaultId_key: { vaultId, key: `assessment:${params.concept}:${Date.now()}` } },
-            update: { value: JSON.stringify({ type: 'mcq', concept: params.concept, question_count: questions.length, difficulty: params.difficulty || 'medium', timestamp: Date.now() }), category: 'quality_check' },
-            create: { vaultId, key: `assessment:${params.concept}:${Date.now()}`, value: JSON.stringify({ type: 'mcq', concept: params.concept, question_count: questions.length, difficulty: params.difficulty || 'medium', timestamp: Date.now() }), category: 'quality_check' },
+          await persistAssessmentMemory(vaultId, 'generate_mcq', params.concept, {
+            type: 'mcq',
+            concept: params.concept,
+            question_count: questions.length,
+            difficulty: params.difficulty || 'medium',
           });
         }
       } catch { /* non-critical */ }
@@ -508,10 +509,12 @@ ${results.filter((r: any) => !r.pass).map((r: any) => `- 需要复习: **${r.con
       try {
         const vaultId = getCurrentVaultId();
         if (vaultId) {
-          await prisma.vaultMemory.upsert({
-            where: { vaultId_key: { vaultId, key: `assessment:batch:${Date.now()}` } },
-            update: { value: JSON.stringify({ type: 'batch', concepts: batch, passed: passCount, failed: failCount, pass_rate: results.length > 0 ? passCount / results.length : 0, timestamp: Date.now() }), category: 'quality_check' },
-            create: { vaultId, key: `assessment:batch:${Date.now()}`, value: JSON.stringify({ type: 'batch', concepts: batch, passed: passCount, failed: failCount, pass_rate: results.length > 0 ? passCount / results.length : 0, timestamp: Date.now() }), category: 'quality_check' },
+          await persistAssessmentMemory(vaultId, 'batch_assessment', 'batch', {
+            type: 'batch',
+            concepts: batch,
+            passed: passCount,
+            failed: failCount,
+            pass_rate: results.length > 0 ? passCount / results.length : 0,
           });
         }
       } catch { /* non-critical */ }
@@ -764,10 +767,12 @@ ${criticalGaps.length > 0
       try {
         const vaultId = getCurrentVaultId();
         if (vaultId) {
-          await prisma.vaultMemory.upsert({
-            where: { vaultId_key: { vaultId, key: `assessment:${params.concept}:${Date.now()}` } },
-            update: { value: JSON.stringify({ type: 'feynman', concept: params.concept, overall_assessment: data.overall_assessment, critical_gaps: criticalGaps.length, total_gaps: gaps.length, timestamp: Date.now() }), category: 'quality_check' },
-            create: { vaultId, key: `assessment:${params.concept}:${Date.now()}`, value: JSON.stringify({ type: 'feynman', concept: params.concept, overall_assessment: data.overall_assessment, critical_gaps: criticalGaps.length, total_gaps: gaps.length, timestamp: Date.now() }), category: 'quality_check' },
+          await persistAssessmentMemory(vaultId, 'feynman_test', params.concept, {
+            type: 'feynman',
+            concept: params.concept,
+            overall_assessment: data.overall_assessment,
+            critical_gaps: criticalGaps.length,
+            total_gaps: gaps.length,
           });
         }
       } catch { /* non-critical */ }
@@ -793,6 +798,37 @@ ${criticalGaps.length > 0
     }
   }
 );
+
+async function persistAssessmentMemory(
+  vaultId: string,
+  toolName: string,
+  concept: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const timestamp = Date.now();
+  const safeConcept = concept.replace(/[:\n\r]/g, '_').slice(0, 120) || 'unknown';
+  const key = `assessment:${toolName}:${safeConcept}:${timestamp}`;
+  await prisma.vaultMemory.create({
+    data: {
+      vaultId,
+      key,
+      category: 'quality_check',
+      value: JSON.stringify({
+        ...payload,
+        timestamp,
+        sourceObjectType: 'vaultMemory',
+        sourceObjectId: key,
+        evidence: [
+          {
+            sourceObjectType: 'agentTool',
+            sourceObjectId: toolName,
+            summary: `${toolName} generated assessment evidence for ${concept}`,
+          },
+        ],
+      }),
+    },
+  });
+}
 
 export function registerAssessmentTools(): void {
   toolRegistry.register(generateMCQTool);

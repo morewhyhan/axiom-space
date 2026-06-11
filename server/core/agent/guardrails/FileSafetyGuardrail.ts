@@ -165,7 +165,7 @@ export class FileSafetyGuardrail implements ToolMiddleware {
     // Delete confirmation gate (对标 D-14)
     // Check if this is a delete/rename operation that needs confirmation
     if (requiresConfirmation(toolName) && (args.force === true || args.confirmed === true)) {
-      const target = String(args.filePath || args.cardPath || args.path || '');
+      const target = String(args.filePath || args.cardPath || args.skillName || args.command || args.target || args.path || '');
       if (!isConfirmationTokenValid(toolName, target, args.confirmationToken)) {
         return {
           proceed: false,

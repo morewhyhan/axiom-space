@@ -19,9 +19,35 @@ const bashTool = createTool(
   '执行 shell 命令并返回结果。注意：此工具在主进程中执行，请谨慎使用。',
   Type.Object({
     command: Type.String({ description: '要执行的 shell 命令' }),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行命令时必须提供。' })),
   }),
   async (_id, params) => {
     try {
+      if (!params.confirmationToken) {
+        const confirmation = createConfirmationToken('bash', params.command)
+        return {
+          content: [{ type: 'text', text: `命令 "${params.command.slice(0, 120)}" 需要用户确认后才能执行。` }],
+          details: {
+            requiresConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            command: params.command,
+          },
+        };
+      }
+      if (!consumeConfirmationToken('bash', params.command, params.confirmationToken)) {
+        const confirmation = createConfirmationToken('bash', params.command)
+        return {
+          content: [{ type: 'text', text: 'confirmationToken 无效或已过期。请重新确认后再执行命令。' }],
+          details: {
+            requiresConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            command: params.command,
+            error: 'Invalid or missing confirmationToken',
+          },
+        };
+      }
       // Shell hook 白名单检查
       const allowlist = getShellHookAllowlist();
       if (allowlist.isEnabled()) {
@@ -316,12 +342,12 @@ const echoTool = createTool(
 const deleteFileTool = createTool(
   'delete_file',
   '删除文件',
-  '删除 Vault 中的文件。默认软删除（移动到 .axiom/trash/ 并记录清单，可恢复）。使用 --force 参数可永久删除。操作前会通过 ask_user 确认。',
+  '删除 Vault 中的文件。必须先取得用户确认 token；模型不能通过参数跳过确认。',
   Type.Object({
     filePath: Type.String({ description: '要删除的文件路径（相对于 Vault 根目录）' }),
-    force: Type.Optional(Type.Boolean({ description: '设为 true 可跳过确认直接删除（默认为软删除）。设为 true 且 needConfirm=true 时才永久删除。' })),
-    needConfirm: Type.Optional(Type.Boolean({ description: '默认为 true。设为 false 可跳过 ask_user 确认（仅配合 force 使用）。' })),
-    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行 force 删除时必须提供。' })),
+    force: Type.Optional(Type.Boolean({ description: '确认后由系统设置为 true，模型不可用它跳过确认。' })),
+    needConfirm: Type.Optional(Type.Boolean({ description: '已废弃；删除始终需要 confirmationToken。' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行删除时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -336,7 +362,7 @@ const deleteFileTool = createTool(
       const resolvedPath = resolvePath(params.filePath);
 
       // Delete confirmation gate (对标 D-14)
-      if (!params.force && params.needConfirm !== false) {
+      if (!params.force) {
         const confirmation = createConfirmationToken('delete_file', resolvedPath);
         console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
         return {

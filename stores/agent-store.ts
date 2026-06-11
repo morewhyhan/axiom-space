@@ -245,9 +245,19 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 
   switchSession: async (id: string) => {
     const session = get().sessions.find((item) => item.id === id) ?? null
-    const shouldActivate = !session || (session.status !== 'completed' && session.threadStatus !== 'archived')
+    if (!session) {
+      set({ error: '会话不存在' })
+      return
+    }
+
+    const isUsableSession = session.status !== 'completed' && session.threadStatus !== 'archived'
+    const shouldActivate = session.status !== 'active'
 
     if (shouldActivate) {
+      if (!isUsableSession) {
+        set({ error: '该会话已归档，无法继续对话' })
+        return
+      }
       try {
         const vid = useAppStore.getState().currentVaultId
         const res = await client.api.agent.sessions[':id'].activate.$post({

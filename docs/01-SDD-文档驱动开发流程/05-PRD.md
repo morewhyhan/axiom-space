@@ -71,6 +71,8 @@
   -> Galaxy / Cognition 展示沉淀结果
 ```
 
+![AXIOM Space PRD 页面交互主流程图](./assets/prd-page-interaction-flow.png)
+
 ### 2.5 本期不做什么
 
 本期不做：

@@ -75,12 +75,31 @@ export async function saveUserProfile(_vaultPath?: string, profile?: UserProfile
         select: { profileCache: true },
       })
 
-      await prisma.vault.update({
-        where: { id: vaultId },
-        data: {
-          profileCache: setProfileCacheEntry(vault?.profileCache, 'agentProfile', profile ?? createDefaultProfile()),
-        },
-      })
+      const nextProfile = profile ?? createDefaultProfile()
+      const evidence = Array.isArray(nextProfile.evidence)
+        ? nextProfile.evidence.map((item: unknown) => String(item).trim()).filter(Boolean)
+        : []
+      await prisma.$transaction([
+        prisma.vault.update({
+          where: { id: vaultId },
+          data: {
+            profileCache: setProfileCacheEntry(vault?.profileCache, 'agentProfile', nextProfile),
+          },
+        }),
+        ...(evidence.length > 0
+          ? [prisma.educationProfileHistory.create({
+            data: {
+              vaultId,
+              profile: JSON.stringify(nextProfile),
+              snapshot: JSON.stringify({
+                profileKey: 'agentProfile',
+                evidence: evidence.slice(0, 10),
+                updatedAt: nextProfile.updatedAt,
+              }),
+            },
+          })]
+          : []),
+      ])
     } catch (e) {
       console.warn('[ProfileManager] save failed:', e)
     }

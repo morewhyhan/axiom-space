@@ -10,6 +10,7 @@ import type { IFileStorage } from "./IFileStorage"
 import { exec } from 'child_process'
 import { promisify } from 'node:util'
 import { homedir } from 'node:os'
+import { validatePermanentCardContent } from '@/server/core/domain/contracts'
 
 const asyncExec = promisify(exec)
 
@@ -140,7 +141,8 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
       await storage.writeFile(filePath, content, 'fleeting')
       // 同步写入 Prisma DB
       const { prisma } = await import('@/lib/db')
-      const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const { getCurrentUserId, getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const { emitDomainEvent } = await import('@/server/core/domain/events')
       const vid = getCurrentVaultId()
       if (vid) {
         const tags = item.tags ? (Array.isArray(item.tags) ? JSON.stringify(item.tags) : item.tags) : null
@@ -148,6 +150,14 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
           where: { vaultId_path: { vaultId: vid, path: filePath } },
           update: { title, content, type: 'fleeting', tags, updatedAt: new Date() },
           create: { vaultId: vid, path: filePath, title, content, type: 'fleeting', tags },
+        })
+        void emitDomainEvent({
+          userId: getCurrentUserId(),
+          vaultId: vid,
+          aggregateType: 'card',
+          aggregateId: card.id,
+          eventType: 'CardCreated',
+          payload: { path: filePath, title, type: 'fleeting', source: 'agentTool' },
         })
         console.log('[AxiomCompat] createFleeing DB write OK:', { id: card.id, title, vaultId: vid })
         return { success: true, actualTitle: title, id: card.id, cardPath: filePath }
@@ -157,6 +167,26 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
     },
 
     async createPermanent(_vp: string, item: any, content: string, oldTitle?: string) {
+      const quality = validatePermanentCardContent(content)
+      if (!quality.passed) {
+        const { getCurrentUserId, getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+        const { recordPromotionAttempt } = await import('@/server/core/domain/events')
+        const vid = getCurrentVaultId()
+        if (vid) {
+          void recordPromotionAttempt({
+            userId: getCurrentUserId(),
+            vaultId: vid,
+            toType: 'permanent',
+            status: 'rejected',
+            missingElements: quality.missingElements,
+            qualityChecks: quality.checks,
+          })
+        }
+        return {
+          success: false,
+          error: `PROMOTION_CRITERIA_FAILED: missing ${quality.missingElements.join(', ')}`,
+        }
+      }
       const title = item.title || `perm-${Date.now()}`
       const filePath = `permanent/${title}.md`
       if (oldTitle) {
@@ -172,7 +202,8 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
       await storage.writeFile(filePath, content, 'permanent')
       // 同步写入 Prisma DB
       const { prisma } = await import('@/lib/db')
-      const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const { getCurrentUserId, getCurrentVaultId } = await import('@/server/core/agent/agent-context')
+      const { emitDomainEvent, recordPromotionAttempt } = await import('@/server/core/domain/events')
       const vid = getCurrentVaultId()
       if (vid) {
         const tags = item.tags ? (Array.isArray(item.tags) ? JSON.stringify(item.tags) : item.tags) : null
@@ -180,6 +211,21 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
           where: { vaultId_path: { vaultId: vid, path: filePath } },
           update: { title, content, type: 'permanent', tags, updatedAt: new Date() },
           create: { vaultId: vid, path: filePath, title, content, type: 'permanent', tags },
+        })
+        void emitDomainEvent({
+          userId: getCurrentUserId(),
+          vaultId: vid,
+          aggregateType: 'card',
+          aggregateId: card.id,
+          eventType: 'CardCreated',
+          payload: { path: filePath, title, type: 'permanent', source: 'agentTool' },
+        })
+        void recordPromotionAttempt({
+          userId: getCurrentUserId(),
+          vaultId: vid,
+          cardId: card.id,
+          toType: 'permanent',
+          status: 'accepted',
         })
         console.log('[AxiomCompat] createPermanent DB write OK:', { id: card.id, title, vaultId: vid })
         return { success: true, actualTitle: title, id: card.id, cardPath: filePath }

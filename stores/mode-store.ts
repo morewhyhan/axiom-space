@@ -60,7 +60,7 @@ interface AppStore {
   setPrefetchedCard: (card: { id: string; content: string; title: string } | null) => void
   /* ── Vault management ── */
   currentVaultId: string | null
-  setCurrentVaultId: (id: string) => void
+  setCurrentVaultId: (id: string | null) => void
   vaults: VaultInfo[]
   setVaults: (vaults: VaultInfo[]) => void
   lastVaultId: string | null

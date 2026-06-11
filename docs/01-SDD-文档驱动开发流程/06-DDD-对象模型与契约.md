@@ -502,6 +502,10 @@ AXIOM 的 AI 不是一个纯文本输入框，因此 Agent 相关对象也应该
 
 ## 4. 核心关系图
 
+![AXIOM Space DDD 领域边界与契约图](./assets/ddd-domain-boundary.png)
+
+这张图表达的是 DDD 视角下的组织架构：`User / Vault` 先确定数据归属边界，`Card`、`LearningPath`、`LearningSession`、`Graph`、`Cognition`、`Resource`、`RAG`、`Agent` 分别是不同的 bounded context。它们之间不能随意互相改数据，必须通过领域服务、值对象契约、领域事件和工具契约发生协作。
+
 ```text
 User
   -> AuthAccount

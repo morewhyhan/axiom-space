@@ -13,6 +13,8 @@ import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-c
 import { prisma } from '@/lib/db';
 import { emitNotification, emitResourceProgress } from '../notification-bus';
 import type { ResourceType } from '../ResourceGenerationState';
+import { createHash } from 'node:crypto';
+import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
 
 const RESOURCE_LABELS: Record<string, string> = {
   document: '学习文档',
@@ -44,6 +46,42 @@ type ResourceOrchestrationEvidence = {
     message: string;
   }>;
 };
+
+type GeneratedResourceManifestItem = {
+  type: string;
+  title: string;
+  path: string;
+  ref: string;
+  mp4Path?: string;
+  mp4Ref?: string;
+  fileName: string;
+  status: 'ready';
+  source: string;
+  sourceObjectType: 'card';
+  sourceObjectId?: string;
+  sourcePath: string;
+  sourceTitle: string;
+  contentHash: string;
+  generatedAt: string;
+};
+
+function sha256Text(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+type PendingExtractCards = {
+  target: string;
+  literatureTitle: string;
+  literatureContent: string;
+  candidates?: string[];
+  createdAt: number;
+};
+
+const pendingExtractCards = new Map<string, PendingExtractCards>();
+
+function rememberPendingExtractCards(token: string, pending: Omit<PendingExtractCards, 'createdAt'>): void {
+  pendingExtractCards.set(token, { ...pending, createdAt: Date.now() });
+}
 
 /** Persist a resource generation record to DB (fire-and-forget, scoped by userId+vaultId) */
 function persistResourceToDb(userId: string, topic: string, types: string[], detail: Record<string, any>): void {
@@ -306,14 +344,9 @@ const pushResourceTool = createTool(
       const sanitizedDir = litTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
       const resourceDir = `resources/${sanitizedDir}`;
       const sections: string[] = [];
-      const resourceManifest: Array<{
-        type: string;
-        title: string;
-        path: string;
-        mp4Path?: string;
-        fileName: string;
-      }> = [];
+      const resourceManifest: GeneratedResourceManifestItem[] = [];
       let generatedCount = 0;
+      const manifestVaultId = getCurrentVaultId();
 
       for (const type of RESOURCE_TYPES) {
         if (state.getStatus(type) !== 'completed') continue;
@@ -322,11 +355,26 @@ const pushResourceTool = createTool(
           const resourcePath = `resources/${sanitizedDir}/${fileName}`;
           const result = await getFileStorage().readFile(`${resourceDir}/${fileName}`);
           if (result?.success && result.content) {
-            const item = {
+            const resourceCard = manifestVaultId
+              ? await prisma.card.findUnique({
+                where: { vaultId_path: { vaultId: manifestVaultId, path: resourcePath } },
+                select: { id: true, path: true },
+              }).catch(() => null)
+              : null;
+            const item: GeneratedResourceManifestItem = {
               type,
               title: RESOURCE_LABELS[type] || type,
               path: resourcePath,
+              ref: resourcePath,
               fileName,
+              status: 'ready',
+              source: 'AI 自动生成资源，已持久化为当前 Vault 内的 Card',
+              sourceObjectType: 'card',
+              sourceObjectId: resourceCard?.id,
+              sourcePath: resourceCard?.path || resourcePath,
+              sourceTitle: litTitle,
+              contentHash: sha256Text(result.content),
+              generatedAt: new Date().toISOString(),
             };
             if (type === 'video') {
               // Embed a reference marker instead of the full HTML.
@@ -337,6 +385,7 @@ const pushResourceTool = createTool(
               resourceManifest.push({
                 ...item,
                 mp4Path: mp4Result?.success ? videoMp4Ref : undefined,
+                mp4Ref: mp4Result?.success ? videoMp4Ref : undefined,
               });
               sections.push([
                 `> 📺 **教学视频已生成** — 在 READ 模式下可预览和播放`,
@@ -455,8 +504,18 @@ ${sections.join('\n\n---\n\n')}
         type: item.type,
         title: RESOURCE_LABELS[item.type as keyof typeof RESOURCE_LABELS] || item.title || item.type,
         path: item.path,
+        ref: item.ref,
         mp4Path: item.mp4Path,
+        mp4Ref: item.mp4Ref,
         fileName: item.fileName,
+        status: item.status,
+        source: item.source,
+        sourceObjectType: item.sourceObjectType,
+        sourceObjectId: item.sourceObjectId,
+        sourcePath: item.sourcePath,
+        sourceTitle: item.sourceTitle,
+        contentHash: item.contentHash,
+        generatedAt: item.generatedAt,
       }));
       const resourceLines = generatedResources.map((item) => {
         const preview = item.type === 'video'
@@ -519,7 +578,8 @@ const extractCardsTool = createTool(
   Type.Object({
     literatureTitle: Type.String({ description: '要提取的文献标题' }),
     literatureContent: Type.String({ description: '文献完整内容（LLM从中提取概念）' }),
-    auto: Type.Optional(Type.Boolean({ description: '是否自动执行无需用户确认。true=直接提取，false=先列候选再确认。默认false。' })),
+    auto: Type.Optional(Type.Boolean({ description: '是否自动执行。写入卡片前仍必须有用户确认 token。默认 false。' })),
+    confirmationToken: Type.Optional(Type.String({ description: '用户确认后得到的一次性确认 token。执行提取写入时必须提供。' })),
   }),
   async (_id, params) => {
     try {
@@ -528,6 +588,47 @@ const extractCardsTool = createTool(
         return {
           content: [{ type: 'text', text: '错误: 未打开 Vault' }],
           details: { error: 'No vault open' },
+        };
+      }
+
+      let literatureTitle = params.literatureTitle;
+      let literatureContent = params.literatureContent;
+
+      if (params.confirmationToken) {
+        const pending = pendingExtractCards.get(params.confirmationToken);
+        const target = pending?.target || literatureTitle;
+        if (!consumeConfirmationToken('extract_cards', target, params.confirmationToken)) {
+          return {
+            content: [{ type: 'text', text: `提取《${literatureTitle}》需要重新确认。` }],
+            details: { error: 'Invalid or missing confirmationToken' },
+          };
+        }
+        if (pending) {
+          literatureTitle = pending.literatureTitle;
+          literatureContent = pending.literatureContent;
+          pendingExtractCards.delete(params.confirmationToken);
+        } else if (!literatureContent.trim()) {
+          return {
+            content: [{ type: 'text', text: '确认请求已失效，无法恢复待提取的文献内容。请重新发起提取。' }],
+            details: { error: 'Pending extraction payload expired' },
+          };
+        }
+      } else if (params.auto) {
+        const confirmation = createConfirmationToken('extract_cards', literatureTitle);
+        rememberPendingExtractCards(confirmation.token, {
+          target: literatureTitle,
+          literatureTitle,
+          literatureContent,
+        });
+        return {
+          content: [{ type: 'text', text: `从《${literatureTitle}》提取概念卡片将写入当前 Vault。请确认后执行。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            literature: literatureTitle,
+            target: literatureTitle,
+          },
         };
       }
 
@@ -540,9 +641,9 @@ const extractCardsTool = createTool(
 2. 有清晰的边界，不是模糊的泛称
 3. 该概念可以复用到该文献之外的场景
 
-文献标题：${params.literatureTitle}
+文献标题：${literatureTitle}
 文献内容：
-${params.literatureContent.slice(0, 8000)}
+${literatureContent.slice(0, 8000)}
 
 仅返回概念名称列表，每行一个。
 
@@ -561,18 +662,31 @@ ${params.literatureContent.slice(0, 8000)}
 
         if (candidates.length === 0) {
           return {
-            content: [{ type: 'text', text: `从《${params.literatureTitle}》中未识别出符合条件的核心概念。` }],
-            details: { candidates: [], literature: params.literatureTitle },
+            content: [{ type: 'text', text: `从《${literatureTitle}》中未识别出符合条件的核心概念。` }],
+            details: { candidates: [], literature: literatureTitle },
           };
         }
 
-        const conceptList = candidates.map((c, i) => `${i + 1}. ${c}`).join('\n');
+        const confirmation = createConfirmationToken('extract_cards', literatureTitle);
+        rememberPendingExtractCards(confirmation.token, {
+          target: literatureTitle,
+          literatureTitle,
+          literatureContent,
+          candidates,
+        });
 
         console.warn('[Event] axiom:ask-user dispatched on server — no client to respond. Returning fallback.');
 
         return {
-          content: [{ type: 'text', text: `从《${params.literatureTitle}》中识别到 ${candidates.length} 个候选概念。请确认是否提取。` }],
-          details: { awaitingConfirmation: true, candidates, literature: params.literatureTitle },
+          content: [{ type: 'text', text: `从《${literatureTitle}》中识别到 ${candidates.length} 个候选概念。请确认是否提取。` }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            candidates,
+            literature: literatureTitle,
+            target: literatureTitle,
+          },
         };
       }
 
@@ -608,9 +722,9 @@ ${params.literatureContent.slice(0, 8000)}
 - 典型数量：3-10个，视文献密度而定
 - 宁缺毋滥：不确定的概念不要提取
 
-文献标题：${params.literatureTitle}
+文献标题：${literatureTitle}
 文献内容：
-${params.literatureContent.slice(0, 8000)}
+${literatureContent.slice(0, 8000)}
 
 ## ⚠️ 强制输出语言：中文
 所有内容必须用中文输出。专有名词保留原文。`;
@@ -657,13 +771,14 @@ ${params.literatureContent.slice(0, 8000)}
 
       if (concepts.length === 0) {
         return {
-          content: [{ type: 'text', text: `从《${params.literatureTitle}》中未提取到符合条件的核心概念。` }],
-          details: { concepts: [], literature: params.literatureTitle },
+          content: [{ type: 'text', text: `从《${literatureTitle}》中未提取到符合条件的核心概念。` }],
+          details: { concepts: [], literature: literatureTitle },
         };
       }
 
       // Step 3: Create DB card records for each concept
       const createdCards: Array<{ title: string; id?: string }> = [];
+      const failedCards: Array<{ title: string; error: string }> = [];
       const { prisma: pdb } = await import('@/lib/db');
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
       const vid = getCurrentVaultId();
@@ -687,7 +802,7 @@ ${(concept.associations || []).map(a => `[[${a}]]`).join(' ')}
 ## 例子
 ${(concept.examples || []).map(e => `- ${e}`).join('\n')}
 
-> 来源：[[${params.literatureTitle}]]`;
+> 来源：[[${literatureTitle}]]`;
 
         try {
           const safeTitle = concept.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100);
@@ -704,28 +819,34 @@ ${(concept.examples || []).map(e => `- ${e}`).join('\n')}
           createdCards.push({ title: concept.title, id: card.id });
         } catch (cardError) {
           console.warn(`[extract_cards] Failed to create card for "${concept.title}":`, cardError);
-          createdCards.push({ title: concept.title });
+          failedCards.push({ title: concept.title, error: cardError instanceof Error ? cardError.message : String(cardError) });
         }
       }
 
       // Step 4: Link extracted cards to source literature via edges
       try {
         const sourceCard = await pdb.card.findFirst({
-          where: { vaultId: vid, title: params.literatureTitle, type: 'literature' },
+          where: { vaultId: vid, title: literatureTitle, type: 'literature' },
           select: { id: true },
         });
         if (sourceCard) {
           for (const c of createdCards) {
             if (!c.id) continue;
-            await pdb.edge.create({
-              data: {
-                vaultId: vid,
-                sourceId: sourceCard.id,
-                targetId: c.id,
-                type: 'derived',
-                weight: 1,
-              },
-            }).catch(() => {});
+            const existingEdge = await pdb.edge.findFirst({
+              where: { vaultId: vid, sourceId: sourceCard.id, targetId: c.id, type: 'derived' },
+              select: { id: true },
+            });
+            if (!existingEdge) {
+              await pdb.edge.create({
+                data: {
+                  vaultId: vid,
+                  sourceId: sourceCard.id,
+                  targetId: c.id,
+                  type: 'derived',
+                  weight: 1,
+                },
+              }).catch(() => {});
+            }
           }
         }
       } catch (updateError) {
@@ -734,11 +855,16 @@ ${(concept.examples || []).map(e => `- ${e}`).join('\n')}
 
       const conceptNames = concepts.map(c => c.title).join('、');
       return {
-        content: [{ type: 'text', text: `从《${params.literatureTitle}》中提取了 ${concepts.length} 个概念: ${conceptNames}\n已创建 ${createdCards.length} 张灵感卡片并关联回源文献。` }],
+        content: [{
+          type: 'text',
+          text: `从《${literatureTitle}》中提取了 ${concepts.length} 个概念: ${conceptNames}\n已创建 ${createdCards.length} 张灵感卡片${failedCards.length > 0 ? `，${failedCards.length} 张创建失败` : ''}。`,
+        }],
         details: {
           concepts: concepts.map(c => ({ title: c.title, tags: c.tags })),
-          literature: params.literatureTitle,
+          literature: literatureTitle,
           cardsCreated: createdCards.length,
+          cardsFailed: failedCards.length,
+          failedCards,
         },
       };
     } catch (error) {

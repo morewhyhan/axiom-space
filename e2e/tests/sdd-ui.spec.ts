@@ -7,7 +7,8 @@ test.describe('SDD UI/E2E contracts', () => {
 
   test('user can enter the app and switch Dashboard, Forge, Galaxy, Cognition, and Learn modes', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await page.getByText('SDD E2E Vault').click()
+    await page.getByRole('button', { name: '进入应用' }).click()
+    await page.waitForSelector('#mode-nav', { timeout: 10000 })
 
     await expect(page.locator('#mode-nav')).toBeVisible()
     await expect(page.getByRole('button', { name: /DASHBOARD/ })).toHaveClass(/active/)
@@ -33,7 +34,8 @@ test.describe('SDD UI/E2E contracts', () => {
     })
 
     await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await page.getByText('SDD E2E Vault').click()
+    await page.getByRole('button', { name: '进入应用' }).click()
+    await page.waitForSelector('#mode-nav', { timeout: 10000 })
 
     await page.getByText('+ 新建').first().click()
     await expect(page.locator('.modal-overlay')).toBeVisible()
@@ -52,7 +54,8 @@ test.describe('SDD UI/E2E contracts', () => {
     })
 
     await page.goto('/', { waitUntil: 'domcontentloaded' })
-    await page.getByText('SDD E2E Vault').click()
+    await page.getByRole('button', { name: '进入应用' }).click()
+    await page.waitForSelector('#mode-nav', { timeout: 10000 })
     await page.keyboard.press('Control+3')
     await expect(page.getByRole('button', { name: /GRAPH/ })).toHaveClass(/active/)
     await page.keyboard.press('Control+5')

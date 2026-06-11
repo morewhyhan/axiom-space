@@ -14,6 +14,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { useAppStore } from '@/stores/mode-store'
 import { useAuthSession } from '@/hooks/use-auth'
 import { getSiteUrl } from '@/lib/site-url'
+import { client } from '@/lib/api-client'
 import type { AgentConfirmationRequest, AgentMessage, RagReference, SessionSummary } from '@/stores/agent-store'
 import type { ResourceProgressStatus } from '@/stores/agent-store'
 
@@ -28,16 +29,22 @@ function extractConfirmationRequest(payload: any): AgentConfirmationRequest | nu
   if (!payload || payload.type !== 'tool_end' || payload.requiresUserInput !== true) return null
   const details = payload.details
   if (!details || typeof details !== 'object') return null
-  if (details.awaitingConfirmation !== true || typeof details.confirmationToken !== 'string') return null
+  if ((details.awaitingConfirmation !== true && details.requiresConfirmation !== true) || typeof details.confirmationToken !== 'string') return null
 
   const tool = typeof payload.tool === 'string' ? payload.tool : 'unknown'
   const target = typeof details.filePath === 'string'
     ? details.filePath
     : typeof details.cardPath === 'string'
       ? details.cardPath
-      : typeof details.target === 'string'
-        ? details.target
-        : ''
+      : typeof details.skillName === 'string'
+        ? details.skillName
+        : typeof details.command === 'string'
+          ? details.command
+          : typeof details.literature === 'string'
+            ? details.literature
+            : typeof details.target === 'string'
+              ? details.target
+              : ''
 
   return {
     id: `${tool}:${details.confirmationToken}`,
@@ -66,6 +73,45 @@ function invalidateWorkspaceQueries(queryClient: ReturnType<typeof useQueryClien
   queryClient.invalidateQueries({ queryKey: ['card-links'] })
 }
 
+async function restoreResourceProgress(vaultId: string) {
+  const res = await client.api.events['resource-progress'].$get({ query: { vid: vaultId } })
+  const data = await res.json() as {
+    success?: boolean
+    jobs?: Array<{
+      topic: string
+      resourceType: string
+      label: string
+      status: string
+      progress: number
+      message: string
+      path?: string | null
+      fileName?: string | null
+      error?: string | null
+      timestamp?: number
+    }>
+  }
+  if (!data.success || !Array.isArray(data.jobs) || data.jobs.length === 0) return
+  const store = useAgentStore.getState()
+  const hasAssistantMessage = store.messages.some((message) => message.role === 'assistant')
+  if (!hasAssistantMessage) {
+    store._appendMessage({ role: 'assistant', content: '最近的 AI 资源生成状态：' })
+  }
+  for (const job of [...data.jobs].reverse()) {
+    store._upsertLastResourceProgress({
+      topic: job.topic,
+      resourceType: job.resourceType,
+      label: job.label,
+      status: (typeof job.status === 'string' ? job.status : 'generating') as ResourceProgressStatus,
+      progress: typeof job.progress === 'number' ? job.progress : 0,
+      message: job.message || '',
+      path: job.path || undefined,
+      fileName: job.fileName || undefined,
+      error: job.error || undefined,
+      timestamp: job.timestamp,
+    })
+  }
+}
+
 export function useAgent() {
   /* ── Read state from the shared store ── */
   const messages = useAgentStore((s) => s.messages)
@@ -79,6 +125,7 @@ export function useAgent() {
   const { data: sessionData } = useAuthSession()
   const queryClient = useQueryClient()
   const isLoggedIn = !!sessionData?.session
+  const isUsableSession = (session: SessionSummary) => session.status !== 'completed' && session.threadStatus !== 'archived'
 
   /* ── Load when the active vault changes (once across all hook instances) ── */
   useEffect(() => {
@@ -93,14 +140,16 @@ export function useAgent() {
     useAgentStore.getState()._setError(null)
     ;(async () => {
       try {
-        const sessionsList = await useAgentStore.getState().loadSessions()
-        const store = useAgentStore.getState()
-        if (!cancelled && sessionsList.length > 0) {
-          const active = sessionsList.find((s: SessionSummary) => s.status === 'active')
-          const target = active ?? sessionsList[0]
-          if (target) {
-            await store.switchSession(target.id)
-          }
+          const sessionsList = await useAgentStore.getState().loadSessions()
+          const store = useAgentStore.getState()
+          if (!cancelled && sessionsList.length > 0) {
+            const active = sessionsList.find((s: SessionSummary) => s.status === 'active' && isUsableSession(s))
+            const resumable = sessionsList.find((s: SessionSummary) => isUsableSession(s))
+            const target = active ?? resumable ?? sessionsList[0]
+            if (target) {
+              await store.switchSession(target.id)
+            }
+            await restoreResourceProgress(currentVaultId).catch(() => {})
         }
       } catch {
         // non-critical
@@ -109,6 +158,24 @@ export function useAgent() {
       }
     })()
     return () => { cancelled = true }
+  }, [currentVaultId, isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn || !currentVaultId) return
+    const refreshSessions = () => {
+      if (document.visibilityState === 'visible') {
+        useAgentStore.getState().loadSessions().catch(() => {})
+        restoreResourceProgress(currentVaultId).catch(() => {})
+      }
+    }
+    window.addEventListener('focus', refreshSessions)
+    document.addEventListener('visibilitychange', refreshSessions)
+    const timer = window.setInterval(refreshSessions, 60_000)
+    return () => {
+      window.removeEventListener('focus', refreshSessions)
+      document.removeEventListener('visibilitychange', refreshSessions)
+      window.clearInterval(timer)
+    }
   }, [currentVaultId, isLoggedIn])
 
   /* ── Reset didAutoInit on sign-out so re-login re-triggers auto-load ── */
@@ -295,11 +362,13 @@ export function useAgent() {
       }
 
       useAgentStore.getState().loadSessions()
+      invalidateWorkspaceQueries(queryClient, currentVaultId)
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === 'AbortError') return
       const errorMsg = err instanceof Error ? err.message : '网络连接异常，请稍后重试。'
       useAgentStore.getState()._setError(errorMsg)
       useAgentStore.getState()._appendMessage({ role: 'assistant', content: errorMsg })
+      invalidateWorkspaceQueries(queryClient, currentVaultId)
     } finally {
       useAgentStore.getState()._setStreaming(false)
       useAgentStore.getState()._setAbortController(null)
@@ -343,17 +412,14 @@ export function useAgent() {
     })
 
     try {
-      const response = await fetch(`${getSiteUrl()}/api/agent/confirm-operation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
+      const response = await client.api.agent['confirm-operation'].$post({
+        json: {
           tool: request.tool,
           target: request.target,
           confirmationToken: request.confirmationToken,
           vaultId: currentVaultId,
           sessionId: store.sessionId ?? undefined,
-        }),
+        },
       })
       const payload = await response.json().catch(() => null) as {
         success?: boolean
@@ -392,17 +458,14 @@ export function useAgent() {
     }
     store._markConfirmationRequest(request.id, 'cancelled')
     try {
-      await fetch(`${getSiteUrl()}/api/agent/cancel-operation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
+      await client.api.agent['cancel-operation'].$post({
+        json: {
           tool: request.tool,
           target: request.target,
           confirmationToken: request.confirmationToken,
           vaultId: currentVaultId,
           sessionId: store.sessionId ?? undefined,
-        }),
+        },
       })
       store.loadSessions().catch(() => {})
     } catch {

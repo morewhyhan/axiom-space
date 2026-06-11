@@ -29,6 +29,7 @@ export default function LearnList() {
     mastery?: number
     cardUpgraded?: boolean
   } | null>(null)
+  const [stepSessionIds, setStepSessionIds] = useState<Record<string, string>>({})
 
   // Auto-select active path on first load
   useEffect(() => {
@@ -63,12 +64,16 @@ export default function LearnList() {
     if (!currentPath || !(step.status === 'available' || step.status === 'learning')) return
     try {
       let cardId: string | null | undefined = step.cardId
-      if (currentPath.source === 'ai' || currentPath.source === 'graph') {
-        const result = await executeStep.mutateAsync({ pathId: currentPath.id, stepId: step.id })
-        // Use the cardId returned by the server (may be newly created)
-        if (result?.cardId) cardId = result.cardId
+      const result = await executeStep.mutateAsync({ pathId: currentPath.id, stepId: step.id })
+      setStepSessionIds((prev) => ({ ...prev, [step.id]: result.id }))
+      if (result?.cardId) cardId = result.cardId
+      if (!cardId) {
+        toast.error('当前步骤没有绑定到真实卡片，无法打开 Forge')
+        return
       }
-      setSelectedNode({ id: cardId || step.id, title: step.name, type: 'fleeting' })
+      setSelectedNode({ id: cardId, title: step.name, type: result.cardType || 'fleeting' })
+      await useAgentStore.getState().loadSessions()
+      await useAgentStore.getState().switchSession(result.id)
       setMode('forge')
     } catch (e) {
       console.error(e)
@@ -82,7 +87,7 @@ export default function LearnList() {
         pathId: currentPath.id,
         stepId: step.id,
         status: 'completed',
-        sessionId: agentSessionId ?? undefined,
+        sessionId: stepSessionIds[step.id] ?? agentSessionId ?? undefined,
       })
 
       if (result.evaluation) {
@@ -96,7 +101,7 @@ export default function LearnList() {
           cardUpgraded: result.cardUpgraded,
         })
         if (ev.passed) {
-          toast.success(`「${step.name}」已掌握！卡片已升级为永久知识。`)
+          toast.success(`「${step.name}」已掌握！可继续发起卡片升级。`)
         } else {
           toast.error(ev.feedback || 'AI 评估：尚未完全掌握，请继续学习。')
         }

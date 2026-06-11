@@ -78,6 +78,16 @@ async function upsertDemoUser() {
 
 async function resetVault(vaultId: string) {
   await prisma.$transaction([
+    prisma.agentConfirmationToken.deleteMany({ where: { vaultId } }),
+    prisma.agentAuditLog.deleteMany({ where: { vaultId } }),
+    prisma.domainEvent.deleteMany({ where: { vaultId } }),
+    prisma.promotionAttempt.deleteMany({ where: { vaultId } }),
+    prisma.assessmentResult.deleteMany({ where: { vaultId } }),
+    prisma.cardRevision.deleteMany({ where: { vaultId } }),
+    prisma.notificationReceipt.deleteMany({ where: { vaultId } }),
+    prisma.resourceGenerationJob.deleteMany({ where: { vaultId } }),
+    prisma.sourceDocumentChunk.deleteMany({ where: { sourceDocument: { is: { vaultId } } } }),
+    prisma.sourceDocument.deleteMany({ where: { vaultId } }),
     prisma.ragDocumentIndex.deleteMany({ where: { vaultId } }),
     prisma.pushRecord.deleteMany({ where: { vaultId } }),
     prisma.pathAdjustmentHistory.deleteMany({ where: { path: { vaultId } } }),

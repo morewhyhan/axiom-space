@@ -11,6 +11,8 @@ import { zValidator } from '@/server/api/validator'
 import { requireAuth } from '../middleware/auth'
 import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
 import { runWithAgentContext } from '@/server/core/agent/agent-context'
+import { CARD_TYPES, validatePermanentCardContent } from '@/server/core/domain/contracts'
+import { emitDomainEvent, recordCardRevision, recordPromotionAttempt } from '@/server/core/domain/events'
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
 
@@ -82,18 +84,62 @@ const app = new Hono<{ Variables: { userId: string } }>()
 .post('/write', zValidator('json', z.object({
   path: z.string(),
   content: z.string(),
-  type: z.string().optional(),
+  type: z.enum(CARD_TYPES).optional(),
   vaultId: z.string().optional(),
 })), async (c) => {
   const userId = c.get('userId') as string
 
   const { path, content, type, vaultId } = c.req.valid('json')
   const storage = getFileStorage(userId)
+  if (type === 'permanent') {
+    const quality = validatePermanentCardContent(content)
+    if (!quality.passed) {
+      if (vaultId) {
+        void recordPromotionAttempt({
+          userId,
+          vaultId,
+          toType: 'permanent',
+          status: 'rejected',
+          missingElements: quality.missingElements,
+          qualityChecks: quality.checks,
+        })
+      }
+      return c.json({
+        success: false,
+        error: 'PROMOTION_CRITERIA_FAILED',
+        missingElements: quality.missingElements,
+        qualityChecks: quality.checks,
+      }, 422)
+    }
+  }
 
   // When vaultId is provided, run in agent context so DbAdapter resolves the
   // correct vault instead of falling back to the user's first vault.
   if (vaultId) {
     const result = await runWithAgentContext({ userId, vaultId }, () => storage.writeFile(path, content, type))
+    if (result.success) {
+      const writtenCard = await prisma.card.findUnique({ where: { vaultId_path: { vaultId, path } } }).catch(() => null)
+      void emitDomainEvent({
+        userId,
+        vaultId,
+        aggregateType: 'card',
+        aggregateId: writtenCard?.id || null,
+        eventType: writtenCard?.createdAt && writtenCard?.updatedAt && writtenCard.createdAt.getTime() === writtenCard.updatedAt.getTime()
+          ? 'CardCreated'
+          : 'CardUpdated',
+        payload: { path, type: type || writtenCard?.type || null, title: writtenCard?.title || null },
+      })
+      if (type === 'permanent') {
+        void recordPromotionAttempt({
+          userId,
+          vaultId,
+          cardId: writtenCard?.id || null,
+          fromType: null,
+          toType: 'permanent',
+          status: 'accepted',
+        })
+      }
+    }
     return c.json(result)
   }
 
@@ -198,7 +244,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
 .put('/card/:id', zValidator('query', vaultQuerySchema), zValidator('json', z.object({
   content: z.string(),
   title: z.string().optional(),
-	  type: z.string().optional(),
+	  type: z.enum(CARD_TYPES).optional(),
 })), async (c) => {
   const userId = c.get('userId') as string
 
@@ -216,6 +262,27 @@ const app = new Hono<{ Variables: { userId: string } }>()
   if (expectedVaultId && card.vaultId !== expectedVaultId) {
     return c.json({ success: false, error: 'Card not found in current vault' }, 404)
   }
+  if (type === 'permanent' && card.type !== 'permanent') {
+    const quality = validatePermanentCardContent(content)
+    if (!quality.passed) {
+      void recordPromotionAttempt({
+        userId,
+        vaultId: card.vaultId,
+        cardId: card.id,
+        fromType: card.type,
+        toType: 'permanent',
+        status: 'rejected',
+        missingElements: quality.missingElements,
+        qualityChecks: quality.checks,
+      })
+      return c.json({
+        success: false,
+        error: 'PROMOTION_CRITERIA_FAILED',
+        missingElements: quality.missingElements,
+        qualityChecks: quality.checks,
+      }, 422)
+    }
+  }
 
   // Update card content and sync wiki-link edges atomically
   const updated = await prisma.$transaction(async (tx) => {
@@ -231,9 +298,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
     // Sync [[WikiLink]] edges within the same transaction
     const titles = parseWikiLinks(content)
     const resolved = await Promise.all(
-      titles.map((t) => resolveWikiLinkTitle(prisma, card.vaultId, t)),
+      titles.map((t) => resolveWikiLinkTitle(tx, card.vaultId, t)),
     )
-    const targets = resolved.filter(Boolean) as { id: string }[]
+    const targets = Array.from(
+      new Map((resolved.filter(Boolean) as { id: string }[]).map((target) => [target.id, target])).values(),
+    )
 
     await tx.edge.deleteMany({ where: { sourceId: id, type: 'wikilink' } })
     if (targets.length > 0) {
@@ -279,6 +348,40 @@ const app = new Hono<{ Variables: { userId: string } }>()
           },
         })),
     )
+  }
+
+  void recordCardRevision({
+    userId,
+    vaultId: card.vaultId,
+    cardId: card.id,
+    title: card.title,
+    type: card.type,
+    content: card.content,
+    reason: type === 'permanent' && card.type !== 'permanent' ? 'before_promotion' : 'before_update',
+  })
+
+  void emitDomainEvent({
+    userId,
+    vaultId: updated.vaultId,
+    aggregateType: 'card',
+    aggregateId: updated.id,
+    eventType: type === 'permanent' && card.type !== 'permanent' ? 'CardPromoted' : 'CardUpdated',
+    payload: {
+      path: updated.path,
+      title: updated.title,
+      previousType: card.type,
+      nextType: updated.type,
+    },
+  })
+  if (type === 'permanent' && card.type !== 'permanent') {
+    void recordPromotionAttempt({
+      userId,
+      vaultId: updated.vaultId,
+      cardId: updated.id,
+      fromType: card.type,
+      toType: 'permanent',
+      status: 'accepted',
+    })
   }
 
   return c.json({

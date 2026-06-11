@@ -82,6 +82,7 @@ export default function LearnWorkspace() {
   const [pathMaterial, setPathMaterial] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pathFilter, setPathFilter] = useState<PathFilter>('active')
+  const [stepSessionIds, setStepSessionIds] = useState<Record<string, string>>({})
 
   useEffect(() => {
     if (data?.activePath && !selectedPathId) {
@@ -162,16 +163,20 @@ export default function LearnWorkspace() {
     if (!currentPath) return
     try {
       setActiveLearningStepId(step.id)
-      let cardId = step.cardId ?? null
+      const result = await executeStep.mutateAsync({ pathId: currentPath.id, stepId: step.id })
+      setStepSessionIds((prev) => ({ ...prev, [step.id]: result.id }))
+      const cardId = result?.cardId ?? step.cardId ?? null
       if (!cardId) {
-        const result = await executeStep.mutateAsync({ pathId: currentPath.id, stepId: step.id })
-        cardId = result?.cardId ?? null
+        toast.error('当前步骤没有绑定到真实卡片，无法打开 Forge')
+        return
       }
       setSelectedNode({
-        id: cardId ?? step.id,
+        id: cardId,
         title: step.name,
-        type: 'fleeting',
+        type: result.cardType || 'fleeting',
       })
+      await useAgentStore.getState().loadSessions()
+      await useAgentStore.getState().switchSession(result.id)
       setMode('forge')
       toast.message('已打开 AI 工作台处理当前任务', { description: step.name })
     } catch (err) {
@@ -186,12 +191,16 @@ export default function LearnWorkspace() {
         pathId: currentPath.id,
         stepId: step.id,
         status: 'completed',
-        sessionId: agentSessionId ?? undefined,
+        sessionId: stepSessionIds[step.id] ?? agentSessionId ?? undefined,
       })
-      if (result.evaluation?.passed) {
-        toast.success(`「${step.name}」已完成，卡片已升级为永久知识`)
+      if (result.evaluation) {
+        if (result.evaluation.passed) {
+          toast.success(`「${step.name}」已掌握，可继续发起卡片升级`)
+        } else {
+          toast.error(result.evaluation.feedback || `「${step.name}」尚未通过评估，请继续学习`)
+        }
       } else {
-        toast.message(`「${step.name}」已完成`, { description: result.evaluation?.feedback || '已更新进度' })
+        toast.message(`「${step.name}」已更新`, { description: '已更新进度' })
       }
       if (result.cardUpgraded) {
         refetch()
@@ -231,7 +240,7 @@ export default function LearnWorkspace() {
       const result = await importDocument.mutateAsync({
         document: documentText,
         topic: topic.trim() || '导入资料',
-        sourceTitle: topic.trim() || undefined,
+        sourceTitle: topic.trim() || '导入资料',
       })
       setDocumentText('')
       if (result.pathId) {

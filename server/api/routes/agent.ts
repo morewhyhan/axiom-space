@@ -17,7 +17,8 @@ import { prisma } from '@/lib/db';
 import { queryLightRAGContext } from '@/server/core/rag/lightrag-service';
 import { registerBuiltinTools } from '@/server/core/agent/builtin-tools';
 import { toolRegistry } from '@/server/core/agent/tools';
-import { revokeConfirmationToken } from '@/server/core/agent/OperationConfirmation';
+import { hydrateConfirmationToken, revokeConfirmationToken } from '@/server/core/agent/OperationConfirmation';
+import { requiresConfirmation } from '@/server/core/agent/ToolContracts';
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .post('/chat', requireAuth, zValidator('json', z.object({
@@ -44,12 +45,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
       const requestedMeta = parseSessionMetadata(requestedSession?.metadata)
       const requestedKind = resolveSessionKind(requestedSession, requestedMeta)
       if (
-        !requestedSession ||
-        requestedSession.userId !== userId ||
-        requestedSession.vaultId !== resolvedVaultId ||
-        requestedSession.domain !== '__agent__' ||
-        requestedSession.status === 'completed' ||
-        requestedMeta.threadStatus === 'archived' ||
+        !requestedSession || !isOwnedAgentSession(requestedSession, userId, resolvedVaultId) ||
+        !isUsableAgentSession(requestedSession, requestedMeta) ||
         (requestedKind !== 'conversation' && !requestedMeta.cardId)
       ) {
         await stream.writeSSE({
@@ -444,7 +441,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const { title } = c.req.valid('json')
 
     const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
-    if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+    if (!session || !isOwnedAgentSession(session, userId, vaultId)) {
       return c.json({ success: false, error: 'Not found' }, 404)
     }
 
@@ -481,7 +478,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const force = c.req.query('force') === '1' || c.req.query('force') === 'true'
 
     const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
-    if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+    if (!session || !isOwnedAgentSession(session, userId, vaultId)) {
       return c.json({ success: false, error: 'Not found' }, 404)
     }
 
@@ -507,10 +504,10 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
     const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
     const metadata = parseSessionMetadata(session?.metadata)
-    if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+    if (!session || !isOwnedAgentSession(session, userId, vaultId)) {
       return c.json({ success: false, error: 'Not found' }, 404)
     }
-    if (session.status === 'completed' || metadata.threadStatus === 'archived') {
+    if (!isUsableAgentSession(session, metadata)) {
       return c.json({ success: false, error: 'Archived thread cannot be activated' }, 400)
     }
 
@@ -544,7 +541,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vaultId = await resolveAgentVaultId(userId, c.req.query('vid'))
 
     const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
-    if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+    if (!session || !isOwnedAgentSession(session, userId, vaultId)) {
       return c.json({ success: false, error: 'Not found' }, 404)
     }
 
@@ -570,10 +567,10 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vaultId = await resolveAgentVaultId(userId, c.req.query('vid'))
 
     const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
-    if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+    if (!session || !isOwnedAgentSession(session, userId, vaultId)) {
       return c.json({ success: false, error: 'Not found' }, 404)
     }
-    if (session.status === 'completed' || parseSessionMetadata(session.metadata).threadStatus === 'archived') {
+    if (!isUsableAgentSession(session, parseSessionMetadata(session.metadata))) {
       return c.json({ success: false, error: 'Archived thread cannot be cleared' }, 400)
     }
 
@@ -596,15 +593,30 @@ const app = new Hono<{ Variables: { userId: string } }>()
     let session
     if (sessionId) {
       session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
-      if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') {
+      const metadata = session ? parseSessionMetadata(session.metadata) : {}
+      if (!session || !isOwnedAgentSession(session, userId, vaultId) || !isUsableAgentSession(session, metadata)) {
         return c.json({ success: true, messages: [], sessionId: null })
       }
     } else {
-      // Find the user's active agent session
+      // Find the user's active agent session first, then fallback to the latest
+      // resumable session so restart/edge cases still restore context.
       session = await prisma.learningSession.findFirst({
         where: { userId, domain: '__agent__', vaultId, status: 'active' },
         orderBy: { updatedAt: 'desc' },
       })
+
+      if (!session) {
+        const candidates = await prisma.learningSession.findMany({
+          where: { userId, domain: '__agent__', vaultId },
+          orderBy: { updatedAt: 'desc' },
+          take: 20,
+          select: { id: true, userId: true, vaultId: true, domain: true, concept: true, status: true, phase: true, metadata: true },
+        })
+        session = candidates.find((item) => {
+          const metadata = parseSessionMetadata(item.metadata)
+          return isUsableAgentSession(item, metadata)
+        }) ?? null
+      }
     }
 
     if (!session) {
@@ -636,7 +648,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   })
   // POST /api/agent/confirm-operation — execute a user-confirmed destructive tool directly.
   .post('/confirm-operation', requireAuth, zValidator('json', z.object({
-    tool: z.enum(['delete_file', 'delete_card']),
+    tool: z.string().min(1),
     target: z.string().min(1),
     confirmationToken: z.string().min(1),
     vaultId: z.string().optional(),
@@ -655,22 +667,26 @@ const app = new Hono<{ Variables: { userId: string } }>()
       registerBuiltinTools()
       const registeredTool = toolRegistry.get(tool)
       if (!registeredTool) return c.json({ success: false, error: `Tool not registered: ${tool}` }, 500)
+      if (!requiresConfirmation(tool)) return c.json({ success: false, error: `Tool does not support confirmation: ${tool}` }, 400)
 
       const affectedCard = tool === 'delete_card'
         ? await findCardByAgentTarget(resolvedVaultId, target)
         : null
 
-      const params = tool === 'delete_card'
-        ? { cardPath: target, force: true, confirmationToken }
-        : { filePath: target, force: true, confirmationToken }
+      const params = buildConfirmedToolParams(tool, target, confirmationToken)
+      if (!params) return c.json({ success: false, error: `Unsupported confirmable tool: ${tool}` }, 400)
+      await hydrateConfirmationToken(tool, target, confirmationToken)
 
       if (dbSessionId) {
-        await persistMessage(dbSessionId, 'user', `确认执行高风险操作：${tool === 'delete_card' ? '删除卡片' : '删除文件'} ${target}`)
+        await persistMessage(dbSessionId, 'user', `确认执行高风险操作：${describeConfirmedTool(tool)} ${target}`)
       }
       const result = await (registeredTool as any).execute(`confirm-${Date.now()}`, params)
       const text = extractToolResultText(result)
       const details = (result as { details?: unknown } | null)?.details
-      const awaiting = !!(details && typeof details === 'object' && (details as Record<string, unknown>).awaitingConfirmation === true)
+      const awaiting = !!(details && typeof details === 'object' && (
+        (details as Record<string, unknown>).awaitingConfirmation === true ||
+        (details as Record<string, unknown>).requiresConfirmation === true
+      ))
       const error = details && typeof details === 'object' && typeof (details as Record<string, unknown>).error === 'string'
         ? String((details as Record<string, unknown>).error)
         : undefined
@@ -688,7 +704,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   })
   // POST /api/agent/cancel-operation — revoke a pending destructive confirmation.
   .post('/cancel-operation', requireAuth, zValidator('json', z.object({
-    tool: z.enum(['delete_file', 'delete_card']),
+    tool: z.string().min(1),
     target: z.string().min(1),
     confirmationToken: z.string().min(1),
     vaultId: z.string().optional(),
@@ -704,9 +720,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
     if (sessionId && !dbSessionId) return c.json({ success: false, error: '当前会话不可用于取消操作。' }, 400)
 
     return runWithAgentContext({ userId, vaultId: resolvedVaultId }, async () => {
+      if (!requiresConfirmation(tool)) return c.json({ success: false, error: `Tool does not support confirmation: ${tool}` }, 400)
+      await hydrateConfirmationToken(tool, target, confirmationToken)
       const revoked = revokeConfirmationToken(tool, target, confirmationToken)
       if (dbSessionId) {
-        await persistMessage(dbSessionId, 'user', `取消高风险操作：${tool === 'delete_card' ? '删除卡片' : '删除文件'} ${target}`)
+        await persistMessage(dbSessionId, 'user', `取消高风险操作：${describeConfirmedTool(tool)} ${target}`)
         await persistMessage(dbSessionId, 'assistant', revoked ? '已取消，操作不会执行。' : '该确认请求已失效。')
       }
       return c.json({ success: true, revoked })
@@ -909,6 +927,22 @@ function parseSessionMetadata(metadata?: string | null): {
   }
 }
 
+function isOwnedAgentSession(
+  session: { userId?: string | null; vaultId?: string | null; domain?: string | null } | null,
+  userId: string,
+  vaultId: string | null,
+): boolean {
+  return !!session && session.userId === userId && session.vaultId === vaultId && session.domain === '__agent__'
+}
+
+function isUsableAgentSession(
+  session: { status?: string | null; metadata?: string | null } | null,
+  metadata: ReturnType<typeof parseSessionMetadata> = {},
+): boolean {
+  const parsed = metadata || parseSessionMetadata(session?.metadata)
+  return !!session && session.status !== 'completed' && parsed.threadStatus !== 'archived'
+}
+
 // ── Agent message DB persistence ────────────────────────────
 // In-memory map: userId+vaultId → learningSession.id
 // Ensures each user has one active agent learningSession per vault in DB.
@@ -921,55 +955,45 @@ globalForSessions.__agentSessionMap = agentSessionMap
  * If an explicit sessionId is given, verify it exists and use it directly.
  * Otherwise reuses the most recent "agent" session or creates a new one.
  */
-async function ensureAgentSession(userId: string, vaultId: string | null, explicitSessionId?: string): Promise<string> {
-  const mapKey = buildSessionMapKey(userId, vaultId)
+  async function ensureAgentSession(userId: string, vaultId: string | null, explicitSessionId?: string): Promise<string> {
+    const mapKey = buildSessionMapKey(userId, vaultId)
 
-  // If explicit session requested, verify and use it
-  if (explicitSessionId) {
-    const session = await prisma.learningSession.findUnique({ where: { id: explicitSessionId } })
-    const metadata = parseSessionMetadata(session?.metadata)
-    if (
-      session &&
-      session.userId === userId &&
-      session.vaultId === vaultId &&
-      session.domain === '__agent__' &&
-      resolveSessionKind(session, metadata) !== 'unknown' &&
-      session.status !== 'completed' &&
-      metadata.threadStatus !== 'archived'
-    ) {
-      agentSessionMap.set(mapKey, session.id)
-      return session.id
+    // If explicit session requested, verify and use it
+    if (explicitSessionId) {
+      const session = await prisma.learningSession.findUnique({ where: { id: explicitSessionId } })
+      const metadata = parseSessionMetadata(session?.metadata)
+      if (session && isOwnedAgentSession(session, userId, vaultId) && isUsableAgentSession(session, metadata) && resolveSessionKind(session, metadata) !== 'unknown') {
+        agentSessionMap.set(mapKey, session.id)
+        return session.id
+      }
+      throw new Error('Invalid or archived session')
     }
-    throw new Error('Invalid or archived session')
-  }
 
-  const cached = agentSessionMap.get(mapKey)
-  if (cached) {
-    // Verify it still exists in DB
-    const existing = await prisma.learningSession.findUnique({ where: { id: cached } })
-    const metadata = parseSessionMetadata(existing?.metadata)
-    if (
-      existing &&
-      existing.userId === userId &&
-      existing.vaultId === vaultId &&
-      resolveSessionKind(existing, metadata) !== 'unknown' &&
-      existing.status !== 'completed' &&
-      metadata.threadStatus !== 'archived'
-    ) return cached
-    agentSessionMap.delete(mapKey)
-  }
+    const cached = agentSessionMap.get(mapKey)
+    if (cached) {
+      // Verify it still exists in DB
+      const existing = await prisma.learningSession.findUnique({ where: { id: cached } })
+      const metadata = parseSessionMetadata(existing?.metadata)
+      if (existing && isOwnedAgentSession(existing, userId, vaultId) && isUsableAgentSession(existing, metadata) && resolveSessionKind(existing, metadata) !== 'unknown') {
+        return cached
+      }
+      agentSessionMap.delete(mapKey)
+    }
 
-  // Look for the most recent active agent session
-  const recent = await prisma.learningSession.findFirst({
-    where: { userId, domain: '__agent__', vaultId, status: 'active' },
-    orderBy: { updatedAt: 'desc' },
-  })
-  if (recent && resolveSessionKind(recent, parseSessionMetadata(recent.metadata)) !== 'unknown') {
-    agentSessionMap.set(mapKey, recent.id)
-    return recent.id
-  }
+    // Look for the most recent active agent session
+    const recent = await prisma.learningSession.findFirst({
+      where: { userId, domain: '__agent__', vaultId, status: 'active' },
+      orderBy: { updatedAt: 'desc' },
+    })
+    if (recent) {
+      const metadata = parseSessionMetadata(recent.metadata)
+      if (isUsableAgentSession(recent, metadata) && resolveSessionKind(recent, metadata) !== 'unknown') {
+        agentSessionMap.set(mapKey, recent.id)
+        return recent.id
+      }
+    }
 
-  throw new Error('No active session')
+    throw new Error('No active session')
 }
 
 /**
@@ -1051,7 +1075,7 @@ async function maybeAutoTitleSession(sessionId: string, userId: string, vaultId:
     },
   })
 
-  if (!session || session.userId !== userId || session.vaultId !== vaultId || session.domain !== '__agent__') return
+  if (!session || !isOwnedAgentSession(session, userId, vaultId)) return
 
   const metadata = parseSessionMetadata(session.metadata)
   if (resolveSessionKind(session, metadata) !== 'conversation') return
@@ -1153,6 +1177,41 @@ function isInteractiveToolResult(toolName: string, details: unknown): boolean {
   if (!details || typeof details !== 'object') return false
   const value = details as Record<string, unknown>
   return value.awaitingConfirmation === true ||
+    value.requiresConfirmation === true ||
     value.awaitingUserResponse === true ||
     value.asked === true
+}
+
+function buildConfirmedToolParams(tool: string, target: string, confirmationToken: string): Record<string, unknown> | null {
+  if (tool === 'delete_card') return { cardPath: target, force: true, confirmationToken }
+  if (tool === 'delete_file') return { filePath: target, force: true, confirmationToken }
+  if (tool === 'bash') return { command: target, confirmationToken }
+  if (tool === 'delete_skill') return { skillName: target, force: true, confirmationToken }
+  if (tool === 'extract_cards') return { literatureTitle: target, literatureContent: '', auto: true, confirmationToken }
+  if (tool === 'cleanup_broken_links') return { dry_run: false, auto_fix: true, confirmationToken }
+  if (tool === 'merge_duplicate_cards') {
+    const match = target.match(/^merge_duplicate_cards:([^:]+):([^:]+):(keep|merge)$/)
+    if (!match) return null
+    return {
+      card_a: match[1],
+      card_b: match[2],
+      keep_both: match[3] === 'keep',
+      preview: false,
+      confirmationToken,
+    }
+  }
+  if (tool === 'import_cards') return { data: '', format: 'json', dry_run: false, confirmationToken }
+  return null
+}
+
+function describeConfirmedTool(tool: string): string {
+  if (tool === 'delete_card') return '删除卡片'
+  if (tool === 'delete_file') return '删除文件'
+  if (tool === 'bash') return '执行命令'
+  if (tool === 'delete_skill') return '删除 Skill'
+  if (tool === 'extract_cards') return '提取概念卡片'
+  if (tool === 'cleanup_broken_links') return '清理破损链接'
+  if (tool === 'merge_duplicate_cards') return '合并重复卡片'
+  if (tool === 'import_cards') return '导入卡片'
+  return tool
 }

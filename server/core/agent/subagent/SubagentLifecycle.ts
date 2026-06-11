@@ -574,17 +574,41 @@ export class SubagentLifecycle {
       if (usePrismaFallback) {
         try {
           const { prisma } = await import('@/lib/db');
+          const sourceObjectId = record.id;
+          const sourceRole = record.config.role || record.config.label || 'profile';
           // Store profile update as vaultMemory entry
           await prisma.vaultMemory.upsert({
             where: { vaultId_key: { vaultId: vaultPath, key: 'profile_cache' } },
             create: {
               vaultId: vaultPath,
               key: 'profile_cache',
-              value: JSON.stringify(profileUpdate),
+              value: JSON.stringify({
+                ...profileUpdate,
+                sourceObjectType: 'subagentRun',
+                sourceObjectId,
+                evidence: [
+                  {
+                    sourceObjectType: 'subagentRun',
+                    sourceObjectId,
+                    summary: `Subagent ${sourceRole} profile update`,
+                  },
+                ],
+              }),
               category: 'preference',
             },
             update: {
-              value: JSON.stringify(profileUpdate),
+              value: JSON.stringify({
+                ...profileUpdate,
+                sourceObjectType: 'subagentRun',
+                sourceObjectId,
+                evidence: [
+                  {
+                    sourceObjectType: 'subagentRun',
+                    sourceObjectId,
+                    summary: `Subagent ${sourceRole} profile update`,
+                  },
+                ],
+              }),
             },
           });
           console.log('[Event] axiom:profile-updated');

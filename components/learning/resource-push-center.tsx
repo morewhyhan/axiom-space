@@ -28,10 +28,12 @@ const PUSH_TRIGGER_LABELS: Record<string, string> = {
 }
 
 interface PushableResource {
+  id?: string
   resourceId?: string
   type: string
   title: string
   content?: string
+  description?: string
 }
 
 interface PushRecord {
@@ -57,13 +59,21 @@ export default function ResourcePushCenter() {
   const [feedbackOpen, setFeedbackOpen] = useState<string | null>(null)
   const [feedbackText, setFeedbackText] = useState('')
 
+  const safeParseJson = <T,>(raw: string, fallback: T): T => {
+    try {
+      return JSON.parse(raw) as T
+    } catch {
+      return fallback
+    }
+  }
+
   // 解析 resources
   const parsePushRecords = (records: PushRecord[] | undefined) => {
     if (!records) return []
     return records.map((r) => ({
       ...r,
-      parsedResources: typeof r.resources === 'string' ? JSON.parse(r.resources) : r.resources || [],
-      parsedFeedback: typeof r.feedback === 'string' ? JSON.parse(r.feedback) : r.feedback || {},
+      parsedResources: typeof r.resources === 'string' ? safeParseJson<PushableResource[]>(r.resources, []) : r.resources || [],
+      parsedFeedback: typeof r.feedback === 'string' ? safeParseJson<{ engagedResourceIds?: string[]; feedbackText?: string }>(r.feedback, {}) : r.feedback || {},
     }))
   }
 
@@ -71,9 +81,13 @@ export default function ResourcePushCenter() {
   const unreadCount = records.filter((r) => !r.viewedAt).length
 
   const handleSubmitFeedback = async (push: PushRecord) => {
+    const engagedResourceIds = push.parsedResources
+      ?.map((res) => res.resourceId || res.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+
     await recordFeedback.mutateAsync({
       pushId: push.id,
-      engagedResourceIds: push.parsedResources?.map((res) => res.resourceId).filter(Boolean) as string[] | undefined,
+      engagedResourceIds,
       feedbackText,
     })
     setFeedbackOpen(null)
@@ -188,7 +202,7 @@ export default function ResourcePushCenter() {
                               <span className="text-sm font-semibold text-purple-400">{res.type}</span>
                               <div className="flex-1">
                                 <p className="text-white/70 text-sm">{res.title}</p>
-                                {res.content && <p className="mono text-white/40 text-xs mt-1 line-clamp-2">{res.content}</p>}
+                                {(res.content || res.description) && <p className="mono text-white/40 text-xs mt-1 line-clamp-2">{res.content || res.description}</p>}
                               </div>
                             </div>
                           ))}

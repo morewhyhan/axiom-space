@@ -808,6 +808,11 @@ export class AgentPipeline {
         content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
         timestamp: m.timestamp || Date.now(),
       }));
+    const evidence = messages
+      .filter((message) => message.role === 'user' && message.content.trim().length > 0)
+      .slice(-5)
+      .map((message) => message.content.trim().slice(0, 300));
+    if (evidence.length === 0) return;
     const currentProfile = getProfileCacheEntry<Record<string, unknown>>(vault.profileCache, 'educationProfile')?.data || {};
     const updates = await analyzer.analyzeSession({
       sessionId: this.services.sessionId,
@@ -819,6 +824,7 @@ export class AgentPipeline {
       ...currentProfile,
       ...updates,
       userId,
+      evidence,
       sessionCount: Number((currentProfile as { sessionCount?: unknown }).sessionCount || 0) + 1,
       lastUpdated: new Date().toISOString(),
     };
@@ -827,12 +833,25 @@ export class AgentPipeline {
       where: { id: vaultId },
       select: { profileCache: true },
     });
-    await prisma.vault.update({
-      where: { id: vaultId },
-      data: {
-        profileCache: setProfileCacheEntry(latestVault?.profileCache ?? vault.profileCache, 'educationProfile', mergedProfile),
-      },
-    });
+    await prisma.$transaction([
+      prisma.vault.update({
+        where: { id: vaultId },
+        data: {
+          profileCache: setProfileCacheEntry(latestVault?.profileCache ?? vault.profileCache, 'educationProfile', mergedProfile),
+        },
+      }),
+      prisma.educationProfileHistory.create({
+        data: {
+          vaultId,
+          profile: JSON.stringify(mergedProfile),
+          snapshot: JSON.stringify({
+            sessionId: this.services.sessionId,
+            evidence,
+            lastUpdated: mergedProfile.lastUpdated,
+          }),
+        },
+      }),
+    ]);
   }
 
   /**

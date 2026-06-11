@@ -99,7 +99,9 @@ export class ContentSafetyGuardrail {
     const academicPatterns = [
       /在(?:历史|文献|研究中)/,
       /(?:根据|按照|依据).*?研究/,
-      /(?:书中|文献中|论文中)/
+      /(?:书中|文献中|论文中)/,
+      /(?:课程|学习|教学|概念|算法|搜索|图|节点|路径|状态空间|复杂度|数据结构|计算机|编程)/,
+      /(?:对抗搜索|独立集合|分裂节点|革命性(?:变化|改进|突破))/
     ];
 
     const isAcademic = academicPatterns.some(p => p.test(sentence));
@@ -110,7 +112,8 @@ export class ContentSafetyGuardrail {
       return false;
     }
 
-    return true;
+    const explicitHarmfulIntent = /(如何|怎么|教程|步骤|制造|实施|组织|煽动|策划|执行|攻击|伤害|杀害|爆炸|诈骗|洗钱|贩卖)/u;
+    return explicitHarmfulIntent.test(sentence);
   }
 
   /**

@@ -570,7 +570,26 @@ const updateLearningProgressTool = createTool(
       }
 
       const newStatus = params.status || 'completed';
-      const mastery = params.mastery_level || (newStatus === 'mastered' ? 95 : 80);
+      if (newStatus === 'completed' || newStatus === 'mastered') {
+        return {
+          content: [{
+            type: 'text',
+            text: `不能直接把「${params.concept}」标记为已完成或已掌握。请先在 Learn 中打开对应 Step，进入 Forge 对话留下用户解释，再通过 Learn 的完成评估更新进度。`,
+          }],
+          details: {
+            error: 'ASSESSMENT_REQUIRED',
+            concept: params.concept,
+            requestedStatus: newStatus,
+            nextAction: 'open_learning_step_and_run_assessment',
+          },
+        };
+      }
+      if (newStatus !== 'learning') {
+        return {
+          content: [{ type: 'text', text: `不支持的学习状态：${newStatus}。Agent 只能把步骤标记为 learning，完成/掌握必须走 Learn 评估。` }],
+          details: { error: 'INVALID_STATUS', requestedStatus: newStatus },
+        };
+      }
       const updated: string[] = [];
 
       for (const step of steps) {
@@ -578,25 +597,10 @@ const updateLearningProgressTool = createTool(
           where: { id: step.id },
           data: {
             status: newStatus,
-            mastery: mastery,
             updatedAt: new Date(),
           },
         });
         updated.push(`${step.path.name || step.path.topic} > ${step.title}`);
-
-        // If this step is completed, unlock the next step (if it exists and is 'locked')
-        if (newStatus === 'completed' || newStatus === 'mastered') {
-          const nextStep = await prisma.learningPathStep.findFirst({
-            where: { pathId: step.pathId, order: step.order + 1, status: 'locked' },
-          });
-          if (nextStep) {
-            await prisma.learningPathStep.update({
-              where: { id: nextStep.id },
-              data: { status: 'available' },
-            });
-            updated.push(`  → 解锁下一步: ${nextStep.title}`);
-          }
-        }
       }
 
       const report = `
@@ -604,18 +608,15 @@ const updateLearningProgressTool = createTool(
 
 ${updated.join('\n')}
 
-**状态**: ${newStatus === 'learning' ? '🟡 学习中' : newStatus === 'completed' ? '✅ 已完成' : '🌟 已掌握'}
-**掌握度**: ${mastery}%
+**状态**: 🟡 学习中
 
 ### 下一步
-${newStatus === 'completed' || newStatus === 'mastered'
-  ? '继续学习路径中的下一个步骤，或使用 get_learning_progress 查看整体进度。'
-  : '继续深入学习此概念，准备好后用 feynman_test 或 generate_mcq 检验理解。'}
+继续深入学习此概念，准备好后用 feynman_test 或 generate_mcq 检验理解。
 `;
 
       return {
         content: [{ type: 'text', text: report }],
-        details: { concept: params.concept, status: newStatus, mastery, updated_steps: updated.length },
+        details: { concept: params.concept, status: newStatus, updated_steps: updated.length },
       };
     } catch (error) {
       return {

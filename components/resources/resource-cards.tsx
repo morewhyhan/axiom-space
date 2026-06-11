@@ -390,8 +390,18 @@ export type GeneratedResourceItem = {
   type: string;
   title: string;
   path: string;
+  ref?: string;
   mp4Path?: string;
+  mp4Ref?: string;
   fileName: string;
+  status?: 'ready' | 'failed' | 'pending' | string;
+  source?: string;
+  sourceObjectType?: string;
+  sourceObjectId?: string;
+  sourcePath?: string;
+  sourceTitle?: string;
+  contentHash?: string;
+  generatedAt?: string;
   content?: string;
   videoUrl?: string;
 };
@@ -439,6 +449,17 @@ function downloadResource(item: GeneratedResourceItem) {
   }
   a.download = item.fileName || `${item.title}.${item.type}`;
   a.click();
+}
+
+function shortHash(hash?: string) {
+  return hash ? hash.slice(0, 12) : 'no-hash';
+}
+
+function statusLabel(status?: string) {
+  if (status === 'ready') return 'DB ready';
+  if (status === 'failed') return 'failed';
+  if (status === 'pending') return 'pending';
+  return status || 'ready';
 }
 
 function ResourcePreview({ item, expanded = false }: { item: GeneratedResourceItem; expanded?: boolean }) {
@@ -587,6 +608,17 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
                     <Download className="h-4 w-4" />
                   </button>
                 </div>
+                <div className="mb-3 grid gap-2 rounded-lg border border-emerald-400/10 bg-emerald-400/[0.035] px-3 py-2 text-[11px] text-white/45 sm:grid-cols-3">
+                  <div className="truncate">
+                    <span className="text-emerald-300/75">status</span> {statusLabel(item.status)}
+                  </div>
+                  <div className="truncate" title={item.sourceObjectId || item.sourcePath || item.path}>
+                    <span className="text-emerald-300/75">db</span> {item.sourceObjectId || item.sourcePath || item.path}
+                  </div>
+                  <div className="truncate" title={item.contentHash || ''}>
+                    <span className="text-emerald-300/75">hash</span> {shortHash(item.contentHash)}
+                  </div>
+                </div>
                 <div className="max-h-96 overflow-auto rounded-lg border border-white/5 bg-black/15 p-4">
                   <ResourcePreview item={item} />
                 </div>
@@ -602,7 +634,7 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
             <div className="flex items-center gap-3 border-b border-white/10 px-5 py-3">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-white/85">{active.title}</div>
-                <div className="truncate text-xs text-white/35">{active.fileName}</div>
+                <div className="truncate text-xs text-white/35">{active.fileName} · {statusLabel(active.status)} · {shortHash(active.contentHash)}</div>
               </div>
               <button
                 type="button"
@@ -630,35 +662,3 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
     </>
   );
 }
-
-// ============================================================
-// 使用示例
-// ============================================================
-
-export const EXAMPLE_CODE_CARD = {
-  title: '求解二次方程',
-  description: '实现一个函数来求解二次方程 ax² + bx + c = 0',
-  difficulty: 'intermediate' as const,
-  skeleton: `function solveQuadratic(a, b, c) {
-  // TODO: 实现二次方程求解
-  // 提示：使用求根公式 x = (-b ± √(b² - 4ac)) / 2a
-  return [];
-}`,
-  solution: `function solveQuadratic(a, b, c) {
-  if (a === 0) return [];
-  const discriminant = b * b - 4 * a * c;
-  if (discriminant < 0) return [];
-
-  const sqrt = Math.sqrt(discriminant);
-  const x1 = (-b + sqrt) / (2 * a);
-  const x2 = (-b - sqrt) / (2 * a);
-
-  return [x1, x2].sort((x, y) => x - y);
-}`,
-  testCases: [
-    { input: 'solveQuadratic(1, -5, 6)', expectedOutput: '[2, 3]' },
-    { input: 'solveQuadratic(1, 2, 1)', expectedOutput: '[-1]' },
-    { input: 'solveQuadratic(1, 0, -4)', expectedOutput: '[-2, 2]' }
-  ],
-  explanation: '使用判别式确定实根的个数，然后应用求根公式计算具体值。'
-};

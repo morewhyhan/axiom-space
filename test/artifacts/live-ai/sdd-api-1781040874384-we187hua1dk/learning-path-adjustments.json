@@ -1,0 +1,37 @@
+{
+  "runId": "sdd-api-1781040874384-we187hua1dk",
+  "capturedAt": "2026-06-09T21:41:34.891Z",
+  "vaultId": "3cd7b56e-bb28-471c-9be8-e274777e6c43",
+  "pathId": "3dbdca2e-2a10-4106-ad63-538d8dacf934",
+  "response": {
+    "success": true,
+    "path": {
+      "id": "3dbdca2e-2a10-4106-ad63-538d8dacf934",
+      "topic": "Adjustment Topic",
+      "totalSteps": 1,
+      "completedSteps": 1,
+      "progress": 100
+    },
+    "adjustmentHistory": [
+      {
+        "id": "4b0dc421-fcca-402d-a974-17cc62f2e342",
+        "adjustmentId": "4b0dc421-fcca-402d-a974-17cc62f2e342",
+        "appliedAt": 1781041294865,
+        "trigger": "assessment",
+        "triggeredBy": "assessment",
+        "adjustment": {
+          "type": "add_review",
+          "concept": "Adjustment Step",
+          "description": "掌握度 50%，建议复习\"Adjustment Step\"相关概念",
+          "reason": "评估分数低于60%，需要加强复习"
+        },
+        "assessmentRef": {
+          "toolName": "code_challenge",
+          "score": 50,
+          "maxScore": 100
+        },
+        "feedback": "AI 评估暂时不可用，步骤已标记为完成。"
+      }
+    ]
+  }
+}

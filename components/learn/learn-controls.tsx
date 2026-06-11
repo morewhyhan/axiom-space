@@ -67,7 +67,7 @@ export default function LearnControls() {
       const result = await importDocument.mutateAsync({
         document: customMaterial,
         topic: customTopic.trim() || '文献学习',
-        sourceTitle: customTopic.trim() || undefined,
+        sourceTitle: customTopic.trim() || '文献学习',
       })
       setImportResult(result)
       if (result.pathId) setSelectedPathId(result.pathId)
@@ -330,7 +330,7 @@ export default function LearnControls() {
                 {importResult && (
                   <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 mono text-[9px] space-y-1">
                     <div className="font-bold">✅ 导入完成</div>
-                    <div>📘 核心概念 {importResult.stats.permanent} 个</div>
+                    <div>📘 核心概念 {importResult.concepts?.length ?? 0} 个</div>
                     <div>🏷️ 知识点 {importResult.stats.fleeting} 个</div>
                     <div>📄 文献记录 {importResult.stats.literature} 个</div>
                     <div>🔗 关联边 {importResult.stats.edges} 条</div>

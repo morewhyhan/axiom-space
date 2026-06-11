@@ -71,7 +71,8 @@ export default function ChatSessionList() {
   const [showArchivedTasks, setShowArchivedTasks] = useState(false)
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
 
-  useEffect(() => { loadSessions() }, [loadSessions])
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  useEffect(() => { loadSessions() }, [loadSessions, currentVaultId])
 
   const pathMap = useMemo(() => {
     const map = new Map<string, LearningPath>()
@@ -137,18 +138,16 @@ export default function ChatSessionList() {
     try {
       setSelectedPathId(path.id)
       setActiveLearningStepId(step.id)
-      let cardId = step.cardId ?? null
-      if (!cardId) {
-        const result = await executeStep.mutateAsync({ pathId: path.id, stepId: step.id })
-        cardId = result?.cardId ?? null
-      }
+      const result = await executeStep.mutateAsync({ pathId: path.id, stepId: step.id })
+      const cardId = result?.cardId ?? step.cardId ?? null
       if (!cardId) {
         toast.error('当前步骤还没有绑定卡片')
         return
       }
       const cardTitle = step.name
-      setSelectedNode({ id: cardId, title: cardTitle, type: 'fleeting' })
-      await openCardThread({ id: cardId, title: cardTitle, type: 'fleeting' })
+      const cardType = result?.cardType || 'fleeting'
+      setSelectedNode({ id: cardId, title: cardTitle, type: cardType })
+      await openCardThread({ id: cardId, title: cardTitle, type: cardType })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '打开任务失败')
     }

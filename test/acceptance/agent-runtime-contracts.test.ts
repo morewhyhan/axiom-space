@@ -153,6 +153,76 @@ test('Agent runtime contracts from the 08 test plan are explicit and executable'
     assert.equal(tracker.isOverBudget(summary.totalCost + 1), false)
   })
 
+  await t.test('LLM usage records are complete, contain no secrets, and survive memory-cap trimming', () => {
+    const tracker = new LLMUsageTracker()
+
+    // 1. field completeness — every record must have provider, model, tokens, cost
+    const record = {
+      timestamp: Date.now(),
+      model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
+      promptTokens: 1500,
+      completionTokens: 600,
+      sessionId: 'sess-integration',
+    }
+    tracker.record(record)
+
+    const summary = tracker.getSessionSummary()
+    assert.equal(summary.totalCalls, 1)
+    assert.equal(summary.totalTokens, 2100)
+    assert.ok(summary.totalCost > 0, 'cost must be > 0 for known model')
+    assert.ok(summary.byModel['claude-sonnet-4-20250514'], 'must group by model')
+
+    // 2. no secret fields leak into UsageRecord shape
+    const knownSafeKeys = new Set([
+      'timestamp', 'model', 'provider', 'promptTokens',
+      'completionTokens', 'estimatedCost', 'sessionId',
+    ])
+    for (const r of (tracker as any).records as Array<Record<string, unknown>>) {
+      for (const key of Object.keys(r)) {
+        assert.ok(knownSafeKeys.has(key), `UsageRecord must not contain secret field: ${key}`)
+      }
+    }
+
+    // 3. memory cap — generate 1001 records, ensure retention window
+    const capTracker = new LLMUsageTracker()
+    for (let i = 0; i < 1001; i++) {
+      capTracker.record({
+        timestamp: Date.now() + i,
+        model: 'gpt-4o-mini',
+        provider: 'openai',
+        promptTokens: 10,
+        completionTokens: 10,
+      })
+    }
+    const capSummary = capTracker.getSessionSummary()
+    assert.ok(capSummary.totalCalls <= 1000, 'must not exceed memory cap')
+    assert.ok(capSummary.totalCalls >= 500, 'must retain recent window after trimming')
+    assert.ok(capSummary.totalCost > 0, 'total cost must be recalculated after trim')
+
+    // 4. resetSession clears session total but retains records for inspection
+    capTracker.resetSession()
+    const resetSummary = capTracker.getSessionSummary()
+    assert.equal(resetSummary.totalCost, 0, 'session total cost must reset to 0')
+    // records survive resetSession (only sessionTotal is cleared)
+    assert.ok(resetSummary.totalCalls >= 500, 'records array survives reset')
+    assert.ok(resetSummary.totalTokens > 0, 'token count survives reset')
+
+    // 5. zero-token record (e.g. failed call) is tracked but costs zero
+    const zeroTracker = new LLMUsageTracker()
+    zeroTracker.record({
+      timestamp: Date.now(),
+      model: 'deepseek-chat',
+      provider: 'deepseek',
+      promptTokens: 0,
+      completionTokens: 0,
+    })
+    const zeroSummary = zeroTracker.getSessionSummary()
+    assert.equal(zeroSummary.totalCalls, 1)
+    assert.equal(zeroSummary.totalTokens, 0)
+    assert.equal(zeroSummary.totalCost, 0)
+  })
+
   await t.test('real role prompts execute against the live model and return structured output', { skip: !RUN_REAL_LIVE_AI }, async () => {
     const model = resolveAiConfig().model
     const transcripts: Array<{

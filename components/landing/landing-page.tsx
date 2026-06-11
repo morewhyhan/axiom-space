@@ -7,12 +7,12 @@ import { client } from '@/lib/api-client'
 
 export default function LandingPage({
   showLoadingHint = false,
-  isLoggedIn = false,
+  isLoggedIn,
   vaultsLoaded = false,
   onEnterApp,
 }: {
   showLoadingHint?: boolean
-  isLoggedIn?: boolean
+  isLoggedIn?: boolean  // undefined = session 检查中，true = 已登录，false = 未登录
   vaultsLoaded?: boolean
   onEnterApp?: () => void
 }) {
@@ -54,7 +54,12 @@ export default function LandingPage({
         </nav>
 
         <div className="landing-hero-content">
-          {!isLoggedIn ? (
+          {isLoggedIn === undefined ? (
+            <>
+              <h2 className="landing-section-title">AXIOM</h2>
+              <p className="landing-loading-hint">正在检查登录状态...</p>
+            </>
+          ) : !isLoggedIn ? (
             <>
               <h1 className="landing-title select-none">AXIOM</h1>
               <p className="landing-subtitle select-none">Cognitive Operating System</p>
