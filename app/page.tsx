@@ -14,6 +14,7 @@ import { useDashboardStats } from '@/hooks/use-dashboard'
 import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
 import type { GraphLayoutMode } from '@/stores/mode-store'
+import LandingPage from '@/components/landing/landing-page'
 
 const GalaxyCanvas = dynamic(() => import('@/components/three/galaxy-canvas'), { ssr: false })
 const DashboardLeft = dynamic(() => import('@/components/dashboard/dashboard-left'))
@@ -32,7 +33,6 @@ const LearnWorkspace = dynamic(() => import('@/components/learn/learn-workspace'
 const PanelBar = dynamic(() => import('@/components/layout/panel-bar'))
 const Header = dynamic(() => import('@/components/layout/header'))
 const BottomBar = dynamic(() => import('@/components/layout/bottom-bar'))
-const LandingPage = dynamic(() => import('@/components/landing/landing-page'))
 
 const createCardTypes = ['fleeting', 'literature', 'permanent'] as const
 type CreateCardType = typeof createCardTypes[number]
@@ -61,17 +61,25 @@ export default function Home() {
   const chatPanelOpen = useAppStore((s) => s.chatPanelOpen)
   const { data: session, isPending: authPending } = useAuthSession()
   const isLoggedIn = !!session?.session
-  const { data: galaxyData, loading: galaxyLoading } = useGalaxyData()
-  const { data: learningData } = useLearningPaths()
-  const { profile: learningProfile } = useLearningProfile()
-  const memorySearch = useMemorySearch()
-  const { stats: dashStats } = useDashboardStats()
   const [showApp, setShowApp] = useState(false)
   const [showLoading, setShowLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
   const [vaultsLoaded, setVaultsLoaded] = useState(false)
+  const [vaultLoadError, setVaultLoadError] = useState<string | null>(null)
+  const [vaultLoadNonce, setVaultLoadNonce] = useState(0)
+  const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
   const [visitedModes, setVisitedModes] = useState<Set<Mode>>(() => new Set([mode]))
   const queryClient = useQueryClient()
+  const vaults = useAppStore((s) => s.vaults)
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const selectedVault = vaults.find((v) => v.id === currentVaultId) ?? null
+  const workspaceReady = isLoggedIn && vaultsLoaded && !!selectedVault
+  const workspaceQueriesEnabled = workspaceReady
+  const { data: galaxyData } = useGalaxyData({ enabled: workspaceQueriesEnabled })
+  const { data: learningData } = useLearningPaths(undefined, { enabled: workspaceQueriesEnabled })
+  const { profile: learningProfile } = useLearningProfile({ enabled: workspaceQueriesEnabled })
+  const memorySearch = useMemorySearch()
+  const { stats: dashStats } = useDashboardStats({ enabled: workspaceQueriesEnabled })
 
   // ── Search state ──
   const [searchQuery, setSearchQuery] = useState('')
@@ -84,13 +92,9 @@ export default function Home() {
   const [newCardType, setNewCardType] = useState<CreateCardType>('fleeting')
   const [creating, setCreating] = useState(false)
   const cardTypeOptions = useMemo(() => {
-    const labels: Record<CreateCardType, string> = { fleeting: '灵感', literature: '文献', permanent: '永久' }
+    const labels: Record<CreateCardType, string> = { fleeting: '灵感草稿', literature: '文献资料', permanent: '永久知识' }
     return createCardTypes.map((type) => ({ id: type, label: labels[type] }))
   }, [])
-
-  // ── Load vaults only when logged in ──
-  const vaults = useAppStore((s) => s.vaults)
-  const currentVaultId = useAppStore((s) => s.currentVaultId)
 
   // ── Onboarding ──
   const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding)
@@ -116,12 +120,15 @@ export default function Home() {
   }, [showOnboarding, openModal])
 
   useEffect(() => {
-    if (!isLoggedIn) {
+    if (authPending || !isLoggedIn || !vaultPickerOpen) {
       setVaultsLoaded(false)
+      setVaultLoadError(null)
       return
     }
     let cancelled = false
     setVaultsLoaded(false)
+    setVaultLoadError(null)
+    useAppStore.getState().setCurrentVaultId(null)
     ;(async () => {
       try {
         const vaultsRes = await client.api.vaults.$get()
@@ -129,35 +136,26 @@ export default function Home() {
         if (cancelled) return
         if (!vaultsRes.ok || !vaultsData.success) throw new Error('加载知识库失败')
 
-        if (vaultsData.success && vaultsData.vaults.length > 0) {
-          useAppStore.getState().setVaults(vaultsData.vaults)
-          const persistedId = useAppStore.getState().currentVaultId
-          const stillExists = persistedId && vaultsData.vaults.some((v: { id: string }) => v.id === persistedId)
-          if (!stillExists) {
-            useAppStore.getState().setCurrentVaultId(vaultsData.vaults[0].id)
-          }
-          setVaultsLoaded(true)
-          return
-        }
-
-        const createRes = await client.api.vaults.$post({ json: { name: 'My Vault' } })
-        const createData = await createRes.json() as { success: boolean; vault?: { id: string; name: string }; error?: string }
-        if (cancelled) return
-        if (!createRes.ok || !createData.success || !createData.vault) {
-          throw new Error(createData.error || '创建默认知识库失败')
-        }
-        useAppStore.getState().setVaults([{ id: createData.vault.id, name: createData.vault.name, cardCount: 0 }])
-        useAppStore.getState().setCurrentVaultId(createData.vault.id)
+        useAppStore.getState().setVaults(vaultsData.vaults)
         setVaultsLoaded(true)
-        return
       } catch (err) {
-        if (!cancelled) console.warn('[Home] failed to load vaults:', err)
+        if (!cancelled) {
+          console.warn('[Home] failed to load vaults:', err)
+          setVaultLoadError(err instanceof Error ? err.message : '加载知识库失败')
+        }
       }
     })()
     return () => { cancelled = true }
-  }, [isLoggedIn])
+  }, [authPending, isLoggedIn, vaultPickerOpen, vaultLoadNonce])
 
-  const workspaceReady = !!currentVaultId
+  useEffect(() => {
+    if (authPending || isLoggedIn) return
+    if (showApp) {
+      setShowApp(false)
+      setShowLoading(false)
+    }
+    setVaultPickerOpen(false)
+  }, [authPending, isLoggedIn, showApp])
 
   // Progress: get the user into the workspace once a vault is selected.
   // Heavy graph data continues loading in the background.
@@ -172,6 +170,9 @@ export default function Home() {
     : ''
 
   const handleEnterApp = () => {
+    const selectedId = useAppStore.getState().currentVaultId
+    const hasSelectedVault = selectedId && useAppStore.getState().vaults.some((v) => v.id === selectedId)
+    if (!hasSelectedVault) return
     setLoadError(false)
     setShowApp(true)
     setShowLoading(false)
@@ -482,6 +483,7 @@ export default function Home() {
 
   // Preload all mode panel JS chunks during idle time
   useEffect(() => {
+    if (!showApp) return
     const preloadPanels = async () => {
       await Promise.all([
         import('@/components/layout/header'),
@@ -506,7 +508,7 @@ export default function Home() {
     } else {
       setTimeout(preloadPanels, 2000)
     }
-  }, [])
+  }, [showApp])
 
   const graphLayoutHint = useMemo(() => {
     const hints: Record<GraphLayoutMode, string> = {
@@ -834,7 +836,7 @@ export default function Home() {
                       disabled={!newCardTitle.trim() || creating}
                       onClick={() => handleCreateCard('literature')}
                     >
-                      {creating ? '导入中...' : '导入为文献卡片'}
+                      {creating ? '导入中...' : '导入为文献资料'}
                     </button>
                   </div>
                 </div>
@@ -889,7 +891,7 @@ export default function Home() {
                       <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-purple-400">{galaxyData?.nodes.length ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>TOTAL</div></div>
                       <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-cyan-400">{galaxyData?.edges.length ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>LINKS</div></div>
                       <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-pink-400">{dashStats?.orphanCount ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>ORPHANS</div></div>
-                      <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-white/60">{dashStats?.fleeting ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>PENDING</div></div>
+                      <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-white/60">{dashStats?.fleeting ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>灵感草稿</div></div>
                     </div>
                     {/* Learning Profile Stats */}
                     {learningProfile && (
@@ -903,7 +905,7 @@ export default function Home() {
                           </div>
                           <div className="text-center bg-white/5 rounded-lg p-3">
                             <div className="serif text-lg text-cyan-400">{learningProfile.permanentCount}</div>
-                            <div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>永久卡</div>
+                            <div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>永久知识</div>
                           </div>
                           <div className="text-center bg-white/5 rounded-lg p-3">
                             <div className="serif text-lg text-purple-400">{learningProfile.domains.length}</div>
@@ -966,10 +968,10 @@ export default function Home() {
                       <div className="space-y-2.5">
                         {[
                           { key: '1', name: '仪表板', sub: 'Dashboard', desc: '查看知识统计、最近活动和系统状态概览', color: 'text-white/60', dot: 'bg-white/40' },
-                          { key: '2', name: 'AI 工作台', sub: 'Workspace', desc: '继续任务、普通对话和卡片加工 — 推荐从这里开始', color: 'text-pink-400', dot: 'bg-pink-400', recommend: true },
+                          { key: '2', name: 'AI 工作台', sub: 'Workspace', desc: '围绕理解卡对话、补例子和打磨理解', color: 'text-pink-400', dot: 'bg-pink-400' },
                           { key: '3', name: '知识图谱', sub: 'Graph', desc: '可视化浏览和整理你的知识网络，发现隐藏关联', color: 'text-cyan-400', dot: 'bg-cyan-400' },
                           { key: '4', name: '认知洞察', sub: 'Insights', desc: '查看能力画像、观察记录和下一步建议', color: 'text-purple-400', dot: 'bg-purple-400' },
-                          { key: '5', name: '路径规划', sub: 'Path', desc: '创建、整理和推进任务路径', color: 'text-amber-400', dot: 'bg-amber-400' },
+                          { key: '5', name: '路径规划', sub: 'Path', desc: '从主题或资料生成学习路径 — 推荐从这里开始', color: 'text-amber-400', dot: 'bg-amber-400', recommend: true },
                         ].map(m => (
                           <div key={m.key} className={`flex items-start gap-3 p-3 rounded-lg ${m.recommend ? 'bg-pink-500/5 border border-pink-500/15' : 'bg-white/[0.02] border border-white/5'}`}>
                             <span className={`w-5 h-5 rounded-full ${m.dot} flex items-center justify-center shrink-0 mt-0.5`}>
@@ -1053,9 +1055,13 @@ export default function Home() {
       {/* ── Landing Page ── */}
       <div className={`landing-stage ${showApp ? 'landing-stage-exit' : ''}`}>
         <LandingPage
-          showLoadingHint={isLoggedIn && !authPending && (galaxyLoading || !galaxyData)}
+          showLoadingHint={false}
           isLoggedIn={authPending ? undefined : isLoggedIn}
+          vaultPickerOpen={vaultPickerOpen}
           vaultsLoaded={vaultsLoaded}
+          vaultLoadError={vaultLoadError}
+          onRetryVaults={() => setVaultLoadNonce((n) => n + 1)}
+          onOpenVaultPicker={() => setVaultPickerOpen(true)}
           onEnterApp={handleEnterApp}
         />
       </div>

@@ -6,6 +6,8 @@
  * 使用 LLM 生成摘要，保留用户偏好、行为模式和关键事实。
  */
 
+import { MEMORY_SUMMARY_PROMPT } from '@/server/core/ai/prompts'
+
 const MAX_MEMORY_LENGTH = 8000; // 超过此长度触发摘要
 
 export interface SummarizableEntry {
@@ -43,18 +45,9 @@ export class MemorySummarizer {
   async summarize(entries: SummarizableEntry[]): Promise<SummarizedMemory> {
     const combinedContent = entries.map(e => `[${e.category || 'general'}] ${e.content}`).join('\n\n');
 
-    const prompt = `Summarize the following memory entries, preserving:
-1. User preferences and personality traits
-2. Recurring patterns and behavioral observations
-3. Key facts and decisions
-4. Corrections and feedback the user has given
-
-Discard task-specific details that won't be useful in future sessions.
-
-Memory entries:
-${combinedContent}
-
-Provide a concise summary (under 2000 characters):`;
+    const prompt = `${MEMORY_SUMMARY_PROMPT.system}\n\n${MEMORY_SUMMARY_PROMPT.buildUserMessage!({
+      combinedContent,
+    })}`;
 
     try {
       const summary = await this.callLLM(prompt);

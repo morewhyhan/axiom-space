@@ -5,6 +5,7 @@ import { hashPassword } from 'better-auth/crypto'
 const prisma = new PrismaClient()
 
 type CardType = 'permanent' | 'fleeting' | 'literature'
+const ROOT_CARD_PATH = '__root__.md'
 
 function daysAgo(days: number): Date {
   const d = new Date()
@@ -15,6 +16,40 @@ function daysAgo(days: number): Date {
 
 function isoDaysAgo(days: number): string {
   return daysAgo(days).toISOString()
+}
+
+function pathSegment(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'concept'
+}
+
+async function createRootCard(vaultId: string, vaultName: string) {
+  return prisma.card.create({
+    data: {
+      vaultId,
+      path: ROOT_CARD_PATH,
+      title: vaultName,
+      type: 'fleeting',
+      tags: JSON.stringify(['axiom-root', 'concept-card']),
+      content: `# ${vaultName}\n\n> 这是这个知识库的根理解卡。它连接下面的概念理解卡。\n`,
+    },
+  })
+}
+
+async function createContainsEdge(vaultId: string, parentId: string, childId: string, weight = 1) {
+  if (!parentId || !childId || parentId === childId) return
+  await prisma.edge.create({
+    data: {
+      vaultId,
+      sourceId: parentId,
+      targetId: childId,
+      type: 'contains',
+      weight,
+    },
+  })
 }
 
 async function upsertDemoUser(email: string, name: string, password: string) {
@@ -96,6 +131,9 @@ function cardBody(title: string, topic: string, kind: CardType, related: string[
 }
 
 async function seedVault(vaultId: string) {
+  const vault = await prisma.vault.findUnique({ where: { id: vaultId }, select: { name: true, userId: true } })
+  if (!vault) throw new Error(`Vault not found: ${vaultId}`)
+
   const clusters = [
     { name: 'Data Structures', color: '#a855f7', position: 0 },
     { name: 'Architecture', color: '#22d3ee', position: 1 },
@@ -114,6 +152,26 @@ async function seedVault(vaultId: string) {
       },
     })
     clusterRows.set(c.name, row)
+  }
+
+  const rootCard = await createRootCard(vaultId, vault.name)
+  const areaCards = new Map<string, { id: string }>()
+  for (const c of clusters) {
+    const cluster = clusterRows.get(c.name)
+    if (!cluster) continue
+    const areaCard = await prisma.card.create({
+      data: {
+        vaultId,
+        clusterId: cluster.id,
+        title: c.name,
+        path: `${pathSegment(c.name)}/__index__.md`,
+        type: 'permanent',
+        tags: JSON.stringify(['concept-card', 'knowledge-area']),
+        content: `# ${c.name}\n\nThis is a high-level concept card inside ${vault.name}. It can contain more specific concept cards below it.\n`,
+      },
+    })
+    areaCards.set(c.name, { id: areaCard.id })
+    await createContainsEdge(vaultId, rootCard.id, areaCard.id, 1.4)
   }
 
   const cardDefs: Array<{
@@ -159,12 +217,14 @@ async function seedVault(vaultId: string) {
         title: card.title,
         path: card.path,
         type: card.type,
-        tags: JSON.stringify(card.tags),
+        tags: JSON.stringify([card.type === 'literature' ? 'source-material' : 'concept-card', ...card.tags]),
         content: cardBody(card.title, card.cluster, card.type, card.related),
         createdAt: card.createdAt,
       },
     })
     cardRows.set(card.title, { id: row.id, title: row.title || '', clusterId: row.clusterId, type: row.type })
+    const areaCard = areaCards.get(card.cluster)
+    if (areaCard) await createContainsEdge(vaultId, areaCard.id, row.id)
   }
 
   const edges: Array<[string, string, string]> = [
@@ -195,7 +255,7 @@ async function seedVault(vaultId: string) {
 
   const path1 = await prisma.learningPath.create({
     data: {
-      userId: (await prisma.vault.findUnique({ where: { id: vaultId }, select: { userId: true } }))!.userId,
+      userId: vault.userId,
       vaultId,
       name: 'CS408 Core Graph',
       topic: 'CS408',
@@ -238,7 +298,7 @@ async function seedVault(vaultId: string) {
 
   const path2 = await prisma.learningPath.create({
     data: {
-      userId: (await prisma.vault.findUnique({ where: { id: vaultId }, select: { userId: true } }))!.userId,
+      userId: vault.userId,
       vaultId,
       name: 'Systems Review Track',
       topic: 'Systems Review',
@@ -307,7 +367,7 @@ async function seedVault(vaultId: string) {
   })
 
   const profile = {
-    userId: (await prisma.vault.findUnique({ where: { id: vaultId }, select: { userId: true } }))!.userId,
+    userId: vault.userId,
     dimensions: {
       depth: { score: 76, confidence: 0.82, evidence: ['High permanent-card ratio', 'Explains graph tradeoffs'] },
       breadth: { score: 68, confidence: 0.77, evidence: ['Four core clusters', 'Cross-domain links'] },
@@ -379,7 +439,7 @@ async function seedVault(vaultId: string) {
   for (const p of pushRecord) {
     await prisma.pushRecord.create({
       data: {
-        userId: (await prisma.vault.findUnique({ where: { id: vaultId }, select: { userId: true } }))!.userId,
+        userId: vault.userId,
         vaultId,
         resources: JSON.stringify(p.resources),
         trigger: p.trigger,

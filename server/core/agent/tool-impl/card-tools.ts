@@ -16,8 +16,8 @@ const axiom = createAxiomCompat(getFileStorage());
 
 const createFleeingCardTool = createTool(
   'create_fleeing_card',
-  '创建灵感卡片',
-  '创建一个新的灵感卡片（Fleeing Card）。请在 content 中用 [[概念名]] 标注与其他概念的关联，并在 links.to 中列出所有引用的概念，确保双向链接完整以便知识图谱连线。',
+  '创建灵感草稿',
+  '创建一个新的灵感草稿（Fleeting Card）。请在 content 中用 [[概念名]] 标注与其他概念的关联，并在 links.to 中列出所有引用的概念，确保双向链接完整以便知识图谱连线。',
   Type.Object({
     content: Type.String({ description: '卡片内容，请用 [[概念名]] 标注与其他概念的关联' }),
     title: Type.Optional(Type.String({ description: '卡片标题（可选）' })),
@@ -39,13 +39,13 @@ const createFleeingCardTool = createTool(
       const result = await (axiom as any).createFleeing?.(vaultPath, params, params.content);
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
-        console.log(`[Event] axiom:toast — card: 创建灵感卡片: ${params.title}`);
+        console.log(`[Event] axiom:toast — card: 创建灵感草稿: ${params.title}`);
         const cardVaultId = getCurrentVaultId();
         if (cardVaultId) {
-          emitNotification(cardVaultId, { type: 'toast', message: `card: 创建灵感卡片: ${params.title}` });
+          emitNotification(cardVaultId, { type: 'toast', message: `card: 创建灵感草稿: ${params.title}` });
         }
         return {
-          content: [{ type: 'text', text: `灵感卡片已创建，路径: ${cardPath}` }],
+          content: [{ type: 'text', text: `灵感草稿已创建，路径: ${cardPath}` }],
           details: { id: cardPath, cardPath, content: params.content },
         };
       }
@@ -65,8 +65,8 @@ const createFleeingCardTool = createTool(
 
 const createPermanentCardTool = createTool(
   'create_permanent_card',
-  '创建永久卡片（两步法 Step 2）',
-  '创建一个新的永久知识卡片。这是两步知识提取流程的第二步——在 extract_concepts 分析之后调用。'
+  '沉淀永久知识卡',
+  '创建一个新的永久知识卡片。只能在用户已经打磨并确认内容后调用；文献导入或概念初提取阶段应先创建 fleeting 灵感草稿。'
   + '【必须遵守】每创建一张卡片后，检查 extract_concepts 返回的 relationships，对每个关系调用 add_graph_edge 建立图谱连线。'
   + '卡片内容质量四要素：\n'
   + '1. 定义 — 概念的核心意思（是什么）\n'
@@ -109,7 +109,7 @@ const createPermanentCardTool = createTool(
         .map(([k]) => k.replace('has', '').toLowerCase());
       if (missingElements.length > 0) {
         return {
-          content: [{ type: 'text', text: `永久卡片创建被拒绝：内容缺少 ${missingElements.join(', ')}。请补齐定义、例子、关联和应用后再创建。` }],
+          content: [{ type: 'text', text: `永久知识卡创建被拒绝：内容缺少 ${missingElements.join(', ')}。请补齐定义、例子、关联和应用后再创建。` }],
           details: { error: 'PERMANENT_CARD_QUALITY_FAILED', missingElements, quality_checks: qualityChecks },
         };
       }
@@ -117,11 +117,11 @@ const createPermanentCardTool = createTool(
       const result = await (axiom as any).createPermanent?.(vaultPath, params, params.content);
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
-        const contentParts = [`永久卡片已创建: ${params.title} (${cardPath})`];
-        console.log(`[Event] axiom:toast — card: 创建永久卡片: ${params.title}`);
+        const contentParts = [`永久知识卡已创建: ${params.title} (${cardPath})`];
+        console.log(`[Event] axiom:toast — card: 创建永久知识卡: ${params.title}`);
         const permVaultId = getCurrentVaultId();
         if (permVaultId) {
-          emitNotification(permVaultId, { type: 'toast', message: `card: 创建永久卡片: ${params.title}` });
+          emitNotification(permVaultId, { type: 'toast', message: `card: 创建永久知识卡: ${params.title}` });
         }
         return {
           content: [{ type: 'text', text: contentParts.join('\n') }],
@@ -430,7 +430,7 @@ const updateSkillTool = createTool(
 const deleteCardTool = createTool(
   'delete_card',
   '删除卡片',
-  '删除 Vault 中的卡片（文献、灵感卡片、永久卡片）。默认软删除（移动到 .axiom/trash/，可恢复）。',
+  '删除 Vault 中的卡片（文献资料、灵感草稿、永久知识卡）。默认软删除（移动到 .axiom/trash/，可恢复）。',
   Type.Object({
     cardPath: Type.String({ description: '要删除的卡片路径（相对于 Vault 根目录，如 "permanent/concept.md"）' }),
     force: Type.Optional(Type.Boolean({ description: '确认后由系统设置为 true，模型不可用它跳过确认' })),
@@ -544,8 +544,8 @@ const deleteCardTool = createTool(
 
 const addGraphNodeTool = createTool(
   'add_graph_node',
-  '添加知识图谱节点',
-  '向知识图谱中添加一个新概念节点。节点会作为 permanent 卡片持久化。',
+  '添加知识图谱灵感节点',
+  '向知识图谱中添加一个新概念节点。节点会先作为 fleeting 灵感草稿持久化，后续需要用户打磨并确认后才能沉淀为 permanent 永久知识卡。',
   Type.Object({
     title: Type.String({ description: '概念名称' }),
     definition: Type.String({ description: '概念定义' }),
@@ -561,15 +561,14 @@ const addGraphNodeTool = createTool(
 
       const fileStorage = getFileStorage()
 const axiom = createAxiomCompat(fileStorage);
-      if (!axiom?.createPermanent) {
+      if (!axiom?.createFleeing) {
         return { content: [{ type: 'text', text: '创建卡片功能不可用。' }], details: {} };
       }
 
-      // Create as permanent card
-      const content = params.definition || `# ${params.title}\n\n${params.definition || ''}`;
-      const result = await (axiom as any).createPermanent(
+      const content = `# ${params.title}\n\n${params.definition || ''}\n\n---\nsource: graph_node_tool\nstatus: draft`;
+      const result = await (axiom as any).createFleeing(
         vaultPath,
-        { title: params.title, tags: [params.domain || 'general'] },
+        { title: params.title, tags: [params.domain || 'general', 'graph-node'] },
         content,
       );
 
@@ -581,7 +580,7 @@ const axiom = createAxiomCompat(fileStorage);
       }
 
       return {
-        content: [{ type: 'text', text: `概念 "${params.title}" 已添加到知识图谱。` }],
+        content: [{ type: 'text', text: `概念 "${params.title}" 已作为灵感草稿添加到知识图谱。` }],
         details: { title: params.title, cardId: (result as any).id || '', cardPath: (result as any).cardPath || '' },
       };
     } catch (error) {
@@ -596,14 +595,14 @@ const axiom = createAxiomCompat(fileStorage);
 
 const addGraphEdgeTool = createTool(
   'add_graph_edge',
-  '添加知识图谱关系（两步法最终步骤）',
-  '在知识图谱中两个概念节点之间添加关系边。概念可以是灵感卡片或永久卡片。'
-  + '【必须遵守】创建多张永久卡片后，必须根据 extract_concepts 返回的 relationships，为每一对相关概念调用此工具建立连线。'
-  + '关系类型：prerequisite(前置依赖) / related(相关) / suggests(推荐学习) / extends(扩展) / contrast(对比)，默认 related。',
+  '添加知识图谱关系',
+  '在知识图谱中两个概念节点之间添加关系边。概念可以是灵感草稿或永久知识卡。'
+  + '【必须遵守】创建或打磨多张卡片后，应根据 extract_concepts 返回的 relationships，为每一对相关概念调用此工具建立连线。'
+  + '关系类型：contains(父概念包含子概念) / prerequisite(前置依赖) / related(相关) / suggests(推荐学习) / extends(扩展) / contrast(对比)，默认 related。',
   Type.Object({
-    source: Type.String({ description: '源概念名称（灵感或永久卡片标题）' }),
-    target: Type.String({ description: '目标概念名称（灵感或永久卡片标题）' }),
-    type: Type.Optional(Type.String({ description: '关系类型: prerequisite(前置), related(相关), suggests(推荐), 默认 related' })),
+    source: Type.String({ description: '源概念名称（灵感草稿或永久知识卡标题）' }),
+    target: Type.String({ description: '目标概念名称（灵感草稿或永久知识卡标题）' }),
+    type: Type.Optional(Type.String({ description: '关系类型: contains(包含/父子), prerequisite(前置), related(相关), suggests(推荐), 默认 related' })),
     strength: Type.Optional(Type.Number({ description: '关系强度 0-1，默认 0.8' })),
   }),
   async (_id, params) => {

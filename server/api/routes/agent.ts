@@ -19,6 +19,7 @@ import { registerBuiltinTools } from '@/server/core/agent/builtin-tools';
 import { toolRegistry } from '@/server/core/agent/tools';
 import { hydrateConfirmationToken, revokeConfirmationToken } from '@/server/core/agent/OperationConfirmation';
 import { requiresConfirmation } from '@/server/core/agent/ToolContracts';
+import { AGENT_TOOL_PROMPTS, ORACLE_CHAT_PROMPT } from '@/server/core/ai/prompts';
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .post('/chat', requireAuth, zValidator('json', z.object({
@@ -37,7 +38,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       if (!explicitSessionId) {
         await stream.writeSSE({
           event: 'error',
-          data: JSON.stringify({ error: 'Forge 对话必须绑定到具体卡片线程。请先选择一张卡片。' }),
+          data: JSON.stringify({ error: 'AI 工作台对话需要先有一张理解卡或一个自由对话。请先选择灵感卡，或创建自由对话。' }),
         })
         return
       }
@@ -187,15 +188,13 @@ const app = new Hono<{ Variables: { userId: string } }>()
     // Get last message for each session (preview snippet)
     const sessionIds = sessions.map(s => s.id)
     const lastMessages = sessionIds.length > 0
-      ? await prisma.$queryRawUnsafe<Array<{ sessionId: string; content: string }>>(
-          `SELECT sessionId, content FROM learningMessage
-           WHERE (sessionId, timestamp) IN (
-             SELECT sessionId, MAX(timestamp) FROM learningMessage
-             WHERE sessionId IN (${sessionIds.map(() => '?').join(',')})
-             GROUP BY sessionId
-           )`,
-          ...sessionIds
-        )
+      ? (await Promise.all(sessionIds.map((sessionId) =>
+          prisma.learningMessage.findFirst({
+            where: { sessionId },
+            orderBy: { timestamp: 'desc' },
+            select: { sessionId: true, content: true },
+          })
+        ))).filter((message): message is { sessionId: string; content: string } => !!message)
       : []
 
     const lastMsgMap = new Map(lastMessages.map(m => [m.sessionId, m.content]))
@@ -282,24 +281,24 @@ const app = new Hono<{ Variables: { userId: string } }>()
         where: { id: pathId, userId, vaultId },
         select: { id: true, name: true, topic: true },
       })
-      if (path) {
-        pathMeta.pathId = path.id
-        pathMeta.pathTitle = path.name || path.topic || undefined
-      }
+      if (!path) return c.json({ success: false, error: 'Path not found in current vault' }, 404)
+      pathMeta.pathId = path.id
+      pathMeta.pathTitle = path.name || path.topic || undefined
     }
-    if (stepId && pathMeta.pathId) {
+    if (stepId) {
+      if (!pathMeta.pathId) {
+        return c.json({ success: false, error: 'Step requires a valid path context' }, 400)
+      }
       const step = await prisma.learningPathStep.findFirst({
         where: { id: stepId, pathId: pathMeta.pathId },
         select: { id: true, title: true, cardId: true },
       })
-      if (step) {
-        pathMeta.stepId = step.id
-        pathMeta.stepTitle = step.title
-        if (step.cardId && step.cardId !== card.id) {
-          // Keep metadata aligned with the requested card thread rather than a stale step card.
-          pathMeta.stepId = step.id
-        }
+      if (!step) return c.json({ success: false, error: 'Step not found in current path' }, 404)
+      if (step.cardId && step.cardId !== card.id) {
+        return c.json({ success: false, error: 'Step is bound to a different card' }, 409)
       }
+      pathMeta.stepId = step.id
+      pathMeta.stepTitle = step.title
     }
 
     const possibleSessions = await prisma.learningSession.findMany({
@@ -834,7 +833,7 @@ async function getAgentForUser(userId: string, oracleId?: string, vaultId?: stri
   const resolvedOracleId = oracleId || 'default'
 
   // Build the persona-specific system prompt
-  let systemPrompt = 'You are a helpful AI assistant.'
+  let systemPrompt = ORACLE_CHAT_PROMPT.system
   try {
     const { buildOracleSystemPrompt } = await import('@/server/core/ai/oracle')
     systemPrompt = buildOracleSystemPrompt(resolvedOracleId)
@@ -1052,9 +1051,11 @@ async function hydrateAgentFromDb(agent: AxiomAgent, sessionId: string): Promise
 function resolveSessionKind(
   session: { concept?: string | null; metadata?: string | null; phase?: string | null } | null | undefined,
   metadata?: ReturnType<typeof parseSessionMetadata>,
-): 'conversation' | 'card-thread' | 'unknown' {
+): 'conversation' | 'card-thread' | 'path-step-thread' | 'unknown' {
   const meta = metadata ?? parseSessionMetadata(session?.metadata)
   if (meta.sessionKind === 'conversation') return 'conversation'
+  if (meta.sessionKind === 'path-step-thread') return 'path-step-thread'
+  if (meta.pathId && meta.stepId && meta.cardId) return 'path-step-thread'
   if (meta.cardId) return 'card-thread'
   if (session?.phase === 'conversation') return 'conversation'
   if (session?.concept && !meta.cardId && !meta.pathId) return 'conversation'
@@ -1089,7 +1090,7 @@ async function maybeAutoTitleSession(sessionId: string, userId: string, vaultId:
   if (!recent.trim()) return
 
   const rawTitle = await aiManager.callAPI(
-    '你是一个中文会话命名助手。请根据给定的对话内容，生成一个简短、准确、自然的标题。要求：只输出标题本身，不要加引号、序号、解释或标点结尾。标题长度控制在 4-12 个汉字优先。',
+    AGENT_TOOL_PROMPTS.conversationTitle.system,
     [{
       role: 'user',
       content: `请为这段对话命名：\n\n${recent.slice(0, 4000)}`,

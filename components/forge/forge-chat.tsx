@@ -551,13 +551,13 @@ export default function ForgeChat() {
   const canChat = (!!selectedNode && selectedNode.type !== 'permanent') || isConversationSession
   const commandQuery = inputValue.trim().startsWith('/') ? inputValue.trim().slice(1) : ''
   const filteredCommands = useMemo(() => filterAgentCommands(commandQuery), [commandQuery])
-  const chatPlaceholder = !canChat
-    ? '先在左侧选择一张卡片，或新建普通会话...'
-    : isConversationSession
-      ? `继续普通会话「${currentSession?.title || '新对话'}」...`
-      : selectedNode?.type === 'permanent'
-        ? '永久卡片线程已归档'
-        : '与此卡片的 Agent Thread 对话...'
+  const chatPlaceholder = selectedNode?.type === 'permanent'
+    ? '永久知识卡已沉淀，旧对话已归档'
+    : !canChat
+      ? '先选择一个学习任务、灵感草稿，或新建自由对话...'
+      : isConversationSession
+        ? `继续自由对话「${currentSession?.title || '新对话'}」...`
+        : '围绕当前理解卡继续对话...'
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
@@ -726,11 +726,11 @@ export default function ForgeChat() {
               <div className="mt-1 mono text-white/28" style={{ fontSize: 'var(--f7)' }}>
                 {streaming
                   ? PROGRESS_STEPS[progressStep]
-                  : currentPath
-                    ? 'TASK GROUP AGENT'
-                    : isConversationSession
-                      ? 'TALK AGENT'
-                      : 'CARD THREAD AGENT'}
+	                  : currentPath
+	                    ? '学习任务'
+	                    : isConversationSession
+	                      ? '自由对话'
+		                      : '理解卡线程'}
               </div>
             </div>
           </div>
@@ -743,8 +743,8 @@ export default function ForgeChat() {
               <span>ORACLE</span>
               <strong>{oracleLabel}</strong>
             </button>
-            <button className="forge-mini-btn" onClick={clearMessages}>CLEAR</button>
-            <button className="forge-mini-btn primary" onClick={() => useAppStore.getState().openModal('newcard')}>NEW CARD</button>
+            <button className="forge-mini-btn" onClick={clearMessages}>清空</button>
+            <button className="forge-mini-btn primary" onClick={() => useAppStore.getState().openModal('newcard')}>新建卡片</button>
           </div>
         </div>
 
@@ -754,21 +754,21 @@ export default function ForgeChat() {
               <Crosshair className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="mono text-pink-300/70 uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f8)' }}>Current Focus</div>
+	              <div className="mono text-pink-300/70 uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f8)' }}>当前焦点</div>
               <div className="mt-1 truncate text-white/88" style={{ fontSize: 'var(--f10)' }}>
                 {currentPath
                   ? (currentStep
-                    ? `处理「${currentPath.name}」任务组 · 当前步骤「${currentStep.name}」`
-                    : `处理「${currentPath.name}」任务组`)
-                  : isConversationSession
-                    ? `处理普通会话「${currentSession?.title || '新对话'}」`
-                    : selectedNode
-                      ? `处理「${selectedNode.title}」卡片线程`
-                      : '选择一条任务、卡片，或新建普通会话'}
+	                    ? `学习路径「${currentPath.name}」 · 当前任务「${currentStep.name}」`
+	                    : `学习路径「${currentPath.name}」`)
+	                  : isConversationSession
+	                    ? `自由对话「${currentSession?.title || '新对话'}」`
+	                    : selectedNode
+		                      ? `理解卡「${selectedNode.title}」`
+		                      : '选择学习任务、灵感草稿，或新建自由对话'}
               </div>
             </div>
             <span className={`mono shrink-0 ${streaming ? 'text-cyan-300/80' : 'text-white/25'}`} style={{ fontSize: 'var(--f8)' }}>
-              {streaming ? `${elapsedSec}s` : 'READY'}
+              {streaming ? `${elapsedSec}s` : '就绪'}
             </span>
           </div>
         </div>
@@ -783,7 +783,7 @@ export default function ForgeChat() {
               </div>
               <div className="serif text-2xl text-white/18 mb-3 tracking-widest">AI WORKSPACE</div>
               <div className="mono text-white/38 leading-relaxed px-4" style={{ fontSize: 'var(--f10)' }}>
-                把灵感、文献和问题放进这里。Agent 会帮你澄清边界、补齐证据，并生成可沉淀的知识卡片。
+		                围绕当前理解卡提问、补例子、找关联，再把自己的理解写回灵感卡。
               </div>
               <div className="forge-phase-strip">
                 <span>Capture</span>

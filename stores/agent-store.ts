@@ -100,6 +100,13 @@ function clearWorkspaceFocus() {
   appStore.setActiveLearningStepId(null)
 }
 
+function isPersistedLearningContext(pathId: string | null, stepId: string | null) {
+  if (!pathId || !stepId) return false
+  if (pathId.startsWith('__') || stepId.startsWith('__')) return false
+  if (stepId.startsWith('inbox:')) return false
+  return true
+}
+
 interface AgentStore {
   messages: AgentMessage[]
   sessions: SessionSummary[]
@@ -382,11 +389,12 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
       const vid = useAppStore.getState().currentVaultId
       const selectedPathId = useAppStore.getState().selectedPathId
       const activeLearningStepId = useAppStore.getState().activeLearningStepId
+      const includeLearningContext = isPersistedLearningContext(selectedPathId, activeLearningStepId)
       const res = await client.api.agent.sessions.card.$post({
         query: {
           ...(vid ? { vid } : {}),
-          ...(selectedPathId ? { pathId: selectedPathId } : {}),
-          ...(activeLearningStepId ? { stepId: activeLearningStepId } : {}),
+          ...(includeLearningContext && selectedPathId ? { pathId: selectedPathId } : {}),
+          ...(includeLearningContext && activeLearningStepId ? { stepId: activeLearningStepId } : {}),
         },
         json: { cardId: card.id },
       })

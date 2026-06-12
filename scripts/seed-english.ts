@@ -4,6 +4,7 @@ import { hashPassword } from 'better-auth/crypto'
 import { syncEdgesFromContent } from '../lib/wiki-links'
 
 const prisma = new PrismaClient()
+const ROOT_CARD_PATH = '__root__.md'
 
 function randomPastDate(daysBack: number): Date { const d = new Date(); d.setDate(d.getDate() - Math.floor(Math.random() * daysBack)); d.setHours(Math.floor(Math.random() * 24), 0, 0, 0); return d; }
 
@@ -13,8 +14,26 @@ function slugify(text: string): string {
 function makePath(cluster: string, title: string): string {
   return `${cluster}/${slugify(title)}.md`
 }
+async function createRootCard(vaultId: string, vaultName: string) {
+  return prisma.card.create({
+    data: {
+      vaultId,
+      path: ROOT_CARD_PATH,
+      title: vaultName,
+      type: 'fleeting',
+      tags: JSON.stringify(['axiom-root', 'concept-card']),
+      content: `# ${vaultName}\n\n> 这是这个知识库的根理解卡。它连接下面的概念理解卡。\n`,
+    },
+  })
+}
+async function createContainsEdge(vaultId: string, parentId: string, childId: string, weight = 1) {
+  if (!parentId || !childId || parentId === childId) return
+  await prisma.edge.create({
+    data: { vaultId, sourceId: parentId, targetId: childId, type: 'contains', weight },
+  })
+}
 function getTags(subject: string, type: string, extra?: string[]): string[] {
-  const base = [subject]
+  const base = [subject, type === 'literature' ? 'source-material' : 'concept-card']
   if (type === 'permanent') base.push('core')
   else if (type === 'fleeting') base.push('idea')
   else if (type === 'literature') base.push('reference')
@@ -408,13 +427,30 @@ async function main() {
   const clusterMap = new Map<string, string>()
   const cardMap = new Map<string, string>() // title → cardId
   const relatedMap = buildRelatedMap()
+  const rootCard = await createRootCard(vault.id, vault.name)
   let totalCards = 0
+  totalCards++
 
   for (const subject of SUBJECTS) {
     const cluster = await prisma.cluster.create({
       data: { vaultId: vault.id, name: subject.name, color: subject.color, position: SUBJECTS.indexOf(subject) },
     })
     clusterMap.set(subject.name, cluster.id)
+
+    const areaCard = await prisma.card.create({
+      data: {
+        vaultId: vault.id,
+        clusterId: cluster.id,
+        path: `${subject.name}/__index__.md`,
+        content: `# ${subject.name}\n\n> 这是「${vault.name}」中的一级概念理解卡。它可以继续连接更具体的学习卡片。\n`,
+        type: 'permanent',
+        title: subject.name,
+        tags: JSON.stringify([subject.name, 'concept-card', 'knowledge-area']),
+        createdAt: randomPastDate(30),
+      },
+    })
+    await createContainsEdge(vault.id, rootCard.id, areaCard.id, 1.4)
+    totalCards++
 
     const perms = subject.cards.filter(c => c.type === 'permanent')
     const fleets = subject.cards.filter(c => c.type === 'fleeting')
@@ -439,6 +475,7 @@ async function main() {
         },
       })
       cardMap.set(card.title, created.id)
+      await createContainsEdge(vault.id, areaCard.id, created.id)
       totalCards++
     }
     console.log(`  ${subject.name}: ${perms.length}P + ${fleets.length}F + ${lits.length}L = ${all.length} cards`)

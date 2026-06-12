@@ -8,6 +8,8 @@
 import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { aiManager } from '../../ai/AIManager';
+import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 /**
  * 从文本中提取关键概念
@@ -15,7 +17,7 @@ import { aiManager } from '../../ai/AIManager';
 const extractConceptsTool = createTool(
   'extract_concepts',
   '提取关键概念（两步法 Step 1）',
-  '从内容中提取关键概念、实体及其与现有知识图谱的关联。这是两步知识提取流程的第一步——先用此工具分析内容，再用 create_permanent_card 创建卡片。'
+  '从内容中提取关键概念、实体及其与现有知识图谱的关联。这是知识提取流程的第一步——先用此工具分析内容，再创建或打磨 fleeting 灵感草稿；只有用户确认且内容满足质量门槛后才创建 permanent 永久知识卡。'
   + '【重要】调用此工具前，请先用 search_cards 查询知识库中是否已有相关概念，以便在分析结果中标注"已存在"或"新概念"。',
   Type.Object({
     content: Type.String({ description: '要分析的内容' }),
@@ -26,6 +28,8 @@ const extractConceptsTool = createTool(
   async (_id, params) => {
     try {
       const prompt = `你是知识提取专家。分析下面的内容，输出结构化分析结果。
+
+${AXIOM_KNOWLEDGE_STANDARD}
 
 ${params.context_domain ? `领域：${params.context_domain}` : ''}
 深度：${params.depth || 'all'}
@@ -39,7 +43,7 @@ ${params.context_domain ? `领域：${params.context_domain}` : ''}
 3. **主要论点/发现** — 核心主张或结果是什么？证据支持度如何？
 4. **概念间关系** — 概念之间的依赖、前置、对比或包含关系。
 5. **矛盾与张力** — 内容中是否有内部矛盾？与常识或其他来源有冲突吗？
-6. **建议行动** — 哪些概念应该创建永久卡片？哪些应该建立链接？
+6. **建议行动** — 哪些概念应该先创建或打磨灵感草稿？哪些已有足够定义、例子、关联和应用，才适合沉淀为永久知识？
 
 ## 输出格式
 
@@ -59,7 +63,7 @@ ${params.context_domain ? `领域：${params.context_domain}` : ''}
   ],
   "key_points": ["核心观点1", "核心观点2"],
   "contradictions": ["矛盾点或不明之处"],
-  "suggestions": ["建议创建的卡片", "建议建立的链接"],
+  "suggestions": ["建议创建或打磨的灵感草稿", "建议建立的链接"],
   "summary": "2-3句话的内容概述"
 }
 
@@ -67,7 +71,7 @@ ${params.context_domain ? `领域：${params.context_domain}` : ''}
 所有内容（概念名、定义、描述）必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是概念提取和知识结构分析专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.contentConceptExtraction.system,
         [{ role: 'user', content: `${prompt}\n\n内容：\n${params.content.slice(0, 4000)}` }]
       );
 
@@ -145,6 +149,8 @@ const generateOutlineTool = createTool(
     try {
       const prompt = `你是文档结构分析专家。分析文档结构，生成分层次的大纲。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 要求：
 1. 最多 ${params.max_depth || 3} 层级
 2. 每个标题配上简短描述（10-20字）
@@ -158,7 +164,7 @@ const generateOutlineTool = createTool(
 ${params.content.slice(0, 4000)}`;
 
       const response = await aiManager.callAPI(
-        '你是文档结构分析专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.contentOutline.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -254,6 +260,8 @@ const identifyPrerequisitesTool = createTool(
     try {
       const prompt = `你是教育课程设计专家。分析下面内容${params.concept ? `中关于 "${params.concept}"` : ''}的学习前置要求。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 分析维度：
 1. 核心前置概念（必须先理解才能学这个）
 2. 辅助背景知识（有帮助但不是必须）
@@ -279,7 +287,7 @@ const identifyPrerequisitesTool = createTool(
 ${params.content.slice(0, 3000)}`;
 
       const response = await aiManager.callAPI(
-        '你是教育课程设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.prerequisites.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -357,6 +365,8 @@ const summarizeContentTool = createTool(
 
       const prompt = `你是文本总结专家。用${lengthMap[params.length as keyof typeof lengthMap] || lengthMap.short}的${params.style || 'academic'}风格总结下面的内容。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 要求：
 - ${params.length === 'bullet' ? '用 • 符号列出要点' : '简洁准确，抓住核心信息'}
 - 不要输出分析过程或 preamble，直接输出摘要
@@ -368,7 +378,7 @@ const summarizeContentTool = createTool(
 ${params.content.slice(0, 3000)}`;
 
       const response = await aiManager.callAPI(
-        '你是文本总结专家。内部推理即可，不要输出思考过程。直接输出摘要内容。',
+        AGENT_TOOL_PROMPTS.textSummary.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -404,6 +414,8 @@ const extractKeywordsTool = createTool(
 
       const prompt = `你是关键词提取专家。从以下内容中提取最多 ${limit} 个关键词或短语，按重要度排序。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 语言: ${lang === 'auto' ? '自动检测' : lang === 'zh' ? '中文' : '英文'}
 
 以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字）：
@@ -420,7 +432,7 @@ const extractKeywordsTool = createTool(
 ${params.content.slice(0, 4000)}`;
 
       const response = await aiManager.callAPI(
-        '你是自然语言处理和关键词提取专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.keywordExtraction.system,
         [{ role: 'user', content: prompt }]
       );
 

@@ -3,8 +3,8 @@
 /**
  * AI workspace sidebar
  *
- * - Tasks: task paths from Path Planner
- * - Talks: standalone discussion streams
+ * - Learning paths: task paths from Path Planner
+ * - Free talks: standalone discussion streams
  * Card-bound threads are opened through the task/card they belong to, rather
  * than exposed as a separate primary workspace tab.
  */
@@ -37,15 +37,21 @@ import { useAppStore } from '@/stores/mode-store'
 type ViewMode = 'tasks' | 'talks'
 
 const TYPE_LABEL: Record<string, string> = {
-  fleeting: 'FLEETING',
-  literature: 'LITERATURE',
-  permanent: 'PERMANENT',
+  fleeting: '灵感草稿',
+  literature: '文献资料',
+  permanent: '永久知识卡',
 }
 
 const TYPE_TONE: Record<string, string> = {
-  fleeting: 'text-amber-300/80 border-amber-400/20 bg-amber-400/8',
-  literature: 'text-cyan-300/80 border-cyan-400/20 bg-cyan-400/8',
-  permanent: 'text-emerald-300/80 border-emerald-400/20 bg-emerald-400/8',
+  fleeting: 'text-cyan-300/80 border-cyan-400/20 bg-cyan-400/8',
+  literature: 'text-pink-300/80 border-pink-400/20 bg-pink-400/8',
+  permanent: 'text-purple-300/80 border-purple-400/20 bg-purple-400/8',
+}
+
+const TYPE_COLOR: Record<string, string> = {
+  fleeting: '#22d3ee',
+  literature: '#f472b6',
+  permanent: '#a855f7',
 }
 
 export default function ChatSessionList() {
@@ -135,16 +141,34 @@ export default function ChatSessionList() {
   }
 
   const handleOpenStep = async (path: LearningPath, step: LearningStep) => {
+    if (!canOpenStep(step)) {
+      toast.error(step.lockedReason || '需要先完成前置任务')
+      return
+    }
     try {
       setSelectedPathId(path.id)
       setActiveLearningStepId(step.id)
-      const result = await executeStep.mutateAsync({ pathId: path.id, stepId: step.id })
-      const cardId = result?.cardId ?? step.cardId ?? null
-      if (!cardId) {
-        toast.error('当前步骤还没有绑定卡片')
+      if (isUnassignedTaskPath(path)) {
+        const cardId = step.cardId
+        if (!cardId) {
+          toast.error('这张灵感草稿缺少有效 ID')
+          return
+        }
+        const cardTitle = step.cardTitle || step.name
+        const cardType = step.cardType || 'fleeting'
+        setSelectedNode({ id: cardId, title: cardTitle, type: cardType })
+        await openCardThread({ id: cardId, title: cardTitle, type: cardType })
         return
       }
-      const cardTitle = step.name
+      const result = await executeStep.mutateAsync({ pathId: path.id, stepId: step.id })
+      if (result?.pathId) setSelectedPathId(result.pathId)
+      if (result?.stepId) setActiveLearningStepId(result.stepId)
+      const cardId = result?.cardId ?? step.cardId ?? null
+      if (!cardId) {
+        toast.error('当前任务还没有理解卡')
+        return
+      }
+      const cardTitle = result?.cardTitle || step.cardTitle || step.name
       const cardType = result?.cardType || 'fleeting'
       setSelectedNode({ id: cardId, title: cardTitle, type: cardType })
       await openCardThread({ id: cardId, title: cardTitle, type: cardType })
@@ -154,8 +178,11 @@ export default function ChatSessionList() {
   }
 
   const handleOpenTask = async (path: LearningPath) => {
-    const step = resolveTaskStep(path, activeLearningStepId) ?? path.steps[0]
-    if (!step) return
+    const step = resolveTaskStep(path, activeLearningStepId)
+    if (!step) {
+      toast.error('这条学习路径暂时没有可开始的任务')
+      return
+    }
     await handleOpenStep(path, step)
   }
 
@@ -210,10 +237,15 @@ export default function ChatSessionList() {
                 </div>
               </div>
               <div className="mt-1 text-white/88 font-medium" style={{ fontSize: 'var(--f10)' }}>
-                任务与自由对话
+                学习路径与自由对话
               </div>
               <div className="mt-1 text-white/22 leading-relaxed" style={{ fontSize: 'var(--f8)' }}>
-                任务组默认收起；卡片线程从对应任务卡片进入。
+                从当前学习任务进入卡片工作；自由对话用于临时探索。
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <TypeLegend color={TYPE_COLOR.fleeting} label="灵感草稿" />
+                <TypeLegend color={TYPE_COLOR.literature} label="文献资料" />
+                <TypeLegend color={TYPE_COLOR.permanent} label="永久知识" />
               </div>
             </div>
             <button
@@ -233,14 +265,14 @@ export default function ChatSessionList() {
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2">
-            <SummaryPill label="Tasks" value={counts.tasks} icon={Layers3} tone="text-pink-300" />
-            <SummaryPill label="Talks" value={counts.talks} icon={MessageSquareText} tone="text-cyan-300" />
+            <SummaryPill label="学习路径" value={counts.tasks} icon={Layers3} tone="text-pink-300" />
+            <SummaryPill label="自由对话" value={counts.talks} icon={MessageSquareText} tone="text-cyan-300" />
           </div>
 
           <div className="mt-4 flex gap-1 rounded-xl border border-white/8 bg-black/25 p-1">
             {[
-              { id: 'tasks' as const, label: 'Tasks', icon: Layers3 },
-              { id: 'talks' as const, label: 'Talks', icon: MessageSquareText },
+              { id: 'tasks' as const, label: '学习路径', icon: Layers3 },
+              { id: 'talks' as const, label: '自由对话', icon: MessageSquareText },
             ].map((item) => {
               const Icon = item.icon
               const active = view === item.id
@@ -265,7 +297,7 @@ export default function ChatSessionList() {
               className="w-full bg-transparent text-sm text-white/70 outline-none placeholder:text-white/20"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索任务或对话..."
+              placeholder="搜索学习路径或对话..."
             />
           </div>
 
@@ -275,7 +307,7 @@ export default function ChatSessionList() {
           {view === 'tasks' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">
-                <SectionLabel title="Tasks" icon={Layers3} count={taskPaths.length} />
+                <SectionLabel title="学习路径" icon={Layers3} count={taskPaths.length} />
                 <button
                   className={`rounded-lg border px-2 py-1 text-[10px] mono transition-colors ${
                     showArchivedTasks
@@ -309,7 +341,7 @@ export default function ChatSessionList() {
 
           {view === 'talks' && (
             <div className="space-y-4">
-              <SectionLabel title="Standalone Talks" icon={MessageSquareText} count={talkSessions.length} />
+              <SectionLabel title="自由对话" icon={MessageSquareText} count={talkSessions.length} />
               {talkSessions.length === 0 ? (
                 <EmptyState label="暂无普通对话" />
               ) : (
@@ -335,10 +367,10 @@ export default function ChatSessionList() {
             onClick={() => openModal('newcard')}
           >
             <Plus className="h-3.5 w-3.5" />
-            <span className="mono" style={{ fontSize: 'var(--f8)' }}>New Card</span>
+            <span className="mono" style={{ fontSize: 'var(--f8)' }}>新建卡片</span>
           </button>
           <span className="mono text-white/18" style={{ fontSize: 'var(--f7)' }}>
-            {taskPaths.length} tasks · {talkSessions.length} talks
+            {taskPaths.length} 路径 · {talkSessions.length} 对话
           </span>
         </div>
       </div>
@@ -367,38 +399,50 @@ function TaskGroupCard({
 }) {
   const [expanded, setExpanded] = useState(false)
   const nextStep = resolveTaskStep(path, currentStepId)
+  const canContinue = !!nextStep && canOpenStep(nextStep)
   const doneCount = path.steps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
   const stepCount = path.steps.length
   const progress = path.progress || (stepCount ? Math.round((doneCount / stepCount) * 100) : 0)
   const aiChatCount = path.steps.reduce((sum, step) => sum + getStepSessions(step, sessions, sessionsByCard).length, 0)
+  const inbox = isUnassignedTaskPath(path)
+  const accent = path.color && path.color !== '#ff4466' ? path.color : (inbox ? TYPE_COLOR.fleeting : '#64748b')
+  const nextIsPermanent = nextStep?.cardType === 'permanent'
 
   return (
     <div
-      className={`group rounded-xl border p-3 transition-all ${
-        active
-          ? 'border-pink-400/30 bg-pink-400/[0.08] shadow-[0_0_18px_rgba(244,114,182,0.08)]'
-          : 'border-white/6 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.045]'
-      }`}
+      className="group rounded-xl border p-3 transition-all hover:bg-white/[0.045]"
+      style={{
+        borderColor: active ? colorWithAlpha(accent, 0.45) : 'rgba(255,255,255,0.06)',
+        background: active ? `linear-gradient(135deg, ${colorWithAlpha(accent, 0.12)}, rgba(255,255,255,0.025))` : 'rgba(255,255,255,0.025)',
+        boxShadow: active ? `0 0 18px ${colorWithAlpha(accent, 0.12)}` : undefined,
+      }}
     >
       <button className="w-full text-left" onClick={() => setExpanded((value) => !value)}>
         <div className="flex items-start gap-3">
-          <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${archived ? 'text-emerald-300/80 border-emerald-400/20 bg-emerald-400/8' : active ? 'text-pink-300/80 border-pink-400/20 bg-pink-400/8' : 'text-white/40 border-white/10 bg-white/5'}`}>
+          <div
+            className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border"
+            style={{
+              color: archived ? '#a78bfa' : accent,
+              borderColor: archived ? 'rgba(167,139,250,0.22)' : colorWithAlpha(accent, 0.24),
+              backgroundColor: archived ? 'rgba(167,139,250,0.08)' : colorWithAlpha(accent, 0.09),
+            }}
+          >
             {archived ? <Archive className="h-4 w-4" /> : <Layers3 className="h-4 w-4" />}
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <div className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-pink-300' : 'bg-white/18'}`} />
+              <div className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: active ? accent : 'rgba(255,255,255,0.18)' }} />
               <div className={`truncate font-medium ${active ? 'text-white' : 'text-white/68 group-hover:text-white/85'}`} style={{ fontSize: 'var(--f9)' }}>
                 {path.name}
               </div>
               <div className="ml-auto flex shrink-0 items-center gap-2 mono text-white/18" style={{ fontSize: 'var(--f7)' }}>
-                {stepCount} steps
+                {inbox ? `${stepCount} 张` : `${stepCount} 步`}
                 {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
               </div>
             </div>
 
             <div className="mt-2 text-white/25" style={{ fontSize: 'var(--f8)' }}>
-              {path.topic || path.description || '由路径规划导入的任务组'}
+              {path.topic || path.description || (inbox ? '还没有安排进正式学习路径的灵感草稿' : '由路径规划生成的学习路径')}
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -407,15 +451,15 @@ function TaskGroupCard({
               </span>
               <span className="inline-flex items-center gap-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>
                 {archived ? <CheckCircle2 className="h-3 w-3 text-emerald-300/70" /> : <Sparkles className="h-3 w-3 text-cyan-300/60" />}
-                {archived ? 'ARCHIVED' : 'PROJECT'}
+                {archived ? '已归档' : inbox ? '灵感草稿箱' : '学习路径'}
               </span>
               <span className="inline-flex items-center gap-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>
                 <MessageSquareText className="h-3 w-3" />
-                {aiChatCount} AI 对话
+                {aiChatCount} 段 AI 对话
               </span>
               {nextStep && (
                 <span className="inline-flex items-center gap-1 rounded-md border border-purple-400/15 bg-purple-400/8 px-1.5 py-0.5 mono text-purple-200/80" style={{ fontSize: 'var(--f7)' }}>
-                  next: {nextStep.name}
+                  当前：{nextStep.name}
                 </span>
               )}
             </div>
@@ -423,55 +467,65 @@ function TaskGroupCard({
         </div>
 
         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-black/35">
-          <div className="h-full rounded-full bg-gradient-to-r from-pink-400 via-purple-400 to-cyan-400" style={{ width: `${progress}%` }} />
+          <div className="h-full rounded-full" style={{ width: `${progress}%`, background: `linear-gradient(90deg, ${accent}, ${colorWithAlpha(accent, 0.35)})` }} />
         </div>
       </button>
 
       <div className="mt-3 flex items-center justify-between gap-3 pl-11">
         <div className="mono text-white/20" style={{ fontSize: 'var(--f7)' }}>
-          {expanded ? '已展开步骤' : '默认收起，展开后选择具体卡片'}
+          {expanded ? '已展开任务' : inbox ? '展开后选择要打磨的灵感草稿' : '展开后选择具体学习任务'}
         </div>
         <button
-          className="inline-flex items-center gap-1 rounded-lg border border-pink-400/20 bg-pink-400/8 px-2.5 py-1.5 text-[10px] mono text-pink-200 transition-colors hover:bg-pink-400/14"
+          className="inline-flex items-center gap-1 rounded-lg border border-pink-400/20 bg-pink-400/8 px-2.5 py-1.5 text-[10px] mono text-pink-200 transition-colors hover:bg-pink-400/14 disabled:cursor-not-allowed disabled:opacity-40"
           onClick={onOpen}
+          disabled={!canContinue}
+          title={!canContinue ? nextStep?.lockedReason || '需要先完成前置任务' : '继续当前任务'}
         >
-          继续
+          {nextIsPermanent ? '查看' : inbox ? '打磨' : '继续'}
           <ArrowRight className="h-3 w-3" />
         </button>
       </div>
 
       {expanded && (
-      <div className="mt-3 space-y-2 pl-11">
-        {path.steps.map((step) => {
-          const stepSessions = getStepSessions(step, sessions, sessionsByCard)
-          const selected = step.id === currentStepId
-          const status = step.status
-          const tone = stepTone(status)
-          return (
-            <button
-              key={step.id}
-              className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
-                selected ? 'border-pink-400/30 bg-pink-400/[0.08]' : 'border-white/8 bg-black/15 hover:border-white/14 hover:bg-white/[0.04]'
-              }`}
-              onClick={() => onOpenStep(step)}
-            >
-              <div className="flex items-center gap-2">
-                <span className={`h-2.5 w-2.5 rounded-full border ${tone.border} ${tone.fill}`} />
-                <span className={`truncate font-medium ${selected ? 'text-white' : 'text-white/70'}`} style={{ fontSize: 'var(--f8)' }}>
-                  {step.name}
-                </span>
-                <span className="ml-auto mono text-white/22" style={{ fontSize: 'var(--f7)' }}>
-                  {stepSessions.length}
-                </span>
-              </div>
-              <div className="mt-1 flex items-center justify-between">
-                <span className={`mono ${tone.text}`} style={{ fontSize: 'var(--f7)' }}>{tone.label}</span>
-                {step.cardId ? <BookOpen className="h-3 w-3 text-white/20" /> : <Clock3 className="h-3 w-3 text-white/14" />}
-              </div>
-            </button>
-          )
-        })}
-      </div>
+        <div className="mt-3 space-y-2 pl-11">
+          {path.steps.map((step) => {
+            const stepSessions = getStepSessions(step, sessions, sessionsByCard)
+            const selected = step.id === currentStepId
+            const status = step.status
+            const tone = stepTone(status)
+            const typeColor = TYPE_COLOR[step.cardType || 'fleeting'] || TYPE_COLOR.fleeting
+            return (
+              <button
+                key={step.id}
+                className="w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-white/[0.04] disabled:cursor-not-allowed disabled:opacity-40"
+                style={{
+                  borderColor: selected ? colorWithAlpha(typeColor, 0.42) : 'rgba(255,255,255,0.08)',
+                  backgroundColor: selected ? colorWithAlpha(typeColor, 0.09) : 'rgba(0,0,0,0.15)',
+                }}
+                disabled={!canOpenStep(step)}
+                title={!canOpenStep(step) ? step.lockedReason || '需要先完成前置任务' : undefined}
+                onClick={() => onOpenStep(step)}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full border" style={{ backgroundColor: typeColor, borderColor: colorWithAlpha(typeColor, 0.35) }} />
+                  <span className={`truncate font-medium ${selected ? 'text-white' : 'text-white/70'}`} style={{ fontSize: 'var(--f8)' }}>
+                    {step.name}
+                  </span>
+                  <span className="ml-auto mono text-white/22" style={{ fontSize: 'var(--f7)' }}>
+                    {stepSessions.length}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-center justify-between">
+                  <span className={`mono ${tone.text}`} style={{ fontSize: 'var(--f7)' }}>{tone.label}</span>
+                  <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 mono ${TYPE_TONE[step.cardType || 'fleeting'] ?? 'text-white/35 border-white/10 bg-white/5'}`} style={{ fontSize: 'var(--f7)' }}>
+                    {step.cardId ? <BookOpen className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
+                    {step.cardId ? TYPE_LABEL[step.cardType || 'fleeting'] ?? '理解卡' : '开始时创建灵感理解'}
+                  </span>
+                </div>
+              </button>
+            )
+          })}
+        </div>
       )}
     </div>
   )
@@ -493,6 +547,7 @@ function ConversationCard({
   onDelete?: () => void | Promise<void>
 }) {
   const isThread = !!session.cardId
+  const threadLabel = session.sessionKind === 'path-step-thread' ? '学习线程' : isThread ? '卡片线程' : '自由对话'
   const type = session.cardType || 'fleeting'
   const typeTone = isThread
     ? (TYPE_TONE[type] ?? 'text-white/45 border-white/10 bg-white/5')
@@ -541,7 +596,7 @@ function ConversationCard({
             )}
             <span className="inline-flex items-center gap-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>
               {archived ? <CheckCircle2 className="h-3 w-3 text-emerald-300/70" /> : isThread ? <CheckCircle2 className="h-3 w-3 text-cyan-300/60" /> : <Clock3 className="h-3 w-3" />}
-              {archived ? 'ARCHIVED' : isThread ? 'THREAD' : 'TALK'}
+              {archived ? '已归档' : threadLabel}
             </span>
           </div>
 
@@ -604,6 +659,15 @@ function SectionLabel({
   )
 }
 
+function TypeLegend({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>
+      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
+      {label}
+    </span>
+  )
+}
+
 function SummaryPill({
   label,
   value,
@@ -635,11 +699,30 @@ function EmptyState({ label }: { label: string }) {
   )
 }
 
+function isUnassignedTaskPath(path: LearningPath) {
+  return path.source === 'unassigned' || path.id === '__unassigned_tasks__' || path.id === '__fleeting_inbox__'
+}
+
+function canOpenStep(step: LearningStep) {
+  return step.status !== 'locked'
+}
+
+function colorWithAlpha(hex: string, alpha: number) {
+  const normalized = hex.trim().replace('#', '')
+  if (!/^[0-9a-fA-F]{6}$/.test(normalized)) return `rgba(255,255,255,${alpha})`
+  const value = Number.parseInt(normalized, 16)
+  const r = (value >> 16) & 255
+  const g = (value >> 8) & 255
+  const b = value & 255
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
 function resolveTaskStep(path: LearningPath, activeStepId: string | null): LearningStep | null {
   if (!path.steps.length) return null
-  return path.steps.find((step) => step.id === activeStepId)
-    ?? path.steps.find((step) => step.status === 'available' || step.status === 'learning')
-    ?? path.steps[0]
+  const selected = path.steps.find((step) => step.id === activeStepId)
+  if (selected && canOpenStep(selected)) return selected
+  return path.steps.find((step) => step.status === 'available' || step.status === 'learning')
+    ?? path.steps.find(canOpenStep)
     ?? null
 }
 
@@ -708,16 +791,19 @@ function isArchivedPath(path: LearningPath): boolean {
 }
 
 function stepTone(status: LearningStep['status']) {
-  if (status === 'mastered' || status === 'completed') {
-    return { label: '已完成', text: 'text-green-300', fill: 'bg-green-400', border: 'border-green-500/30' }
+  if (status === 'mastered') {
+    return { label: '已掌握', text: 'text-green-300', fill: 'bg-green-400', border: 'border-green-500/30' }
+  }
+  if (status === 'completed') {
+    return { label: '任务已完成', text: 'text-green-300', fill: 'bg-green-400', border: 'border-green-500/30' }
   }
   if (status === 'learning') {
-    return { label: '处理中', text: 'text-cyan-300', fill: 'bg-cyan-400', border: 'border-cyan-500/30' }
+    return { label: '学习中', text: 'text-cyan-300', fill: 'bg-cyan-400', border: 'border-cyan-500/30' }
   }
   if (status === 'available') {
-    return { label: '可进入', text: 'text-purple-300', fill: 'bg-purple-400', border: 'border-purple-500/30' }
+    return { label: '可开始', text: 'text-purple-300', fill: 'bg-purple-400', border: 'border-purple-500/30' }
   }
-  return { label: '待解锁', text: 'text-white/25', fill: 'bg-white/20', border: 'border-white/10' }
+  return { label: '前置未满足', text: 'text-white/25', fill: 'bg-white/20', border: 'border-white/10' }
 }
 
 function formatRelativeTime(dateStr: string): string {

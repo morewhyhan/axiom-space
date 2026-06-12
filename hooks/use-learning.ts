@@ -9,6 +9,9 @@ export interface LearningStep {
   index: number
   id: string
   cardId?: string | null
+  cardTitle?: string | null
+  cardType?: 'fleeting' | 'literature' | 'permanent' | string | null
+  lockedReason?: string | null
   name: string
   status: 'locked' | 'available' | 'learning' | 'completed' | 'mastered'
   desc: string
@@ -42,6 +45,11 @@ export interface LearningPath {
   progress: number
 }
 
+export interface GeneratePathResult extends LearningPath {
+  paths?: LearningPath[]
+  createdPathCount?: number
+}
+
 export interface LearningPathsData {
   paths: LearningPath[]
   activePath: string | null
@@ -67,12 +75,13 @@ async function fetchLearningPaths(vaultId?: string | null, topic?: string): Prom
   return { paths: data.paths, activePath: data.activePath, activeStep: data.activeStep }
 }
 
-export function useLearningPaths(topic?: string) {
+export function useLearningPaths(topic?: string, options: { enabled?: boolean } = {}) {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const enabled = options.enabled ?? true
   const query = useQuery({
     queryKey: ['learning-paths', currentVaultId, topic],
     queryFn: () => fetchLearningPaths(currentVaultId, topic),
-    enabled: !!currentVaultId,
+    enabled: enabled && !!currentVaultId,
     refetchInterval: 60_000, // periodic sync for step progress/background updates
     staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
@@ -98,20 +107,24 @@ export function useGeneratePath() {
         query: { vid: currentVaultId },
         json: { ...params },
       })
-      const data = await res.json() as ApiResult<{ path: LearningPath }>
+      const data = await res.json() as ApiResult<{ path: LearningPath; paths?: LearningPath[]; createdPathCount?: number }>
       if (!data.success) throw new Error(data.error || 'Generation failed')
-      return data.path
+      return Object.assign(data.path, {
+        paths: data.paths ?? [data.path],
+        createdPathCount: data.createdPathCount ?? data.paths?.length ?? 1,
+      }) as GeneratePathResult
     },
     onSuccess: (data) => {
       // Direct cache update so the new path appears instantly
       const queryKey = ['learning-paths', currentVaultId, undefined]
       queryClient.setQueryData(queryKey, (old: LearningPathsData | undefined) => {
         const base = old ?? { paths: [], activePath: null, activeStep: 0 }
-        const alreadyExists = base.paths.some((p: LearningPath) => p.id === data.id)
-        if (alreadyExists) return base
+        const generatedPaths = data.paths ?? [data]
+        const newPaths = generatedPaths.filter((path) => !base.paths.some((p: LearningPath) => p.id === path.id))
+        if (newPaths.length === 0) return base
         return {
           ...base,
-          paths: [data, ...base.paths],
+          paths: [...newPaths, ...base.paths],
           activePath: data.id,
         }
       })
@@ -139,7 +152,7 @@ export function useExecuteStep() {
         query: { vid: currentVaultId },
         json: { stepId: params.stepId },
       })
-      const data = await res.json() as ApiResult<{ session: { id: string; stepId: string; cardId?: string | null; cardType?: string | null } }>
+      const data = await res.json() as ApiResult<{ session: { id: string; stepId: string; pathId?: string | null; pathTitle?: string | null; cardId?: string | null; cardTitle?: string | null; cardType?: string | null } }>
       if (!data.success) throw new Error(data.error || 'Execute failed')
       return data.session
     },
@@ -331,8 +344,9 @@ export interface LearningProfile {
   recentSessions: Array<{ id: string; domain: string; concept: string; status: string; updatedAt: string }>
 }
 
-export function useLearningProfile() {
+export function useLearningProfile(options: { enabled?: boolean } = {}) {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const enabled = options.enabled ?? true
   const query = useQuery({
     queryKey: ['learning-profile', currentVaultId],
     queryFn: async () => {
@@ -341,7 +355,7 @@ export function useLearningProfile() {
       if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch learning profile (${res.status})` : data.error || `Failed to fetch learning profile (${res.status})`)
       return data.profile
     },
-    enabled: !!currentVaultId,
+    enabled: enabled && !!currentVaultId,
     staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: true,

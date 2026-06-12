@@ -286,8 +286,8 @@ export default function LearnControls() {
             {createMode === 'material' && (
               <>
                 <p className="mono text-white/30 leading-relaxed" style={{ fontSize: 'var(--f8)' }}>
-                  粘贴文献或学习资料全文，AI 会自动提取核心概念生成 permanent 卡片、细节知识点 fleeting 卡片、
-                  并建立知识图谱关联，同时生成结构化的学习路径。一次完成，无需逐张创建。
+                  粘贴文献或学习资料全文，AI 会先保留资料来源，再提取核心概念和细节知识点生成灵感草稿，
+                  并建立知识图谱关联，同时生成结构化的学习路径。永久知识卡需要后续打磨沉淀。
                 </p>
                 <textarea
                   className="w-full bg-black/30 border border-purple-500/30 rounded-lg px-4 py-3 outline-none text-white/80 placeholder:text-white/15 focus:border-purple-500/50 resize-none"

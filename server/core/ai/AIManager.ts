@@ -389,7 +389,8 @@ export class AIManager {
    */
   public generateSystemPrompt(oracleId: string, customPrompt?: string): string {
     const oracle = getOracle(oracleId);
-    const basePrompt = customPrompt || oracle?.systemPrompt || 'You are a helpful AI assistant.';
+    const defaultOracle = getOracle('default');
+    const basePrompt = customPrompt || oracle?.systemPrompt || defaultOracle?.systemPrompt || '';
 
     // 添加全局上下文信息
     const ctx = this.getGlobalContext();

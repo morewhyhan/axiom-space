@@ -17,8 +17,9 @@ type DashboardResponse =
       error?: string
     }
 
-export function useDashboardStats() {
+export function useDashboardStats(options: { enabled?: boolean } = {}) {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const enabled = options.enabled ?? true
 
   const query = useQuery({
     queryKey: ['dashboard-stats', currentVaultId],
@@ -35,7 +36,7 @@ export function useDashboardStats() {
         recentActivity: responseData.recentActivity ?? [],
       }
     },
-    enabled: !!currentVaultId,
+    enabled: enabled && !!currentVaultId,
     staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: true,

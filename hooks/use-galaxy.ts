@@ -21,8 +21,9 @@ async function readMutationResult<T>(
   return data as T
 }
 
-export function useGalaxyData() {
+export function useGalaxyData(options: { enabled?: boolean } = {}) {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const enabled = options.enabled ?? true
 
   const query = useQuery({
     queryKey: ['galaxy', currentVaultId],
@@ -52,7 +53,7 @@ export function useGalaxyData() {
 
       return { nodes, edges, clusters } as GalaxyData
     },
-    enabled: !!currentVaultId,
+    enabled: enabled && !!currentVaultId,
     staleTime: 15 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: true,

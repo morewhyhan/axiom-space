@@ -1,3 +1,3 @@
-declare const piAI: typeof import('../../../node_modules/@mariozechner/pi-ai/dist/index.js')
+declare const piAI: Promise<typeof import('@mariozechner/pi-ai')>
 export default piAI
-export * from '../../../node_modules/@mariozechner/pi-ai/dist/index.js'
+export * from '@mariozechner/pi-ai'

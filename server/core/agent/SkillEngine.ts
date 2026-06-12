@@ -160,7 +160,7 @@ export class SkillEngine {
 
       prompt += `\n${TOOL_ENFORCEMENT}`;
 
-      // Hermes-style N 轮画像更新提醒
+      // AXIOM-style N 轮画像更新提醒
       const turns = this.profileTurns.get(name) || 0;
       if (turns > 0 && turns % 5 === 0) {
         prompt += `\n\n[系统提醒] 已对话多轮，如有值得记录的偏好变化，调用 write 更新 .axiom/user-profile.json。`;

@@ -261,12 +261,12 @@ export default function DashboardRight() {
             <div className="space-y-1.5">
               <div className="flex items-center gap-2" style={{ fontSize: 'var(--f10)' }}>
                 <span className="w-1 h-1 rounded-full bg-pink-400 flex-shrink-0" />
-                <span className="text-pink-300/80">{s?.orphanCount ?? 0} nodes pending review</span>
+                <span className="text-pink-300/80">{s?.orphanCount ?? 0} 个孤立节点待连接</span>
                 <span className="mono opacity-30 ml-auto" style={{ fontSize: 'var(--f7)' }}>{s?.orphanCount && s.orphanCount > 10 ? 'HIGH' : 'LOW'}</span>
               </div>
               <div className="flex items-center gap-2" style={{ fontSize: 'var(--f10)' }}>
                 <span className="w-1 h-1 rounded-full bg-cyan-400 flex-shrink-0" />
-                <span className="text-cyan-300/80">{s?.cardsToday ?? 0} new cards today</span>
+                <span className="text-cyan-300/80">今日新增 {s?.cardsToday ?? 0} 张卡片</span>
                 <span className="mono opacity-30 ml-auto" style={{ fontSize: 'var(--f7)' }}>INFO</span>
               </div>
             </div>

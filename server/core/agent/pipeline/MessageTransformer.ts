@@ -13,6 +13,7 @@ import { getAuxiliaryClient } from '../AuxiliaryClient';
 import { applyAnthropicCacheControl } from '../AnthropicCache';
 import { injectSafetyConstraints } from './SystemPromptBuilder';
 import type { AgentServices } from './AgentServices';
+import { MEMORY_SUMMARY_PROMPT } from '../../ai/prompts';
 
 export class MessageTransformer {
   constructor(
@@ -201,7 +202,7 @@ export class MessageTransformer {
    */
   async callLLMForSummary(prompt: string, systemPromptOverride?: string): Promise<string> {
     const aux = getAuxiliaryClient();
-    const effectiveSystemPrompt = systemPromptOverride || 'You are a context compression assistant. Summarize concisely.';
+    const effectiveSystemPrompt = systemPromptOverride || MEMORY_SUMMARY_PROMPT.system;
     if (aux) {
       const result = await aux.call({
         systemPrompt: effectiveSystemPrompt,

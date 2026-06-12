@@ -8,6 +8,10 @@
 import { EventEmitter } from 'events';
 import { nanoid } from 'nanoid';
 import { getProfileCacheEntry } from '@/server/api/profile-cache';
+import {
+  ORCHESTRATION_GENERATOR_PROMPT,
+  ORCHESTRATION_PLANNER_PROMPT,
+} from '@/server/core/ai/prompts';
 
 /**
  * Agent 消息协议
@@ -547,19 +551,15 @@ export class RealAgent {
     const previousResults = payload.previousResults || {};
     const { aiManager } = await import('@/server/core/ai/AIManager');
 
-    const systemPrompt = `你是一个学习路径规划专家。根据用户的学习画像，生成一份学习计划。
-请以 JSON 格式返回（不要 markdown fence），字段如下：
-{
-  "recommendedResourceTypes": ["document", "code", "diagram", "video"],
-  "contentOutline": ["章节标题1", "章节标题2"],
-  "estimatedDuration": 120,
-  "resources": [{ "type": "document", "title": "资源标题" }]
-}`;
-
     try {
       const raw = await aiManager.callAPI(
-        systemPrompt,
-        [{ role: 'user', content: `用户画像：\n${JSON.stringify(previousResults, null, 2)}\n请生成适合该用户的学习计划。` }],
+        ORCHESTRATION_PLANNER_PROMPT.system,
+        [{
+          role: 'user',
+          content: ORCHESTRATION_PLANNER_PROMPT.buildUserMessage!({
+            profile: previousResults,
+          }),
+        }],
         { temperature: 0.7 }
       );
       const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
@@ -585,24 +585,15 @@ export class RealAgent {
     const previousResults = payload.previousResults || {};
     const { aiManager } = await import('@/server/core/ai/AIManager');
 
-    const systemPrompt = `你是一个学习资源生成专家。根据学习计划大纲，生成具体的资源内容。
-请以 JSON 格式返回（不要 markdown fence），字段如下：
-{
-  "generatedResources": [
-    {
-      "type": "document",
-      "title": "资源标题",
-      "content": "资源内容（markdown格式）",
-      "status": "completed"
-    }
-  ],
-  "qualityScore": 0.95
-}`;
-
     try {
       const raw = await aiManager.callAPI(
-        systemPrompt,
-        [{ role: 'user', content: `计划大纲：\n${JSON.stringify(previousResults, null, 2)}\n请根据大纲生成具体的学习资源。` }],
+        ORCHESTRATION_GENERATOR_PROMPT.system,
+        [{
+          role: 'user',
+          content: ORCHESTRATION_GENERATOR_PROMPT.buildUserMessage!({
+            planOutline: previousResults,
+          }),
+        }],
         { temperature: 0.7 }
       );
       const cleaned = raw.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();

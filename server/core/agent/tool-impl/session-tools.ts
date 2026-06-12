@@ -10,6 +10,7 @@ const axiom = createAxiomCompat(getFileStorage());
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath, getSessionState, setSessionState, resolvePath } from "./helpers";
 import { DEFAULT_MODEL, DEFAULT_COMPRESSION_MODEL } from "@/types/agent";
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 // In-memory cache replacing localStorage (browser API unavailable in Node.js)
 const _toolCache = new Map<string, string>();
@@ -262,7 +263,7 @@ const feynmanTestTool = createTool(
       // MODE 2: userResponse provided — Evaluate the user's explanation
       const { aiManager } = await import('../../ai/AIManager');
 
-      const evaluationSystemPrompt = `你是概念理解评估专家。用户正在尝试用自己的话解释一个概念（费曼学习法）。
+      const evaluationSystemPrompt = `${AGENT_TOOL_PROMPTS.sessionConceptEvaluation.system}
 
 请从以下维度评估用户的解释质量，每个维度给出1-5分：
 

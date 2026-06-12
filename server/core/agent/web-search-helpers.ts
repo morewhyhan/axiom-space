@@ -12,6 +12,7 @@
 import { createAxiomCompat } from '@/server/infra/storage/AxiomCompat'
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { resolveAiConfig } from '@/lib/ai-config';
+import { WEB_SEARCH_ANSWER_PROMPT } from '@/server/core/ai/prompts'
 
 export interface WebSearchModel {
   id: string;
@@ -64,17 +65,11 @@ export async function executeWebSearch(
   const messages = [
     {
       role: 'system',
-      content: `你是一个知识搜索助手。根据用户的查询，提供准确、全面的信息回答。
-格式要求：
-## 搜索结果: {query}
-**摘要**: 一句话总结
-**详细说明**: 2-3段详细解释
-**相关概念**: 列出相关概念
-**来源**: 如果你知道具体出处请列出`,
+      content: WEB_SEARCH_ANSWER_PROMPT.system,
     },
     {
       role: 'user',
-      content: `请搜索并回答: ${query}`,
+      content: WEB_SEARCH_ANSWER_PROMPT.buildUserMessage!({ query }),
     },
   ];
 

@@ -10,6 +10,8 @@ import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId, getCurrentUserId } from '../agent-context';
 import { aiManager } from '../../ai/AIManager';
+import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 /**
  * 为某个主题创建学习路径
@@ -38,6 +40,8 @@ const createLearningPathTool = createTool(
 
       const prompt = `你是学习课程设计专家。为以下主题设计一个学习路径：
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 主题：${params.topic}
 目标：${params.goal}
 时长：${params.duration_hours || 20} 小时
@@ -65,7 +69,7 @@ const createLearningPathTool = createTool(
 所有内容必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是教育学和课程设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.learningPathDesign.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -241,7 +245,9 @@ const suggestNextTopicTool = createTool(
 
       const conceptNames = learnedConcepts.map(c => c.title).join(', ');
 
-      const prompt = `用户已学过的概念：${conceptNames}
+      const prompt = `${AXIOM_KNOWLEDGE_STANDARD}
+
+用户已学过的概念：${conceptNames}
 
 基于这些已学概念，推荐 3 个最合适的下一步学习主题。
 
@@ -262,7 +268,7 @@ const suggestNextTopicTool = createTool(
 所有内容必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是个性化学习推荐专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.personalizedPathRecommendation.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -334,6 +340,8 @@ const optimizePathOrderTool = createTool(
 
       const prompt = `你是有经验的课程设计师。优化以下一组 "${style}" 策略的学习顺序。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 概念列表：${concepts.join(', ')}
 
 策略说明：
@@ -355,7 +363,7 @@ const optimizePathOrderTool = createTool(
 所有内容必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是教育学和课程设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.pathOrderOptimization.system,
         [{ role: 'user', content: prompt }]
       );
 

@@ -7,7 +7,8 @@
  * 执行完后用 sentinel marker 清除所有 flush 痕迹。
  */
 
-import { getAuditLogger, LogCategory, LogLevel } from '../audit/AuditLogger';
+import { getAuditLogger, LogCategory } from '../audit/AuditLogger';
+import { MEMORY_FLUSH_PROMPT } from '../../ai/prompts';
 
 export interface FlushableMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -36,8 +37,6 @@ export interface MemoryFlushLLMCaller {
   executeMemoryToolCall(toolCall: any): Promise<any>;
 }
 
-const FLUSH_SYSTEM_PROMPT = `[System: The session is being compressed. Save anything worth remembering — prioritize user preferences, corrections, and recurring patterns over task-specific details.]`;
-
 export class MemoryFlush {
   private caller: MemoryFlushLLMCaller;
 
@@ -56,7 +55,7 @@ export class MemoryFlush {
     // 注入 flush 消息
     const flushMessage: FlushableMessage = {
       role: 'user',
-      content: `${FLUSH_SYSTEM_PROMPT} ${sentinel}`,
+      content: MEMORY_FLUSH_PROMPT.buildUserMessage!({ sentinel }),
     };
     messages.push(flushMessage);
 

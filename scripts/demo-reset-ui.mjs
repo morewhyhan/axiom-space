@@ -1,7 +1,8 @@
 import crypto from 'node:crypto'
-import { PrismaClient } from '../node_modules/.pnpm/@prisma+client@6.19.2_prisma@6.19.2_typescript@5.6.2__typescript@5.6.2/node_modules/@prisma/client/default.js'
+import { PrismaClient } from '@prisma/client'
 
 const prisma = new PrismaClient()
+const ROOT_CARD_PATH = '__root__.md'
 
 async function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex')
@@ -23,6 +24,40 @@ function daysAgo(days) {
 
 function isoDaysAgo(days) {
   return daysAgo(days).toISOString()
+}
+
+function pathSegment(value) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'concept'
+}
+
+async function createRootCard(vaultId, vaultName) {
+  return prisma.card.create({
+    data: {
+      vaultId,
+      path: ROOT_CARD_PATH,
+      title: vaultName,
+      type: 'fleeting',
+      tags: JSON.stringify(['axiom-root', 'concept-card']),
+      content: `# ${vaultName}\n\n> 这是这个知识库的根理解卡。它连接下面的概念理解卡。\n`,
+    },
+  })
+}
+
+async function createContainsEdge(vaultId, parentId, childId, weight = 1) {
+  if (!parentId || !childId || parentId === childId) return
+  await prisma.edge.create({
+    data: {
+      vaultId,
+      sourceId: parentId,
+      targetId: childId,
+      type: 'contains',
+      weight,
+    },
+  })
 }
 
 async function upsertDemoUser(email, name, password) {
@@ -97,7 +132,9 @@ function cardBody(title, topic, kind, related) {
 }
 
 async function seedVault(vaultId) {
-  const userId = (await prisma.vault.findUnique({ where: { id: vaultId }, select: { userId: true } })).userId
+  const vault = await prisma.vault.findUnique({ where: { id: vaultId }, select: { name: true, userId: true } })
+  if (!vault) throw new Error(`Vault not found: ${vaultId}`)
+  const userId = vault.userId
 
   const clusters = [
     { name: 'Data Structures', color: '#a855f7', position: 0 },
@@ -112,6 +149,26 @@ async function seedVault(vaultId) {
       data: { vaultId, name: c.name, color: c.color, position: c.position },
     })
     clusterRows.set(c.name, row)
+  }
+
+  const rootCard = await createRootCard(vaultId, vault.name)
+  const areaCards = new Map()
+  for (const c of clusters) {
+    const cluster = clusterRows.get(c.name)
+    if (!cluster) continue
+    const areaCard = await prisma.card.create({
+      data: {
+        vaultId,
+        clusterId: cluster.id,
+        title: c.name,
+        path: `${pathSegment(c.name)}/__index__.md`,
+        type: 'permanent',
+        tags: JSON.stringify(['concept-card', 'knowledge-area']),
+        content: `# ${c.name}\n\nThis is a high-level concept card inside ${vault.name}. It can contain more specific concept cards below it.\n`,
+      },
+    })
+    areaCards.set(c.name, { id: areaCard.id })
+    await createContainsEdge(vaultId, rootCard.id, areaCard.id, 1.4)
   }
 
   const cardDefs = [
@@ -146,12 +203,14 @@ async function seedVault(vaultId) {
         title: card.title,
         path: card.path,
         type: card.type,
-        tags: JSON.stringify(card.tags),
+        tags: JSON.stringify([card.type === 'literature' ? 'source-material' : 'concept-card', ...card.tags]),
         content: cardBody(card.title, card.cluster, card.type, card.related),
         createdAt: card.createdAt,
       },
     })
     cardRows.set(card.title, { id: row.id })
+    const areaCard = areaCards.get(card.cluster)
+    if (areaCard) await createContainsEdge(vaultId, areaCard.id, row.id)
   }
 
   const edges = [

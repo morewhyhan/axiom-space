@@ -10,6 +10,7 @@ import { renderDocx, renderPdf, renderPptx } from '../ai/hyperframes/resource-re
 import { hyperframesRenderer } from '../ai/hyperframes/renderer';
 import { contentSafetyGuardrail } from '../ai/guardrails/content-safety';
 import { factualCheckGuardrail } from '../ai/guardrails/factual-check';
+import { RESOURCE_GENERATION_PROMPTS } from '../ai/prompts';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -60,136 +61,6 @@ const RESOURCE_PROGRESS_START: Record<ResourceType, number> = {
   docx: 4,
   pdf: 4,
   ppt: 4,
-};
-
-// ── Per-type generation prompts ──────────────────────────────────
-
-const RESOURCE_PROMPTS: Record<ResourceType, string> = {
-  document: `你是 AXIOM 课程文档生成专家。请根据以下内容生成一份结构化的学习文档。
-
-要求：
-1. 总字数不少于 800 字，内容具体、有实质性信息
-2. 严格包含以下章节：
-   ## 概述
-   ## 核心概念
-   ## 进阶理解
-   ## 总结
-3. 格式：Markdown，代码用 \` 包裹，强调用 **粗体**
-4. 输出纯文档内容，不要加前言`,
-
-  mindmap: `你是 AXIOM 思维导图生成专家。请根据以下内容生成一张 Mermaid mindmap。
-
-要求：
-1. 使用 Mermaid mindmap 语法，根节点为 ((学习主题))
-2. 至少 4 个一级分支，每分支至少 3 个叶子节点
-3. 输出纯 Mermaid mindmap 代码块，以 \`\`\`mermaid 开头
-4. 子节点直接写文本，不要使用 [] 方括号，不要使用 & / < > 等特殊符号
-
-格式参考：
-\`\`\`mermaid
-mindmap
-  root((主题))
-    分支A
-      子概念1
-      子概念2
-\`\`\``,
-
-  quiz: `你是 AXIOM 练习题库生成专家。请根据以下内容生成一套练习题。
-
-要求：
-1. 至少 5 道题，覆盖基础概念理解（3 题）+ 进阶应用分析（2 题）
-2. 输出严格 JSON 数组格式，不要加任何其他文字
-3. 每题包含：type, question, options, answer, explanation
-4. 每题只能有一个正确答案，answer 必须对应 options 里的选项编号
-5. 禁止重复选项、重复题目、模型自我纠错、笔误说明或不确定表达
-
-输出格式：
-[
-  {
-    "type": "choice",
-    "question": "以下关于X的描述，正确的是？",
-    "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
-    "answer": "B",
-    "explanation": "选项B正确，因为..."
-  }
-]`,
-
-  code: `你是 AXIOM 代码实操资源生成专家。请根据以下内容生成一个可以直接练习的代码案例。
-
-要求：
-1. 输出 Markdown，必须包含以下章节：
-   ## 练习目标
-   ## 初始代码
-   ## 任务要求
-   ## 测试样例
-   ## 参考实现
-   ## 讲解
-2. 至少包含 2 个 fenced code block，优先使用 TypeScript、Python 或伪代码中最贴近主题的一种
-3. 练习必须可操作，不要只给概念解释
-4. 输出纯 Markdown，不要加前言`,
-
-  video: `你是 AXIOM 教学视频脚本生成专家。请根据以下学习主题，生成一个教学动画视频的场景配置。
-
-要求：
-1. 生成 4-6 个场景
-2. 每个场景包含 2-5 个元素（text/code/shape）
-3. 总时长控制在 30-90 秒
-
-用 \`\`\`json 代码块包裹，以严格 JSON 格式返回：
-{
-  "scenes": [{ "id": "intro", "duration": 6, "backgroundColor": "#f0f4f8", "elements": [...] }],
-  "width": 1920, "height": 1080, "fps": 30
-}`,
-
-  svg: `You are an SVG expert. Create an SVG diagram. Output inside \`\`\`svg code block. Include <svg> tags with proper namespace. Use 800x600 viewBox. Include at least 6 elements (rect, circle, text, line) with Chinese labels.`,
-
-
-  diagram: `你是 AXIOM Mermaid 图表生成专家。请根据以下内容生成一个 Mermaid 图表。
-
-要求：
-1. 选择最合适的图表类型：flowchart / sequenceDiagram / classDiagram / pie / stateDiagram / gantt
-2. 至少 6 个节点，结构完整
-3. 输出纯 Mermaid 代码块，以 \`\`\`mermaid 开头
-
-格式参考：
-\`\`\`mermaid
-flowchart TD
-  A[概念] --> B[子概念]
-\`\`\``,
-
-  docx: `你是 AXIOM Word 文档生成专家。请根据以下内容生成一份结构化的学习文档。
-
-要求：
-1. 总字数不少于 800 字
-2. 使用 HTML 格式（将直接转换为 Word 文档）
-3. 用 h1/h2/h3 表示章节层级，p 表示段落，ul/li 表示列表
-4. 代码用 pre/code 包裹，表格用 table
-5. 输出纯 HTML body 内容（不要 <html>/<head>/<body> 包裹），不要加前言`,
-
-  pdf: `你是 AXIOM PDF 文档生成专家。请根据以下内容生成一份适合打印的学习文档。
-
-要求：
-1. 总字数不少于 800 字
-2. 使用 HTML 格式（将直接转换为 PDF）
-3. 用 h1/h2/h3 表示章节层级，p 表示段落，ul/li 表示列表
-4. 代码用 pre/code 包裹，表格用 table
-5. 适合 A4 打印排版
-6. 输出纯 HTML body 内容（不要 <html>/<head>/<body> 包裹），不要加前言`,
-
-  ppt: `你是 AXIOM 演示文稿生成专家。请根据以下内容生成一份幻灯片内容。
-
-要求：
-1. 至少 8 页，包括封面和总结页
-2. 使用 HTML 格式，每页用 <!-- slide --> 分隔
-3. 每页包含一个 h1/h2 标题 + 若干 li 要点
-4. 输出纯 HTML，不要加前言
-
-示例格式：
-<h1>封面标题</h1>
-<p>副标题</p>
-<!-- slide -->
-<h2>核心概念</h2>
-<ul><li>要点1</li><li>要点2</li></ul>`,
 };
 
 // ── Quality validation ───────────────────────────────────────────
@@ -297,7 +168,6 @@ export class ResourceGenerationOrchestrator {
     formats?: string[],
   ): Promise<GenerationResult[]> {
     const results: GenerationResult[] = [];
-    const context = this.buildContext(topic, userLevel, literatureContent);
     const types = formats && formats.length > 0
       ? RESOURCE_TYPES.filter(t => formats.includes(t))
       : RESOURCE_TYPES;
@@ -327,10 +197,13 @@ export class ResourceGenerationOrchestrator {
           continue;
         }
 
-        const prompt = RESOURCE_PROMPTS[type];
+        const prompt = RESOURCE_GENERATION_PROMPTS[type];
         let content: string;
         try {
-          content = await this.deps.callLLM(prompt, context);
+          content = await this.deps.callLLM(
+            prompt.system,
+            prompt.buildUserMessage!({ topic, userLevel, literatureContent }),
+          );
         } catch (error: any) {
           if (type !== 'svg') throw error;
           content = this.buildFallbackSvg(topic);
@@ -463,14 +336,6 @@ export class ResourceGenerationOrchestrator {
     }
 
     return results;
-  }
-
-  private buildContext(topic: string, userLevel: string, literatureContent?: string): string {
-    const parts = [`学习主题：${topic}`, `用户水平：${userLevel}`];
-    if (literatureContent) {
-      parts.push(`\n参考文献内容：\n${literatureContent.slice(0, 4000)}`);
-    }
-    return parts.join('\n');
   }
 
   private cleanOutput(type: ResourceType, raw: string): string {

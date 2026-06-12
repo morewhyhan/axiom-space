@@ -9,7 +9,7 @@ import { prisma } from '@/lib/db'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
 import { requireAuth } from '../middleware/auth'
-import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
+import { parseWikiLinks, resolveWikiLinkTitle, syncEdgesFromContent } from '@/lib/wiki-links'
 import { runWithAgentContext } from '@/server/core/agent/agent-context'
 import { CARD_TYPES, validatePermanentCardContent } from '@/server/core/domain/contracts'
 import { emitDomainEvent, recordCardRevision, recordPromotionAttempt } from '@/server/core/domain/events'
@@ -53,6 +53,29 @@ function resourcePathPrefixes(paths: string[]): string[] {
     }
   }
   return Array.from(prefixes)
+}
+
+function safeCardFileName(value: string) {
+  return value.trim().replace(/[/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100) || '未命名'
+}
+
+function parentPath(path: string) {
+  const parts = path.split('/').filter(Boolean)
+  parts.pop()
+  return parts.join('/')
+}
+
+async function nextAvailableCardPath(vaultId: string, basePath: string) {
+  const dot = basePath.endsWith('.md') ? basePath.length - 3 : basePath.length
+  const stem = basePath.slice(0, dot)
+  const ext = basePath.endsWith('.md') ? '.md' : ''
+  let candidate = basePath
+  for (let i = 2; i < 100; i++) {
+    const existing = await prisma.card.findUnique({ where: { vaultId_path: { vaultId, path: candidate } }, select: { id: true } })
+    if (!existing) return candidate
+    candidate = `${stem}-${i}${ext}`
+  }
+  return `${stem}-${Date.now()}${ext}`
 }
 
 const app = new Hono<{ Variables: { userId: string } }>()
@@ -211,7 +234,12 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const expectedVaultId = c.req.query('vid')
   const card = await prisma.card.findUnique({
     where: { id },
-    include: { cluster: { select: { name: true, color: true } } },
+    include: {
+      cluster: { select: { name: true, color: true } },
+      sourceDocument: { select: { id: true, title: true, source: true, contentHash: true } },
+      sourceChunk: { select: { id: true, index: true, headingPath: true } },
+      derivedFrom: { select: { id: true, title: true, type: true } },
+    },
   })
 
   if (!card) return c.json({ success: false, error: 'Card not found' }, 404)
@@ -232,11 +260,17 @@ const app = new Hono<{ Variables: { userId: string } }>()
       path: card.path,
       content: card.content,
       tags: safeParseTags(card.tags),
-      clusterName: card.cluster?.name ?? null,
-      clusterColor: card.cluster?.color ?? null,
-      createdAt: card.createdAt,
-      updatedAt: card.updatedAt,
-    },
+	      clusterName: card.cluster?.name ?? null,
+	      clusterColor: card.cluster?.color ?? null,
+	      sourceDocumentId: card.sourceDocumentId,
+	      sourceChunkId: card.sourceChunkId,
+	      derivedFromCardId: card.derivedFromCardId,
+	      sourceDocument: card.sourceDocument,
+	      sourceChunk: card.sourceChunk,
+	      derivedFrom: card.derivedFrom,
+	      createdAt: card.createdAt,
+	      updatedAt: card.updatedAt,
+	    },
   })
 })
 
@@ -267,11 +301,12 @@ const app = new Hono<{ Variables: { userId: string } }>()
     if (!quality.passed) {
       void recordPromotionAttempt({
         userId,
-        vaultId: card.vaultId,
-        cardId: card.id,
-        fromType: card.type,
-        toType: 'permanent',
-        status: 'rejected',
+          vaultId: card.vaultId,
+          cardId: card.id,
+          fromCardId: card.id,
+          fromType: card.type,
+          toType: 'permanent',
+          status: 'rejected',
         missingElements: quality.missingElements,
         qualityChecks: quality.checks,
       })
@@ -378,6 +413,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
       userId,
       vaultId: updated.vaultId,
       cardId: updated.id,
+      fromCardId: updated.id,
+      toCardId: updated.id,
       fromType: card.type,
       toType: 'permanent',
       status: 'accepted',
@@ -392,6 +429,95 @@ const app = new Hono<{ Variables: { userId: string } }>()
       type: updated.type,
       content: updated.content,
       updatedAt: updated.updatedAt,
+    },
+  })
+})
+
+// POST /api/vault/card/:id/extract-fleeting — 从文献资料结构化提取灵感草稿
+.post('/card/:id/extract-fleeting', zValidator('query', vaultQuerySchema), zValidator('json', z.object({
+  title: z.string().min(1).max(120),
+  content: z.string().optional(),
+})), async (c) => {
+  const userId = c.get('userId') as string
+  const id = c.req.param('id')
+  const expectedVaultId = c.req.query('vid')
+  const { title, content } = c.req.valid('json')
+
+  const literature = await prisma.card.findUnique({
+    where: { id },
+    include: {
+      vault: { select: { userId: true } },
+      sourceDocument: { select: { id: true, title: true, source: true, contentHash: true } },
+    },
+  })
+  if (!literature) return c.json({ success: false, error: 'Card not found' }, 404)
+  if (literature.vault.userId !== userId) return c.json({ success: false, error: 'Forbidden' }, 403)
+  if (expectedVaultId && literature.vaultId !== expectedVaultId) {
+    return c.json({ success: false, error: 'Card not found in current vault' }, 404)
+  }
+  if (literature.type !== 'literature') {
+    return c.json({ success: false, error: 'ONLY_LITERATURE_CAN_EXTRACT_FLEETING' }, 422)
+  }
+
+  const folder = parentPath(literature.path)
+  const safeTitle = safeCardFileName(title)
+  const basePath = folder ? `${folder}/${safeTitle}.md` : `${safeTitle}.md`
+  const path = await nextAvailableCardPath(literature.vaultId, basePath)
+  const sourceLine = literature.sourceDocument?.source
+    ? `> 来源：${literature.sourceDocument.source}`
+    : `> 来源文献：[[${literature.title || '未命名文献'}]]`
+  const draftContent = `# ${title.trim()}
+
+> 提取自 [[${literature.title || '未命名文献'}]]
+${sourceLine}
+
+${content?.trim() || ''}
+`
+
+  const created = await prisma.card.create({
+    data: {
+      vaultId: literature.vaultId,
+      clusterId: literature.clusterId,
+      sourceDocumentId: literature.sourceDocumentId,
+      sourceChunkId: literature.sourceChunkId,
+      derivedFromCardId: literature.id,
+      path,
+      title: title.trim(),
+      content: draftContent,
+      type: 'fleeting',
+      tags: JSON.stringify([...new Set([...safeParseTags(literature.tags), 'extracted-from-literature'])]),
+    },
+  })
+  await syncEdgesFromContent(prisma, created.id, created.vaultId, created.content)
+
+  void emitDomainEvent({
+    userId,
+    vaultId: created.vaultId,
+    aggregateType: 'card',
+    aggregateId: created.id,
+    eventType: 'CardCreated',
+    payload: {
+      path: created.path,
+      title: created.title,
+      type: created.type,
+      derivedFromCardId: literature.id,
+      sourceDocumentId: created.sourceDocumentId,
+      sourceChunkId: created.sourceChunkId,
+    },
+  })
+
+  return c.json({
+    success: true,
+    card: {
+      id: created.id,
+      title: created.title,
+      type: created.type,
+      path: created.path,
+      content: created.content,
+      derivedFromCardId: created.derivedFromCardId,
+      sourceDocumentId: created.sourceDocumentId,
+      sourceChunkId: created.sourceChunkId,
+      updatedAt: created.updatedAt,
     },
   })
 })
@@ -597,7 +723,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     content: card.content,
   })))
 
-  return new Response(zip, {
+  return new Response(zip as unknown as BodyInit, {
     status: 200,
     headers: {
       'Content-Type': 'application/zip',

@@ -12,17 +12,30 @@ import { queryLightRAGContext } from '@/server/core/rag/lightrag-service'
 import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
 import { getProfileCacheEntry, setProfileCacheEntry } from '../profile-cache'
-import { createHash } from 'crypto'
 import {
   STEP_STATUSES,
   assertStepStatus,
   canTransitionStepStatus,
   normalizeDifficulty,
-  normalizeEdgeType,
-  sanitizeOrder,
   type StepStatus,
 } from '@/server/core/domain/contracts'
-import { emitDomainEvent, recordAssessmentResult, recordSourceDocument } from '@/server/core/domain/events'
+import {
+  CONTAINS_EDGE_TYPE,
+  ensureConceptCard,
+  ensureContainsEdge,
+  ensureRootContainsConcept,
+  ensureVaultRootCard,
+  normalizeConceptLookup,
+  safeConceptFileName,
+} from '@/server/core/domain/concept-graph'
+import { emitDomainEvent, recordAssessmentResult } from '@/server/core/domain/events'
+import { DocumentImportError, importDocumentToVault } from '@/server/core/learning/document-import-service'
+import {
+  JSON_REPAIR_PROMPT,
+  LEARNING_BATCH_CONCEPTS_PROMPT,
+  LEARNING_PATH_PLANNER_PROMPT,
+  LEARNING_STEP_EVALUATION_PROMPT,
+} from '@/server/core/ai/prompts'
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
 const pathAdjustmentsQuerySchema = vaultQuerySchema.extend({ pathId: z.string().optional() })
@@ -35,6 +48,23 @@ async function getAiManager() {
 function matchesRequestedVault(c: Context, vaultId: string | null | undefined): boolean {
   const expectedVaultId = c.req.query('vid')
   return !expectedVaultId || expectedVaultId === vaultId
+}
+
+const DEFAULT_PATH_ACCENT = '#64748b'
+
+function normalizeStepStatusForCard(status: string | null | undefined, cardType?: string | null): StepStatus {
+  void cardType
+  return STEP_STATUSES.includes(status as StepStatus) ? status as StepStatus : 'locked'
+}
+
+function stepDescriptionForCard(cardType: string | null | undefined, fallback: string | null | undefined): string {
+  if (cardType === 'permanent' && !fallback) return '已有永久知识卡可参考，但任务进度仍以本次学习和评估为准。'
+  return fallback || ''
+}
+
+function stepMasteryForCard(cardType: string | null | undefined, mastery: number | null | undefined): number {
+  void cardType
+  return mastery ?? 0
 }
 
 const app = new Hono<{ Variables: { userId: string } }>()
@@ -96,6 +126,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
       include: {
         steps: {
           orderBy: { order: 'asc' },
+          include: {
+            card: { select: { id: true, title: true, type: true } },
+          },
         },
       },
       orderBy: { updatedAt: 'desc' },
@@ -104,38 +137,50 @@ const app = new Hono<{ Variables: { userId: string } }>()
     if (persistedPaths.length > 0) {
       const paths = persistedPaths
         .filter(p => !topic || p.topic.toLowerCase().includes(topic))
-        .map(p => ({
-          id: p.id,
-          name: p.name,
-          description: p.description,
-          topic: p.topic,
-          color: '#ff4466',
-          difficulty: p.difficulty,
-          source: p.source,
-          status: p.status,
-          steps: p.steps.map(s => ({
-            index: s.order,
-            id: s.id,
-            cardId: s.cardId,
-            name: s.title,
-            status: s.status as 'locked' | 'available' | 'learning' | 'completed' | 'mastered',
-            desc: s.description || '',
-            concept: s.concept || undefined,
-            chapter: s.chapter || undefined,
-            mastery: s.mastery,
-            estimatedMinutes: s.estimatedMinutes || undefined,
-            prerequisites: safeParseJsonArray(s.prerequisites),
-          })),
-          totalCount: p.totalSteps,
-          doneCount: p.doneSteps,
-          progress: p.totalSteps > 0 ? Math.round((p.doneSteps / p.totalSteps) * 100) : 0,
-          createdAt: p.createdAt,
-          updatedAt: p.updatedAt,
-        }))
+        .map(p => {
+          const steps = p.steps.map(s => {
+            const status = normalizeStepStatusForCard(s.status, s.card?.type)
+            const prerequisites = safeParseJsonArray(s.prerequisites)
+            return {
+              index: s.order,
+              id: s.id,
+              cardId: s.cardId,
+              cardTitle: s.card?.title ?? null,
+              cardType: s.card?.type ?? null,
+              name: s.title,
+              status,
+              desc: stepDescriptionForCard(s.card?.type, s.description),
+              concept: s.concept || undefined,
+              chapter: s.chapter || undefined,
+              mastery: stepMasteryForCard(s.card?.type, s.mastery),
+              estimatedMinutes: s.estimatedMinutes || undefined,
+              prerequisites,
+              lockedReason: describeLockedReason(status, prerequisites),
+            }
+          })
+          const doneCount = steps.filter(s => s.status === 'completed' || s.status === 'mastered').length
+          return {
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            topic: p.topic,
+            color: DEFAULT_PATH_ACCENT,
+            difficulty: p.difficulty,
+            source: p.source,
+            status: p.status,
+            steps,
+            totalCount: p.totalSteps,
+            doneCount,
+            progress: p.totalSteps > 0 ? Math.round((doneCount / p.totalSteps) * 100) : 0,
+            createdAt: p.createdAt,
+            updatedAt: p.updatedAt,
+          }
+        })
       const inboxPath = await buildUnassignedTaskPath(vid, topic)
       if (inboxPath) paths.unshift(inboxPath)
 
-      const activePath = paths.find(p => p.status !== 'archived' && p.steps.some(s => s.status === 'learning' || s.status === 'available'))
+      const activePath = paths.find(p => p.source !== 'unassigned' && p.status !== 'archived' && p.steps.some(s => s.status === 'learning' || s.status === 'available'))
+        ?? paths.find(p => p.status !== 'archived' && p.steps.some(s => s.status === 'learning' || s.status === 'available'))
         ?? paths[0] ?? null
       const activeStep = activePath
         ? activePath.steps.findIndex(s => s.status === 'learning') !== -1
@@ -166,7 +211,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const inboxPath = await buildUnassignedTaskPath(vid, topic)
     if (inboxPath) paths.unshift(inboxPath)
 
-    const activePath = paths.find((p: { steps: Array<{ status: string }> }) => p.steps.some((s: { status: string }) => s.status === 'learning' || s.status === 'available'))
+    const activePath = paths.find((p: { source?: string; steps: Array<{ status: string }> }) => p.source !== 'unassigned' && p.steps.some((s: { status: string }) => s.status === 'learning' || s.status === 'available'))
+      ?? paths.find((p: { steps: Array<{ status: string }> }) => p.steps.some((s: { status: string }) => s.status === 'learning' || s.status === 'available'))
       ?? paths[0] ?? null
     const activeStep = activePath
       ? activePath.steps.findIndex((s: { status: string }) => s.status === 'learning') !== -1
@@ -196,6 +242,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     if (!topic) return c.json({ success: false, error: 'TOPIC_REQUIRED' }, 400)
 
     const vid = vault.id
+    const vaultName = vault.name || '未命名仓库'
 
     // Gather existing knowledge for context (shared by all modes)
     const existingCards = await prisma.card.findMany({
@@ -203,7 +250,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
       select: { title: true, type: true },
       take: 50,
     })
-    const existingTitles = existingCards.map(c => c.title).filter(Boolean)
+    const existingTitles = existingCards
+      .map(c => c.title)
+      .filter((title): title is string => Boolean(title))
 
     // Read user capabilities for personalization
     const capabilities = await prisma.vaultCapability.findMany({
@@ -224,6 +273,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
 - 注意: 优先加强薄弱概念，跳过已掌握概念，适当深化学习中的概念
 ` : ''
 
+    // ── Progressive mode: generate only 3 steps ──
+    const stepLimit = mode === 'progressive' ? batchSize : 10
+
     const ragContext = await queryLightRAGContext({
       vaultId: vid,
       query: `${topic}\n${material.slice(0, 1000)}`,
@@ -243,38 +295,17 @@ ${context.answer.slice(0, 2400)}
     // ── Batch mode: generate many concept cards with relationships ──
     if (mode === 'batch') {
       try {
-        const batchSystemPrompt = `You are an expert knowledge graph builder. Generate a list of concept cards for a topic, with their relationships.
-
-Respond ONLY with a valid JSON object:
-{
-  "concepts": [
-    {
-      "title": "concept name",
-      "content": "1-2 sentence definition/explanation of this concept",
-      "tags": ["tag1", "tag2"],
-      "linksTo": ["other concept title to link to", "another concept"]
-    }
-  ]
-}
-
-Rules:
-- Generate ${batchSize} to ${Math.min(batchSize + 8, 20)} concepts
-- Cover the topic comprehensively from foundational to advanced
-- Each concept links to at least 1-2 other concepts in the list
-- Links represent prerequisite, related, or derived relationships
-- Tags should be relevant keywords (1-3 per concept)
-- Content should be Markdown with a clear definition
-- If User Capability Profile shows mastered concepts, avoid generating them again
-- If weak concepts exist, generate more detailed steps for those areas
-- Adjust difficulty based on the user's current mastery levels`
-
-        const batchUserMessage = `Topic: ${topic}
-Level: ${level}
-${material ? `Reference Material: ${material.slice(0, 3000)}` : ''}
-Existing Knowledge: ${existingTitles.join(', ') || '(none)'}
-${capabilityContext}
-${ragContext}
-Generate ${batchSize} interconnected concept cards for "${topic}".`
+        const batchSystemPrompt = LEARNING_BATCH_CONCEPTS_PROMPT.system
+        const batchUserMessage = LEARNING_BATCH_CONCEPTS_PROMPT.buildUserMessage!({
+          vaultName,
+          topic,
+          level,
+          batchSize,
+          material,
+          existingTitles,
+          capabilityContext,
+          ragContext,
+        })
 
         const aiManager = await getAiManager()
         const rawResponse = await aiManager.callAPI(batchSystemPrompt, [
@@ -286,25 +317,33 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
 
         const parsed = JSON.parse(cleaned)
         const concepts: Array<{ title: string; content: string; tags: string[]; linksTo: string[] }> = parsed.concepts || []
+        const topicCard = await ensureRootContainsConcept({
+          vaultId: vid,
+          vaultName: vault.name,
+          conceptTitle: topic,
+          tags: [topic, 'ai-generated', 'topic-root'],
+          content: `# ${topic}\n\n> 这是围绕「${topic}」生成的主题理解卡。下面的概念卡会作为它的子节点继续展开。\n`,
+        })
 
         // Create or reuse Card records for each concept
-        const createdCards: Array<{ id: string; title: string }> = []
+        const createdCards: Array<{ id: string; title: string; type: string }> = []
         const usedPathsBatch = new Set<string>()
         for (const c of concepts) {
           const existingCard = await prisma.card.findFirst({
-            where: { vaultId: vid, title: c.title, type: { in: ['fleeting', 'permanent'] } },
-            select: { id: true, title: true },
+            where: { vaultId: vid, title: c.title, type: 'fleeting' },
+            select: { id: true, title: true, type: true },
           })
           if (existingCard) {
-            createdCards.push({ id: existingCard.id, title: existingCard.title || c.title })
+            createdCards.push({ id: existingCard.id, title: existingCard.title || c.title, type: existingCard.type })
+            await ensureContainsEdge({ vaultId: vid, parentId: topicCard.id, childId: existingCard.id })
             continue
           }
 
-          let safeTitle = c.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100)
-          let candidatePath = `${safeTitle}.md`
+          let safeTitle = safeConceptFileName(c.title)
+          let candidatePath = `${safeConceptFileName(topic)}/${safeTitle}.md`
           let counter = 1
           while (usedPathsBatch.has(candidatePath)) {
-            candidatePath = `${safeTitle}_${counter}.md`
+            candidatePath = `${safeConceptFileName(topic)}/${safeTitle}_${counter}.md`
             counter++
           }
           usedPathsBatch.add(candidatePath)
@@ -313,7 +352,7 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
               vaultId: vid,
               path: candidatePath,
               title: c.title,
-              content: `# ${c.title}\n\n${c.content || ''}`,
+              content: buildGeneratedTaskScaffold(c.title, c.content, topic),
               type: 'fleeting',
               tags: JSON.stringify(c.tags || []),
             },
@@ -325,7 +364,7 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
                   vaultId: vid,
                   path: fallbackPath,
                   title: c.title,
-                  content: `# ${c.title}\n\n${c.content || ''}`,
+                  content: buildGeneratedTaskScaffold(c.title, c.content, topic),
                   type: 'fleeting',
                   tags: JSON.stringify(c.tags || []),
                 },
@@ -333,7 +372,8 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
             }
             throw err
           })
-          createdCards.push({ id: card.id, title: card.title || '' })
+          createdCards.push({ id: card.id, title: card.title || '', type: card.type })
+          await ensureContainsEdge({ vaultId: vid, parentId: topicCard.id, childId: card.id })
         }
 
         // Create edges for links between concepts
@@ -407,11 +447,15 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
               index: s.order,
               id: s.id,
               cardId: s.cardId,
+              cardTitle: createdCards.find(card => card.id === s.cardId)?.title ?? null,
+              cardType: createdCards.find(card => card.id === s.cardId)?.type ?? null,
               name: s.title,
-              status: s.status,
-              desc: s.description || '',
-              mastery: s.mastery,
+              status: normalizeStepStatusForCard(s.status, createdCards.find(card => card.id === s.cardId)?.type),
+              desc: stepDescriptionForCard(createdCards.find(card => card.id === s.cardId)?.type, s.description),
+              mastery: stepMasteryForCard(createdCards.find(card => card.id === s.cardId)?.type, s.mastery),
               estimatedMinutes: s.estimatedMinutes || undefined,
+              prerequisites: safeParseJsonArray(s.prerequisites),
+              lockedReason: describeLockedReason(normalizeStepStatusForCard(s.status, createdCards.find(card => card.id === s.cardId)?.type), safeParseJsonArray(s.prerequisites)),
             })),
             totalCount: path.totalSteps,
             doneCount: path.doneSteps,
@@ -424,50 +468,17 @@ Generate ${batchSize} interconnected concept cards for "${topic}".`
       }
     }
 
-    // ── Progressive mode: generate only 3 steps ──
-    const stepLimit = mode === 'progressive' ? batchSize : 10
-
     try {
-      const systemPrompt = `You are an expert curriculum designer. Generate a structured learning path for the given topic.
-
-Respond ONLY with a valid JSON object. No markdown fences, no explanation text.
-
-The JSON must have exactly this shape:
-{
-  "name": "short path title (max 30 chars)",
-  "description": "2-3 sentence summary of what this path covers",
-  "difficulty": "beginner" | "intermediate" | "advanced",
-  "steps": [
-    {
-      "order": 1,
-      "title": "step title",
-      "description": "what to learn in this step",
-      "concept": "core concept name",
-      "chapter": "chapter name (group 2-5 related steps)",
-      "estimatedMinutes": 15
-    }
-  ]
-}
-
-Rules:
-- 4 to 12 steps total
-- Steps must be ordered from foundational to advanced
-- Group steps into chapters by logical topic (2-5 steps per chapter)
-- Each step title should be concise (max 40 chars)
-- estimatedMinutes should be 10-45 per step
-- difficulty should match the user's requested level
-- If the user already knows some concepts (listed in existing knowledge), skip or adjust them
-- If User Capability Profile shows mastered concepts, avoid generating them again
-- If weak concepts exist, generate more detailed steps for those areas
-- Adjust difficulty based on the user's current mastery levels`
-
-      const userMessage = `Topic: ${topic}
-Level: ${level}
-${material ? `Reference Material: ${material.slice(0, 3000)}` : ''}
-Existing Knowledge: ${existingTitles.join(', ') || '(none)'}
-${capabilityContext}
-${ragContext}
-Generate a learning path for "${topic}" at ${level} level.`
+      const systemPrompt = LEARNING_PATH_PLANNER_PROMPT.system
+      const userMessage = LEARNING_PATH_PLANNER_PROMPT.buildUserMessage!({
+        vaultName,
+        topic,
+        level,
+        material,
+        existingTitles,
+        capabilityContext,
+        ragContext,
+      })
 
       const aiManager = await getAiManager()
       const rawResponse = await aiManager.callAPI(systemPrompt, [
@@ -481,10 +492,11 @@ Generate a learning path for "${topic}" at ${level} level.`
       }
 
       let parsed: {
-        name: string
+        name?: string
         description?: string
-        difficulty: string
-        steps: Array<{
+        difficulty?: string
+        clusterName?: string
+        steps?: Array<{
           order: number
           title: string
           description?: string
@@ -492,14 +504,32 @@ Generate a learning path for "${topic}" at ${level} level.`
           chapter?: string
           estimatedMinutes?: number
         }>
+        paths?: Array<{
+          name?: string
+          topic?: string
+          clusterName?: string
+          description?: string
+          difficulty?: string
+          steps?: Array<{
+            order?: number
+            title?: string
+            description?: string
+            concept?: string
+            chapter?: string
+            estimatedMinutes?: number
+          }>
+        }>
       }
       try {
         parsed = JSON.parse(cleaned)
       } catch {
         // Retry once with stricter prompt
         const retryResponse = await aiManager.callAPI(
-          'You MUST respond with ONLY a valid JSON object. No markdown, no explanation.',
-          [{ role: 'user' as const, content: `Parse the following into JSON:\n\n${rawResponse.slice(0, 2000)}` }],
+          JSON_REPAIR_PROMPT.system,
+          [{
+            role: 'user' as const,
+            content: JSON_REPAIR_PROMPT.buildUserMessage!({ rawText: rawResponse }),
+          }],
           { temperature: 0, maxTokens: 4096 },
         )
         let retryCleaned = retryResponse.trim()
@@ -509,136 +539,46 @@ Generate a learning path for "${topic}" at ${level} level.`
         parsed = JSON.parse(retryCleaned)
       }
 
-      // Validate & normalize
-      const rawSteps = parsed.steps || []
-      const limitedSteps = mode === 'progressive' ? rawSteps.slice(0, stepLimit) : rawSteps.slice(0, 10)
-      const usedOrders = new Set<number>()
-      const steps = limitedSteps.map((s, i) => {
-        let order = Number.isFinite(Number(s.order)) ? Math.trunc(Number(s.order)) : i + 1
-        if (order < 1) order = i + 1
-        while (usedOrders.has(order)) order += 1
-        usedOrders.add(order)
-        return {
-          order,
-          title: String(s.title || `Step ${i + 1}`).slice(0, 100),
-          description: String(s.description || '').slice(0, 500) || null,
-          concept: s.concept?.slice(0, 200) || null,
-          chapter: (s.chapter as string | undefined)?.slice(0, 100) || null,
-          estimatedMinutes: Math.min(120, Math.max(5, s.estimatedMinutes ?? 15)),
-        }
+      const modules = normalizeGeneratedModules(parsed, {
+        rootTopic: topic,
+        level,
+        mode,
+        stepLimit,
       })
 
-      // Create or reuse Card records for each step FIRST so we can link cardId
-      const cardRecords: Array<{ id: string; title: string }> = []
-      const usedPaths = new Set<string>()
-      for (const s of steps) {
-        const existingCard = await prisma.card.findFirst({
-          where: { vaultId: vid, title: s.title, type: { in: ['fleeting', 'permanent'] } },
-          select: { id: true, title: true },
-        })
-        if (existingCard) {
-          cardRecords.push({ id: existingCard.id, title: existingCard.title || s.title })
-          continue
-        }
-
-        let safeTitle = s.title.replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100)
-        // Deduplicate: if two steps have the same sanitized title, append a counter
-        let candidatePath = `${safeTitle}.md`
-        let counter = 1
-        while (usedPaths.has(candidatePath)) {
-          candidatePath = `${safeTitle}_${counter}.md`
-          counter++
-        }
-        usedPaths.add(candidatePath)
-        const card = await prisma.card.create({
-          data: {
-            vaultId: vid,
-            path: candidatePath,
-            title: s.title,
-            content: `# ${s.title}\n\n${s.description || ''}\n\n> 概念: ${s.concept || s.title}\n> 学习路径: ${topic}`,
-            type: 'fleeting',
-          },
-        }).catch(async (err: unknown) => {
-          // If still duplicate (race condition), append random suffix and retry once
-          if (err instanceof Error && (err as { code?: string })?.code === 'P2002') {
-            const fallbackPath = `${safeTitle}_${Date.now().toString(36)}.md`
-            return prisma.card.create({
-              data: {
-                vaultId: vid,
-                path: fallbackPath,
-                title: s.title,
-                content: `# ${s.title}\n\n${s.description || ''}\n\n> 概念: ${s.concept || s.title}\n> 学习路径: ${topic}`,
-                type: 'fleeting',
-              },
-            })
-          }
-          throw err
-        })
-        cardRecords.push({ id: card.id, title: card.title || '' })
+      if (modules.length === 0) {
+        throw new Error('AI returned no usable learning steps')
       }
 
-      // Save to DB
-      const path = await prisma.learningPath.create({
-        data: {
+      const usedPaths = new Set<string>()
+      const createdPaths = []
+      for (const module of modules) {
+        const created = await createGeneratedPathModule({
           userId,
           vaultId: vid,
-          name: String(parsed.name || `${topic}学习路径`).slice(0, 100),
-          topic,
-          description: String(parsed.description || '').slice(0, 500) || null,
-          difficulty: ['beginner', 'intermediate', 'advanced'].includes(parsed.difficulty)
-            ? parsed.difficulty
-            : 'beginner',
-          totalSteps: steps.length,
-          source: 'ai',
-          steps: {
-            create: steps.map((s, i) => ({
-              order: s.order,
-              title: s.title,
-              description: s.description,
-              concept: s.concept,
-              estimatedMinutes: s.estimatedMinutes,
-              cardId: cardRecords[i]?.id || null,
-              status: i === 0 ? 'available' : 'locked',
-            })),
-          },
-        },
-        include: { steps: { orderBy: { order: 'asc' } } },
-      })
+          vaultName: vault.name,
+          rootTopic: topic,
+          module,
+          usedPaths,
+        })
+        createdPaths.push(created)
 
-      // Sync engine state (non-fatal)
-      try {
-        const concepts = path.steps?.map((s: { concept?: string | null; title?: string | null }) => s.concept || s.title).filter(Boolean) || []
-        if (concepts.length > 0) {
-          pathAdjustmentEngine.createInitialPath(userId, topic, concepts as string[])
-        }
-      } catch { /* non-fatal */ }
+        try {
+          const concepts = created.path.steps?.map((s: { concept?: string | null; title?: string | null }) => s.concept || s.title).filter(Boolean) || []
+          if (concepts.length > 0) {
+            pathAdjustmentEngine.createInitialPath(userId, module.topic, concepts as string[])
+          }
+        } catch { /* non-fatal */ }
+      }
+
+      const responsePaths = createdPaths.map((item) => learningPathResponse(item.path, item.cardRecords))
+      const primaryPath = responsePaths[0]
 
       return c.json({
         success: true,
-        path: {
-          id: path.id,
-          name: path.name,
-          description: path.description,
-          topic: path.topic,
-          color: '#ff4466',
-          difficulty: path.difficulty,
-          source: path.source,
-          status: path.status,
-          steps: path.steps.map(s => ({
-            index: s.order,
-            id: s.id,
-            cardId: s.cardId,
-            name: s.title,
-            status: s.status,
-            desc: s.description || '',
-            concept: s.concept || undefined,
-            mastery: s.mastery,
-            estimatedMinutes: s.estimatedMinutes || undefined,
-          })),
-          totalCount: path.totalSteps,
-          doneCount: path.doneSteps,
-          progress: 0,
-        },
+        path: primaryPath,
+        paths: responsePaths,
+        createdPathCount: responsePaths.length,
       })
     } catch (err: unknown) {
       console.error('[Learning] AI generation failed:', err instanceof Error ? err.message : String(err))
@@ -661,10 +601,13 @@ Generate a learning path for "${topic}" at ${level} level.`
           return {
             order: i + 1,
             title: card?.title || conceptId,
-            description: card ? '已有卡片' : '推荐学习概念',
+            description: card?.type === 'permanent' ? '已有永久知识卡，可作为复习或扩展任务' : card ? '已有卡片' : '推荐学习概念',
             concept: conceptId,
             estimatedMinutes: 15,
             status: i === 0 ? 'available' : 'locked',
+            cardId: card?.id ?? null,
+            cardTitle: card?.title ?? null,
+            cardType: card?.type ?? null,
           }
         })
 
@@ -693,7 +636,8 @@ Generate a learning path for "${topic}" at ${level} level.`
                 description: s.description,
                 concept: s.concept,
                 estimatedMinutes: s.estimatedMinutes,
-                status: s.status as string,
+                status: s.status,
+                cardId: s.cardId,
               })),
             },
           },
@@ -715,19 +659,24 @@ Generate a learning path for "${topic}" at ${level} level.`
             name: path.name,
             description: path.description,
             topic: path.topic,
-            color: '#ff4466',
+            color: DEFAULT_PATH_ACCENT,
             difficulty: path.difficulty,
             source: path.source,
             status: path.status,
             steps: path.steps.map(s => ({
               index: s.order,
               id: s.id,
+              cardId: s.cardId,
+              cardTitle: fallbackSteps.find(step => step.cardId === s.cardId)?.cardTitle ?? null,
+              cardType: fallbackSteps.find(step => step.cardId === s.cardId)?.cardType ?? null,
               name: s.title,
-              status: s.status,
-              desc: s.description || '',
+              status: normalizeStepStatusForCard(s.status, fallbackSteps.find(step => step.cardId === s.cardId)?.cardType),
+              desc: stepDescriptionForCard(fallbackSteps.find(step => step.cardId === s.cardId)?.cardType, s.description),
               concept: s.concept || undefined,
-              mastery: s.mastery,
+              mastery: stepMasteryForCard(fallbackSteps.find(step => step.cardId === s.cardId)?.cardType, s.mastery),
               estimatedMinutes: s.estimatedMinutes || undefined,
+              prerequisites: safeParseJsonArray(s.prerequisites),
+              lockedReason: describeLockedReason(normalizeStepStatusForCard(s.status, fallbackSteps.find(step => step.cardId === s.cardId)?.cardType), safeParseJsonArray(s.prerequisites)),
             })),
             totalCount: path.totalSteps,
             doneCount: path.doneSteps,
@@ -800,18 +749,25 @@ Generate a learning path for "${topic}" at ${level} level.`
       })
     }
 
-    if (step.status !== 'learning') {
-      await prisma.learningPathStep.update({
-        where: { id: effectiveStepId },
-        data: { status: 'learning' },
-      })
-    }
-
     const stepCard = await prisma.card.findFirst({
       where: { id: cardId, vaultId: path.vaultId },
       select: { id: true, title: true, type: true },
     })
     if (!stepCard) return c.json({ success: false, error: 'Card not found' }, 404)
+
+    if (stepCard.type === 'permanent') {
+      if (step.status !== 'mastered') {
+        await prisma.learningPathStep.update({
+          where: { id: effectiveStepId },
+          data: { status: 'mastered', mastery: 100 },
+        })
+      }
+    } else if (step.status !== 'learning') {
+      await prisma.learningPathStep.update({
+        where: { id: effectiveStepId },
+        data: { status: 'learning' },
+      })
+    }
 
     const sessionMetadata = {
       cardId,
@@ -829,7 +785,7 @@ Generate a learning path for "${topic}" at ${level} level.`
 
     return c.json({
       success: true,
-      session: { id: session.id, stepId: effectiveStepId, cardId, cardType: stepCard.type, pathId: effectivePathId, pathTitle: path.name || path.topic || null },
+      session: { id: session.id, stepId: effectiveStepId, cardId, cardTitle: stepCard.title, cardType: stepCard.type, pathId: effectivePathId, pathTitle: path.name || path.topic || null },
     })
   })
 
@@ -935,35 +891,13 @@ Generate a learning path for "${topic}" at ${level} level.`
             .map(m => `${m.role === 'user' ? '用户' : 'AI'}: ${m.content.slice(0, 500)}`)
             .join('\n\n')
 
-          const evalPrompt = `你是学习评估专家。根据对话记录，判断用户是否真正掌握了这个概念。
-
-## 评估标准（四要素）
-1. **定义清晰** — 用户能否用自己的话准确定义这个概念？
-2. **举例具体** — 用户能否给出具体的例子或应用场景？
-3. **关联正确** — 用户能否将这个概念与其他概念正确关联？
-4. **应用准确** — 用户能否在实际场景中应用这个概念？
-
-## 评分
-- 0-39: 未掌握（概念理解不清或严重错误）
-- 40-69: 部分掌握（理解基本正确但不完整）
-- 70-100: 已掌握（四要素齐全，可以升级为永久卡片）
-
-## 输出格式
-返回纯JSON（不要markdown）:
-{
-  "passed": true/false,
-  "mastery": 0-100,
-  "feedback": "简短评价（1-2句话，中文），说明用户表现好的地方和需要改进的地方"
-}`
-
-          const evalUserMsg = `概念: ${step.title}
-${step.concept ? `核心概念: ${step.concept}` : ''}
-卡片内容: ${cardContent}
-
-对话记录:
-${conversationText}
-
-请评估用户对「${step.title}」的掌握程度。`
+          const evalPrompt = LEARNING_STEP_EVALUATION_PROMPT.system
+          const evalUserMsg = LEARNING_STEP_EVALUATION_PROMPT.buildUserMessage!({
+            title: step.title,
+            concept: step.concept,
+            cardContent,
+            conversationText,
+          })
 
           const aiManager = await getAiManager()
           const rawEval = await aiManager.callAPI(evalPrompt, [
@@ -1758,298 +1692,41 @@ ${conversationText}
     if (document.length > 50000) return c.json({ success: false, error: 'DOCUMENT_TOO_LONG' }, 400)
     if (!source) return c.json({ success: false, error: 'SOURCE_REQUIRED' }, 400)
 
-    const vid = vault.id
-    const contentHash = createHash('sha256').update(document).digest('hex')
-    void recordSourceDocument({
-      userId,
-      vaultId: vid,
-      title: sourceTitle || topic,
-      source,
-      contentHash,
-      document,
-      metadata: { topic },
-    })
-    const existingImportCards = await prisma.card.findMany({
-      where: { vaultId: vid, content: { contains: `contentHash: ${contentHash}` } },
-      select: { id: true, title: true, type: true },
-      take: 50,
-    })
-    if (existingImportCards.length > 0) {
+    try {
+      const result = await importDocumentToVault({
+        userId,
+        vaultId: vault.id,
+        document,
+        topic,
+        source,
+        sourceTitle,
+      })
       return c.json({
         success: true,
-        stats: { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: existingImportCards.length, errors: 0 },
+        stats: result.stats,
         importResult: {
-          source,
-          sourceTitle,
-          contentHash,
-          created: 0,
-          skipped: existingImportCards.length,
-          errors: [],
-          duplicate: true,
+          source: result.source,
+          sourceTitle: result.docTitle,
+          contentHash: result.contentHash,
+          created: result.stats.created,
+          skipped: result.stats.skipped,
+          errors: result.errors,
+          duplicate: result.duplicate,
+          literatureCardId: result.literatureCardId,
+          sourceDocumentId: result.sourceDocumentId,
+          clusterId: result.clusterId,
+          clusterName: result.clusterName,
         },
-        docTitle: sourceTitle,
-        concepts: existingImportCards.filter((card) => card.type === 'fleeting').map((card) => card.title).filter(Boolean),
-        pathId: null,
+        docTitle: result.docTitle,
+        concepts: result.concepts,
+        pathId: result.pathId,
       })
-    }
-
-    // ── Step 1: AI 解析文档 ──────────────────────────────────────────
-    const parsePrompt = `你是一个知识萃取专家。将以下文档解析为结构化的知识卡片体系。
-
-以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字）：
-
-{
-  "title": "文档标题",
-  "concepts": [
-    {"name": "核心概念名称", "description": "简要定义和说明（100-200 字）"}
-  ],
-  "fleetingCards": [
-    {
-      "title": "知识点标题",
-      "content": "详细说明（200-500 字），包括定义、原理、示例等",
-      "linksTo": ["关联的核心概念名称1", "关联的核心概念名称2"]
-    }
-  ],
-  "relations": [
-    {"from": "概念A", "to": "概念B", "type": "prerequisite | related | derived"}
-  ]
-}
-
-规则：
-- concepts 5-15 个，提取文档中的核心概念
-- fleetingCards 15-40 条，覆盖主要内容，每条 linksTo 1-3 个核心概念
-- 所有名称精准匹配，后续用 [[名称]] 做 WikiLink
-- 内容中的代码片段保留原样
-
-主题：${topic}
-${sourceTitle !== topic ? `标题：${sourceTitle}` : ''}
-
----
-
-${document}`
-
-    let parsed: {
-      title?: string;
-      concepts?: Array<{ name: string; description: string }>;
-      fleetingCards?: Array<{ title: string; content: string; linksTo?: string[] }>;
-      relations?: { from: string; to: string; type: string }[]
-    }
-    try {
-      const aiManager = await getAiManager()
-      const response = await aiManager.callAPI(
-        '你是知识萃取专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
-        [{ role: 'user' as const, content: parsePrompt }],
-        { temperature: 0.1, maxTokens: 8192 },
-      )
-      const cleaned = response.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '')
-      const match = cleaned.match(/\{[\s\S]*\}/)
-      if (!match) throw new Error('AI output parse failed')
-      parsed = JSON.parse(match[0])
     } catch (err) {
-      return c.json({ success: false, error: 'AI parsing failed: ' + (err as Error).message }, 500)
-    }
-
-    if (!parsed.concepts || parsed.concepts.length === 0) {
-      return c.json({ success: false, error: 'No concepts extracted from document' }, 422)
-    }
-
-    const docTitle = parsed.title || sourceTitle || topic
-
-    // ── Step 2: 确保 cluster 存在 ─────────────────────────────────────
-    const clusterName = topic
-    let cluster = await prisma.cluster.findFirst({ where: { vaultId: vid, name: clusterName } })
-    if (!cluster) {
-      cluster = await prisma.cluster.create({
-        data: { vaultId: vid, name: clusterName, color: '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0') },
-      })
-    }
-
-    const stats = { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: 0, errors: 0 }
-    const errors: Array<{ item: string; error: string }> = []
-    const conceptNames: string[] = []
-
-    // ── Step 3: 批量创建 extracted concept fleeting 卡片 ─────────────
-    for (const concept of parsed.concepts) {
-      const content = `## ${concept.name}\n\n${concept.description}\n\n---\nsource: ${source}\nsourceTitle: ${docTitle}\ncontentHash: ${contentHash}\n_从「${docTitle}」自动生成_`
-      const path = `${clusterName}/${concept.name.replace(/[/\\]/g, '_')}.md`
-      try {
-        const existing = await prisma.card.findUnique({ where: { vaultId_path: { vaultId: vid, path } }, select: { id: true } })
-        await prisma.card.upsert({
-          where: { vaultId_path: { vaultId: vid, path } },
-          update: { content, type: 'fleeting', clusterId: cluster.id },
-          create: { vaultId: vid, clusterId: cluster.id, path, title: concept.name, content, type: 'fleeting', tags: JSON.stringify([topic, 'core', 'extracted-concept', 'imported']) },
-        })
-        conceptNames.push(concept.name)
-        stats.fleeting++
-        if (existing) stats.skipped++
-        else stats.created++
-      } catch (err) {
-        stats.errors++
-        errors.push({ item: concept.name, error: err instanceof Error ? err.message : String(err) })
+      if (err instanceof DocumentImportError) {
+        return c.json({ success: false, error: err.code, detail: err.message }, err.status as 400 | 422 | 500 | 502)
       }
+      return c.json({ success: false, error: 'DOCUMENT_IMPORT_FAILED', detail: err instanceof Error ? err.message : String(err) }, 500)
     }
-
-    // ── Step 4: 批量创建 fleeting 卡片（带 WikiLink） ──────────────────
-    for (const fc of parsed.fleetingCards || []) {
-      const linksSection = fc.linksTo && fc.linksTo.length > 0
-        ? '\n\n**关联概念：** ' + [...new Set(fc.linksTo)].map(t => `[[${t}]]`).join('、')
-        : ''
-      const content = `## ${fc.title}\n\n${fc.content}${linksSection}\n\n---\nsource: ${source}\nsourceTitle: ${docTitle}\ncontentHash: ${contentHash}\n_从「${docTitle}」自动生成_`
-      const path = `${clusterName}/${fc.title.replace(/[/\\]/g, '_')}.md`
-      try {
-        const existing = await prisma.card.findUnique({ where: { vaultId_path: { vaultId: vid, path } }, select: { id: true } })
-        await prisma.card.upsert({
-          where: { vaultId_path: { vaultId: vid, path } },
-          update: { content, type: 'fleeting', clusterId: cluster.id },
-          create: { vaultId: vid, clusterId: cluster.id, path, title: fc.title, content, type: 'fleeting', tags: JSON.stringify([topic, 'idea', 'imported']) },
-        })
-        stats.fleeting++
-        if (existing) stats.skipped++
-        else stats.created++
-      } catch (err) {
-        stats.errors++
-        errors.push({ item: fc.title, error: err instanceof Error ? err.message : String(err) })
-      }
-    }
-
-    // ── Step 5: 创建 literature 卡片 ──────────────────────────────────
-    const litContent = `## ${docTitle}\n\n> 本文档由 import-document 导入。\n\n**主题：** ${topic}\n**来源：** ${source}\n**内容哈希：** ${contentHash}\n\n**核心概念：** ${conceptNames.map(n => `[[${n}]]`).join('、')}\n\n---\n\n${document.slice(0, 12000)}\n\n---\n_自动生成文献记录_`
-    const litPath = `${clusterName}/${docTitle.replace(/[/\\]/g, '_')}.md`
-    const existingLit = await prisma.card.findUnique({ where: { vaultId_path: { vaultId: vid, path: litPath } }, select: { id: true } })
-    await prisma.card.upsert({
-      where: { vaultId_path: { vaultId: vid, path: litPath } },
-      update: { content: litContent, type: 'literature', clusterId: cluster.id },
-      create: { vaultId: vid, clusterId: cluster.id, path: litPath, title: docTitle, content: litContent, type: 'literature', tags: JSON.stringify([topic, 'reference', 'imported']) },
-    })
-    stats.literature++
-    if (existingLit) stats.skipped++
-    else stats.created++
-
-    // ── Step 6: 同步 WikiLink → edges ────────────────────────────────
-    const cardsWithLinks = await prisma.card.findMany({
-      where: { vaultId: vid, content: { contains: '[[' } },
-      select: { id: true, content: true },
-    })
-    const { syncEdgesFromContent } = await import('@/lib/wiki-links')
-    for (const card of cardsWithLinks) {
-      await syncEdgesFromContent(prisma, card.id, vid, card.content)
-    }
-
-    // ── Step 7: 额外添加 relations edge ───────────────────────────────
-    const allCards = await prisma.card.findMany({ where: { vaultId: vid }, select: { id: true, title: true } })
-    const cardIdByName = new Map(allCards.map(c => [c.title, c.id]))
-
-    for (const rel of parsed.relations || []) {
-      const sourceId = cardIdByName.get(rel.from)
-      const targetId = cardIdByName.get(rel.to)
-      if (!sourceId || !targetId) continue
-      let edgeType: string
-      try {
-        edgeType = normalizeEdgeType(rel.type)
-      } catch (err) {
-        stats.errors++
-        errors.push({ item: `${rel.from}->${rel.to}`, error: err instanceof Error ? err.message : String(err) })
-        continue
-      }
-      const existing = await prisma.edge.findFirst({ where: { vaultId: vid, sourceId, targetId, type: edgeType } })
-      if (!existing) {
-        await prisma.edge.create({ data: { vaultId: vid, sourceId, targetId, type: edgeType, weight: 1.0 } })
-        stats.edges++
-        stats.created++
-      } else {
-        stats.skipped++
-      }
-    }
-
-    // ── Step 8: 自动创建学习路径 ──────────────────────────────────────
-    let pathId: string | null = null
-    try {
-      const pathPrompt = `你是课程设计师。基于以下概念列表，生成一个结构化的学习路径。
-
-以严格的 JSON 格式返回（不要 \`\`\`json 包裹）：
-{
-  "name": "路径名称（限 30 字）",
-  "description": "2-3 句摘要",
-  "difficulty": "beginner | intermediate | advanced",
-  "steps": [
-    {
-      "order": 1,
-      "title": "步骤标题（限 40 字）",
-      "description": "学习内容说明",
-      "concept": "关联的核心概念名",
-      "chapter": "章节名称",
-      "estimatedMinutes": 15
-    }
-  ]
-}
-
-概念列表：${conceptNames.join('、')}
-主题：${topic}
-难度：beginner`
-
-      const aiManager = await getAiManager()
-      const pathResponse = await aiManager.callAPI(
-        '你是课程设计专家。直接返回 JSON。',
-        [{ role: 'user' as const, content: pathPrompt }],
-        { temperature: 0.3, maxTokens: 4096 },
-      )
-      const pathCleaned = pathResponse.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '')
-      const pathMatch = pathCleaned.match(/\{[\s\S]*\}/)
-      if (pathMatch) {
-        const pathData = JSON.parse(pathMatch[0])
-        const rawSteps = Array.isArray(pathData.steps) ? pathData.steps : []
-        const learningPath = await prisma.learningPath.create({
-          data: { userId, vaultId: vid, name: pathData.name || `${topic} 学习路径`, topic, description: pathData.description || '', difficulty: normalizeDifficulty(pathData.difficulty), source: 'import-document', status: 'active', totalSteps: rawSteps.length },
-        })
-        const usedOrders = new Set<number>()
-        for (const [index, step] of rawSteps.entries()) {
-          const matchingCard = allCards.find(c => c.title === step.concept)
-          let order = sanitizeOrder(step.order, index + 1)
-          while (usedOrders.has(order)) order++
-          usedOrders.add(order)
-          await prisma.learningPathStep.create({
-            data: { pathId: learningPath.id, order, title: step.title, description: step.description, concept: step.concept, chapter: step.chapter || '基础', status: index === 0 ? 'available' : 'locked', estimatedMinutes: step.estimatedMinutes || 15, cardId: matchingCard?.id || null },
-          })
-        }
-        pathId = learningPath.id
-      }
-    } catch (err) {
-      console.warn('[import-document] Failed to auto-generate learning path:', err)
-      // Non-fatal: cards were still created
-    }
-
-    void emitDomainEvent({
-      userId,
-      vaultId: vid,
-      aggregateType: 'documentImport',
-      aggregateId: pathId || contentHash,
-      eventType: 'DocumentImported',
-      payload: {
-        source,
-        sourceTitle: docTitle,
-        contentHash,
-        conceptCount: conceptNames.length,
-        pathId,
-        stats,
-      },
-    })
-
-    // ── Step 9: 返回结果 ─────────────────────────────────────────────
-    return c.json({
-      success: true,
-      stats,
-      importResult: {
-        source,
-        sourceTitle: docTitle,
-        contentHash,
-        created: stats.created,
-        skipped: stats.skipped,
-        errors,
-      },
-      docTitle,
-      concepts: conceptNames,
-      pathId,
-    })
   })
 
   // POST /api/learning/reset-engines — 重置学习引擎缓存（vault 切换时调用）
@@ -2097,32 +1774,34 @@ function buildVirtualGraphPaths(clusters: Array<{
   cards: Array<{ id: string; title: string | null; type: string; content: string | null; createdAt: Date }>
 }>) {
   return clusters
+    .map((cluster) => ({ ...cluster, cards: cluster.cards.filter((card) => card.type !== 'literature') }))
     .filter((cluster) => cluster.cards.length > 0)
     .map((cluster) => {
-      const permCards = cluster.cards.filter((card) => card.type === 'permanent')
-      const doneCount = permCards.length
+      const permanentCount = cluster.cards.filter((card) => card.type === 'permanent').length
+      const doneCount = 0
       const totalCount = cluster.cards.length
       return {
         id: `${VIRTUAL_GRAPH_PATH_PREFIX}${cluster.id}`,
         name: `${cluster.name}学习路径`,
-        description: '基于当前知识图谱生成的推荐路径，执行时才会写入数据库。',
+        description: '基于当前知识图谱生成的推荐路径，用来把灵感草稿继续送入工作台打磨。',
         topic: cluster.name,
-        color: '#ff4466',
-        difficulty: graphDifficultyLabel(totalCount, doneCount / Math.max(totalCount, 1)),
+        color: DEFAULT_PATH_ACCENT,
+        difficulty: graphDifficultyLabel(totalCount, permanentCount / Math.max(totalCount, 1)),
         source: 'graph_virtual',
         status: 'active',
         steps: cluster.cards.map((card, index) => {
-          const completed = card.type === 'permanent'
           return {
             index: index + 1,
             id: `${VIRTUAL_GRAPH_STEP_PREFIX}${cluster.id}:${card.id}`,
             cardId: card.id,
+            cardTitle: card.title || null,
+            cardType: card.type,
             name: card.title || `卡片 ${index + 1}`,
-            status: completed ? 'completed' as const : 'available' as const,
-            desc: completed ? '已固化知识' : '待深化理解',
+            status: 'available' as const,
+            desc: card.type === 'permanent' ? '已有永久知识卡，可作为复习或扩展任务。' : '待进入 AI 工作台打磨',
             concept: card.title || undefined,
             chapter: cluster.name,
-            mastery: completed ? Math.min(100, Math.round(70 + (card.content?.length ?? 0) / 20)) : 0,
+            mastery: 0,
             estimatedMinutes: 10,
             prerequisites: [],
           }
@@ -2154,7 +1833,10 @@ async function materializeVirtualGraphPath(userId: string, vaultId: string, virt
   })
   if (!cluster || cluster.cards.length === 0) return { path: null, stepId: null }
 
-  const permCards = cluster.cards.filter((card) => card.type === 'permanent')
+  const learningCards = cluster.cards.filter((card) => card.type !== 'literature')
+  if (learningCards.length === 0) return { path: null, stepId: null }
+
+  const permanentCount = learningCards.filter((card) => card.type === 'permanent').length
   const path = await prisma.learningPath.create({
     data: {
       vaultId,
@@ -2162,22 +1844,21 @@ async function materializeVirtualGraphPath(userId: string, vaultId: string, virt
       name: `${cluster.name}学习路径`,
       topic: cluster.name,
       source: 'graph',
-      difficulty: graphDifficultyLabel(cluster.cards.length, permCards.length / Math.max(cluster.cards.length, 1)),
-      totalSteps: cluster.cards.length,
-      doneSteps: permCards.length,
+      difficulty: graphDifficultyLabel(learningCards.length, permanentCount / Math.max(learningCards.length, 1)),
+      totalSteps: learningCards.length,
+      doneSteps: 0,
       status: 'active',
       steps: {
-        create: cluster.cards.map((card, index) => {
-          const completed = card.type === 'permanent'
+        create: learningCards.map((card, index) => {
           return {
             cardId: card.id,
             title: card.title || `卡片 ${index + 1}`,
-            description: completed ? '已固化知识' : '待深化理解',
+            description: card.type === 'permanent' ? '已有永久知识卡，可作为复习或扩展任务' : '待进入 AI 工作台打磨',
             order: index + 1,
             concept: card.title || null,
             chapter: cluster.name,
-            status: completed ? 'completed' : 'available',
-            mastery: completed ? Math.min(100, Math.round(70 + (card.content?.length ?? 0) / 20)) : 0,
+            status: 'available',
+            mastery: 0,
           }
         }),
       },
@@ -2244,6 +1925,7 @@ async function buildUnassignedTaskPath(vaultId: string, topic?: string) {
   const cards = await prisma.card.findMany({
     where: {
       vaultId,
+      type: 'fleeting',
       learningPathSteps: { none: {} },
       ...(topic ? {
         OR: [
@@ -2268,9 +1950,9 @@ async function buildUnassignedTaskPath(vaultId: string, topic?: string) {
 
   return {
     id: '__unassigned_tasks__',
-    name: '零散卡片任务组',
-    description: '尚未安排进正式学习任务组的真实卡片。',
-    topic: '零散卡片任务组',
+    name: '灵感草稿箱',
+    description: '这些是真实的灵感草稿，还没有安排进正式学习路径，可先进入 AI 工作台打磨。',
+    topic: '灵感草稿箱',
     color: '#22d3ee',
     difficulty: 'unassigned',
     source: 'unassigned',
@@ -2279,14 +1961,17 @@ async function buildUnassignedTaskPath(vaultId: string, topic?: string) {
       index: index + 1,
       id: `inbox:${card.id}`,
       cardId: card.id,
+      cardTitle: card.title || null,
+      cardType: card.type,
       name: card.title || card.content.split('\n').find(Boolean)?.slice(0, 60) || '未命名卡片',
       status: 'available' as const,
-      desc: '尚未安排进正式学习任务组的卡片',
+      desc: '尚未安排进正式学习路径，可进入 AI 工作台继续打磨。',
       concept: card.title || undefined,
-      chapter: card.type === 'permanent' ? '永久卡片' : card.type === 'literature' ? '文献卡片' : '闪念卡片',
+      chapter: '灵感草稿',
       mastery: 0,
       estimatedMinutes: 10,
       prerequisites: [],
+      lockedReason: null,
     })),
     totalCount: cards.length,
     doneCount: 0,
@@ -2294,6 +1979,406 @@ async function buildUnassignedTaskPath(vaultId: string, topic?: string) {
     createdAt: cards[cards.length - 1]?.createdAt,
     updatedAt: cards[0]?.updatedAt,
   }
+}
+
+type AiGeneratedRawStep = {
+  order?: number
+  title?: string
+  description?: string
+  concept?: string
+  chapter?: string
+  estimatedMinutes?: number
+}
+
+type AiGeneratedPayload = {
+  name?: string
+  description?: string
+  difficulty?: string
+  clusterName?: string
+  steps?: AiGeneratedRawStep[]
+  paths?: Array<{
+    name?: string
+    topic?: string
+    clusterName?: string
+    description?: string
+    difficulty?: string
+    steps?: AiGeneratedRawStep[]
+  }>
+}
+
+type GeneratedStep = {
+  order: number
+  title: string
+  description: string | null
+  concept: string | null
+  chapter: string | null
+  estimatedMinutes: number
+}
+
+type GeneratedModule = {
+  name: string
+  topic: string
+  description: string | null
+  difficulty: string
+  clusterName: string
+  steps: GeneratedStep[]
+}
+
+function normalizeGeneratedModules(
+  parsed: AiGeneratedPayload,
+  options: { rootTopic: string; level: string; mode: string; stepLimit: number },
+): GeneratedModule[] {
+  const rawModules = Array.isArray(parsed.paths) && parsed.paths.length > 0
+    ? parsed.paths
+    : [{
+      name: parsed.name,
+      topic: options.rootTopic,
+      clusterName: parsed.clusterName || options.rootTopic,
+      description: parsed.description,
+      difficulty: parsed.difficulty,
+      steps: parsed.steps || [],
+    }]
+
+  return rawModules
+    .slice(0, options.mode === 'progressive' ? 1 : 6)
+    .map((module, moduleIndex) => {
+      const moduleTopic = normalizeGeneratedText(module.topic || module.name || options.rootTopic, options.rootTopic).slice(0, 100)
+      const clusterName = normalizeGeneratedText(module.clusterName || moduleTopic, moduleTopic).slice(0, 80)
+      const rawSteps = Array.isArray(module.steps) ? module.steps : []
+      const stepLimit = options.mode === 'progressive' ? options.stepLimit : 12
+      const usedOrders = new Set<number>()
+      const steps = rawSteps.slice(0, stepLimit).map((step, index) => {
+        let order = Number.isFinite(Number(step.order)) ? Math.trunc(Number(step.order)) : index + 1
+        if (order < 1) order = index + 1
+        while (usedOrders.has(order)) order += 1
+        usedOrders.add(order)
+        const concept = normalizeGeneratedText(step.concept || step.title || `${moduleTopic} ${index + 1}`, `${moduleTopic} ${index + 1}`).slice(0, 160)
+        return {
+          order,
+          title: normalizeGeneratedText(step.title || concept, `任务 ${index + 1}`).slice(0, 100),
+          description: normalizeGeneratedOptionalText(step.description, 500),
+          concept,
+          chapter: normalizeGeneratedOptionalText(step.chapter || clusterName, 100),
+          estimatedMinutes: Math.min(120, Math.max(5, Number(step.estimatedMinutes) || 15)),
+        }
+      }).sort((a, b) => a.order - b.order)
+
+      return {
+        name: normalizeGeneratedText(module.name || `${moduleTopic}学习路径`, `${options.rootTopic}学习路径 ${moduleIndex + 1}`).slice(0, 100),
+        topic: moduleTopic,
+        description: normalizeGeneratedOptionalText(module.description || parsed.description, 500),
+        difficulty: normalizeDifficulty(module.difficulty || parsed.difficulty || options.level),
+        clusterName,
+        steps,
+      }
+    })
+    .filter((module) => module.steps.length > 0)
+}
+
+async function createGeneratedPathModule(params: {
+  userId: string
+  vaultId: string
+  vaultName?: string | null
+  rootTopic: string
+  module: GeneratedModule
+  usedPaths: Set<string>
+}) {
+  const cluster = await resolveClusterForGeneratedModule({
+    vaultId: params.vaultId,
+    clusterName: params.module.clusterName,
+    topic: params.module.topic,
+    concepts: params.module.steps.map((step) => step.concept || step.title),
+  })
+
+  const root = await ensureVaultRootCard({ vaultId: params.vaultId, vaultName: params.vaultName })
+  const clusterConcept = await ensureConceptCard({
+    vaultId: params.vaultId,
+    title: cluster.name || params.module.clusterName,
+    clusterId: cluster.id,
+    tags: [params.rootTopic, cluster.name, 'knowledge-area'],
+    pathFolder: cluster.name,
+    content: `# ${cluster.name}\n\n> 这是「${params.rootTopic}」知识空间下的一个高层概念/区域理解卡。它不是文件夹，而是可以继续打磨的概念节点。\n`,
+  })
+  await ensureContainsEdge({ vaultId: params.vaultId, parentId: root.id, childId: clusterConcept.id })
+
+  let stepParent = clusterConcept
+  const moduleTopicKey = normalizeConceptLookup(params.module.topic)
+  const clusterKey = normalizeConceptLookup(cluster.name)
+  const rootTopicKey = normalizeConceptLookup(params.rootTopic)
+  if (moduleTopicKey && moduleTopicKey !== clusterKey && moduleTopicKey !== rootTopicKey) {
+    const moduleConcept = await ensureConceptCard({
+      vaultId: params.vaultId,
+      title: params.module.topic,
+      clusterId: cluster.id,
+      tags: [params.rootTopic, params.module.topic, cluster.name, 'learning-module'],
+      pathFolder: cluster.name,
+      content: `# ${params.module.topic}\n\n${params.module.description || ''}\n\n> 这是「${cluster.name}」下面的模块理解卡，可继续展开为更具体的概念卡。\n`,
+    })
+    await ensureContainsEdge({ vaultId: params.vaultId, parentId: clusterConcept.id, childId: moduleConcept.id })
+    stepParent = moduleConcept
+  }
+
+  const cardRecords: Array<{ id: string; title: string; type: string }> = []
+  for (const step of params.module.steps) {
+    const cardTitle = step.concept || step.title
+    const existingCard = await prisma.card.findFirst({
+      where: {
+        vaultId: params.vaultId,
+        title: cardTitle,
+        type: 'fleeting',
+      },
+      select: { id: true, title: true, type: true, clusterId: true },
+    })
+
+    if (existingCard) {
+      if (!existingCard.clusterId) {
+        await prisma.card.update({ where: { id: existingCard.id }, data: { clusterId: cluster.id } }).catch(() => null)
+      }
+      cardRecords.push({ id: existingCard.id, title: existingCard.title || cardTitle, type: existingCard.type })
+      await ensureContainsEdge({ vaultId: params.vaultId, parentId: stepParent.id, childId: existingCard.id })
+      continue
+    }
+
+    const cardPath = await nextGeneratedCardPath(params.vaultId, cluster.name, cardTitle, params.usedPaths)
+    const card = await prisma.card.create({
+      data: {
+        vaultId: params.vaultId,
+        clusterId: cluster.id,
+        path: cardPath,
+        title: cardTitle,
+        content: `${buildGeneratedTaskScaffold(cardTitle, step.description, params.rootTopic)}\n> 所属星团: ${cluster.name}\n> 学习路径: ${params.module.name}\n> 学习目标: ${params.rootTopic}`,
+        type: 'fleeting',
+        tags: JSON.stringify([params.rootTopic, params.module.topic, cluster.name, 'ai-generated']),
+      },
+    })
+    cardRecords.push({ id: card.id, title: card.title || cardTitle, type: card.type })
+    await ensureContainsEdge({ vaultId: params.vaultId, parentId: stepParent.id, childId: card.id })
+  }
+
+  await createSequentialPrerequisiteEdges(params.vaultId, cardRecords.map((card) => card.id))
+
+  const path = await prisma.learningPath.create({
+    data: {
+      userId: params.userId,
+      vaultId: params.vaultId,
+      name: params.module.name,
+      topic: params.module.topic,
+      description: params.module.description,
+      difficulty: params.module.difficulty,
+      totalSteps: params.module.steps.length,
+      doneSteps: 0,
+      source: 'ai',
+      steps: {
+        create: params.module.steps.map((step, index) => ({
+          order: index + 1,
+          title: step.title,
+          description: step.description,
+          concept: step.concept,
+          chapter: step.chapter || params.module.clusterName,
+          estimatedMinutes: step.estimatedMinutes,
+          cardId: cardRecords[index]?.id || null,
+          status: index === 0 ? 'available' : 'locked',
+          mastery: 0,
+        })),
+      },
+    },
+    include: { steps: { orderBy: { order: 'asc' } } },
+  })
+
+  return { path, cardRecords }
+}
+
+async function resolveClusterForGeneratedModule(params: {
+  vaultId: string
+  clusterName: string
+  topic: string
+  concepts: string[]
+}) {
+  const targetName = normalizeGeneratedLookup(params.clusterName)
+  const targetTopic = normalizeGeneratedLookup(params.topic)
+  const concepts = params.concepts.map(normalizeGeneratedLookup).filter(Boolean)
+
+  const clusters = await prisma.cluster.findMany({
+    where: { vaultId: params.vaultId },
+    include: {
+      cards: {
+        select: { title: true, content: true },
+        take: 30,
+        orderBy: { updatedAt: 'desc' },
+      },
+    },
+  })
+
+  let best: { cluster: (typeof clusters)[number]; score: number } | null = null
+  for (const cluster of clusters) {
+    const name = normalizeGeneratedLookup(cluster.name)
+    let score = 0
+    if (name === targetName || name === targetTopic) score += 100
+    else if (name.includes(targetName) || targetName.includes(name) || name.includes(targetTopic) || targetTopic.includes(name)) score += 60
+
+    for (const card of cluster.cards) {
+      const title = normalizeGeneratedLookup(card.title || '')
+      const content = normalizeGeneratedLookup((card.content || '').slice(0, 1200))
+      for (const concept of concepts.slice(0, 12)) {
+        if (!concept) continue
+        if (title && (title.includes(concept) || concept.includes(title))) score += 12
+        else if (content.includes(concept)) score += 4
+      }
+    }
+
+    if (!best || score > best.score) best = { cluster, score }
+  }
+
+  if (best && best.score >= 24) return best.cluster
+
+  const last = await prisma.cluster.findFirst({
+    where: { vaultId: params.vaultId },
+    orderBy: { position: 'desc' },
+    select: { position: true },
+  })
+  return prisma.cluster.create({
+    data: {
+      vaultId: params.vaultId,
+      name: params.clusterName,
+      color: deterministicGeneratedClusterColor(params.clusterName),
+      position: (last?.position ?? 0) + 1,
+    },
+    include: { cards: true },
+  })
+}
+
+async function nextGeneratedCardPath(vaultId: string, clusterName: string, title: string, usedPaths: Set<string>) {
+  const folder = safeGeneratedFileName(clusterName)
+  const fileName = safeGeneratedFileName(title)
+  let candidate = `${folder}/${fileName}.md`
+  let counter = 1
+  while (usedPaths.has(candidate) || await prisma.card.findUnique({ where: { vaultId_path: { vaultId, path: candidate } } })) {
+    candidate = `${folder}/${fileName}_${counter}.md`
+    counter += 1
+  }
+  usedPaths.add(candidate)
+  return candidate
+}
+
+async function createSequentialPrerequisiteEdges(vaultId: string, cardIds: string[]) {
+  for (let index = 1; index < cardIds.length; index += 1) {
+    const sourceId = cardIds[index - 1]
+    const targetId = cardIds[index]
+    if (!sourceId || !targetId || sourceId === targetId) continue
+    const existing = await prisma.edge.findFirst({ where: { vaultId, sourceId, targetId, type: 'prerequisite' } })
+    if (!existing) {
+      await prisma.edge.create({
+        data: { vaultId, sourceId, targetId, type: 'prerequisite', weight: 1 },
+      })
+    }
+  }
+}
+
+function learningPathResponse(
+  path: Awaited<ReturnType<typeof prisma.learningPath.create>> & { steps: Array<{
+    id: string
+    order: number
+    cardId: string | null
+    title: string
+    status: string
+    description: string | null
+    concept: string | null
+    chapter: string | null
+    mastery: number
+    estimatedMinutes: number | null
+    prerequisites: string | null
+  }> },
+  cardRecords: Array<{ id: string; title: string; type: string }>,
+) {
+  return {
+    id: path.id,
+    name: path.name,
+    description: path.description,
+    topic: path.topic,
+    color: DEFAULT_PATH_ACCENT,
+    difficulty: path.difficulty,
+    source: path.source,
+    status: path.status,
+    steps: path.steps.map((step) => {
+      const card = cardRecords.find((item) => item.id === step.cardId)
+      const status = normalizeStepStatusForCard(step.status, card?.type)
+      const prerequisites = safeParseJsonArray(step.prerequisites)
+      return {
+        index: step.order,
+        id: step.id,
+        cardId: step.cardId,
+        cardTitle: card?.title ?? null,
+        cardType: card?.type ?? null,
+        name: step.title,
+        status,
+        desc: stepDescriptionForCard(card?.type, step.description),
+        concept: step.concept || undefined,
+        chapter: step.chapter || undefined,
+        mastery: stepMasteryForCard(card?.type, step.mastery),
+        estimatedMinutes: step.estimatedMinutes || undefined,
+        prerequisites,
+        lockedReason: describeLockedReason(status, prerequisites),
+      }
+    }),
+    totalCount: path.totalSteps,
+    doneCount: path.doneSteps,
+    progress: path.totalSteps > 0 ? Math.round((path.doneSteps / path.totalSteps) * 100) : 0,
+  }
+}
+
+function normalizeGeneratedText(value: string | undefined, fallback: string) {
+  const text = String(value || '').trim()
+  return text || fallback
+}
+
+function normalizeGeneratedOptionalText(value: string | undefined, maxLength: number) {
+  const text = String(value || '').trim()
+  return text ? text.slice(0, maxLength) : null
+}
+
+function buildGeneratedTaskScaffold(title: string, hint: string | null | undefined, topic: string) {
+  const cleanHint = String(hint || '').trim()
+  return `# ${title}
+
+> AI 生成的学习任务草稿。这里先保存目标、问题和关联线索，不直接替用户写成永久知识。
+
+## 学习目标
+- 用自己的话解释「${title}」是什么。
+- 写出一个具体例子、反例或应用场景。
+- 说明它和「${topic}」中的其他概念有什么关系。
+- 在 AI 工作台对话后，再决定是否沉淀为永久知识卡。
+
+## 待填写
+
+### 我的定义
+
+### 我的例子
+
+### 我的关联
+
+## AI 线索
+${cleanHint || '- 进入 AI 工作台后继续追问和补全。'}
+`
+}
+
+function normalizeGeneratedLookup(value: string) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function deterministicGeneratedClusterColor(seed: string) {
+  const palette = ['#a855f7', '#22d3ee', '#f472b6', '#34d399', '#f59e0b', '#60a5fa', '#fb7185']
+  const sum = Array.from(seed || 'cluster').reduce((acc, ch) => acc + ch.charCodeAt(0), 0)
+  return palette[sum % palette.length]
+}
+
+function safeGeneratedFileName(value: string) {
+  return (value || 'untitled')
+    .replace(/[<>:"|?*]/g, '')
+    .replace(/[\/\\]/g, '_')
+    .replace(/\.+/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 100) || 'untitled'
 }
 
 /** Safe JSON array parse for prerequisites column */
@@ -2305,6 +2390,12 @@ function safeParseJsonArray(raw: string | null | undefined): string[] {
   } catch {
     return []
   }
+}
+
+function describeLockedReason(status: string | null | undefined, prerequisites: string[]): string | null {
+  if (status !== 'locked') return null
+  if (prerequisites.length > 0) return `需要先完成 ${prerequisites.length} 个前置任务`
+  return '需要按路径顺序推进，先完成前面的任务'
 }
 
 async function ensureLearningAgentThread(params: {
@@ -2342,7 +2433,7 @@ async function ensureLearningAgentThread(params: {
     ...(existing ? parsePathSessionMetadata(existing.metadata) : {}),
     ...params.metadata,
     cardType: params.card.type,
-    sessionKind: 'card-thread',
+    sessionKind: 'path-step-thread',
     threadStatus: archived ? 'archived' : 'active',
     ...(archived ? { archivedAt: new Date().toISOString() } : {}),
   }

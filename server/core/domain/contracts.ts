@@ -1,7 +1,7 @@
 export const CARD_TYPES = ['fleeting', 'literature', 'permanent'] as const
 export type CardType = typeof CARD_TYPES[number]
 
-export const EDGE_TYPES = ['wikilink', 'related', 'prerequisite', 'derived', 'supports', 'contradicts'] as const
+export const EDGE_TYPES = ['wikilink', 'contains', 'related', 'prerequisite', 'derived', 'supports', 'contradicts'] as const
 export type EdgeType = typeof EDGE_TYPES[number]
 
 export const STEP_STATUSES = ['locked', 'available', 'learning', 'completed', 'mastered'] as const
@@ -11,9 +11,14 @@ export const PATH_DIFFICULTIES = ['beginner', 'intermediate', 'advanced'] as con
 export type PathDifficulty = typeof PATH_DIFFICULTIES[number]
 
 const EDGE_TYPE_ALIASES: Record<string, EdgeType> = {
+  part_of: 'contains',
+  partOf: 'contains',
+  parent: 'contains',
+  child: 'contains',
   suggests: 'related',
   extends: 'derived',
   contrast: 'contradicts',
+  counter: 'contradicts',
 }
 
 function isOneOf<T extends readonly string[]>(values: T, value: unknown): value is T[number] {

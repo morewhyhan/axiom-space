@@ -6,6 +6,7 @@
 
 import { prisma } from '@/lib/db'
 import { getCurrentVaultId, getCurrentUserId } from '@/server/core/agent/agent-context'
+import { SKILL_DUPLICATE_PROMPT } from '@/server/core/ai/prompts'
 
 export interface SkillMeta {
   name: string;
@@ -183,12 +184,18 @@ export async function findDuplicate(
   // Strategy 3: LLM-judged description similarity
   try {
     const { aiManager } = await import('../ai/AIManager')
-    const systemPrompt = `判断以下两个技能描述是否描述相同的学习能力或习惯。
-仅当含义高度重叠（基本是同一个能力的不同表述）时返回 true。
-如果一个是另一个的细化或补充，不要视为重复。只返回 JSON：{"isDuplicate": true/false, "reason": "..."}`
-    const userPrompt = `已有技能: ${incoming.name}: ${incoming.description}\n新技能: ${existing.map(s => `${s.name}: ${s.description}`).join('\n')}`
-    const result = await aiManager.callAPI(systemPrompt, [
-      { role: 'user', content: userPrompt },
+    const result = await aiManager.callAPI(SKILL_DUPLICATE_PROMPT.system, [
+      {
+        role: 'user',
+        content: SKILL_DUPLICATE_PROMPT.buildUserMessage!({
+          incomingName: incoming.name,
+          incomingDescription: incoming.description,
+          existingSkills: existing.map((skill) => ({
+            name: skill.name,
+            description: skill.description,
+          })),
+        }),
+      },
     ])
     const jsonMatch = result?.match(/\{[\s\S]*\}/)
     if (jsonMatch) {

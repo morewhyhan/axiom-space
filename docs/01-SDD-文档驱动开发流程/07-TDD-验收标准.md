@@ -290,7 +290,7 @@ Card 错误标准：
 
 | 对象 | 输入 | 输出 | 正确 | 错误 | 预设问题 |
 |---|---|---|---|---|---|
-| VaultMemory | 用户偏好、事实、上下文 | Memory | 有 category、source、confidence | 临时一句话变长期事实 | 记忆污染 |
+| VaultMemory | 用户偏好、事实、上下文 | Memory | 有 category、source、confidence | 临时短句变长期事实 | 记忆污染 |
 | VaultCapability | concept、assessment、行为 | capability | 有 mastery、status、weakAreas | 无证据更新 | 概念命名不一致 |
 | VaultSkill | 行为证据 | skill | 有 evidence | 把 AgentSkill 当用户技能 | 技能边界混乱 |
 | EducationProfile | 多源证据 | 六维画像 | score + confidence + evidence | 裸分数 | LLM 主观判断过强 |
@@ -409,7 +409,7 @@ Card 错误标准：
 |---|---|---|---|---|---|
 | DashboardStats | 源对象集合 | 统计 | 可重算 | 当源数据写回 | 读模型污染 |
 | RecentActivity | 领域事件或更新时间 | 活动列表 | 能指回对象 | 活动指向已删对象 | 删除同步不完整 |
-| GrowthPoint | 时间序列指标 | 曲线点 | 指标来源明确 | 图好看但无业务意义 | 指标口径漂移 |
+| GrowthPoint | 时间序列指标 | 曲线点 | 指标来源明确 | 图好看但无业务意义 | 指标定义漂移 |
 | AppMode | 用户导航 | 当前模式 | 只影响 UI | 改变业务状态 | UI 和领域混用 |
 | SelectedNode | 用户选择 | cardId | 必须能指回 Card | 指向不存在节点 | 图谱刷新后选中失效 |
 | PanelLayout | 用户布局 | UI 布局 | 不影响领域 | 布局影响权限和数据 | 前端状态过重 |
@@ -505,8 +505,8 @@ Card 错误标准：
 | CapabilityStatus | Capability 变化 | known / learning / mastered | 状态来自行为或评估证据 | 无证据直接 mastered | 能解释用户为什么处于该状态 |
 | GapType | KnowledgeGap | 缺口类型 | 类型能指导下一步 | 类型泛化无意义 | 缺口可分类处理 |
 | GapSeverity | KnowledgeGap | 严重程度 | 严重度有依据 | 高低随意 | 优先级可解释 |
-| CognitiveDimension | Profile | 画像维度 | 维度固定且含义稳定 | 新维度随意扩张 | 页面和服务口径一致 |
-| ThinkingPattern | 用户输出和对话 | 思维模式 | 来自多个证据 | 一句话就下结论 | 模式判断有置信度 |
+| CognitiveDimension | Profile | 画像维度 | 维度固定且含义稳定 | 新维度随意扩张 | 页面和服务定义一致 |
+| ThinkingPattern | 用户输出和对话 | 思维模式 | 来自多个证据 | 单条证据就下结论 | 模式判断有置信度 |
 | Strength | 用户表现 | 强项 | 能说明证据 | 空泛夸奖 | 强项能影响推荐 |
 | GrowthEdge | 缺口和强项 | 成长点 | 能转成下一步行动 | 泛泛建议 | 用户知道该做什么 |
 | NextAction | Profile / Gap / Path | 下一步动作 | 指向 Path、Step、Card 或 Resource | 没有落点 | 建议可执行 |
@@ -974,7 +974,7 @@ P1 是让系统变得稳定、可维护的验收标准。
 
 P2 是体验完善和未来扩展的验收标准。
 
-- DashboardStats 口径稳定。
+- DashboardStats 定义稳定。
 - RecentActivity 指向的对象被删除后能降级展示。
 - PanelLayout 不影响领域状态。
 - SubagentRunRecord 可复盘。

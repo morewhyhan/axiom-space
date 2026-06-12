@@ -10,6 +10,8 @@ import { createTool, toolRegistry } from "../tools";
 import { aiManager } from '../../ai/AIManager';
 import { getCurrentVaultId } from '../agent-context';
 import { prisma } from '@/lib/db';
+import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 /**
  * 生成选择题
@@ -30,6 +32,8 @@ const generateMCQTool = createTool(
         params.difficulty === 'easy' ? '简单' : params.difficulty === 'hard' ? '困难' : '中等'
       }难度的选择题。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 ${params.definition_or_content ? `概念定义或内容：\n${params.definition_or_content}` : ''}
 
 以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字）：
@@ -48,7 +52,7 @@ ${params.definition_or_content ? `概念定义或内容：\n${params.definition_
 题目、选项和解释必须用中文。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是教育学专家和测评设计师。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.mcqGeneration.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -136,6 +140,8 @@ const generateCodeChallengeTool = createTool(
     try {
       const prompt = `你是编程教育专家。为概念 "${params.concept}" 设计一个 ${params.difficulty || 'medium'} 难度的代码挑战题。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 使用 ${params.language || 'python'} 语言。
 
 以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字）：
@@ -156,7 +162,7 @@ const generateCodeChallengeTool = createTool(
 题目描述和解释必须用中文。代码和变量名保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是编程教育和算法设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.codeChallenge.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -238,6 +244,9 @@ const generateApplicationTaskTool = createTool(
   async (_id, params) => {
     try {
       const prompt = `你是项目设计和教育专家。设计一个真实的、能够应用概念 "${params.concept}" 的项目任务。
+
+${AXIOM_KNOWLEDGE_STANDARD}
+
 ${params.domain ? `应用领域: ${params.domain}` : ''}
 
 以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字）：
@@ -257,7 +266,7 @@ ${params.domain ? `应用领域: ${params.domain}` : ''}
 所有内容必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是项目设计和教学设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.applicationTask.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -333,6 +342,8 @@ const generateDebateTopicTool = createTool(
     try {
       const prompt = `你是教育辩论专家。为概念 "${params.concept}" 生成一个值得辩论的问题。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 要求：
 1. 问题没有唯一正确答案，存在合理的正反双方观点
 2. 正反方都有实质性的论据支撑
@@ -351,7 +362,7 @@ const generateDebateTopicTool = createTool(
 所有内容必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是教育辩论和批判性思维专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.debateQuestion.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -437,6 +448,8 @@ const batchAssessTool = createTool(
 
       const prompt = `你是测评专家。对以下概念进行${method === 'quick' ? '快速' : '详细'}评估。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 概念列表：
 ${batch.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
@@ -463,7 +476,7 @@ ${batch.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 题目、选项和反馈必须用中文。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是教育测评和知识评估专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.conceptAssessment.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -684,6 +697,8 @@ const feynmanTestTool = createTool(
 
       const prompt = `你是费曼学习法的评估专家。用户试图向${audience}解释概念"${params.concept}"。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 ## 用户的解释
 ${params.explanation}
 
@@ -694,6 +709,7 @@ ${params.explanation}
 2. **核心理解** — 用户是否抓住了概念的本质？有没有遗漏关键要素？
 3. **例子质量** — 如果用户举了例子，例子是否准确、有助于理解？如果没举例，什么例子可以帮助理解？
 4. **知识缺口** — 用户在哪里含糊其辞、跳过了细节、或者显示出理解不完整？
+5. **清晰准确必要** — 用户是否说清边界、保持事实正确、抓住必要结构？
 
 ## 输出格式
 以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字）：
@@ -717,7 +733,7 @@ ${params.explanation}
 所有评估内容必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是费曼学习法和认知评估专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.feynmanAssessment.system,
         [{ role: 'user', content: prompt }]
       );
 

@@ -590,7 +590,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
 
     function createCore(name: string): void {
-      const core = createGlowNode(0xffffff, 9.5, 'CENTRAL_INTELLIGENCE');
+      const core = createGlowNode(0xffffff, 9.5, name || 'CENTRAL_INTELLIGENCE');
+      core.userData.isSyntheticRoot = true;
       nodesGroup.add(core);
     }
 
@@ -1001,6 +1002,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     function createClustersFromData(clustersData: GalaxyCluster[], nodesData: GalaxyNode[], edgesData: GalaxyEdge[]): void {
       // Skip if no real data — wait for async fetch
       if (clustersData.length === 0 && nodesData.length === 0) return;
+      const rootNodeData = nodesData.find(n => n.isRoot);
+      const graphNodesData = nodesData.filter(n => !n.isRoot);
 
       // Build a lookup from node title to node data for edge matching
       const nodeTitleToGroup = new Map<string, THREE.Group>();
@@ -1009,6 +1012,25 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         nodeDegree.set(edge.sourceId, (nodeDegree.get(edge.sourceId) || 0) + 1);
         nodeDegree.set(edge.targetId, (nodeDegree.get(edge.targetId) || 0) + 1);
       });
+
+      if (rootNodeData) {
+        const rootTitle = rootNodeData.title || '知识库';
+        const root = createGlowNode(0xffffff, 10.4, rootTitle);
+        root.position.set(0, 0, 0);
+        root.userData.id = rootNodeData.id;
+        root.userData.type = rootNodeData.type;
+        root.userData.trueColor = 0xffffff;
+        root.userData.clusterColor = 0xffffff;
+        root.userData.isRoot = true;
+        root.userData.parentId = null;
+        root.userData.depth = 0;
+        root.userData.childCount = rootNodeData.childCount || 0;
+        root.userData.createdAt = rootNodeData.createdAt;
+        root.userData.updatedAt = rootNodeData.updatedAt;
+        nodesGroup.add(root);
+        nodeTitleToGroup.set(rootTitle, root);
+        addClusterLabel(rootTitle, 0xffffff, new THREE.Vector3(0, 86, 0), root);
+      }
 
       // Create sun for each cluster
       clustersData.forEach((cluster, i) => {
@@ -1033,11 +1055,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         addClusterLabel(cluster.name, 0xffffff, clusterPos, sun);
 
         // Link sun to center
-        const core = allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE')!;
+        const core = getCoreNode();
         if (core) createCurve(core, sun, color, 0.08, undefined, color, false);
 
         // Create nodes for cards in this cluster — with organic positioning + mixed colors
-        const clusterNodeData = nodesData.filter(n => n.clusterId === cluster.id);
+        const clusterNodeData = graphNodesData.filter(n => n.clusterId === cluster.id);
         const sortedClusterNodes = [...clusterNodeData].sort((a, b) => {
           const degreeDiff = (nodeDegree.get(b.id) || 0) - (nodeDegree.get(a.id) || 0);
           if (degreeDiff !== 0) return degreeDiff;
@@ -1075,6 +1097,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
           node.userData.clusterColor = color;
           node.userData.type = cardNode.type;
           node.userData.trueColor = nodeTypeColor;
+          node.userData.parentId = cardNode.parentId;
+          node.userData.depth = cardNode.depth;
+          node.userData.childCount = cardNode.childCount || 0;
+          node.userData.hierarchyPath = cardNode.hierarchyPath || [];
           node.userData.createdAt = cardNode.createdAt;
           node.userData.updatedAt = cardNode.updatedAt;
           nodesGroup.add(node);
@@ -1095,7 +1121,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       // 1. Build a map: cardId → firstClusterId (from real edges)
       const linkTargetCluster = new Map<string, string | null>();
       // 2. Also collect unclustered node IDs for quick lookup
-      const unclusteredIds = new Set(nodesData.filter(n => !n.clusterId).map(n => n.id));
+      const unclusteredIds = new Set(graphNodesData.filter(n => !n.clusterId).map(n => n.id));
 
       // Build cluster lookup by DB id (clustersData[i].id → i)
       const clusterIdxByDbId = new Map(clustersData.map((cl, i) => [cl.id, i]));
@@ -1103,8 +1129,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       // For each edge where an unclustered node connects to a clustered node,
       // assign the unclustered node to that cluster
       edgesData.forEach(edge => {
-        const srcNode = nodesData.find(n => n.id === edge.sourceId);
-        const tgtNode = nodesData.find(n => n.id === edge.targetId);
+        const srcNode = graphNodesData.find(n => n.id === edge.sourceId);
+        const tgtNode = graphNodesData.find(n => n.id === edge.targetId);
         if (!srcNode || !tgtNode) return;
         // Source is unclustered, target has a cluster
         if (unclusteredIds.has(edge.sourceId) && tgtNode.clusterId) {
@@ -1117,7 +1143,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
 
       // Place unclustered nodes
-      const unclusteredNodes = nodesData.filter(n => !n.clusterId);
+      const unclusteredNodes = graphNodesData.filter(n => !n.clusterId);
       unclusteredNodes.forEach((cardNode) => {
         const utc = cardNode.type === 'permanent' ? 0xa855f7 : cardNode.type === 'literature' ? 0xf472b6 : 0x22d3ee;
         const node = createGlowNode(utc, 2, cardNode.title);
@@ -1125,6 +1151,10 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         node.userData.trueColor = utc;
         node.userData.clusterColor = utc;
         node.userData.type = cardNode.type;
+        node.userData.parentId = cardNode.parentId;
+        node.userData.depth = cardNode.depth;
+        node.userData.childCount = cardNode.childCount || 0;
+        node.userData.hierarchyPath = cardNode.hierarchyPath || [];
         node.userData.createdAt = cardNode.createdAt;
         node.userData.updatedAt = cardNode.updatedAt;
 
@@ -1180,6 +1210,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       // Create edges from real data (concept-to-concept connections)
       // Real wiki-link edges are always visible regardless of cluster.
       edgesData.forEach(edge => {
+        if (edge.type === 'contains') return;
         const sourceNode = allNodes.find(n => n.userData.id === edge.sourceId);
         const targetNode = allNodes.find(n => n.userData.id === edge.targetId);
         if (sourceNode && targetNode) {
@@ -1189,8 +1220,80 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       });
     }
 
+    function applyHierarchyInitialPositions(edgesData: GalaxyEdge[]): void {
+      const root = getCoreNode();
+      if (!root?.userData.id) return;
+
+      const nodeById = new Map<string, THREE.Group>();
+      allNodes.forEach((node) => {
+        if (node.userData.id) nodeById.set(String(node.userData.id), node);
+      });
+
+      const childrenByParent = new Map<string, string[]>();
+      edgesData
+        .filter(edge => edge.type === 'contains' && nodeById.has(edge.sourceId) && nodeById.has(edge.targetId))
+        .forEach((edge) => {
+          childrenByParent.set(edge.sourceId, [...(childrenByParent.get(edge.sourceId) || []), edge.targetId]);
+        });
+
+      const rootId = String(root.userData.id);
+      const levels = new Map<number, THREE.Group[]>();
+      const parentAngle = new Map<string, number>([[rootId, -Math.PI / 2]]);
+      const seen = new Set<string>([rootId]);
+      const queue: Array<{ id: string; depth: number }> = [{ id: rootId, depth: 0 }];
+      root.position.set(0, 0, 0);
+      root.userData.position3D = root.position.clone();
+
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const children = (childrenByParent.get(current.id) || [])
+          .map(id => nodeById.get(id))
+          .filter((node): node is THREE.Group => !!node)
+          .sort((a, b) => sortedByGraphSemantics([a, b])[0] === a ? -1 : 1);
+        const parentBaseAngle = parentAngle.get(current.id) ?? -Math.PI / 2;
+        const spread = current.depth === 0 ? Math.PI * 2 : Math.min(Math.PI * 0.95, Math.PI * 0.32 + children.length * 0.1);
+        children.forEach((child, index) => {
+          const childId = String(child.userData.id);
+          if (seen.has(childId)) return;
+          seen.add(childId);
+          const depth = current.depth + 1;
+          const localRatio = children.length <= 1 ? 0.5 : index / (children.length - 1);
+          const angle = current.depth === 0
+            ? (index / Math.max(1, children.length)) * Math.PI * 2 - Math.PI / 2
+            : parentBaseAngle - spread / 2 + localRatio * spread;
+          parentAngle.set(childId, angle);
+          child.userData.depth = typeof child.userData.depth === 'number' ? child.userData.depth : depth;
+          levels.set(depth, [...(levels.get(depth) || []), child]);
+          queue.push({ id: childId, depth });
+        });
+      }
+
+      levels.forEach((nodesInLevel, depth) => {
+        const radius = 210 + depth * 165;
+        nodesInLevel.forEach((node, index) => {
+          const id = String(node.userData.id || index);
+          const angle = parentAngle.get(id) ?? ((index / Math.max(1, nodesInLevel.length)) * Math.PI * 2);
+          const seed = hashId(id);
+          const jitter = (seededRandom(seed) - 0.5) * 34;
+          const y = depth === 1 ? 46 : depth === 2 ? -18 : -64 - (depth - 3) * 18;
+          node.position.set(
+            Math.cos(angle) * (radius + jitter),
+            y,
+            Math.sin(angle) * (radius + jitter),
+          );
+          node.userData.position3D = node.position.clone();
+        });
+      });
+
+      allNodes.forEach((node) => {
+        if (!node.userData.position3D) node.userData.position3D = node.position.clone();
+      });
+    }
+
     function getCoreNode(): THREE.Group | undefined {
-      return allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE' && !n.userData.isSun && !n.userData.id);
+      return allNodes.find(n => n.userData.isRoot && !n.userData.isSun)
+        || allNodes.find(n => n.userData.isSyntheticRoot && !n.userData.isSun)
+        || allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE' && !n.userData.isSun && !n.userData.id);
     }
 
     function capture3DPositions(): void {
@@ -1492,7 +1595,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     function buildLayeredGuides(): void {
       [
         { label: '永久知识 / 结论', y: 60, color: 0xa855f7 },
-        { label: '灵感 / 处理中', y: -90, color: 0x22d3ee },
+        { label: '灵感草稿 / 待打磨', y: -90, color: 0x22d3ee },
         { label: '文献 / 原始资料', y: -240, color: 0xf472b6 },
       ].forEach((layer) => {
         addGuideLine(new THREE.Vector3(-900, layer.y, 80), new THREE.Vector3(900, layer.y, 80), layer.color, 0.14);
@@ -2617,12 +2720,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
       const storeVaults = useAppStore.getState().vaults;
       const vaultName = storeVaults.find(v => v.id === vid)?.name || vid || `CENTRAL_INTELLIGENCE`;
-      createCore(vaultName);
+      if (!n.some(node => node.isRoot)) createCore(vaultName);
       createClustersFromData(c, n, e);
       clearLearningPath();
       buildDemoLearningPath(dataRef.current.learningPathSteps);
       createLearningPath();
       applyNodeModeVisual(useAppStore.getState().mode, true);
+      applyLayoutLinkVisibility(layoutMode);
       if (layoutMode !== 'galaxy') {
         requestAnimationFrame(() => applyGraphLayout(layoutMode, 0.85));
       }

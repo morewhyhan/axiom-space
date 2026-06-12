@@ -13,6 +13,7 @@ import { prisma } from '@/lib/db'
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context'
 import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
 import { assertCardType, inferCardTypeFromPath } from '@/server/core/domain/contracts'
+import { ensureVaultRootCard } from '@/server/core/domain/concept-graph'
 
 export class DbAdapter implements IFileStorage {
   private resolvedUserId: string
@@ -92,6 +93,7 @@ export class DbAdapter implements IFileStorage {
       vault = await prisma.vault.create({
         data: { userId: this.userId, name: 'My Vault' },
       })
+      await ensureVaultRootCard({ vaultId: vault.id, vaultName: vault.name })
     }
     return vault.id
   }

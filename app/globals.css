@@ -1552,6 +1552,41 @@ body {
     cursor: pointer;
 }
 .dashboard-panel-compact { font-size: 0.95; }
+.dashboard-vital-block,
+.dashboard-status-block {
+  flex: 0 0 auto;
+  min-height: 0;
+}
+.dashboard-vital-block {
+  overflow: visible;
+}
+.dashboard-vital-block-sm {
+  min-height: 0;
+}
+@media (max-height: 820px) {
+  .main-grid.mode-dashboard .dashboard-vitals-panel {
+    --panel-py: 12px;
+  }
+  .main-grid.mode-dashboard .dashboard-vitals-panel {
+    gap: 8px !important;
+  }
+  .main-grid.mode-dashboard .dashboard-vital-block .serif {
+    transform: scale(0.92);
+    transform-origin: left center;
+  }
+}
+
+@media (max-height: 700px) {
+  .main-grid.mode-dashboard .dashboard-vitals-panel {
+    --panel-py: 8px;
+  }
+  .main-grid.mode-dashboard .dashboard-vital-block .serif {
+    transform: scale(0.82);
+  }
+  .main-grid.mode-dashboard .dashboard-status-block p {
+    display: none;
+  }
+}
 
 /* ── Narrow viewport: shrink panels ── */
 @media (max-width: 1400px) {

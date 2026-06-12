@@ -10,6 +10,10 @@ import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '../agent-context';
 import { aiManager } from '../../ai/AIManager';
+import {
+  GRAPH_LINK_SUGGESTION_PROMPT,
+  GRAPH_RELATION_ANALYSIS_PROMPT,
+} from '../../ai/prompts';
 
 /**
  * 分析知识图谱的结构和质量
@@ -115,7 +119,7 @@ const detectGraphGapsTool = createTool(
 
       if (allCards.length === 0) {
         return {
-          content: [{ type: 'text', text: '知识图谱中还没有卡片。先用 create_permanent_card 添加一些概念吧。' }],
+          content: [{ type: 'text', text: '知识图谱中还没有卡片。先用 create_fleeing_card 添加一些灵感草稿，再逐步打磨为永久知识。' }],
           details: { gaps: [], total_cards: 0 },
         };
       }
@@ -404,28 +408,15 @@ const suggestLinksTool = createTool(
         `${i + 1}. **${c.a.title}** ↔ **${c.b.title}** (关键词重叠: ${c.overlap} 个)`
       ).join('\n');
 
-      const prompt = `你是知识图谱专家。以下是由算法预筛选的高关联度概念对，请判断哪些值得建立链接。
-
-预筛选候选对：
-${candidateList}
-
-卡片详情：
-${topCandidates.map((c, i) =>
-  `[${i + 1}] "${c.a.title}": ${c.a.content?.slice(0, 120) || '(无)'}\n     "${c.b.title}": ${c.b.content?.slice(0, 120) || '(无)'}`
-).join('\n\n')}
-
-以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要 preamble）：
-{
-  "suggestions": [
-    {"from": "概念A", "to": "概念B", "reason": "关联原因（1句话）", "strength": 0.85}
-  ]
-}
-只返回 strength >= 0.5 的建议。如果都不值得链接，返回 {"suggestions": []}。
-
-## ⚠️ 强制输出语言：中文`;
+      const prompt = GRAPH_LINK_SUGGESTION_PROMPT.buildUserMessage!({
+        candidateList,
+        candidateDetails: topCandidates.map((c, i) =>
+          `[${i + 1}] "${c.a.title}": ${c.a.content?.slice(0, 120) || '(无)'}\n     "${c.b.title}": ${c.b.content?.slice(0, 120) || '(无)'}`
+        ).join('\n\n'),
+      });
 
       const response = await aiManager.callAPI(
-        '你是知识结构设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        GRAPH_LINK_SUGGESTION_PROMPT.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -452,7 +443,7 @@ ${topCandidates.map((c, i) =>
 
 ${suggestions.length > 0
   ? suggestions.map((s: any) =>
-      `- **${s.from}** → **${s.to}**\n  相关度: ${(s.strength * 100).toFixed(0)}% · ${s.reason}`
+      `- **${s.from}** → **${s.to}**\n  类型: ${s.type || '未标注'} · 强度: ${(s.strength * 100).toFixed(0)}% · ${s.reason}`
     ).join('\n\n')
   : '暂无达到阈值的链接建议。尝试降低相似度阈值或添加更多卡片。'}
 
@@ -717,21 +708,15 @@ const analyzeConceptStrengthTool = createTool(
       const avgStrength = edges.length > 0 ? totalStrength / edges.length : 0;
 
       // AI evaluation of relationship quality
-      const prompt = `分析概念 "${cardA.title}" 和 "${cardB.title}" 之间的关系质量和强度。
-
-概念 A 内容: ${(cardA.content || '').slice(0, 500)}
-概念 B 内容: ${(cardB.content || '').slice(0, 500)}
-
-以 JSON 格式返回（不要其他文字）：
-{
-  "relationship_quality": "strong/moderate/weak",
-  "relationship_type": "prerequisite/related/extension/contrast/part_of",
-  "semantic_similarity": 0.0-1.0,
-  "analysis": "简要分析"
-}`;
+      const prompt = GRAPH_RELATION_ANALYSIS_PROMPT.buildUserMessage!({
+        cardATitle: cardA.title || '',
+        cardBTitle: cardB.title || '',
+        cardAContent: cardA.content || '',
+        cardBContent: cardB.content || '',
+      });
 
       const response = await aiManager.callAPI(
-        '你是知识图谱和语义分析专家',
+        GRAPH_RELATION_ANALYSIS_PROMPT.system,
         [{ role: 'user', content: prompt }]
       );
 

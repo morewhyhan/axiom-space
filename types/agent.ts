@@ -27,9 +27,9 @@ import type {
   ToolResultMessage as PiToolResultMessage,
   Static,
   TSchema,
-} from '@/server/core/agent/pi-ai.js';
+} from '@mariozechner/pi-ai';
 
-export { Type } from '@/server/core/agent/pi-ai.js';
+export { Type } from '@mariozechner/pi-ai';
 export type { Static, TSchema };
 
 export type Message = PiUserMessage | PiAssistantMessage | PiToolResultMessage;

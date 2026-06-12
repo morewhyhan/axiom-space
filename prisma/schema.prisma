@@ -66,28 +66,40 @@ model cluster {
 }
 
 model card {
-  id        String   @id @default(uuid())
-  vaultId   String
-  clusterId String?
-  path      String   // 文件路径，如 "数据结构/线性表.md"
-  content   String   // 完整 Markdown 内容
-  type      String   @default("fleeting") // "literature" | "fleeting" | "permanent"
-  title     String?
-  tags      String?  // JSON 数组字符串
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                String   @id @default(uuid())
+  vaultId           String
+  clusterId         String?
+  sourceDocumentId  String?
+  sourceChunkId     String?
+  derivedFromCardId String?
+  path              String   // 文件路径，如 "数据结构/线性表.md"
+  content           String   // 完整 Markdown 内容
+  type              String   @default("fleeting") // "literature" | "fleeting" | "permanent"
+  title             String?
+  tags              String?  // JSON 数组字符串
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
-  vault   vault    @relation(fields: [vaultId], references: [id], onDelete: Cascade)
-  cluster cluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  vault          vault                @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+  cluster        cluster?             @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  sourceDocument sourceDocument?      @relation(fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  sourceChunk    sourceDocumentChunk? @relation(fields: [sourceChunkId], references: [id], onDelete: SetNull)
+  derivedFrom    card?                @relation("CardDerivation", fields: [derivedFromCardId], references: [id], onDelete: SetNull)
+  derivedCards   card[]               @relation("CardDerivation")
 
   edgesFrom edge[] @relation("EdgeSource")
   edgesTo   edge[] @relation("EdgeTarget")
   learningPathSteps learningPathStep[]
   ragIndexes ragDocumentIndex[]
+  promotionAttemptsFrom promotionAttempt[] @relation("PromotionFromCard")
+  promotionAttemptsTo   promotionAttempt[] @relation("PromotionToCard")
 
   @@unique([vaultId, path])
   @@index([vaultId, type])
   @@index([clusterId])
+  @@index([sourceDocumentId])
+  @@index([sourceChunkId])
+  @@index([derivedFromCardId])
 }
 
 // 卡片间关联 — 用于 Galaxy 图谱连线
@@ -97,7 +109,7 @@ model edge {
   sourceId  String
   targetId  String
   weight    Float    @default(1.0)
-  type      String   @default("related") // "related" | "prerequisite" | "derived" | "counter"
+  type      String   @default("related") // "contains" | "related" | "prerequisite" | "derived" | "counter" | "wikilink"
   createdAt DateTime @default(now())
 
   vault  vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
@@ -472,6 +484,8 @@ model promotionAttempt {
   userId          String?
   vaultId         String
   cardId          String?
+  fromCardId      String?
+  toCardId        String?
   fromType        String?
   toType          String
   status          String   // accepted | rejected
@@ -479,9 +493,14 @@ model promotionAttempt {
   qualityChecks   String?
   createdAt       DateTime @default(now())
 
+  fromCard card? @relation("PromotionFromCard", fields: [fromCardId], references: [id], onDelete: SetNull)
+  toCard   card? @relation("PromotionToCard", fields: [toCardId], references: [id], onDelete: SetNull)
+
   @@index([userId])
   @@index([vaultId, createdAt])
   @@index([cardId])
+  @@index([fromCardId])
+  @@index([toCardId])
   @@index([status])
 }
 
@@ -533,6 +552,7 @@ model sourceDocument {
   createdAt   DateTime @default(now())
 
   chunks sourceDocumentChunk[]
+  cards  card[]
 
   @@unique([vaultId, contentHash])
   @@index([userId, vaultId])
@@ -547,6 +567,7 @@ model sourceDocumentChunk {
   createdAt        DateTime @default(now())
 
   sourceDocument sourceDocument @relation(fields: [sourceDocumentId], references: [id], onDelete: Cascade)
+  cards          card[]
 
   @@unique([sourceDocumentId, index])
 }

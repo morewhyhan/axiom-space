@@ -6,6 +6,12 @@ export interface GalaxyNode {
   clusterName: string | null
   clusterColor: string | null
   tags: string[]
+  path?: string
+  parentId?: string | null
+  depth?: number | null
+  childCount?: number
+  isRoot?: boolean
+  hierarchyPath?: string[]
   createdAt?: string
   updatedAt?: string
 }

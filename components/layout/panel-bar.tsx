@@ -15,8 +15,8 @@ import { useAppStore, type PanelId } from '@/stores/mode-store'
 const FORGE_ITEMS = [
   {
     id: 'sessionList' as const,
-    label: '任务',
-    description: '任务组和普通对话入口',
+    label: '路径',
+    description: '学习路径和自由对话入口',
     icon: LayoutDashboard,
     tone: 'text-pink-300',
   },

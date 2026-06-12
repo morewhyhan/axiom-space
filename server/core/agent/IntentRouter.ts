@@ -11,6 +11,8 @@
  * 每种意图对应不同的工具集和 prompt 后缀。
  */
 
+import { INTENT_ROUTER_PROMPT } from '@/server/core/ai/prompts'
+
 export type Intent = 'chat' | 'learn' | 'create' | 'analyze' | 'manage' | 'profile';
 
 export interface IntentRoute {
@@ -172,21 +174,12 @@ export async function classifyIntentSmart(
       ? `\n## 最近对话\n${recentContext.slice(-3).map(m => `[${m.role}]: ${String(m.content).slice(0, 200)}`).join('\n')}`
       : '';
 
-    const systemPrompt = `你是意图分类器，输出严格 JSON。
-6 类意图：
-- chat: 闲聊问候
-- learn: 学概念、求解释
-- create: 创建卡片/笔记/PPT/题目/资源
-- analyze: 检索、阅读、对比、总结已有内容
-- manage: 设置、配置、删改
-- profile: 查询/更新学习画像
-
-输出 JSON: {"intent": "...", "confidence": 0.0-1.0, "slots": {"topic": "...", "format": "...", "count": "..."}, "reasoning": "一句话"}
-- slots 抽取用户提到的主题/格式/数量等参数（无则空对象）
-- confidence < 0.6 表示意图不清晰，下游会请用户确认
-只输出 JSON，无其他文字。`;
-
-    const userMessage = `${candidateHint}${contextHint}\n\n## 当前消息\n${message}`;
+    const systemPrompt = INTENT_ROUTER_PROMPT.system;
+    const userMessage = INTENT_ROUTER_PROMPT.buildUserMessage!({
+      candidateHint,
+      contextHint,
+      message,
+    });
 
     const result = await aux.call({
       systemPrompt,

@@ -4,6 +4,7 @@
 
 import { resolveAiConfig } from '@/lib/ai-config';
 import type { AxiomAgentConfig } from '@/types/agent';
+import { ORACLE_CHAT_PROMPT } from '@/server/core/ai/prompts';
 
 /**
  * 返回默认 Agent 配置（运行时读取 env，避免 import-time 副作用）
@@ -11,8 +12,7 @@ import type { AxiomAgentConfig } from '@/types/agent';
 export function getDefaultAgentConfig(): Required<AxiomAgentConfig> {
   const aiConfig = resolveAiConfig()
   return {
-    // 使用完整的系统提示词（from oracle.ts AXIOM_SYSTEM_PROMPT）
-    systemPrompt: 'You are AXIOM Cognitive OS AI Assistant. Focus on guiding self-directed learning through Socratic questioning and smart tool integration.',
+    systemPrompt: ORACLE_CHAT_PROMPT.system,
     modelId: aiConfig.model.modelId,
     thinkingLevel: 'medium',
     toolExecution: 'parallel',

@@ -23,7 +23,7 @@ const API_KEY_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /hf_[a-zA-Z0-9]{34}/g, label: 'HuggingFace' },
   { pattern: /gsk_[a-zA-Z0-9]{52}/g, label: 'Groq' },
   { pattern: /pplx-[a-zA-Z0-9]{48}/g, label: 'Perplexity' },
-  // 新增 12 种（对齐 Hermes redact.py 全部前缀）
+  // 新增 12 种（对齐 AXIOM redact.py 全部前缀）
   { pattern: /sg_[a-zA-Z0-9_-]{20,}/g, label: 'SendGrid' },
   { pattern: /SK[a-zA-Z0-9]{32}/g, label: 'Twilio' },
   { pattern: /npm_[a-zA-Z0-9]{36,}/g, label: 'npm Token' },

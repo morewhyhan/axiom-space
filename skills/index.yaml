@@ -1,5 +1,5 @@
 # AXIOM Skill Index — 快速发现，避免逐个扫描 SKILL.md
-# 对标 Hermes: skill_index.yaml / iter_skill_index_files()
+# 对标 AXIOM: skill_index.yaml / iter_skill_index_files()
 skills:
   axiom-learning:
     path: skills/axiom-learning/SKILL.md

@@ -1,9 +1,9 @@
 'use client'
 
 import { useDashboardStats } from '@/hooks/use-dashboard'
+import { client } from '@/lib/api-client'
 import { useAppStore } from '@/stores/mode-store'
 import { useState, useEffect } from 'react'
-import { client } from '@/lib/api-client'
 
 function CountUp({ end, duration = 1000, loading = false }: { end: number; duration?: number; loading?: boolean }) {
   const [count, setCount] = useState(0)
@@ -35,6 +35,7 @@ function CountUp({ end, duration = 1000, loading = false }: { end: number; durat
 export default function DashboardLeft() {
   const { stats, loading } = useDashboardStats()
   const [agentOnline, setAgentOnline] = useState(true)
+
   useEffect(() => {
     let mounted = true
     const check = async () => {
@@ -42,56 +43,73 @@ export default function DashboardLeft() {
         const res = await client.api.agent.health.$get()
         const data = await res.json()
         if (mounted) setAgentOnline(data.status === 'ok')
-      } catch { if (mounted) setAgentOnline(false) }
+      } catch {
+        if (mounted) setAgentOnline(false)
+      }
     }
     check()
     const id = setInterval(check, 30000)
-    return () => { mounted = false; clearInterval(id) }
+    return () => {
+      mounted = false
+      clearInterval(id)
+    }
   }, [])
+
+  const metricBlock = 'dashboard-vital-block'
+  const smallMetricBlock = 'dashboard-vital-block dashboard-vital-block-sm'
+  const labelClass = 'mono text-white/88 font-bold uppercase tracking-[0.2em]'
+  const hintClass = 'mono text-white/72 block mt-1 leading-snug'
 
   return (
     <aside
-      className="side-slot visible dashboard-panel flex-col pointer-events-auto no-scrollbar"
-      style={{ width: 'var(--panel-sm)', justifyContent: 'space-between', overflow: 'hidden', padding: 'var(--panel-py) 0 var(--panel-py) 14px' }}
+      className="side-slot visible dashboard-panel dashboard-vitals-panel flex-col pointer-events-auto no-scrollbar"
+      style={{
+        width: 'var(--panel-sm)',
+        height: '100%',
+        justifyContent: 'space-evenly',
+        gap: 'clamp(8px, 1.25vh, 18px)',
+        overflow: 'hidden',
+        padding: 'var(--panel-py) 0 var(--panel-py) 14px',
+      }}
     >
-      <div>
-        <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>NODES</span>
-        <div className="serif font-bold glow-text-purple leading-none mt-0.5" style={{ fontSize: 'min(96px, calc(var(--t-hero) * 0.88))' }}>
+      <div className={metricBlock}>
+        <span className={labelClass} style={{ fontSize: 'clamp(12px, 1.25vh, 18px)' }}>NODES</span>
+        <div className="serif font-bold glow-text-purple leading-none mt-1" style={{ fontSize: 'clamp(78px, 10.5vh, 142px)' }}>
           <CountUp end={stats?.totalNodes ?? 0} loading={loading} />
         </div>
-        <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Total knowledge nodes</span>
+        <span className={hintClass} style={{ fontSize: 'clamp(12px, 1.18vh, 17px)' }}>Total knowledge nodes</span>
       </div>
-      <div>
-        <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>EDGES</span>
-        <div className="serif font-bold glow-text-cyan leading-none mt-0.5" style={{ fontSize: 'min(72px, calc(var(--t-huge) * 0.86))' }}>
+      <div className={metricBlock}>
+        <span className={labelClass} style={{ fontSize: 'clamp(12px, 1.25vh, 18px)' }}>EDGES</span>
+        <div className="serif font-bold glow-text-cyan leading-none mt-1" style={{ fontSize: 'clamp(62px, 8.2vh, 112px)' }}>
           <CountUp end={stats?.totalEdges ?? 0} loading={loading} />
         </div>
-        <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Total connections in system</span>
+        <span className={hintClass} style={{ fontSize: 'clamp(12px, 1.18vh, 17px)' }}>Total connections in system</span>
       </div>
 
       <div className="hud-line"></div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 'calc(var(--space-stats, 24px) * 0.62)' }}>
-        <div>
-          <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>PERMANENT</span>
-          <div className="serif font-bold text-purple-300 leading-none mt-0.5" style={{ fontSize: 'min(60px, calc(var(--t-big) * 0.84))' }}>
+      <div className="flex flex-col" style={{ gap: 'clamp(8px, 1.5vh, 22px)' }}>
+        <div className={smallMetricBlock}>
+          <span className={labelClass} style={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}>PERMANENT</span>
+          <div className="serif font-bold text-purple-200 leading-none mt-1" style={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}>
             <CountUp end={stats?.permanent ?? 0} loading={loading} />
           </div>
-          <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Solidified knowledge cards</span>
+          <span className={hintClass} style={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}>Solidified knowledge cards</span>
         </div>
-        <div>
-          <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>FLEETING</span>
-          <div className="serif font-bold text-cyan-300 leading-none mt-0.5" style={{ fontSize: 'min(60px, calc(var(--t-big) * 0.84))' }}>
+        <div className={smallMetricBlock}>
+          <span className={labelClass} style={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}>FLEETING</span>
+          <div className="serif font-bold text-cyan-200 leading-none mt-1" style={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}>
             <CountUp end={stats?.fleeting ?? 0} loading={loading} />
           </div>
-          <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Ideas awaiting refinement</span>
+          <span className={hintClass} style={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}>Ideas awaiting refinement</span>
         </div>
-        <div>
-          <span className="mono text-white font-bold uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f10)' }}>LITERATURE</span>
-          <div className="serif font-bold text-pink-300 leading-none mt-0.5" style={{ fontSize: 'min(60px, calc(var(--t-big) * 0.84))' }}>
+        <div className={smallMetricBlock}>
+          <span className={labelClass} style={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}>LITERATURE</span>
+          <div className="serif font-bold text-pink-200 leading-none mt-1" style={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}>
             <CountUp end={stats?.literature ?? 0} loading={loading} />
           </div>
-          <span className="mono text-white/58 block mt-0.5" style={{ fontSize: 'var(--f9)' }}>Source materials imported</span>
+          <span className={hintClass} style={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}>Source materials imported</span>
         </div>
       </div>
 

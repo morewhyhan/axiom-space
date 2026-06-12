@@ -5,6 +5,33 @@ const prisma = new PrismaClient()
 
 const DEMO_EMAIL = 'demo@axiom.space'
 const DEMO_PASSWORD = 'demo123456'
+const ROOT_CARD_PATH = '__root__.md'
+
+async function createRootCard(vaultId: string, vaultName: string) {
+  return prisma.card.create({
+    data: {
+      vaultId,
+      path: ROOT_CARD_PATH,
+      title: vaultName,
+      type: 'fleeting',
+      tags: JSON.stringify(['axiom-root', 'concept-card']),
+      content: `# ${vaultName}\n\n> 这是这个知识库的根理解卡。它连接下面的概念理解卡。\n`,
+    },
+  })
+}
+
+async function createContainsEdge(vaultId: string, parentId: string, childId: string) {
+  if (!parentId || !childId || parentId === childId) return
+  await prisma.edge.create({
+    data: {
+      vaultId,
+      sourceId: parentId,
+      targetId: childId,
+      type: 'contains',
+      weight: 1,
+    },
+  })
+}
 
 async function main() {
   console.log('Seeding database...')
@@ -66,28 +93,44 @@ async function main() {
     },
   })
 
-  await prisma.card.createMany({
-    data: [
-      {
-        vaultId: vault.id,
-        clusterId: cluster.id,
-        path: '示例知识域/欢迎卡片.md',
-        title: '欢迎来到 Axiom Space',
-        type: 'permanent',
-        content: '# 欢迎\n\n这是你的第一个知识卡片。Axiom Space 帮助你构建个人知识星系。',
-        tags: JSON.stringify(['入门', '指南']),
-      },
-      {
-        vaultId: vault.id,
-        clusterId: cluster.id,
-        path: '示例知识域/快速笔记.md',
-        title: '快速笔记示例',
-        type: 'fleeting',
-        content: '这是一个 Fleeting 卡片，用于快速捕获灵感。',
-        tags: JSON.stringify(['笔记']),
-      },
-    ],
+  const rootCard = await createRootCard(vault.id, vault.name)
+  const areaCard = await prisma.card.create({
+    data: {
+      vaultId: vault.id,
+      clusterId: cluster.id,
+      path: '示例知识域/__index__.md',
+      title: '示例知识域',
+      type: 'permanent',
+      content: '# 示例知识域\n\n这是示例库中的高层概念理解卡，它下面连接具体卡片。',
+      tags: JSON.stringify(['入门', 'concept-card']),
+    },
   })
+  await createContainsEdge(vault.id, rootCard.id, areaCard.id)
+
+  const welcomeCard = await prisma.card.create({
+    data: {
+      vaultId: vault.id,
+      clusterId: cluster.id,
+      path: '示例知识域/欢迎卡片.md',
+      title: '欢迎来到 Axiom Space',
+      type: 'permanent',
+      content: '# 欢迎\n\n这是你的第一个知识卡片。Axiom Space 帮助你构建个人知识星系。',
+      tags: JSON.stringify(['入门', '指南', 'concept-card']),
+    },
+  })
+  const noteCard = await prisma.card.create({
+    data: {
+      vaultId: vault.id,
+      clusterId: cluster.id,
+      path: '示例知识域/快速笔记.md',
+      title: '快速笔记示例',
+      type: 'fleeting',
+      content: '这是一个 Fleeting 卡片，用于快速捕获灵感。',
+      tags: JSON.stringify(['笔记', 'concept-card']),
+    },
+  })
+  await createContainsEdge(vault.id, areaCard.id, welcomeCard.id)
+  await createContainsEdge(vault.id, areaCard.id, noteCard.id)
 
   console.log('Seed complete!')
 }

@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FileText,
   Layers3,
+  Loader2,
   Plus,
   Route,
   Sparkles,
@@ -24,6 +25,22 @@ import { useAgentStore } from '@/stores/agent-store'
 type CreateMode = 'ai' | 'material'
 type PathFilter = 'active' | 'all' | 'archived'
 
+const AI_GENERATION_STAGES = [
+  { label: '理解学习目标', desc: '识别这是单一概念还是复合课程目标' },
+  { label: '拆解知识模块', desc: '把主题拆成星团、任务组和前置关系' },
+  { label: '匹配已有知识库', desc: '复用已有卡片，避免重复创建' },
+  { label: '生成任务路径', desc: '创建可推进的学习步骤和理解卡' },
+  { label: '写入知识图谱', desc: '生成星团、卡片和关系边' },
+]
+
+const DOCUMENT_IMPORT_STAGES = [
+  { label: '解析资料内容', desc: '识别标题、来源、章节和核心概念' },
+  { label: '匹配星团', desc: '判断资料属于已有主题还是新主题' },
+  { label: '抽取灵感草稿', desc: '把资料拆成可打磨的灵感卡片' },
+  { label: '生成学习路径', desc: '把概念编排成可推进的任务组' },
+  { label: '同步知识图谱', desc: '写入卡片、星团和关联边' },
+]
+
 function formatTime(value?: string) {
   if (!value) return '刚刚'
   const date = new Date(value)
@@ -35,6 +52,10 @@ function getNextStep(steps: LearningStep[]) {
   return steps.find((step) => step.status === 'available' || step.status === 'learning') ?? steps[0] ?? null
 }
 
+function getActionableStep(steps: LearningStep[]) {
+  return steps.find((step) => step.status === 'available' || step.status === 'learning') ?? null
+}
+
 function isArchivedPath(path: LearningPath) {
   return path.status === 'archived'
 }
@@ -44,16 +65,43 @@ function isUnassignedTaskPath(path: LearningPath) {
 }
 
 function statusMeta(step: LearningStep) {
-  if (step.status === 'mastered' || step.status === 'completed') {
-    return { label: '已完成', tone: 'text-green-300', bar: 'bg-green-400', border: 'border-green-500/30' }
+  if (step.status === 'mastered') {
+    return { label: '已掌握', tone: 'text-green-300', bar: 'bg-green-400', border: 'border-green-500/30' }
+  }
+  if (step.status === 'completed') {
+    return { label: '任务已完成', tone: 'text-green-300', bar: 'bg-green-400', border: 'border-green-500/30' }
   }
   if (step.status === 'learning') {
-    return { label: '处理中', tone: 'text-cyan-300', bar: 'bg-cyan-400', border: 'border-cyan-500/30' }
+    return { label: '学习中', tone: 'text-cyan-300', bar: 'bg-cyan-400', border: 'border-cyan-500/30' }
   }
   if (step.status === 'available') {
-    return { label: '可进入', tone: 'text-purple-300', bar: 'bg-purple-400', border: 'border-purple-500/30' }
+    return { label: '可开始', tone: 'text-purple-300', bar: 'bg-purple-400', border: 'border-purple-500/30' }
   }
-  return { label: '待解锁', tone: 'text-white/25', bar: 'bg-white/20', border: 'border-white/10' }
+  return { label: '前置未满足', tone: 'text-white/25', bar: 'bg-white/20', border: 'border-white/10' }
+}
+
+function cardTypeLabel(type?: string | null) {
+  if (type === 'permanent') return '永久知识卡'
+  if (type === 'literature') return '文献资料'
+  return '灵感草稿'
+}
+
+function canOpenStep(step: LearningStep) {
+  return step.status !== 'locked'
+}
+
+function GenerationStatusHint({ stage }: { stage: { label: string; desc: string } }) {
+  return (
+    <div className="flex items-start gap-2 rounded-lg border border-white/8 bg-black/20 px-3 py-2">
+      <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-purple-200/80" />
+      <div className="min-w-0">
+        <div className="mono text-[10px] text-white/55">AI 正在{stage.label}...</div>
+        <div className="mt-0.5 text-white/28" style={{ fontSize: 'var(--f8)' }}>
+          {stage.desc}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function LearnWorkspace() {
@@ -83,6 +131,22 @@ export default function LearnWorkspace() {
   const [error, setError] = useState<string | null>(null)
   const [pathFilter, setPathFilter] = useState<PathFilter>('active')
   const [stepSessionIds, setStepSessionIds] = useState<Record<string, string>>({})
+  const isGenerating = generatePath.isPending || importDocument.isPending
+  const generationStages = createMode === 'material' ? DOCUMENT_IMPORT_STAGES : AI_GENERATION_STAGES
+  const [generationStageIndex, setGenerationStageIndex] = useState(0)
+  const currentGenerationStage = generationStages[generationStageIndex] ?? generationStages[0]
+
+  useEffect(() => {
+    if (!isGenerating) {
+      setGenerationStageIndex(0)
+      return
+    }
+    setGenerationStageIndex(0)
+    const id = setInterval(() => {
+      setGenerationStageIndex((index) => Math.min(index + 1, generationStages.length - 1))
+    }, 2400)
+    return () => clearInterval(id)
+  }, [generationStages.length, isGenerating])
 
   useEffect(() => {
     if (data?.activePath && !selectedPathId) {
@@ -152,7 +216,7 @@ export default function LearnWorkspace() {
   const allDone = !!currentSteps.length && currentSteps.every((step) => step.status === 'completed' || step.status === 'mastered')
   const totalDone = currentSteps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
   const totalProgress = currentSteps.length ? Math.round((totalDone / currentSteps.length) * 100) : 0
-  const nextStep = getNextStep(currentSteps)
+  const nextActionableStep = getActionableStep(currentSteps)
 
   const handleSelectPath = (path: LearningPath) => {
     setSelectedPathId(path.id)
@@ -161,24 +225,45 @@ export default function LearnWorkspace() {
 
   const openStepInForge = async (step: LearningStep) => {
     if (!currentPath) return
+    if (!canOpenStep(step)) {
+      toast.error(step.lockedReason || '需要先完成前置任务')
+      return
+    }
+    if (isUnassignedTaskPath(currentPath)) {
+      const cardId = step.cardId
+      if (!cardId) {
+        toast.error('这张灵感草稿缺少有效 ID')
+        return
+      }
+      const cardTitle = step.cardTitle || step.name
+      const cardType = step.cardType || 'fleeting'
+      setActiveLearningStepId(step.id)
+      setSelectedNode({ id: cardId, title: cardTitle, type: cardType })
+      await useAgentStore.getState().openCardThread({ id: cardId, title: cardTitle, type: cardType })
+      setMode('forge')
+      toast.message('已打开 AI 工作台打磨灵感草稿', { description: cardTitle })
+      return
+    }
     try {
       setActiveLearningStepId(step.id)
       const result = await executeStep.mutateAsync({ pathId: currentPath.id, stepId: step.id })
-      setStepSessionIds((prev) => ({ ...prev, [step.id]: result.id }))
+      if (result.pathId) setSelectedPathId(result.pathId)
+      if (result.stepId) setActiveLearningStepId(result.stepId)
+      setStepSessionIds((prev) => ({ ...prev, [result.stepId || step.id]: result.id }))
       const cardId = result?.cardId ?? step.cardId ?? null
       if (!cardId) {
-        toast.error('当前步骤没有绑定到真实卡片，无法打开 Forge')
+        toast.error('当前任务还没有理解卡，无法打开 AI 工作台')
         return
       }
       setSelectedNode({
         id: cardId,
-        title: step.name,
+        title: result.cardTitle || step.cardTitle || step.name,
         type: result.cardType || 'fleeting',
       })
       await useAgentStore.getState().loadSessions()
       await useAgentStore.getState().switchSession(result.id)
       setMode('forge')
-      toast.message('已打开 AI 工作台处理当前任务', { description: step.name })
+      toast.message('已打开 AI 工作台打磨当前任务', { description: step.name })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '无法打开任务')
     }
@@ -225,7 +310,8 @@ export default function LearnWorkspace() {
       setTopic('')
       setPathMaterial('')
       setCreatePanelOpen(false)
-      toast.success('任务路径已创建')
+      const createdCount = path.createdPathCount ?? path.paths?.length ?? 1
+      toast.success(createdCount > 1 ? `已创建 ${createdCount} 条学习路径` : '学习路径已创建')
     } catch (err) {
       const message = err instanceof Error ? err.message : '生成失败'
       setError(message)
@@ -235,12 +321,16 @@ export default function LearnWorkspace() {
 
   const handleImportDocument = async () => {
     if (!documentText.trim()) return
+    if (!topic.trim()) {
+      toast.error('请先填写资料所属主题，系统会据此匹配已有星团')
+      return
+    }
     setError(null)
     try {
       const result = await importDocument.mutateAsync({
         document: documentText,
-        topic: topic.trim() || '导入资料',
-        sourceTitle: topic.trim() || '导入资料',
+        topic: topic.trim(),
+        sourceTitle: topic.trim(),
       })
       setDocumentText('')
       if (result.pathId) {
@@ -258,7 +348,7 @@ export default function LearnWorkspace() {
   const handleDeletePath = async (pathId: string) => {
     if (pathId === '__unassigned_tasks__' || pathId === '__fleeting_inbox__') return
     const path = paths.find((item) => item.id === pathId)
-    if (!window.confirm(`确定删除「${path?.name || '这条路径'}」？相关任务线程也会一起移除。`)) return
+    if (!window.confirm(`确定删除「${path?.name || '这条路径'}」？相关学习线程也会一起移除。`)) return
     try {
       await deletePath.mutateAsync(pathId)
       if (selectedPathId === pathId) {
@@ -281,7 +371,7 @@ export default function LearnWorkspace() {
         setSelectedPathId(fallback)
         setActiveLearningStepId(null)
       }
-      toast.message(archived ? '任务组已归档' : '任务组已恢复')
+      toast.message(archived ? '学习路径已归档' : '学习路径已恢复')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '更新归档状态失败')
     }
@@ -289,7 +379,7 @@ export default function LearnWorkspace() {
 
   const renderPathCard = (path: LearningPath, active: boolean) => {
     const done = path.progress >= 100 || isArchivedPath(path)
-    const next = getNextStep(path.steps)
+    const next = getActionableStep(path.steps)
     const inbox = isUnassignedTaskPath(path)
     const archived = isArchivedPath(path)
     return (
@@ -319,7 +409,7 @@ export default function LearnWorkspace() {
               </div>
             </div>
             <div className="mt-1 line-clamp-2 text-white/30" style={{ fontSize: 'var(--f8)' }}>
-              {path.description || '系统会把导入资料拆成卡片任务，并按路径推进到 AI 工作台。'}
+              {path.description || '系统会把主题拆成任务，每个任务围绕一张灵感草稿推进。'}
             </div>
           </div>
           {!inbox && (
@@ -348,8 +438,8 @@ export default function LearnWorkspace() {
           )}
         </div>
         <div className="mt-3 flex items-center justify-between text-[10px]">
-          <span className="mono text-white/25">{path.source || 'learning'} · {formatTime(path.createdAt)}</span>
-          <span className="mono text-white/35">{path.doneCount}/{path.totalCount}</span>
+          <span className="mono text-white/25">{inbox ? '收件箱' : path.source || 'learning'} · {formatTime(path.createdAt)}</span>
+          <span className="mono text-white/35">{inbox ? `${path.totalCount} 张` : `${path.doneCount}/${path.totalCount}`}</span>
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/40">
           <div
@@ -358,8 +448,8 @@ export default function LearnWorkspace() {
           />
         </div>
         <div className="mt-2 flex items-center justify-between text-[10px]">
-          <span className={`mono ${done ? 'text-green-300' : 'text-purple-300'}`}>{done ? '已完成' : next ? `下一步：${next.name}` : '等待推进'}</span>
-          <span className="mono text-white/20">{inbox ? '零散卡片' : archived ? '已归档' : '路径任务'}</span>
+          <span className={`mono ${done ? 'text-green-300' : 'text-purple-300'}`}>{done ? '已完成' : next ? `当前可学：${next.name}` : '等待前置任务'}</span>
+          <span className="mono text-white/20">{inbox ? '灵感草稿箱' : archived ? '已归档' : '学习路径'}</span>
         </div>
       </div>
     )
@@ -378,7 +468,7 @@ export default function LearnWorkspace() {
                   <span className="mono text-purple-300" style={{ fontSize: 'var(--f10)' }}>PATH PLANNER</span>
                 </div>
                 <div className="mt-1 text-white/30" style={{ fontSize: 'var(--f8)' }}>
-                  创建任务路径，安排零散卡片，再送进 AI 工作台处理
+                  创建学习路径，把当前任务送进 AI 工作台打磨灵感草稿
                 </div>
               </div>
               <button
@@ -397,7 +487,7 @@ export default function LearnWorkspace() {
                 className="flex w-full items-center justify-between rounded-xl border border-white/8 bg-black/20 px-4 py-3 text-left transition-colors hover:border-purple-500/25 hover:bg-purple-500/8"
                 onClick={() => setCreatePanelOpen(true)}
               >
-                <span className="mono text-[10px] text-white/35">新建任务组 / 导入资料</span>
+                <span className="mono text-[10px] text-white/35">新建学习路径 / 导入资料</span>
                 <Plus className="h-3.5 w-3.5 text-purple-300/70" />
               </button>
             ) : (
@@ -420,9 +510,9 @@ export default function LearnWorkspace() {
                 </div>
 
                 <input
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder="主题 / 课程 / 概念"
+	                  value={topic}
+	                  onChange={(e) => setTopic(e.target.value)}
+	                  placeholder={createMode === 'material' ? '资料所属主题（用于匹配已有星团）' : '主题 / 课程 / 概念'}
                   className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-white/85 outline-none placeholder:text-white/20 focus:border-purple-500/40"
                   style={{ fontSize: 'var(--f9)' }}
                 />
@@ -458,8 +548,11 @@ export default function LearnWorkspace() {
                       className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-500/35 bg-purple-500/15 px-4 py-3 text-[10px] mono text-purple-200 transition-colors hover:bg-purple-500/20 disabled:opacity-40"
                     >
                       <Sparkles className="h-3.5 w-3.5" />
-                      {generatePath.isPending ? '生成路径中...' : '生成任务路径'}
+                      {generatePath.isPending ? `AI 正在${currentGenerationStage.label}...` : '生成学习路径'}
                     </button>
+                    {generatePath.isPending && (
+                      <GenerationStatusHint stage={currentGenerationStage} />
+                    )}
                   </>
                 ) : (
                   <>
@@ -467,18 +560,21 @@ export default function LearnWorkspace() {
                       value={documentText}
                       onChange={(e) => setDocumentText(e.target.value)}
                       rows={6}
-                      placeholder="粘贴资料全文，系统会自动抽取概念、生成节点和任务路径"
+                      placeholder="粘贴资料全文，系统会自动抽取概念、生成节点和学习路径"
                       className="w-full resize-none rounded-xl border border-white/10 bg-black/25 px-4 py-3 text-white/75 outline-none placeholder:text-white/20 focus:border-cyan-500/35"
                       style={{ fontSize: 'var(--f9)' }}
                     />
-                    <button
-                      onClick={handleImportDocument}
-                      disabled={importDocument.isPending || !documentText.trim()}
+	                    <button
+	                      onClick={handleImportDocument}
+	                      disabled={importDocument.isPending || !documentText.trim() || !topic.trim()}
                       className="flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-500/35 bg-cyan-500/10 px-4 py-3 text-[10px] mono text-cyan-200 transition-colors hover:bg-cyan-500/15 disabled:opacity-40"
                     >
                       <FileText className="h-3.5 w-3.5" />
-                      {importDocument.isPending ? '导入解析中...' : '导入资料并建路径'}
+                    {importDocument.isPending ? `AI 正在${currentGenerationStage.label}...` : '导入资料并生成路径'}
                     </button>
+                    {importDocument.isPending && (
+                      <GenerationStatusHint stage={currentGenerationStage} />
+                    )}
                   </>
                 )}
 
@@ -514,23 +610,23 @@ export default function LearnWorkspace() {
                 <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03] text-white/25">
                   <Layers3 className="h-5 w-5" />
                 </div>
-                <div className="font-semibold text-white/70" style={{ fontSize: 'var(--f10)' }}>还没有任务路径</div>
+                <div className="font-semibold text-white/70" style={{ fontSize: 'var(--f10)' }}>还没有学习路径</div>
                 <div className="mt-1 text-white/20" style={{ fontSize: 'var(--f8)' }}>
-                  导入一份资料，系统会把它拆成可推进的任务路径
+                  输入主题或导入资料，系统会拆成可推进的学习任务
                 </div>
               </div>
             ) : (
               <div className="space-y-5">
                 {pathBuckets.visible.length === 0 && (
                   <div className="rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-8 text-center text-white/25 mono" style={{ fontSize: 'var(--f9)' }}>
-                    {pathFilter === 'archived' ? '暂无已归档任务组' : '暂无符合筛选的任务组'}
+                    {pathFilter === 'archived' ? '暂无已归档学习路径' : '暂无符合筛选的学习路径'}
                   </div>
                 )}
                 {pathBuckets.inbox.length > 0 && (
                   <div>
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="mono text-[10px] text-cyan-300/80">零散卡片任务组</span>
-                      <span className="mono text-[10px] text-white/25">{pathBuckets.inbox.length}</span>
+                      <span className="mono text-[10px] text-cyan-300/80">灵感草稿箱</span>
+                      <span className="mono text-[10px] text-white/25">{pathBuckets.inbox.reduce((sum, path) => sum + path.totalCount, 0)}</span>
                     </div>
                     <div className="space-y-2">
                       {pathBuckets.inbox.map((path) => renderPathCard(path, path.id === currentPath?.id))}
@@ -539,7 +635,7 @@ export default function LearnWorkspace() {
                 )}
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="mono text-[10px] text-purple-300/80">任务组</span>
+                    <span className="mono text-[10px] text-purple-300/80">学习路径</span>
                     <span className="mono text-[10px] text-white/25">{pathBuckets.active.length + pathBuckets.queued.length}</span>
                   </div>
                   <div className="space-y-2">
@@ -572,7 +668,7 @@ export default function LearnWorkspace() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <Target className="h-4 w-4 text-pink-300" />
-                      <span className="mono text-pink-300" style={{ fontSize: 'var(--f10)' }}>PATH MAP</span>
+                  <span className="mono text-pink-300" style={{ fontSize: 'var(--f10)' }}>学习路线</span>
                       {allDone && (
                         <span className="rounded-full border border-green-500/30 bg-green-500/10 px-2 py-0.5 text-[10px] mono text-green-300">
                           路径已完成
@@ -583,7 +679,7 @@ export default function LearnWorkspace() {
                       {currentPath.name}
                     </div>
                     <div className="mt-1 line-clamp-2 text-white/25" style={{ fontSize: 'var(--f8)' }}>
-                      {currentPath.description || '按这条路径逐张处理卡片，最后把所有步骤沉淀成 Permanent。'}
+                      {currentPath.description || '按这条路径逐步学习，每个任务都会围绕一张理解卡展开。'}
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
@@ -607,12 +703,12 @@ export default function LearnWorkspace() {
                     <div className="mt-1 text-lg text-white/90">{currentSteps.length}</div>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <div className="mono text-[10px] text-white/25">下一任务</div>
-                    <div className="mt-1 truncate text-sm text-cyan-200">{nextStep?.name || '无'}</div>
+                    <div className="mono text-[10px] text-white/25">当前可学</div>
+                    <div className="mt-1 truncate text-sm text-cyan-200">{nextActionableStep?.name || '等待前置任务'}</div>
                   </div>
                   <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <div className="mono text-[10px] text-white/25">线程归档</div>
-                    <div className="mt-1 text-sm text-purple-200">永久卡片自动归档</div>
+                    <div className="mono text-[10px] text-white/25">卡片沉淀</div>
+                    <div className="mt-1 text-sm text-purple-200">永久卡会归档旧线程</div>
                   </div>
                 </div>
               </>
@@ -687,7 +783,7 @@ export default function LearnWorkspace() {
                                       {step.cardId && (
                                         <span className="inline-flex items-center gap-1 rounded-full border border-purple-500/20 px-2 py-0.5 text-purple-200/80">
                                           <BookOpen className="h-3 w-3" />
-                                          绑定卡片
+                                          理解卡：{cardTypeLabel(step.cardType)}
                                         </span>
                                       )}
                                     </div>
@@ -701,7 +797,8 @@ export default function LearnWorkspace() {
                                           e.stopPropagation()
                                           void openStepInForge(step)
                                         }}
-                                        disabled={executeStep.isPending}
+                                        disabled={executeStep.isPending || !canOpenStep(step)}
+                                        title={!canOpenStep(step) ? step.lockedReason || '需要先完成前置任务' : '进入 AI 工作台'}
                                         className="inline-flex items-center gap-1 rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-2 text-[10px] mono text-purple-200 transition-colors hover:bg-purple-500/15 disabled:opacity-40"
                                       >
                                         <ExternalLink className="h-3 w-3" />
@@ -753,10 +850,10 @@ export default function LearnWorkspace() {
           <div className="border-b border-white/5 px-5 py-4">
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4 text-cyan-300" />
-              <span className="mono text-cyan-300" style={{ fontSize: 'var(--f10)' }}>TASK DETAIL</span>
+              <span className="mono text-cyan-300" style={{ fontSize: 'var(--f10)' }}>任务详情</span>
             </div>
             <div className="mt-1 text-white/30" style={{ fontSize: 'var(--f8)' }}>
-              当前任务、卡片绑定和进入 AI 工作台的入口
+              当前任务、理解卡和进入 AI 工作台的入口
             </div>
           </div>
 
@@ -767,7 +864,7 @@ export default function LearnWorkspace() {
                   <div className="mono text-[10px] text-white/25">当前路径</div>
                   <div className="mt-1 font-semibold text-white/85" style={{ fontSize: 'var(--f10)' }}>{currentPath.name}</div>
                   <div className="mt-2 text-white/25" style={{ fontSize: 'var(--f8)' }}>
-                    {currentPath.description || '这条路径会在 AI 工作台中逐个完成并自动归档。'}
+                    {currentPath.description || '这条路径会把主题拆成一组可推进的学习任务。'}
                   </div>
                 </div>
 
@@ -785,10 +882,22 @@ export default function LearnWorkspace() {
                     <div className={`mt-1 text-sm ${statusMeta(currentStep).tone}`}>{statusMeta(currentStep).label}</div>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <div className="mono text-[10px] text-white/25">卡片绑定</div>
-                    <div className="mt-1 text-sm text-white/75">{currentStep.cardId ? '已绑定' : '待生成'}</div>
+                    <div className="mono text-[10px] text-white/25">理解卡</div>
+                    <div className="mt-1 truncate text-sm text-white/75">
+                      {currentStep.cardId ? cardTypeLabel(currentStep.cardType) : '开始任务时创建灵感理解'}
+                    </div>
                   </div>
                 </div>
+
+                {currentStep.cardId && (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4">
+                    <div className="mono text-[10px] text-white/25">本任务理解卡</div>
+                    <div className="mt-1 truncate text-sm text-white/80">{currentStep.cardTitle || currentStep.name}</div>
+                    <div className="mt-2 text-white/25" style={{ fontSize: 'var(--f8)' }}>
+                      AI 工作台会围绕这张理解卡追问、解释和生成资源；你的理解会先写回灵感卡，再由你决定是否沉淀为永久知识。
+                    </div>
+                  </div>
+                )}
 
                 <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 space-y-3">
                   <div className="mono text-[10px] text-white/25">任务信息</div>
@@ -802,18 +911,19 @@ export default function LearnWorkspace() {
                   </div>
                   <div className="flex items-center justify-between gap-3 text-[10px] mono text-white/30">
                     <span>前置条件</span>
-                    <span className="text-white/70">{currentStep.prerequisites?.length ? `${currentStep.prerequisites.length} 项` : '无'}</span>
+                    <span className="text-white/70">{currentStep.lockedReason || (currentStep.prerequisites?.length ? `${currentStep.prerequisites.length} 项` : '无')}</span>
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <button
                     onClick={() => void openStepInForge(currentStep)}
-                    disabled={executeStep.isPending}
+                    disabled={executeStep.isPending || !canOpenStep(currentStep)}
+                    title={!canOpenStep(currentStep) ? currentStep.lockedReason || '需要先完成前置任务' : '进入 AI 工作台'}
                     className="flex w-full items-center justify-center gap-2 rounded-xl border border-purple-500/35 bg-purple-500/15 px-4 py-3 text-[10px] mono text-purple-200 transition-colors hover:bg-purple-500/20 disabled:opacity-40"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    进入 AI 工作台处理
+                    进入 AI 工作台打磨
                   </button>
                   {currentStep.status === 'learning' && (
                     <button
@@ -828,9 +938,9 @@ export default function LearnWorkspace() {
                 </div>
 
                 <div className="rounded-2xl border border-white/10 bg-black/20 px-4 py-4">
-                  <div className="mono text-[10px] text-white/25">路径完成规则</div>
+                  <div className="mono text-[10px] text-white/25">路径进度规则</div>
                   <div className="mt-2 text-white/25" style={{ fontSize: 'var(--f8)' }}>
-                    这条路径下所有卡片都升级为 Permanent 后，相关会话自动归档，任务结束。
+                    路径进度只按任务完成度计算；任务完成不等于卡片永久化。灵感草稿可以继续提炼成永久知识卡，提炼后旧线程会归档。
                   </div>
                   <div className="mt-3 flex items-center gap-2 text-[10px] mono text-white/25">
                     <Circle className="h-3 w-3" />

@@ -43,8 +43,8 @@ export default function CognitionSidebar() {
       <section className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-4">
         <div className="grid grid-cols-3 gap-2 text-center">
           <Metric value={stats.streakDays} label="连续天数" tone="text-purple-300" />
-          <Metric value={stats.mastered} label="永久卡" tone="text-cyan-300" />
-          <Metric value={stats.pendingReview} label="待复习" tone="text-pink-300" />
+          <Metric value={stats.mastered} label="永久知识" tone="text-cyan-300" />
+          <Metric value={stats.pendingReview} label="灵感草稿" tone="text-pink-300" />
         </div>
       </section>
 

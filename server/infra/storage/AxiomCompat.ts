@@ -224,6 +224,7 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
           userId: getCurrentUserId(),
           vaultId: vid,
           cardId: card.id,
+          toCardId: card.id,
           toType: 'permanent',
           status: 'accepted',
         })

@@ -6,7 +6,7 @@
  * multiple internal providers (capability-tracking, knowledge-graph) that are
  * all considered first-party, not external plugins.
  *
- * Hermes limits to 1 external plugin (Honcho/Mem0 etc.) to avoid tool schema
+ * AXIOM limits to 1 external plugin (Honcho/Mem0 etc.) to avoid tool schema
  * bloat. AXIOM's providers are all internal and non-conflicting, so the limit
  * is not needed here.
  */
@@ -82,7 +82,7 @@ export class MemoryManager {
   /**
    * 收集所有 Provider 的系统提示词块
    * 对标 build_system_prompt
-   * 使用 <memory-context> 标签包裹（Hermes context fencing）
+   * 使用 <memory-context> 标签包裹（AXIOM context fencing）
    */
   async buildSystemPrompt(): Promise<string> {
     const blocks: string[] = [];
@@ -103,7 +103,7 @@ export class MemoryManager {
 
     if (blocks.length === 0) return '';
 
-    // Hermes context fencing：防止 LLM 将记忆上下文误认为用户输入
+    // AXIOM context fencing：防止 LLM 将记忆上下文误认为用户输入
     return `<memory-context>\n${blocks.join('\n\n')}\n</memory-context>`;
   }
 

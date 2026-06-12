@@ -68,7 +68,7 @@ export default function LearnList() {
       setStepSessionIds((prev) => ({ ...prev, [step.id]: result.id }))
       if (result?.cardId) cardId = result.cardId
       if (!cardId) {
-        toast.error('当前步骤没有绑定到真实卡片，无法打开 Forge')
+        toast.error('当前任务还没有理解卡，无法打开 AI 工作台')
         return
       }
       setSelectedNode({ id: cardId, title: step.name, type: result.cardType || 'fleeting' })
@@ -223,7 +223,7 @@ export default function LearnList() {
             </p>
             <div className="mt-4 rounded-xl border border-white/5 bg-white/[0.03] px-3 py-2 text-white/35" style={{ fontSize: 'var(--f9)' }}>
               {assessDialog.passed
-                ? assessDialog.cardUpgraded ? '卡片已升级为 Permanent，并会更新学习路径进度。' : '学习路径进度已更新。'
+                ? assessDialog.cardUpgraded ? '卡片已沉淀为永久知识卡，并会更新学习路径进度。' : '学习路径进度已更新。'
                 : '系统会保留当前步骤，并继续推送复习资源到学习资源区。'}
             </div>
             <button
@@ -450,7 +450,7 @@ export default function LearnList() {
                                 ? 'bg-green-500/10 border border-green-500/20 text-green-400/80'
                                 : 'bg-amber-500/10 border border-amber-500/20 text-amber-400/80'
                             }`}>
-                              {evalResults[step.id].passed ? '✓ 已掌握 · 卡片已升级' : evalResults[step.id].feedback}
+                              {evalResults[step.id].passed ? '✓ 已掌握 · 可继续提炼卡片' : evalResults[step.id].feedback}
                             </div>
                           )}
                         </div>

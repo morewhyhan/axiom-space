@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { zValidator } from '@/server/api/validator'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
+import { ensureVaultRootCard } from '@/server/core/domain/concept-graph'
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
@@ -42,6 +43,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const vault = await prisma.vault.create({
     data: { userId, name },
   })
+  await ensureVaultRootCard({ vaultId: vault.id, vaultName: vault.name })
 
   return c.json({ success: true, vault: { id: vault.id, name: vault.name } })
 })

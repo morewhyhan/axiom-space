@@ -208,13 +208,13 @@ export function useAgent() {
     if (!selectedNode && !isConversationSession) {
       const created = await store.createTalkSession()
       if (!created) {
-        store._setError('请先创建一个普通会话，或者先选择一张卡片。')
+        store._setError('请先创建一个自由对话，或者先选择一张灵感草稿。')
         return
       }
     }
 
     if (selectedNode?.type === 'permanent') {
-      store._setError('这张卡片已升级为永久卡片，绑定会话已归档。需要继续讨论时请创建新的 Fleeting 卡片。')
+      store._setError('这张卡片已沉淀为永久知识卡，旧对话已归档。需要继续讨论时请创建新的灵感草稿。')
       return
     }
 

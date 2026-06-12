@@ -15,6 +15,8 @@ import { emitNotification, emitResourceProgress } from '../notification-bus';
 import type { ResourceType } from '../ResourceGenerationState';
 import { createHash } from 'node:crypto';
 import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
+import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 const RESOURCE_LABELS: Record<string, string> = {
   document: '学习文档',
@@ -637,6 +639,8 @@ const extractCardsTool = createTool(
         const { aiManager } = await import('../../ai/AIManager');
         const candidatePrompt = `你是文献概念识别专家。从以下文献内容中，列出所有符合以下条件的核心概念名称（仅返回名称，每行一个，不要序号）：
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 1. 在文献中有明确的定义或解释
 2. 有清晰的边界，不是模糊的泛称
 3. 该概念可以复用到该文献之外的场景
@@ -651,7 +655,7 @@ ${literatureContent.slice(0, 8000)}
 所有内容必须用中文输出。专有名词保留原文。`;
 
         const candidateResult = await aiManager.callAPI(
-          '你是一个精确的概念识别专家。只输出概念名称列表。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+          AGENT_TOOL_PROMPTS.documentConceptCandidate.system,
           [{ role: 'user', content: candidatePrompt }],
         );
 
@@ -694,6 +698,8 @@ ${literatureContent.slice(0, 8000)}
       const { aiManager } = await import('../../ai/AIManager');
       const extractionPrompt = `你是文献概念提取专家。从给定的文献内容中提取所有重要的核心概念。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 提取标准（必须全部满足）：
 1. 概念在文献中有明确的定义或解释（不是仅提及）
 2. 概念有清晰的边界，不是模糊的泛称
@@ -730,7 +736,7 @@ ${literatureContent.slice(0, 8000)}
 所有内容必须用中文输出。专有名词保留原文。`;
 
       const llmResult = await aiManager.callAPI(
-        '你是一个精确的概念提取专家。严格按照JSON格式返回。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.documentConceptExtraction.system,
         [{ role: 'user', content: extractionPrompt }],
       );
 

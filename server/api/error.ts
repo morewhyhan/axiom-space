@@ -1,12 +1,12 @@
 import { z } from 'zod'
 import type { Context } from 'hono'
 import { HTTPException } from 'hono/http-exception'
-import type { StatusCode } from 'hono/utils/http-status'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 
 export class ApiError extends HTTPException {
-  public readonly code?: StatusCode
+  public readonly code?: ContentfulStatusCode
 
-  constructor({ code, message }: { code?: StatusCode; message: string }) {
+  constructor({ code, message }: { code?: ContentfulStatusCode; message: string }) {
     super(code, { message })
     this.code = code
   }
@@ -32,6 +32,7 @@ export function handleError(err: Error, c: Context): Response {
   /**
    * This is a generic error, we should log it and return a 500
    */
+  console.error('[API] Unhandled error:', err)
 
   return c.json(
     {

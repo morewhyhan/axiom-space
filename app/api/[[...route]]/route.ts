@@ -12,17 +12,10 @@ process.on('unhandledRejection', (reason) => {
 })
 
 import { handle } from 'hono/vercel'
-import type { FetchEventLike } from 'hono/types'
 
 async function handler(req: Request) {
   const { default: api } = await import('@/server/api')
-  const event: FetchEventLike = {
-    request: req,
-    respondWith: () => {},
-    passThroughOnException: () => {},
-    waitUntil: () => {},
-  }
-  return handle(api)(req, event)
+  return handle(api)(req)
 }
 
 export {

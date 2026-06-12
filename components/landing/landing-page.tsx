@@ -8,12 +8,20 @@ import { client } from '@/lib/api-client'
 export default function LandingPage({
   showLoadingHint = false,
   isLoggedIn,
+  vaultPickerOpen = false,
   vaultsLoaded = false,
+  vaultLoadError = null,
+  onRetryVaults,
+  onOpenVaultPicker,
   onEnterApp,
 }: {
   showLoadingHint?: boolean
   isLoggedIn?: boolean  // undefined = session 检查中，true = 已登录，false = 未登录
+  vaultPickerOpen?: boolean
   vaultsLoaded?: boolean
+  vaultLoadError?: string | null
+  onRetryVaults?: () => void
+  onOpenVaultPicker?: () => void
   onEnterApp?: () => void
 }) {
   const [showAuth, setShowAuth] = useState<'login' | 'register' | null>(null)
@@ -22,23 +30,44 @@ export default function LandingPage({
   const vaults = useAppStore((s) => s.vaults)
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const setCurrentVaultId = useAppStore((s) => s.setCurrentVaultId)
-  const lastVaultId = useAppStore((s) => s.lastVaultId)
   const setLastVaultId = useAppStore((s) => s.setLastVaultId)
-
-  // Auto-select last used vault, or first vault
-  useEffect(() => {
-    if (!isLoggedIn || vaults.length === 0) return
-    const target = lastVaultId && vaults.find(v => v.id === lastVaultId)
-      ? lastVaultId
-      : vaults[0].id
-    if (target !== currentVaultId) setCurrentVaultId(target)
-  }, [isLoggedIn, vaults, lastVaultId, currentVaultId, setCurrentVaultId])
 
   const handleSelectVault = (id: string) => {
     setLastVaultId(id)
     setCurrentVaultId(id)
     onEnterApp?.()
   }
+
+  const renderGuestIntro = (checkingSession = false) => (
+    <>
+      <h1 className="landing-title select-none">AXIOM</h1>
+      <p className="landing-subtitle select-none">Cognitive Operating System</p>
+      <p className="landing-desc select-none opacity-40">
+        AI 驱动的知识构建系统 —— 将你的思想可视化为星系图谱，<br />
+        让 AI 帮助你整理、连接、深化认知。
+      </p>
+      <div className="landing-cta scale-110 mt-4 transition-all">
+        <button className="landing-btn landing-btn-primary hover:shadow-[0_0_20px_rgba(168,85,247,0.3)]" onClick={() => setShowAuth('login')}>登录</button>
+        <button className="landing-btn landing-btn-secondary" onClick={() => setShowAuth('register')}>注册</button>
+      </div>
+      {checkingSession && <p className="landing-loading-hint">正在恢复会话...</p>}
+    </>
+  )
+
+  const renderSignedInHome = () => (
+    <>
+      <h1 className="landing-title select-none">AXIOM</h1>
+      <p className="landing-subtitle select-none">Workspace Gateway</p>
+      <p className="landing-desc select-none opacity-40">
+        你的登录状态已恢复。选择一个知识库后，系统才会载入图谱、卡片和 AI 工作台上下文。
+      </p>
+      <div className="landing-cta scale-110 mt-4 transition-all">
+        <button className="landing-btn landing-btn-primary landing-btn-large hover:shadow-[0_0_20px_rgba(168,85,247,0.3)]" onClick={onOpenVaultPicker}>
+          进入知识库 <span className="landing-arrow">→</span>
+        </button>
+      </div>
+    </>
+  )
 
   return (
     <div className="landing-root">
@@ -55,21 +84,18 @@ export default function LandingPage({
 
         <div className="landing-hero-content">
           {isLoggedIn === undefined ? (
-            <>
-              <h2 className="landing-section-title">AXIOM</h2>
-              <p className="landing-loading-hint">正在检查登录状态...</p>
-            </>
+            renderGuestIntro(true)
           ) : !isLoggedIn ? (
+            renderGuestIntro(false)
+          ) : !vaultPickerOpen ? (
+            renderSignedInHome()
+          ) : vaultLoadError ? (
             <>
-              <h1 className="landing-title select-none">AXIOM</h1>
-              <p className="landing-subtitle select-none">Cognitive Operating System</p>
-              <p className="landing-desc select-none opacity-40">
-                AI 驱动的知识构建系统 —— 将你的思想可视化为星系图谱，<br />
-                让 AI 帮助你整理、连接、深化认知。
-              </p>
-              <div className="landing-cta scale-110 mt-4 transition-all">
-                <button className="landing-btn landing-btn-primary hover:shadow-[0_0_20px_rgba(168,85,247,0.3)]" onClick={() => setShowAuth('login')}>登录</button>
-                <button className="landing-btn landing-btn-secondary" onClick={() => setShowAuth('register')}>注册</button>
+              <h2 className="landing-section-title">知识库暂时不可用</h2>
+              <p className="landing-loading-hint">{vaultLoadError}</p>
+              <div className="landing-cta mt-4 transition-all">
+                <button className="landing-btn landing-btn-primary" onClick={onRetryVaults}>重试</button>
+                <button className="landing-btn landing-btn-secondary" onClick={() => signOut.mutate()}>退出登录</button>
               </div>
             </>
           ) : !vaultsLoaded ? (
@@ -78,7 +104,7 @@ export default function LandingPage({
               <p className="landing-loading-hint">正在读取你的知识库...</p>
             </>
           ) : vaults.length === 0 ? (
-            <CreateVault onCreated={handleSelectVault} onSkip={onEnterApp} />
+            <CreateVault onCreated={handleSelectVault} />
           ) : (
             <>
               <h2 className="landing-section-title">选择知识库</h2>
@@ -117,8 +143,12 @@ function CreateVault({ onCreated, onSkip }: { onCreated: (id: string) => void; o
       const res = await client.api.vaults.$post({ json: { name: name.trim() } })
       const data: { success: boolean; vault?: { id: string; name: string }; vaults?: Array<{ id: string; name: string }>; error?: string } = await res.json()
       if (data.success && data.vault?.id) {
+        const existingVaults = useAppStore.getState().vaults
+        const nextVaults = existingVaults.some((vault) => vault.id === data.vault!.id)
+          ? existingVaults
+          : [...existingVaults, { id: data.vault.id, name: data.vault.name, cardCount: 0 }]
         useAppStore.getState().setCurrentVaultId(data.vault.id)
-        useAppStore.getState().setVaults([{ id: data.vault.id, name: data.vault.name, cardCount: 0 }])
+        useAppStore.getState().setVaults(nextVaults)
         useAppStore.getState().setLastVaultId(data.vault.id)
         onCreated(data.vault.id)
         return

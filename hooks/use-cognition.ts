@@ -41,6 +41,8 @@ export interface ThinkingPattern {
 }
 
 export interface CognitionData {
+  aiAvailable?: boolean
+  analysisMode?: string
   user: { name: string; joinedAt: string }
   dimensions: CognitiveDimensions
   stats: {
@@ -102,6 +104,8 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     throw new Error(data.error || '获取认知数据失败')
   }
   return {
+    aiAvailable: data.aiAvailable as boolean ?? true,
+    analysisMode: data.analysisMode as string ?? 'ai_assisted_evidence_based',
     user: data.user as CognitionData['user'] ?? { name: '学习者', joinedAt: '' },
     dimensions: data.dimensions as CognitionData['dimensions'] ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0 },
     stats: data.stats as CognitionData['stats'] ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 },

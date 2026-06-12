@@ -32,6 +32,8 @@ export async function recordPromotionAttempt(input: {
   userId?: string | null
   vaultId: string
   cardId?: string | null
+  fromCardId?: string | null
+  toCardId?: string | null
   fromType?: string | null
   toType: string
   status: 'accepted' | 'rejected'
@@ -46,6 +48,8 @@ export async function recordPromotionAttempt(input: {
         userId: input.userId || null,
         vaultId: input.vaultId,
         cardId: input.cardId || null,
+        fromCardId: input.fromCardId || input.cardId || null,
+        toCardId: input.toCardId || (input.status === 'accepted' ? input.cardId || null : null),
         fromType: input.fromType || null,
         toType: input.toType,
         status: input.status,
@@ -126,7 +130,7 @@ export async function recordSourceDocument(input: {
   contentHash: string
   document: string
   metadata?: Record<string, unknown>
-}): Promise<void> {
+}): Promise<{ id: string; chunks: Array<{ id: string; index: number }> } | null> {
   try {
     const sourceDelegate = (prisma as unknown as {
       sourceDocument?: {
@@ -143,7 +147,7 @@ export async function recordSourceDocument(input: {
         createMany: (args: unknown) => Promise<unknown>
       }
     }).sourceDocumentChunk
-    if (!sourceDelegate || !chunkDelegate) return
+    if (!sourceDelegate || !chunkDelegate) return null
     const sourceDocument = await sourceDelegate.upsert({
       where: { vaultId_contentHash: { vaultId: input.vaultId, contentHash: input.contentHash } },
       update: {
@@ -172,7 +176,15 @@ export async function recordSourceDocument(input: {
         })),
       })
     }
-  } catch {}
+    const storedChunks = await prisma.sourceDocumentChunk.findMany({
+      where: { sourceDocumentId: sourceDocument.id },
+      select: { id: true, index: true },
+      orderBy: { index: 'asc' },
+    })
+    return { id: sourceDocument.id, chunks: storedChunks }
+  } catch {
+    return null
+  }
 }
 
 function chunkDocument(document: string): string[] {

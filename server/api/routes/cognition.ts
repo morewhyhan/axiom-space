@@ -77,6 +77,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     recentCards,
     user,
     learningSessions,
+    capabilities,
   ] = await Promise.all([
     prisma.card.findMany({ where: { vaultId: vid }, select: { id: true, type: true, content: true, title: true, clusterId: true, tags: true, createdAt: true, cluster: { select: { name: true, color: true } } } }),
     prisma.card.count({ where: { vaultId: vid, type: 'permanent' } }),
@@ -87,6 +88,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     prisma.card.findMany({ where: { vaultId: vid }, orderBy: { createdAt: 'desc' }, take: 20, select: { createdAt: true } }),
     prisma.user.findUnique({ where: { id: userId }, select: { name: true, createdAt: true } }),
     prisma.learningSession.findMany({ where: { userId, vaultId: vid }, select: { id: true, status: true, createdAt: true } }),
+    prisma.vaultCapability.findMany({ where: { vaultId: vid }, select: { concept: true, masteryLevel: true, status: true } }),
   ])
 
   const n = totalCards.length
@@ -131,7 +133,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   // ── Learning stats ──
   // Streak: count consecutive days with activity
   const streakDays = computeStreak(recentCards.map(c => c.createdAt))
-  const mastered = permCount
+  const mastered = capabilities.filter((capability) => capability.status === 'mastered' || capability.masteryLevel >= 80).length
   const pendingReview = fleetCount
   const chatRounds = learningSessions.length
 
@@ -230,7 +232,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     })
   }
   if (pendingReview > 0) {
-    nextActionItems.push({ text: `整理 ${pendingReview} 张 Fleeting 卡片 — 判断是否值得沉淀`, targetType: 'cardType', targetId: 'fleeting', evidence: [vaultEvidence] })
+    nextActionItems.push({ text: `打磨 ${pendingReview} 张灵感草稿，判断是否值得沉淀`, targetType: 'cardType', targetId: 'fleeting', evidence: [vaultEvidence] })
   }
   if (n > 0 && e < n * 0.5) {
     nextActionItems.push({ text: '发现更多节点间的关联 — 丰富知识网络', targetType: 'edge', targetId: 'related', evidence: [vaultEvidence] })
@@ -242,6 +244,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
   const responseBody = {
     success: true,
+    aiAvailable: true,
+    analysisMode: 'ai_assisted_evidence_based',
     user: { name: user?.name ?? '学习者', joinedAt: user?.createdAt },
     dimensions,
     stats,
@@ -333,7 +337,7 @@ const routes = app
           id: `cluster:${cluster.id}:no-permanent`,
           type: 'no_permanent',
           title: `${cluster.name} 缺少永久卡`,
-          detail: `该星团有 ${draft} 张待整理卡片，但还没有稳定沉淀的永久知识。`,
+          detail: `该星团有 ${draft} 张灵感草稿或文献资料，但还没有稳定沉淀的永久知识。`,
           severity: draft >= 5 ? 'high' : 'medium',
           clusterId: cluster.id,
           sourceObjectType: 'cluster',

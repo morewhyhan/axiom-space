@@ -10,6 +10,8 @@ const axiom = createAxiomCompat(getFileStorage());
 
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath } from "./helpers";
+import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 // 结果缓存
 const spawnCache = new Map<string, { result: any; expiresAt: number }>();
@@ -162,8 +164,8 @@ const webFetchTool = createTool(
       if (params.extract_concepts) {
         try {
           const { aiManager } = await import('../../ai/AIManager');
-          const conceptPrompt = `从以下内容中提取关键概念、术语和关键观点。以 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字），包含 concepts (数组) 和 key_points (数组)。\n\n内容：\n${content.slice(0, 2000)}\n\n## ⚠️ 强制输出语言：中文\n所有内容必须用中文输出。专有名词保留原文。`;
-          const conceptResult = await aiManager.callAPI('你是概念提取专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。', [{ role: 'user', content: conceptPrompt }]);
+          const conceptPrompt = `从以下内容中提取关键概念、术语和关键观点。以 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字），包含 concepts (数组) 和 key_points (数组)。\n\n${AXIOM_KNOWLEDGE_STANDARD}\n\n内容：\n${content.slice(0, 2000)}\n\n## ⚠️ 强制输出语言：中文\n所有内容必须用中文输出。专有名词保留原文。`;
+          const conceptResult = await aiManager.callAPI(AGENT_TOOL_PROMPTS.agentContentConceptExtraction.system, [{ role: 'user', content: conceptPrompt }]);
 
           try {
             const cleaned = conceptResult.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '');
@@ -186,8 +188,8 @@ const webFetchTool = createTool(
       if (params.summary) {
         try {
           const { aiManager } = await import('../../ai/AIManager');
-          const summaryPrompt = `用 100-200 字总结以下内容的核心要点：\n\n${content.slice(0, 1500)}\n\n## ⚠️ 强制输出语言：中文\n所有内容必须用中文输出。专有名词保留原文。`;
-          const summaryResult = await aiManager.callAPI('你是总结专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。', [{ role: 'user', content: summaryPrompt }]);
+          const summaryPrompt = `用 100-200 字总结以下内容的核心要点：\n\n${AXIOM_KNOWLEDGE_STANDARD}\n\n${content.slice(0, 1500)}\n\n## ⚠️ 强制输出语言：中文\n所有内容必须用中文输出。专有名词保留原文。`;
+          const summaryResult = await aiManager.callAPI(AGENT_TOOL_PROMPTS.agentContentSummary.system, [{ role: 'user', content: summaryPrompt }]);
           details.summary = summaryResult;
           response += `\n\n### 摘要\n${summaryResult}`;
         } catch (err) {

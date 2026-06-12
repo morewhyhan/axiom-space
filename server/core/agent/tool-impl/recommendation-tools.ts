@@ -10,6 +10,8 @@ import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId, getCurrentUserId } from '../agent-context';
 import { aiManager } from '../../ai/AIManager';
+import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 /**
  * 基于学习历史推荐下一步
@@ -53,6 +55,8 @@ const recommendNextStepTool = createTool(
 
       const prompt = `你是个性化学习路径推荐专家。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 ${params.topic ? `限定领域: ${params.topic}` : ''}
 
 用户已掌握的概念 (${masteredCards.length} 个):
@@ -87,7 +91,7 @@ ${recentSessions.map(s => `- ${s.concept}`).join('\n')}
 所有内容必须用中文输出。专有名词保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是个性化学习推荐专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.recommendationNextStep.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -172,6 +176,8 @@ const detectLearningStyleTool = createTool(
 
       const prompt = `你是学习风格分析专家。基于以下用户数据，分析用户的学习风格。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 学习会话: ${sessions.length} 次（完成 ${sessions.filter(s => s.status === 'completed').length} 次）
 领域分布: ${[...new Set(sessions.map(s => s.domain))].filter(Boolean).join(', ') || '未知'}
 卡片分布: 永久 ${cardTypeDist.permanent} / 灵感 ${cardTypeDist.fleeting} / 文献 ${cardTypeDist.literature}
@@ -192,7 +198,7 @@ const detectLearningStyleTool = createTool(
 所有内容必须用中文输出。`;
 
       const response = await aiManager.callAPI(
-        '你是学习风格和教育心理学专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.learningStyleDetection.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -300,6 +306,8 @@ const suggestRelatedConceptsTool = createTool(
 
       const prompt = `你是知识图谱推荐专家。为概念 "${card.title}" 推荐相关概念。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 关联类型要求: ${(params.relation_types || ['prerequisite', 'extension', 'application', 'analogy']).join(', ')}
 
 已有直接关联: ${existingEdges.length} 条
@@ -322,7 +330,7 @@ ${otherCards.map(c => `- ${c.title}: ${(c.content || '').slice(0, 80)}`).join('\
 ## ⚠️ 强制输出语言：中文`;
 
       const response = await aiManager.callAPI(
-        '你是知识结构和关联分析专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.relatedConceptSuggestion.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -386,6 +394,8 @@ const recommendResourcesTool = createTool(
     try {
       const prompt = `你是学习资源推荐专家。为 "${params.topic}" 推荐 ${params.count || 3} 个${params.difficulty || 'intermediate'} 难度的学习资源。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 ${params.format && params.format !== 'all' ? `资源类型: ${params.format}` : '资源类型不限'}
 
 以 JSON 格式返回（不要其他文字）：
@@ -407,7 +417,7 @@ ${params.format && params.format !== 'all' ? `资源类型: ${params.format}` : 
 所有内容必须用中文输出。书名、课程名保留原文。`;
 
       const response = await aiManager.callAPI(
-        '你是学习资源推荐和教学设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.resourceRecommendation.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -496,6 +506,8 @@ const adjustDifficultyTool = createTool(
 
       const prompt = `你是自适应学习难度调整专家。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 概念: ${params.concept}
 当前等级: ${params.current_level || 'intermediate'}
 平均测试分数: ${avgScore}/100
@@ -520,7 +532,7 @@ ${scores.length > 0 ? `最近分数: ${scores.join(', ')}` : '暂无测试记录
 ## ⚠️ 强制输出语言：中文`;
 
       const response = await aiManager.callAPI(
-        '你是自适应学习系统设计专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.adaptiveDifficulty.system,
         [{ role: 'user', content: prompt }]
       );
 

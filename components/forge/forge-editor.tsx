@@ -57,13 +57,13 @@ type RelatedRagCard = {
 }
 
 const CARD_TYPE_LABELS: Record<string, string> = {
-  fleeting: '◇ 灵感',
-  literature: '○ 文献',
-  permanent: '◆ 永久',
+  fleeting: '◇ 灵感草稿',
+  literature: '○ 文献资料',
+  permanent: '◆ 永久知识',
 }
 
 function cardTypeLabel(type: string | undefined) {
-  if (!type) return '◇ 灵感'
+  if (!type) return '◇ 灵感草稿'
   return CARD_TYPE_LABELS[type] ?? type
 }
 
@@ -541,7 +541,7 @@ export default function ForgeEditor() {
         missingElements?: string[]
       } = await res.json()
       if (res.ok && data.success) {
-        toast.success('已升级为永久卡片')
+        toast.success('已沉淀为永久知识卡')
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
@@ -568,22 +568,36 @@ export default function ForgeEditor() {
   /** Extract a fleeting note from a literature card */
   const handleExtractFleeting = useCallback(async () => {
     if (!selectedNode || selectedNode.type !== 'literature') return
-    const title = prompt('灵感卡片标题:', `源自「${selectedNode.title}」`)
+    const title = prompt('灵感草稿标题:', `源自「${selectedNode.title}」`)
     if (!title?.trim()) return
     setSaving(true)
     try {
-      const safeTitle = title.trim().replace(/[\/\\]/g, '_').replace(/\.+/g, '_').slice(0, 100)
-      const res = await client.api.vault.write.$post({
+      const res = await (client.api.vault.card[':id']['extract-fleeting'].$post as (args: {
+        param: { id: string }
+        query?: Record<string, string | undefined>
+        json: { title: string; content?: string }
+      }) => Promise<Response>)({
+        param: { id: selectedNode.id },
+        query: currentVaultId ? { vid: currentVaultId } : undefined,
         json: {
-          path: `${safeTitle}.md`,
-          content: `# ${title.trim()}\n\n> 提取自 [[${selectedNode.title}]]\n\n`,
-          type: 'fleeting',
-          vaultId: currentVaultId ?? undefined,
+          title: title.trim(),
+          content: '',
         },
       })
-      const data = await res.json() as { success?: boolean; error?: string }
+      const data = await res.json() as {
+        success?: boolean
+        error?: string
+        card?: { id: string; title: string | null; type: string; content: string }
+      }
       if (res.ok && data.success) {
-        toast.success('灵感卡片已创建')
+        toast.success('灵感草稿已创建')
+        if (data.card?.id) {
+          useAppStore.getState().setSelectedNode({
+            id: data.card.id,
+            title: data.card.title || title.trim(),
+            type: 'fleeting',
+          })
+        }
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
@@ -839,7 +853,7 @@ export default function ForgeEditor() {
                     className="mono text-cyan-400/60 hover:text-cyan-400 hover:bg-cyan-500/10 px-2 py-0.5 rounded transition-colors"
                     style={{ fontSize: 'var(--f8)' }}
                     onClick={handleExtractFleeting}
-                  >◇ 提取灵感</button>
+	                  >◇ 提取灵感草稿</button>
                 )}
               </div>
               <div className="w-px h-3 bg-white/5" />

@@ -10,6 +10,7 @@
  */
 import type { SessionState, ModelConfig, ThinkingLevel } from '@/types/agent';
 import type { ISessionService } from './interfaces';
+import { SESSION_SUMMARY_PROMPT } from '../../ai/prompts';
 
 // In-memory cache replacing localStorage (browser API unavailable in Node.js)
 const _sessionCache = new Map<string, string>();
@@ -193,16 +194,14 @@ export class SessionService implements ISessionService {
       const { aiManager } = await import('../../ai/AIManager');
 
       const summary = await aiManager.callAPI(
-        '你是一个学习会话摘要生成专家。请根据以下对话内容，生成一篇结构化的学习摘要（Markdown 格式），包含：\n'
-          + '1. 会话主题概述\n'
-          + '2. 讨论的关键概念和要点\n'
-          + '3. 用户提出的问题\n'
-          + '4. 核心收获与结论\n'
-          + '保持客观、简洁，以中文输出。',
+        SESSION_SUMMARY_PROMPT.system,
         [
           {
             role: 'user',
-            content: `以下是一次学习对话的记录（共 ${messageCount} 条消息），请生成摘要：\n\n${conversationText.slice(0, 8000)}`,
+            content: SESSION_SUMMARY_PROMPT.buildUserMessage!({
+              messageCount,
+              conversationText,
+            }),
           },
         ],
       );

@@ -10,6 +10,8 @@ import { createTool, toolRegistry } from "../tools";
 import { prisma } from '@/lib/db';
 import { getCurrentVaultId, getCurrentUserId } from '../agent-context';
 import { aiManager } from '../../ai/AIManager';
+import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
+import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 
 /**
  * 创建学习计划
@@ -34,6 +36,8 @@ const createStudyPlanTool = createTool(
       }
 
       const prompt = `你是学习计划设计专家。为以下主题创建一个 ${params.days || 7} 天的详细学习计划。
+
+${AXIOM_KNOWLEDGE_STANDARD}
 
 主题: ${params.topic}
 目标: ${params.goal}
@@ -65,7 +69,7 @@ const createStudyPlanTool = createTool(
 `;
 
       const response = await aiManager.callAPI(
-        '你是学习计划和时间管理专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.learningPlan.system,
         [{ role: 'user', content: prompt }]
       );
 
@@ -281,6 +285,8 @@ const generateProgressReportTool = createTool(
       // 详细报告用 AI 生成分析
       const prompt = `你是学习分析专家。基于以下数据生成一份详细的学习报告。
 
+${AXIOM_KNOWLEDGE_STANDARD}
+
 学习数据:
 - 总会话: ${totalSessions}, 完成率: ${completionRate}%
 - 总学习时长: ${totalHours} 小时, 平均每次: ${avgDuration} 分钟
@@ -305,7 +311,7 @@ const generateProgressReportTool = createTool(
 `;
 
       const response = await aiManager.callAPI(
-        '你是学习分析和教育数据专家。内部推理即可，不要输出思考过程。直接返回 JSON 结果。',
+        AGENT_TOOL_PROMPTS.learningReport.system,
         [{ role: 'user', content: prompt }]
       );
 

@@ -41,13 +41,16 @@ export default function LearningProfile() {
         <section className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
           <div className="mb-4 flex items-center justify-between">
             <PanelHeader title="认知维度" icon={<BrainCircuit className="h-4 w-4" />} />
-            <button
-              className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5"
-              style={{ fontSize: 'var(--f8)' }}
-              onClick={() => useAppStore.getState().setMode('learn')}
-            >
-              维度详情 <ChevronRight className="inline h-3.5 w-3.5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <SourceBadge label="AI 在线 · 证据推导" />
+              <button
+                className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5"
+                style={{ fontSize: 'var(--f8)' }}
+                onClick={() => useAppStore.getState().setMode('learn')}
+              >
+                维度详情 <ChevronRight className="inline h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
           <div className="space-y-3">
             {DIMENSIONS.map(([key, label, gradient]) => {
@@ -74,12 +77,16 @@ export default function LearningProfile() {
           <div className="grid grid-cols-[180px_1fr_44px] gap-5">
             <div className="border-r border-white/8 pr-5">
               <PanelHeader title="知识状态" />
+              <div className="mt-2"><SourceBadge label="卡片库统计" /></div>
               <div className="mt-4 text-4xl font-light text-white/85">{totalCards}</div>
               <div className="mt-1 mono text-white/28" style={{ fontSize: 'var(--f8)' }}>已积累知识点</div>
               <div className="mt-2 mono text-cyan-300/75" style={{ fontSize: 'var(--f8)' }}>连续 {Math.max(stats.streakDays, 0)} 天</div>
             </div>
             <div className="min-w-0">
-              <div className="mb-3 mono text-white/35" style={{ fontSize: 'var(--f8)' }}>重点领域</div>
+              <div className="mb-3 flex items-center gap-2">
+                <span className="mono text-white/35" style={{ fontSize: 'var(--f8)' }}>重点领域</span>
+                <SourceBadge label="星团/标签统计" />
+              </div>
               <div className="mb-4 flex flex-wrap gap-2">
                 {(skills.length > 0 ? skills.slice(0, 6).map((skill) => skill.name) : strengths).slice(0, 6).map((tag, index) => (
                   <span key={tag} className={`rounded-full border px-3 py-1 mono ${index % 2 === 0 ? 'border-cyan-400/15 bg-cyan-400/8 text-cyan-200/80' : 'border-pink-400/15 bg-pink-400/8 text-pink-200/80'}`} style={{ fontSize: 'var(--f8)' }}>{tag}</span>
@@ -111,7 +118,10 @@ export default function LearningProfile() {
 
         <section className="grid grid-cols-[1fr_1.35fr] gap-3">
           <div className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
-            <PanelHeader title="知识分布" icon={<Network className="h-4 w-4" />} />
+            <div className="flex items-center justify-between">
+              <PanelHeader title="知识分布" icon={<Network className="h-4 w-4" />} />
+              <SourceBadge label="真实卡片" />
+            </div>
             <div className="mt-5 grid grid-cols-[140px_1fr] items-center gap-5">
               <Donut domains={topDomains} total={domainTotal} center={totalCards} />
               <div className="space-y-2">
@@ -133,7 +143,10 @@ export default function LearningProfile() {
 
           <div className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
             <div className="mb-3 flex items-center justify-between">
-              <PanelHeader title="知识网络" />
+              <div className="flex items-center gap-2">
+                <PanelHeader title="知识网络" />
+                <SourceBadge label="关系图谱" />
+              </div>
               <button
                 className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5"
                 style={{ fontSize: 'var(--f8)' }}
@@ -142,13 +155,16 @@ export default function LearningProfile() {
                 查看详情
               </button>
             </div>
-            <KnowledgeCloud domains={topDomains} />
+            <KnowledgeNetworkDiagram domains={topDomains} structure={structure} />
           </div>
         </section>
 
         <section className="glass-panel rounded-2xl border border-white/10 bg-black/45 p-5">
           <div className="mb-4 flex items-center justify-between">
-            <PanelHeader title="知识结构" />
+            <div className="flex items-center gap-2">
+              <PanelHeader title="知识结构" />
+              <SourceBadge label="星团结构" />
+            </div>
             <button
               className="rounded-lg border border-white/10 px-3 py-1.5 mono text-white/35 transition-colors hover:bg-white/5"
               style={{ fontSize: 'var(--f8)' }}
@@ -158,7 +174,7 @@ export default function LearningProfile() {
             </button>
           </div>
           <div className="grid grid-cols-[260px_1fr_160px] gap-5">
-              <div className="max-h-44 overflow-y-auto no-scrollbar rounded-xl border border-white/8 bg-white/[0.025] p-4">
+            <div className="max-h-44 overflow-y-auto no-scrollbar rounded-xl border border-white/8 bg-white/[0.025] p-4">
               {structure.length > 0 ? structure.slice(0, 5).map((cluster) => (
                 <div key={cluster.name} className="mb-3 last:mb-0">
                   <div className="flex items-center gap-2 text-white/70" style={{ fontSize: 'var(--f8)' }}>
@@ -174,11 +190,15 @@ export default function LearningProfile() {
                 <div className="text-white/28" style={{ fontSize: 'var(--f9)' }}>暂无知识结构</div>
               )}
             </div>
-            <OrbitMap domains={topDomains} />
+            <KnowledgeFlowDiagram
+              literature={stats.literatureCards ?? 0}
+              fleeting={stats.fleetingCards ?? stats.pendingReview}
+              permanent={stats.permanentCards ?? stats.mastered}
+            />
             <div className="space-y-3">
               <Count label="核心概念" value={stats.permanentCards ?? stats.mastered} tone="text-purple-300" />
-              <Count label="待整理" value={stats.fleetingCards ?? stats.pendingReview} tone="text-cyan-300" />
-              <Count label="文献卡" value={stats.literatureCards ?? 0} tone="text-pink-300" />
+              <Count label="灵感草稿" value={stats.fleetingCards ?? stats.pendingReview} tone="text-cyan-300" />
+              <Count label="文献资料" value={stats.literatureCards ?? 0} tone="text-pink-300" />
             </div>
           </div>
         </section>
@@ -186,7 +206,10 @@ export default function LearningProfile() {
         {gaps.length > 0 && (
           <section className="glass-panel rounded-2xl border border-amber-300/14 bg-amber-300/[0.04] p-5">
             <div className="mb-3 flex items-center justify-between">
-              <PanelHeader title="知识缺口" icon={<Target className="h-4 w-4" />} />
+              <div className="flex items-center gap-2">
+                <PanelHeader title="AI 识别的知识缺口" icon={<Target className="h-4 w-4" />} />
+                <SourceBadge label="证据驱动" />
+              </div>
               <span className="mono text-amber-200/55" style={{ fontSize: 'var(--f8)' }}>{gaps.length}</span>
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -205,7 +228,7 @@ export default function LearningProfile() {
                   }}
                 >
                   <div className="flex items-center gap-2">
-                    <span className={`h-1.5 w-1.5 rounded-full ${gap.severity === 'high' ? 'bg-red-300' : gap.severity === 'medium' ? 'bg-amber-300' : 'bg-cyan-300'}`} />
+                    <span className={`h-1.5 w-1.5 rounded-full ${gap.severity === 'high' ? 'bg-rose-300' : gap.severity === 'medium' ? 'bg-amber-300' : 'bg-cyan-300'}`} />
                     <span className="truncate text-white/72" style={{ fontSize: 'var(--f9)' }}>{gap.title}</span>
                   </div>
                   <p className="mt-1 line-clamp-2 text-white/36" style={{ fontSize: 'var(--f8)' }}>{gap.detail}</p>
@@ -246,6 +269,14 @@ function PanelHeader({ title, icon }: { title: string; icon?: ReactNode }) {
   )
 }
 
+function SourceBadge({ label }: { label: string }) {
+  return (
+    <span className="rounded-md border border-white/8 bg-white/[0.035] px-1.5 py-0.5 mono text-white/28" style={{ fontSize: 'var(--f7)' }}>
+      {label}
+    </span>
+  )
+}
+
 function Donut({ domains, total, center }: { domains: Array<{ domain: string; color: string; weight?: number; hours?: number }>; total: number; center: number }) {
   let cursor = 0
   const gradient = domains.length > 0
@@ -270,55 +301,84 @@ function Donut({ domains, total, center }: { domains: Array<{ domain: string; co
   )
 }
 
-function KnowledgeCloud({ domains }: { domains: Array<{ domain: string; color: string; weight?: number; hours?: number }> }) {
-  const nodes = Array.from({ length: 72 }, (_, index) => {
-    const angle = index * 0.72
-    const radius = 12 + (index % 9) * 8 + (index % 3) * 5
+function KnowledgeNetworkDiagram({
+  domains,
+  structure,
+}: {
+  domains: Array<{ domain: string; color: string; weight?: number; hours?: number }>
+  structure: Array<{ name: string; color: string; children: Array<{ name: string }> }>
+}) {
+  const source = domains.length > 0
+    ? domains.map((domain) => ({ name: domain.domain, color: domain.color || '#22d3ee', weight: getDomainWeight(domain) }))
+    : structure.slice(0, 5).map((cluster) => ({ name: cluster.name, color: cluster.color || '#8b5cf6', weight: Math.max(cluster.children.length, 1) }))
+  const nodes = source.slice(0, 6).map((item, index) => {
+    const angle = (Math.PI * 2 * index) / Math.max(source.length, 1) - Math.PI / 2
+    const radius = 50 + (index % 2) * 15
     return {
-      x: 150 + Math.cos(angle) * radius + ((index * 17) % 25) - 12,
-      y: 76 + Math.sin(angle) * radius * 0.55 + ((index * 11) % 18) - 9,
-      color: domains[index % Math.max(domains.length, 1)]?.color || (index % 2 ? '#8b5cf6' : '#22d3ee'),
-      size: index % 11 === 0 ? 3 : 1.8,
+      ...item,
+      x: 150 + Math.cos(angle) * radius * 1.45,
+      y: 78 + Math.sin(angle) * radius * 0.72,
+      size: 8 + Math.min(12, item.weight * 3),
     }
   })
+
   return (
-    <svg viewBox="0 0 300 150" className="h-40 w-full">
+    <svg viewBox="0 0 300 156" className="h-40 w-full overflow-visible">
       <defs>
-        <radialGradient id="cogCore" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor="#f472b6" stopOpacity="0.78" />
-          <stop offset="100%" stopColor="#22d3ee" stopOpacity="0" />
-        </radialGradient>
+        <filter id="networkGlow" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur stdDeviation="4" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
       </defs>
-      <ellipse cx="150" cy="75" rx="60" ry="28" fill="url(#cogCore)" opacity="0.55" />
       {nodes.map((node, index) => (
-        <circle key={index} cx={node.x} cy={node.y} r={node.size} fill={node.color} opacity={0.35 + (index % 5) * 0.12} />
+        <line key={`line-${node.name}`} x1="150" y1="78" x2={node.x} y2={node.y} stroke={node.color} strokeOpacity="0.22" strokeWidth="1.2" />
       ))}
-      <circle cx="150" cy="75" r="7" fill="#f472b6" />
+      <circle cx="150" cy="78" r="16" fill="rgba(244,114,182,0.18)" stroke="rgba(244,114,182,0.55)" filter="url(#networkGlow)" />
+      <text x="150" y="82" textAnchor="middle" fill="rgba(255,255,255,0.72)" fontSize="9">知识库</text>
+      {nodes.map((node) => (
+        <g key={node.name}>
+          <circle cx={node.x} cy={node.y} r={node.size} fill={node.color} fillOpacity="0.18" stroke={node.color} strokeOpacity="0.82" />
+          <circle cx={node.x} cy={node.y} r="3" fill={node.color} />
+          <text x={node.x} y={node.y + node.size + 12} textAnchor="middle" fill="rgba(255,255,255,0.48)" fontSize="8">
+            {node.name.slice(0, 8)}
+          </text>
+        </g>
+      ))}
+      {nodes.length === 0 && <text x="150" y="82" textAnchor="middle" fill="rgba(255,255,255,0.35)" fontSize="10">暂无网络数据</text>}
     </svg>
   )
 }
 
-function OrbitMap({ domains }: { domains: Array<{ color: string }> }) {
-  const satellites = Array.from({ length: 26 }, (_, index) => {
-    const angle = (Math.PI * 2 * index) / 26
-    const radius = 25 + (index % 4) * 14
-    return {
-      x: 190 + Math.cos(angle) * radius,
-      y: 75 + Math.sin(angle) * radius * 0.72,
-      color: domains[index % Math.max(domains.length, 1)]?.color || (index % 2 ? '#8b5cf6' : '#22d3ee'),
-      size: index % 5 === 0 ? 5 : 3,
-    }
-  })
+function KnowledgeFlowDiagram({ literature, fleeting, permanent }: { literature: number; fleeting: number; permanent: number }) {
+  const stages = [
+    { label: '文献资料', value: literature, color: '#f472b6', x: 62 },
+    { label: '灵感草稿', value: fleeting, color: '#22d3ee', x: 190 },
+    { label: '永久知识', value: permanent, color: '#a855f7', x: 318 },
+  ]
+
   return (
-    <svg viewBox="0 0 380 150" className="h-44 w-full">
-      {[28, 48, 70].map((r) => <ellipse key={r} cx="190" cy="75" rx={r * 1.45} ry={r * 0.72} fill="none" stroke="rgba(255,255,255,0.08)" />)}
-      {satellites.map((node, index) => (
-        <g key={index}>
-          <line x1="190" y1="75" x2={node.x} y2={node.y} stroke={node.color} strokeOpacity="0.18" />
-          <circle cx={node.x} cy={node.y} r={node.size} fill={node.color} opacity="0.8" />
+    <svg viewBox="0 0 380 150" className="h-44 w-full overflow-visible">
+      <defs>
+        <marker id="flowArrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+          <path d="M0,0 L8,4 L0,8 Z" fill="rgba(255,255,255,0.35)" />
+        </marker>
+      </defs>
+      <path d="M92 74 C124 48, 128 48, 158 74" fill="none" stroke="rgba(255,255,255,0.20)" strokeWidth="1.5" markerEnd="url(#flowArrow)" />
+      <path d="M220 74 C252 48, 256 48, 286 74" fill="none" stroke="rgba(255,255,255,0.20)" strokeWidth="1.5" markerEnd="url(#flowArrow)" />
+      {stages.map((stage) => (
+        <g key={stage.label}>
+          <rect x={stage.x - 44} y="48" width="88" height="58" rx="12" fill={stage.color} fillOpacity="0.08" stroke={stage.color} strokeOpacity="0.36" />
+          <circle cx={stage.x} cy="48" r="5" fill={stage.color} />
+          <text x={stage.x} y="73" textAnchor="middle" fill="rgba(255,255,255,0.76)" fontSize="10">{stage.label}</text>
+          <text x={stage.x} y="93" textAnchor="middle" fill={stage.color} fontSize="18" fontWeight="600">{stage.value}</text>
         </g>
       ))}
-      <circle cx="190" cy="75" r="13" fill="#f472b6" filter="drop-shadow(0 0 12px rgba(244,114,182,0.65))" />
+      <text x="190" y="132" textAnchor="middle" fill="rgba(255,255,255,0.32)" fontSize="9">
+        文献资料保留证据，灵感草稿负责打磨，永久知识代表稳定沉淀
+      </text>
     </svg>
   )
 }

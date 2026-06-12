@@ -10,23 +10,7 @@
  */
 
 import { getAuditLogger, LogCategory } from '../audit/AuditLogger';
-
-const MEMORY_REVIEW_PROMPT = `Review the conversation above and consider saving to memory if appropriate.
-
-Focus on:
-1. Has the user revealed things about themselves — their persona, desires, preferences, or personal details worth remembering?
-2. Has the user expressed expectations about how you should behave, their work style, or ways they want you to operate?
-
-If something stands out, save it using the memory tool.
-If nothing is worth saving, just say 'Nothing to save.' and stop.`;
-
-const SKILL_REVIEW_PROMPT = `Review the conversation above and consider saving or updating a skill if appropriate.
-
-Focus on: was a non-trivial approach used to complete a task that required trial and error, or changing course due to experiential findings along the way, or did the user expect or desire a different method or outcome?
-
-If a relevant skill already exists, update it with what you learned.
-Otherwise, create a new skill if the approach is reusable.
-If nothing is worth saving, just say 'Nothing to save.' and stop.`;
+import { BACKGROUND_REVIEW_PROMPT } from '../../ai/prompts';
 
 export interface ReviewableMessage {
   role: 'user' | 'assistant' | 'system' | 'tool';
@@ -120,10 +104,7 @@ export class BackgroundReview {
     const agent = this.agentFactory.createReviewAgent();
 
     try {
-      // Combined review prompt
-      const reviewPrompt = MEMORY_REVIEW_PROMPT + '\n\n---\n\n' + SKILL_REVIEW_PROMPT;
-
-      const result = await agent.run(reviewPrompt, messages);
+      const result = await agent.run(BACKGROUND_REVIEW_PROMPT.system, messages);
 
       return {
         type: 'combined',

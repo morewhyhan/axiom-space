@@ -75,7 +75,7 @@ export default function CognitiveRadar() {
             <div className="font-bold text-pink-300" style={{ fontSize: 'var(--f10)' }}>
               {loading ? '—' : stats.pendingReview}
             </div>
-            <div className="mono text-white/20 mt-0.5" style={{ fontSize: 'var(--f7)' }}>待整理</div>
+            <div className="mono text-white/20 mt-0.5" style={{ fontSize: 'var(--f7)' }}>灵感草稿</div>
           </div>
           <div className="text-center">
             <div className="font-bold text-white/50" style={{ fontSize: 'var(--f10)' }}>

@@ -7,6 +7,7 @@ import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
 import { safeParseTags } from './vault'
+import { CONTAINS_EDGE_TYPE, ROOT_CARD_PATH, ensureVaultRootCard } from '@/server/core/domain/concept-graph'
 
 function sanitizeClusterColor(color: unknown): string | undefined {
   if (typeof color !== 'string') return undefined
@@ -41,16 +42,50 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: true, nodes: [] })
 
+    const rootCard = await ensureVaultRootCard({ vaultId: vault.id, vaultName: vault.name })
     const cards = await prisma.card.findMany({
       where: { vaultId: vault.id },
-      select: { id: true, title: true, type: true, clusterId: true, tags: true, createdAt: true, updatedAt: true, cluster: { select: { name: true, color: true } } },
+      select: { id: true, title: true, path: true, type: true, clusterId: true, tags: true, createdAt: true, updatedAt: true, cluster: { select: { name: true, color: true } } },
     })
+    const containsEdges = await prisma.edge.findMany({
+      where: { vaultId: vault.id, type: CONTAINS_EDGE_TYPE },
+      select: { sourceId: true, targetId: true },
+    })
+    const cardById = new Map(cards.map((card) => [card.id, card]))
+    const parentByChild = new Map<string, string>()
+    const childrenByParent = new Map<string, string[]>()
+    for (const edge of containsEdges) {
+      if (!cardById.has(edge.sourceId) || !cardById.has(edge.targetId)) continue
+      if (!parentByChild.has(edge.targetId)) parentByChild.set(edge.targetId, edge.sourceId)
+      childrenByParent.set(edge.sourceId, [...(childrenByParent.get(edge.sourceId) || []), edge.targetId])
+    }
+    const rootId = rootCard.id
+    const depthById = new Map<string, number>([[rootId, 0]])
+    const pathById = new Map<string, string[]>([[rootId, [rootCard.title || vault.name || '知识库']]])
+    const queue = [rootId]
+    while (queue.length > 0) {
+      const current = queue.shift()!
+      const currentDepth = depthById.get(current) ?? 0
+      const currentPath = pathById.get(current) || []
+      for (const childId of childrenByParent.get(current) || []) {
+        if (depthById.has(childId)) continue
+        const child = cardById.get(childId)
+        depthById.set(childId, currentDepth + 1)
+        pathById.set(childId, [...currentPath, child?.title || childId])
+        queue.push(childId)
+      }
+    }
     return c.json({
       success: true,
       nodes: cards.map((card) => ({
-        id: card.id, title: card.title, type: card.type, clusterId: card.clusterId,
+        id: card.id, title: card.title, path: card.path, type: card.type, clusterId: card.clusterId,
         clusterName: card.cluster?.name ?? null, clusterColor: card.cluster?.color ?? null,
         tags: card.tags ? safeParseTags(card.tags) : [],
+        parentId: parentByChild.get(card.id) ?? null,
+        depth: depthById.get(card.id) ?? null,
+        childCount: childrenByParent.get(card.id)?.length ?? 0,
+        isRoot: card.id === rootId || card.path === ROOT_CARD_PATH,
+        hierarchyPath: pathById.get(card.id) ?? [],
         createdAt: card.createdAt.toISOString(),
         updatedAt: card.updatedAt.toISOString(),
       })),
