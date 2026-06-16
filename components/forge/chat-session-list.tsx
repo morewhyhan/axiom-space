@@ -135,11 +135,6 @@ export default function ChatSessionList() {
 
   const talkSessions = allTalkSessions
 
-  const counts = {
-    tasks: allTaskPaths.length,
-    talks: allTalkSessions.length,
-  }
-
   const handleOpenStep = async (path: LearningPath, step: LearningStep) => {
     if (!canOpenStep(step)) {
       toast.error(step.lockedReason || '需要先完成前置任务')
@@ -223,24 +218,21 @@ export default function ChatSessionList() {
 
   return (
     <aside
-      className="side-slot visible flex-col pointer-events-auto"
+      className="side-slot visible forge-context-tray flex-col pointer-events-auto"
       style={{ width: '100%', flex: 1, padding: 'var(--panel-py) 0' }}
     >
-      <div className="glass-panel rounded-2xl flex-1 flex flex-col overflow-hidden border-purple-500/20 shadow-[0_0_28px_rgba(244,114,182,0.06)]">
-        <div className="border-b border-white/8 px-5 py-4">
+      <div className="glass-panel workspace-surface workspace-context-surface rounded-2xl flex-1 flex flex-col overflow-hidden border-purple-500/20 shadow-[0_0_28px_rgba(244,114,182,0.06)]">
+        <div className="workspace-panel-head border-b border-white/8 px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <FolderKanban className="h-4 w-4 text-pink-300/80" />
                 <div className="mono text-white/35 uppercase tracking-[0.22em]" style={{ fontSize: 'var(--f8)' }}>
-                  AI Workspace
+                  Context
                 </div>
               </div>
               <div className="mt-1 text-white/88 font-medium" style={{ fontSize: 'var(--f10)' }}>
                 学习路径与自由对话
-              </div>
-              <div className="mt-1 text-white/22 leading-relaxed" style={{ fontSize: 'var(--f8)' }}>
-                从当前学习任务进入卡片工作；自由对话用于临时探索。
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <TypeLegend color={TYPE_COLOR.fleeting} label="灵感草稿" />
@@ -262,11 +254,6 @@ export default function ChatSessionList() {
             >
               <MessageSquareText className="h-4 w-4" />
             </button>
-          </div>
-
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <SummaryPill label="学习路径" value={counts.tasks} icon={Layers3} tone="text-pink-300" />
-            <SummaryPill label="自由对话" value={counts.talks} icon={MessageSquareText} tone="text-cyan-300" />
           </div>
 
           <div className="mt-4 flex gap-1 rounded-xl border border-white/8 bg-black/25 p-1">
@@ -665,28 +652,6 @@ function TypeLegend({ color, label }: { color: string; label: string }) {
       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
       {label}
     </span>
-  )
-}
-
-function SummaryPill({
-  label,
-  value,
-  icon: Icon,
-  tone,
-}: {
-  label: string
-  value: number
-  icon: ComponentType<{ className?: string }>
-  tone: string
-}) {
-  return (
-    <div className="rounded-xl border border-white/8 bg-white/[0.03] px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <div className="mono text-white/25" style={{ fontSize: 'var(--f7)' }}>{label}</div>
-        <Icon className={`h-3.5 w-3.5 ${tone}`} />
-      </div>
-      <div className={`mt-1 font-semibold ${tone}`} style={{ fontSize: 'var(--f10)' }}>{value}</div>
-    </div>
   )
 }
 

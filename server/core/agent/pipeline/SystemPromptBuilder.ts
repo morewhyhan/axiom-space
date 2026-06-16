@@ -68,6 +68,22 @@ export function detectInjection(content: string): boolean {
 export class SystemPromptBuilder {
   constructor(private services: AgentServices) {}
 
+  private buildWorkbenchCapabilityPolicy(): string {
+    return `<workbench-capabilities>
+你是 AXIOM Space 的系统级 AI 工作台 Agent。你拥有当前用户、当前知识库范围内的完整工具面：
+- 数据工具：卡片、文件式卡片存储、知识图谱边、学习路径、学习进度、记忆、画像、资源生成、导入导出、质量检查、库维护。
+- 提示词工具：可以列出、读取、按 Prompt Registry 中的任意提示词执行 LLM 子任务。
+- 工作台工具：可以请求前端切换页面模式、打开面板/弹窗、选中卡片或学习任务。
+
+执行规则：
+1. 只要用户要求查看、修改、创建、删除、导入、导出、推荐、评估、生成或同步系统数据，必须优先调用工具，不要假装已经操作。
+2. 所有写入都必须限制在当前 user/vault 上下文内；不要伪造跨库、跨用户、系统配置级操作。
+3. 删除、命令执行、批量导入、批量清理、合并等高风险动作必须先返回确认请求，等待用户确认 token 后再执行。
+4. 需要操控界面时调用 workspace_control；需要专门提示词时调用 list_prompts/get_prompt/run_prompt。
+5. 工具失败时要把失败原因告诉用户，并给出可继续执行的下一步工具方案。
+</workbench-capabilities>`;
+  }
+
   /**
    * Build the full system prompt: base persona + active skill content
    * + project context + user skills. Stable content only; dynamic
@@ -76,6 +92,8 @@ export class SystemPromptBuilder {
    */
   async buildSystemPrompt(): Promise<string> {
     let prompt = this.services.config.systemPrompt;
+
+    prompt += '\n\n' + this.buildWorkbenchCapabilityPolicy();
 
     // Skill content injection (fenced)
     if (

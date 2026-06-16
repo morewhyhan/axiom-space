@@ -12,3 +12,5 @@ export { registerMemoryTools } from './memory-tools';
 export { registerAgentTools } from './agent-tools';
 export { registerResourceTools } from './resource-tools';
 export { registerImportDocumentTool } from './import-document-tool';
+export { registerPromptTools } from './prompt-tools';
+export { registerWorkspaceTools } from './workspace-tools';

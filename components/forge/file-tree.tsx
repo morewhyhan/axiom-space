@@ -204,9 +204,9 @@ export default function FileTree() {
   }
 
   return (
-    <aside className="side-slot visible flex-col pointer-events-auto" style={{ width: '100%', flex: 1, padding: 'var(--panel-py) 0' }}>
-      <div className="glass-panel flex flex-1 flex-col overflow-hidden rounded-2xl border-white/10 bg-black/45">
-        <div className="border-b border-white/8 px-3 py-3">
+    <aside className="side-slot visible forge-card-tray flex-col pointer-events-auto" style={{ width: '100%', flex: 1, padding: 'var(--panel-py) 0' }}>
+      <div className="glass-panel workspace-surface workspace-library-surface flex flex-1 flex-col overflow-hidden rounded-2xl border-white/10 bg-black/45">
+        <div className="workspace-panel-head border-b border-white/8 px-3 py-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
               <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-purple-400/18 bg-purple-400/8 text-purple-200">
@@ -214,7 +214,7 @@ export default function FileTree() {
               </div>
               <div className="min-w-0">
                 <div className="mono text-[9px] uppercase tracking-[0.16em] text-white/42">Cards</div>
-                <div className="truncate text-[11px] text-white/76">知识空间</div>
+                <div className="truncate text-[11px] text-white/76">卡片库</div>
               </div>
             </div>
             <div className="mono text-[8px] text-white/24">{filteredNodes.length}/{nodes.length}</div>

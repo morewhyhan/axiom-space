@@ -18,6 +18,8 @@ import { registerLearningManagementTools } from "./tool-impl/learning-management
 import { registerContentQualityTools } from "./tool-impl/content-quality-tools";
 import { registerVaultMaintenanceTools } from "./tool-impl/vault-maintenance-tools";
 import { registerImportDocumentTool } from "./tool-impl/import-document-tool";
+import { registerPromptTools } from "./tool-impl/prompt-tools";
+import { registerWorkspaceTools } from "./tool-impl/workspace-tools";
 
 export function registerBuiltinTools(): void {
   registerFileTools();
@@ -37,4 +39,6 @@ export function registerBuiltinTools(): void {
   registerContentQualityTools();
   registerVaultMaintenanceTools();
   registerImportDocumentTool();
+  registerPromptTools();
+  registerWorkspaceTools();
 }

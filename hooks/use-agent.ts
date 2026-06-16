@@ -11,7 +11,7 @@
 import { useCallback, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAgentStore } from '@/stores/agent-store'
-import { useAppStore } from '@/stores/mode-store'
+import { useAppStore, type GraphLayoutMode, type Mode, type PanelId, type PanelZone } from '@/stores/mode-store'
 import { useAuthSession } from '@/hooks/use-auth'
 import { getSiteUrl } from '@/lib/site-url'
 import { client } from '@/lib/api-client'
@@ -24,6 +24,164 @@ export type { AgentMessage, SessionSummary }
 // Module-level guard: prevent double auto-init when ChatSessionList and
 // ForgeChat both mount in the same render cycle for the same vault.
 let autoInitVaultId: string | null = null
+
+type WorkspaceAction =
+  | { type: 'set_mode'; mode?: unknown }
+  | { type: 'open_modal'; modal?: unknown }
+  | { type: 'close_modal' }
+  | { type: 'set_chat_panel_open'; open?: unknown }
+  | { type: 'set_panel'; panel?: unknown; open?: unknown; zone?: unknown }
+  | { type: 'set_right_panel_view'; view?: unknown }
+  | { type: 'set_graph_layout'; layout?: unknown }
+  | { type: 'set_graph_hover_attention'; enabled?: unknown }
+  | { type: 'set_immersive'; enabled?: unknown }
+  | { type: 'set_oracle'; oracle?: unknown }
+  | { type: 'select_card'; card?: unknown }
+  | { type: 'select_learning_context'; pathId?: unknown; stepId?: unknown }
+  | { type: 'clear_selection' }
+  | { type: 'select_vault'; vaultId?: unknown }
+  | { type: 'refresh_workspace' }
+
+const VALID_MODES: readonly Mode[] = ['dashboard', 'forge', 'galaxy', 'cognition', 'learn']
+const VALID_PANELS: readonly PanelId[] = ['fileTree', 'sessionList', 'editor']
+const VALID_ZONES: readonly PanelZone[] = ['left', 'right']
+const VALID_GRAPH_LAYOUTS: readonly GraphLayoutMode[] = ['galaxy', 'flat', 'radial', 'concentric', 'layered', 'matrix', 'task-flow', 'timeline', 'mastery', 'evidence']
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (['true', '1', 'yes', 'open', 'on', 'enabled'].includes(normalized)) return true
+    if (['false', '0', 'no', 'close', 'off', 'disabled'].includes(normalized)) return false
+  }
+  return fallback
+}
+
+function setPanelVisibility(panel: PanelId, open: boolean, zone?: PanelZone) {
+  const app = useAppStore.getState()
+  const next = {
+    left: app.panelLayout.left.filter((item) => item !== panel),
+    right: app.panelLayout.right.filter((item) => item !== panel),
+  }
+
+  if (open) {
+    const targetZone = zone ?? (panel === 'editor' ? 'right' : 'left')
+    next[targetZone] = [...next[targetZone], panel]
+  }
+
+  app.setPanelLayout(next)
+  if (panel === 'fileTree') app.setFilePanelOpen(open)
+  if (panel === 'sessionList') app.setSessionsPanelOpen(open)
+  if (panel === 'editor') app.setRightPanelOpen(open)
+}
+
+function applyWorkspaceActions(
+  actions: unknown[],
+  queryClient: ReturnType<typeof useQueryClient>,
+  fallbackVaultId: string,
+) {
+  for (const raw of actions) {
+    if (!raw || typeof raw !== 'object') continue
+    const action = raw as WorkspaceAction
+    const app = useAppStore.getState()
+
+    if (action.type === 'set_mode' && typeof action.mode === 'string' && VALID_MODES.includes(action.mode as Mode)) {
+      app.setMode(action.mode as Mode)
+      continue
+    }
+
+    if (action.type === 'open_modal' && typeof action.modal === 'string' && action.modal.trim()) {
+      app.openModal(action.modal.trim())
+      continue
+    }
+
+    if (action.type === 'close_modal') {
+      app.closeModal()
+      continue
+    }
+
+    if (action.type === 'set_chat_panel_open') {
+      app.setChatPanelOpen(asBoolean(action.open))
+      continue
+    }
+
+    if (action.type === 'set_panel' && typeof action.panel === 'string') {
+      const panel = action.panel as PanelId
+      const zone = typeof action.zone === 'string' && VALID_ZONES.includes(action.zone as PanelZone)
+        ? action.zone as PanelZone
+        : undefined
+      if (VALID_PANELS.includes(panel)) setPanelVisibility(panel, asBoolean(action.open, true), zone)
+      continue
+    }
+
+    if (action.type === 'set_right_panel_view' && (action.view === 'editor' || action.view === 'read')) {
+      app.setRightPanelView(action.view)
+      continue
+    }
+
+    if (action.type === 'set_graph_layout' && typeof action.layout === 'string' && VALID_GRAPH_LAYOUTS.includes(action.layout as GraphLayoutMode)) {
+      app.setGraphLayoutMode(action.layout as GraphLayoutMode)
+      continue
+    }
+
+    if (action.type === 'set_graph_hover_attention') {
+      app.setGraphHoverAttention(asBoolean(action.enabled, true))
+      continue
+    }
+
+    if (action.type === 'set_immersive') {
+      app.setImmersive(asBoolean(action.enabled, true))
+      continue
+    }
+
+    if (action.type === 'set_oracle' && typeof action.oracle === 'string' && action.oracle.trim()) {
+      app.setOracle(action.oracle.trim())
+      continue
+    }
+
+    if (action.type === 'select_card' && action.card && typeof action.card === 'object') {
+      const card = action.card as { id?: unknown; title?: unknown; type?: unknown }
+      if (typeof card.id === 'string') {
+        app.setSelectedNode({
+          id: card.id,
+          title: typeof card.title === 'string' && card.title.trim() ? card.title : 'Untitled',
+          type: typeof card.type === 'string' && card.type.trim() ? card.type : 'fleeting',
+        })
+        app.setMode('forge')
+        setPanelVisibility('editor', true, 'right')
+      }
+      continue
+    }
+
+    if (action.type === 'select_learning_context') {
+      app.setSelectedPathId(typeof action.pathId === 'string' ? action.pathId : null)
+      app.setActiveLearningStepId(typeof action.stepId === 'string' ? action.stepId : null)
+      app.setMode('learn')
+      continue
+    }
+
+    if (action.type === 'clear_selection') {
+      app.clearSelectedNode()
+      app.setSelectedPathId(null)
+      app.setActiveLearningStepId(null)
+      continue
+    }
+
+    if (action.type === 'select_vault' && typeof action.vaultId === 'string' && action.vaultId.trim()) {
+      const vaultId = action.vaultId.trim()
+      app.setCurrentVaultId(vaultId)
+      app.clearSelectedNode()
+      app.setSelectedPathId(null)
+      app.setActiveLearningStepId(null)
+      invalidateWorkspaceQueries(queryClient, vaultId)
+      continue
+    }
+
+    if (action.type === 'refresh_workspace') {
+      invalidateWorkspaceQueries(queryClient, useAppStore.getState().currentVaultId ?? fallbackVaultId)
+    }
+  }
+}
 
 function extractConfirmationRequest(payload: any): AgentConfirmationRequest | null {
   if (!payload || payload.type !== 'tool_end' || payload.requiresUserInput !== true) return null
@@ -321,6 +479,10 @@ export function useAgent() {
                     return typeof value.filePath === 'string'
                   }),
                 )
+              }
+              if (payload.type === 'workspace_action' && Array.isArray(payload.actions)) {
+                applyWorkspaceActions(payload.actions, queryClient, currentVaultId)
+                useAgentStore.getState()._setCurrentProgress('')
               }
               if (payload.type === 'tool_end') {
                 useAgentStore.getState()._setCurrentProgress('')

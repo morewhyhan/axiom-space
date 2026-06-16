@@ -93,16 +93,27 @@ const app = new Hono<{ Variables: { userId: string } }>()
             const toolText = extractToolResultText(result)
             const details = (result as { details?: unknown } | null)?.details
             const interactive = isInteractiveToolResult(toolName, details)
+            const workspaceActions = extractWorkspaceActions(details)
             if (toolName === 'push_resource' && toolText.trim()) {
               toolSummaries.push(toolText.trim())
+            }
+            if (workspaceActions.length > 0) {
+              stream.writeSSE({
+                event: 'workspace_action',
+                data: JSON.stringify({
+                  type: 'workspace_action',
+                  tool: toolName,
+                  actions: workspaceActions,
+                }),
+              }).catch(() => {})
             }
             stream.writeSSE({
               event: 'tool_end',
               data: JSON.stringify({
                 type: 'tool_end',
                 tool: toolName,
-                text: toolName === 'push_resource' || interactive ? toolText : undefined,
-                details: toolName === 'push_resource' || interactive ? details : undefined,
+                text: toolName === 'push_resource' || interactive || workspaceActions.length > 0 ? toolText : undefined,
+                details: toolName === 'push_resource' || interactive || workspaceActions.length > 0 ? details : undefined,
                 requiresUserInput: interactive,
               }),
             }).catch(() => {})
@@ -1181,6 +1192,12 @@ function isInteractiveToolResult(toolName: string, details: unknown): boolean {
     value.requiresConfirmation === true ||
     value.awaitingUserResponse === true ||
     value.asked === true
+}
+
+function extractWorkspaceActions(details: unknown): unknown[] {
+  if (!details || typeof details !== 'object') return []
+  const value = details as Record<string, unknown>
+  return Array.isArray(value.workspaceActions) ? value.workspaceActions : []
 }
 
 function buildConfirmedToolParams(tool: string, target: string, confirmationToken: string): Record<string, unknown> | null {

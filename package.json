@@ -27,6 +27,8 @@
     "db:seed": "node --import tsx prisma/seed.ts",
     "db:seed:demo": "node --env-file=.env scripts/demo-reset-ui.mjs",
     "db:seed:cs408": "node --import tsx scripts/seed-cs408.ts",
+    "db:seed:career": "node --import tsx scripts/seed-career.ts",
+    "seed:career": "node --import tsx scripts/seed-career.ts",
     "db:verify:cs408": "node scripts/verify-cs408-seed.mjs",
     "agent:eval": "tsx scripts/eval-agent-production.ts"
   },

@@ -699,12 +699,12 @@ export default function ForgeEditor() {
 
   return (
     <aside
-      className="side-slot visible forge-panel flex-1 flex-col pointer-events-auto"
+      className="side-slot visible forge-panel forge-paper-panel flex-1 flex-col pointer-events-auto"
       style={{ maxWidth: 'var(--panel-xl)', minWidth: 'var(--panel-lg)' }}
     >
-      <div className="glass-panel rounded-2xl flex-1 flex flex-col overflow-hidden">
+      <div className="glass-panel workspace-surface forge-paper-surface rounded-2xl flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="flex justify-between items-center px-5 py-3 border-b border-white/10">
+        <div className="forge-paper-header flex justify-between items-center px-5 py-3 border-b border-white/10">
           <div className="flex items-center gap-4 min-w-0">
             <span className="mono opacity-40 uppercase shrink-0" style={{ fontSize: 'var(--f9)' }}>
               Editing
@@ -799,7 +799,7 @@ export default function ForgeEditor() {
           /* Empty / select state */
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="serif text-2xl text-white/10 mb-4">Card Editor</div>
+              <div className="serif text-2xl text-white/10 mb-4">Card Preview</div>
               <p className="mono text-white/20" style={{ fontSize: 'var(--f10)' }}>
                 从知识图谱中选择节点，或在 AI 工作台开始对话
                 <br />
@@ -822,7 +822,7 @@ export default function ForgeEditor() {
         ) : (
           <>
             {/* Status bar */}
-            <div className="px-5 py-2 border-b border-white/5 flex items-center gap-4">
+            <div className="forge-paper-meta px-5 py-2 border-b border-white/5 flex items-center gap-4">
               <div className="flex items-center gap-1.5">
                 <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>
                   Words
@@ -952,7 +952,7 @@ export default function ForgeEditor() {
               <div className="flex-1 p-0 overflow-hidden relative">
                 <textarea
                   ref={textareaRef}
-                  className="forge-editor"
+                  className="forge-editor forge-editor-paper"
                   value={cardContent}
                   onChange={handleContentChange}
                   onKeyDown={handleWikiKeyDown}
@@ -996,7 +996,7 @@ export default function ForgeEditor() {
             ) : (
               <div
                 ref={readContainerRef}
-                className="flex-1 p-8 overflow-y-auto no-scrollbar forge-reader"
+                className="forge-paper-read flex-1 p-8 overflow-y-auto no-scrollbar forge-reader"
               >
                 <div className="max-w-2xl mx-auto">
                   <div

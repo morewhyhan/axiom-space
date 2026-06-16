@@ -186,6 +186,35 @@ export const TOOL_CONTRACTS: Record<string, ToolContract> = {
     idempotent: false,
     sideEffects: ['imports multiple cards into the current vault'],
   },
+  list_prompts: {
+    name: 'list_prompts',
+    risk: ['read'],
+    requiresVault: false,
+    idempotent: true,
+    sideEffects: [],
+  },
+  get_prompt: {
+    name: 'get_prompt',
+    risk: ['read'],
+    requiresVault: false,
+    idempotent: true,
+    sideEffects: [],
+  },
+  run_prompt: {
+    name: 'run_prompt',
+    risk: ['llm'],
+    requiresVault: false,
+    idempotent: false,
+    sideEffects: ['executes one LLM call using a registered prompt contract'],
+  },
+  workspace_control: {
+    name: 'workspace_control',
+    risk: ['interactive'],
+    requiresVault: false,
+    idempotent: false,
+    sideEffects: ['requests client-side workspace navigation, panel, modal, graph, oracle, vault, or selection changes'],
+    successDetails: ['workspaceActions'],
+  },
 };
 
 export function getToolContract(name: string): ToolContract | undefined {

@@ -216,7 +216,6 @@ export default function LearnWorkspace() {
   const allDone = !!currentSteps.length && currentSteps.every((step) => step.status === 'completed' || step.status === 'mastered')
   const totalDone = currentSteps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
   const totalProgress = currentSteps.length ? Math.round((totalDone / currentSteps.length) * 100) : 0
-  const nextActionableStep = getActionableStep(currentSteps)
 
   const handleSelectPath = (path: LearningPath) => {
     setSelectedPathId(path.id)
@@ -697,20 +696,6 @@ export default function LearnWorkspace() {
                   <div className="mono text-[10px] text-white/35">{totalProgress}%</div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-3 gap-3">
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <div className="mono text-[10px] text-white/25">任务总数</div>
-                    <div className="mt-1 text-lg text-white/90">{currentSteps.length}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <div className="mono text-[10px] text-white/25">当前可学</div>
-                    <div className="mt-1 truncate text-sm text-cyan-200">{nextActionableStep?.name || '等待前置任务'}</div>
-                  </div>
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <div className="mono text-[10px] text-white/25">卡片沉淀</div>
-                    <div className="mt-1 text-sm text-purple-200">永久卡会归档旧线程</div>
-                  </div>
-                </div>
               </>
             ) : (
               <div className="rounded-2xl border border-white/8 bg-white/[0.02] px-5 py-8 text-center">

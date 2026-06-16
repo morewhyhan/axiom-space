@@ -11,7 +11,7 @@ export interface PanelLayout {
 }
 
 export const DEFAULT_PANEL_LAYOUT: PanelLayout = {
-  left: ['sessionList'],
+  left: [],
   right: ['editor'],
 }
 
@@ -173,7 +173,7 @@ export const useAppStore = create<AppStore>()(
       setPanelSize: (panel, size) => set((state) => ({
         panelSizes: { ...state.panelSizes, [panel]: Math.max(200, Math.min(800, size)) },
       })),
-      chatPanelOpen: true,
+      chatPanelOpen: false,
       setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
       /* ── Learn selected path ── */
       selectedPathId: null,
@@ -191,7 +191,7 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: 'axiom-store',
-      version: 5,
+      version: 9,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== 'object') return persistedState
         const state = persistedState as Partial<AppStore> & {
@@ -204,7 +204,7 @@ export const useAppStore = create<AppStore>()(
         }
         if (version < 4) {
           next.panelLayout = {
-            left: ['sessionList'],
+            left: ['fileTree', 'sessionList'],
             right: state.panelLayout?.right?.filter((panel) => panel === 'editor') ?? ['editor'],
           }
           next.panelSizes = {
@@ -213,6 +213,44 @@ export const useAppStore = create<AppStore>()(
             fileTree: 280,
             sessionList: 340,
           }
+        }
+        if (version < 7) {
+          next.panelLayout = {
+            left: ['sessionList'],
+            right: ['editor'],
+          }
+          next.panelSizes = {
+            ...DEFAULT_PANEL_SIZES,
+            ...(state.panelSizes ?? {}),
+            sessionList: 340,
+            editor: 420,
+          }
+          next.chatPanelOpen = false
+        }
+        if (version < 8) {
+          next.panelLayout = {
+            left: [],
+            right: ['editor'],
+          }
+          next.panelSizes = {
+            ...DEFAULT_PANEL_SIZES,
+            ...(state.panelSizes ?? {}),
+            editor: 420,
+          }
+          next.chatPanelOpen = false
+        }
+        if (version < 9) {
+          next.panelLayout = {
+            left: [],
+            right: ['editor'],
+          }
+          next.chatPanelOpen = false
+        }
+        const existingLeft = next.panelLayout?.left?.filter((panel): panel is PanelId => panel === 'fileTree' || panel === 'sessionList') ?? []
+        const existingRight = next.panelLayout?.right?.filter((panel): panel is PanelId => panel === 'editor') ?? []
+        next.panelLayout = {
+          left: existingLeft,
+          right: existingRight.length > 0 ? existingRight : ['editor'],
         }
         return next
       },

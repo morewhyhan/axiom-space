@@ -1,55 +1,71 @@
 'use client'
 
+import type { ReactNode } from 'react'
+import { Activity, CircleDot, GitBranch, Layers3 } from 'lucide-react'
 import { useDashboardStats } from '@/hooks/use-dashboard'
-import { useAppStore } from '@/stores/mode-store'
 
 export default function GalaxyFilter() {
   const { stats, loading } = useDashboardStats()
-  const openModal = useAppStore((s) => s.openModal)
 
   return (
     <aside
-      className="side-slot visible galaxy-panel flex-col pointer-events-auto no-scrollbar"
-      style={{ width: 'var(--panel-sm)', justifyContent: 'flex-start', gap: '10px', padding: 'var(--panel-py) 0' }}
+      className="side-slot visible galaxy-panel galaxy-hud flex-col pointer-events-auto no-scrollbar"
+      style={{
+        width: '260px',
+        alignSelf: 'flex-start',
+        justifyContent: 'flex-start',
+        gap: '10px',
+        maxHeight: 'calc(100% - 18px)',
+        overflowY: 'auto',
+        padding: 'var(--panel-py) 0 0',
+      }}
     >
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f8)' }}>GALAXY_INFO</span>
-      </section>
-
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-30 uppercase block mb-3" style={{ fontSize: 'var(--f7)' }}>SEARCH</span>
-        <div className="flex items-center gap-2 bg-white/[0.025] px-3 py-2.5 rounded-lg border border-white/8 cursor-pointer mb-3 group" onClick={() => openModal('search')}>
-          <span className="opacity-30 mono" style={{ fontSize: 'var(--t-label)' }}>⌘K</span>
-          <span className="mono opacity-30 group-hover:opacity-60 transition-opacity" style={{ fontSize: 'var(--t-label)' }}>搜索节点...</span>
+      <section className="glass-panel rounded-2xl border-white/10 bg-black/[0.38] px-4 py-3 shadow-[0_18px_58px_rgba(0,0,0,0.22)]">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="mono text-white/36 uppercase tracking-[0.18em]" style={{ fontSize: 'var(--f8)' }}>GRAPH STATUS</div>
+            <div className="mt-1 text-white/72" style={{ fontSize: 'var(--f9)' }}>当前知识网络</div>
+          </div>
+          <Activity className="h-4 w-4 text-cyan-200/55" />
         </div>
-        <div className="flex items-center gap-2 bg-white/[0.025] px-3 py-2.5 rounded-lg border border-white/8 cursor-pointer group" onClick={() => openModal('importtext')}>
-          <span className="opacity-30 mono" style={{ fontSize: 'var(--t-label)' }}>+</span>
-          <span className="mono opacity-30 group-hover:opacity-60 transition-opacity" style={{ fontSize: 'var(--t-label)' }}>导入文献...</span>
-        </div>
-      </section>
-
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-30 uppercase block mb-3" style={{ fontSize: 'var(--f7)' }}>STATS</span>
-        <div className="space-y-2.5">
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>总节点</span><span className="mono text-white/70" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.totalNodes ?? 0}</span></div>
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>总连接</span><span className="mono text-white/70" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.totalEdges ?? 0}</span></div>
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>永久</span><span className="mono text-purple-400" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.permanent ?? 0}</span></div>
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>灵感</span><span className="mono text-cyan-400" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.fleeting ?? 0}</span></div>
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>文献</span><span className="mono text-pink-400" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.literature ?? 0}</span></div>
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>今日新增</span><span className="mono text-white/50" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.cardsToday ?? 0}</span></div>
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>概念数</span><span className="mono text-white/50" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.conceptCount ?? 0}</span></div>
-          <div className="flex justify-between"><span className="mono opacity-40" style={{ fontSize: 'var(--f10)' }}>审核率</span><span className="mono text-white/50" style={{ fontSize: 'var(--f10)' }}>{loading ? '…' : stats?.reviewRate ?? 0}%</span></div>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Metric icon={<CircleDot className="h-3.5 w-3.5" />} label="节点" value={loading ? '…' : stats?.totalNodes ?? 0} tone="text-cyan-200/70" />
+          <Metric icon={<GitBranch className="h-3.5 w-3.5" />} label="连接" value={loading ? '…' : stats?.totalEdges ?? 0} tone="text-purple-200/70" />
+          <Metric icon={<Layers3 className="h-3.5 w-3.5" />} label="概念" value={loading ? '…' : stats?.conceptCount ?? 0} tone="text-pink-200/70" />
+          <Metric icon={<Activity className="h-3.5 w-3.5" />} label="今日" value={loading ? '…' : stats?.cardsToday ?? 0} tone="text-white/[0.58]" />
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-30 uppercase block mb-3" style={{ fontSize: 'var(--f7)' }}>LEGEND</span>
-        <div className="space-y-2.5">
-          <div className="flex items-center gap-2.5"><span className="w-2 h-2 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.4)]"></span><span className="mono opacity-50" style={{ fontSize: 'var(--f9)' }}>PERM — 永久知识</span></div>
-          <div className="flex items-center gap-2.5"><span className="w-2 h-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.4)]"></span><span className="mono opacity-50" style={{ fontSize: 'var(--f9)' }}>FLEE — 灵感</span></div>
-          <div className="flex items-center gap-2.5"><span className="w-2 h-2 rounded-full bg-pink-400 shadow-[0_0_8px_rgba(244,114,182,0.4)]"></span><span className="mono opacity-50" style={{ fontSize: 'var(--f9)' }}>LIT — 文献</span></div>
+      <section className="glass-panel rounded-2xl border-white/10 bg-black/[0.34] px-4 py-3 shadow-[0_18px_58px_rgba(0,0,0,0.2)]">
+        <div className="mono text-white/34 uppercase tracking-[0.16em]" style={{ fontSize: 'var(--f8)' }}>LEGEND</div>
+        <div className="mt-3 space-y-2.5">
+          <LegendDot color="bg-purple-400" label="永久知识" value={loading ? '…' : stats?.permanent ?? 0} />
+          <LegendDot color="bg-cyan-400" label="灵感草稿" value={loading ? '…' : stats?.fleeting ?? 0} />
+          <LegendDot color="bg-pink-400" label="文献证据" value={loading ? '…' : stats?.literature ?? 0} />
         </div>
       </section>
     </aside>
+  )
+}
+
+function Metric({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number | string; tone: string }) {
+  return (
+    <div className="rounded-xl border border-white/8 bg-white/[0.022] px-3 py-2">
+      <div className={`mb-2 ${tone}`}>{icon}</div>
+      <div className="mono text-white/24" style={{ fontSize: 'var(--f10)' }}>{label}</div>
+      <div className="mono text-white/74 leading-none" style={{ fontSize: 'var(--f8)' }}>{value}</div>
+    </div>
+  )
+}
+
+function LegendDot({ color, label, value }: { color: string; label: string; value: number | string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className={`h-2 w-2 rounded-full ${color} shadow-[0_0_8px_rgba(255,255,255,0.18)]`} />
+        <span className="truncate text-white/[0.56]" style={{ fontSize: 'var(--f9)' }}>{label}</span>
+      </div>
+      <span className="mono text-white/32" style={{ fontSize: 'var(--f9)' }}>{value}</span>
+    </div>
   )
 }

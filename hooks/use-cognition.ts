@@ -1,6 +1,6 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
 import { useAppStore } from '@/stores/mode-store'
 
@@ -105,7 +105,39 @@ export interface CognitionData {
     contextInjection: string[]
     recentEvidence: string[]
   }
+  dimensionInsights?: ProfileDimensionInsight[]
   promptBlock?: string
+}
+
+export interface ProfileDimensionInsight {
+  key: string
+  label: string
+  score: number
+  confidence: number
+  interpretation: string
+  evidence: string[]
+  observations: Array<{
+    text: string
+    entryPoint: string
+    evidence: string
+    sourceType: 'vaultMemory' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
+    sourceId: string
+  }>
+  userFeedback?: {
+    verdict: 'correct' | 'partial' | 'wrong'
+    confidence: number
+    note?: string
+    summary?: string
+    createdAt: string
+  }
+  nodeFeedback?: Record<string, {
+    verdict: 'correct' | 'partial' | 'wrong'
+    confidence: number
+    note?: string
+    summary?: string
+    nodeLabel?: string
+    createdAt: string
+  }>
 }
 
 export interface EvidenceRef {
@@ -137,6 +169,15 @@ export interface KnowledgeGap {
   evidence?: EvidenceRef[]
 }
 
+export interface ProfilePromptSummary {
+  promptBlock: string
+  generatorPrompt?: string
+  generationMode?: 'ai' | 'fallback'
+  generatedAt: string
+  dimensionCount: number
+  evidenceCount: number
+}
+
 async function fetchCognition(vaultId?: string | null): Promise<CognitionData | null> {
   const params = vaultId ? { query: { vid: vaultId } } : {}
   const res = await client.api.cognition.stats.$get(params)
@@ -165,13 +206,14 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     preferences: data.preferences as CognitionData['preferences'],
     teachingPolicy: data.teachingPolicy as CognitionData['teachingPolicy'],
     profileLoop: data.profileLoop as CognitionData['profileLoop'],
+    dimensionInsights: data.dimensionInsights as ProfileDimensionInsight[] | undefined,
     promptBlock: data.promptBlock as string | undefined,
   }
 }
 
 async function fetchObservations(vaultId?: string | null): Promise<Observation[]> {
   if (!vaultId) return []
-  const res = await client.api.cognition.observations.$get({ query: { vid: vaultId } })
+  const res = await (client.api.cognition as any).observations.$get({ query: { vid: vaultId } })
   const data: { success: boolean; observations?: Observation[]; error?: string } = await res.json()
   if (!data.success) {
     throw new Error(data.error || '获取观察数据失败')
@@ -181,12 +223,30 @@ async function fetchObservations(vaultId?: string | null): Promise<Observation[]
 
 async function fetchKnowledgeGaps(vaultId?: string | null): Promise<KnowledgeGap[]> {
   if (!vaultId) return []
-  const res = await client.api.cognition.gaps.$get({ query: { vid: vaultId } })
+  const res = await (client.api.cognition as any).gaps.$get({ query: { vid: vaultId } })
   const data: { success: boolean; gaps?: KnowledgeGap[]; error?: string } = await res.json()
   if (!data.success) {
     throw new Error(data.error || '获取知识缺口失败')
   }
   return data.gaps ?? []
+}
+
+async function summarizeProfilePrompt(vaultId?: string | null): Promise<ProfilePromptSummary> {
+  const res = await (client.api.cognition as any)['summarize-prompt'].$post({
+    query: vaultId ? { vid: vaultId } : {},
+  })
+  const data = await res.json() as { success: boolean; error?: string } & Partial<ProfilePromptSummary>
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '提示词汇总失败')
+  }
+  return {
+    promptBlock: data.promptBlock ?? '',
+    generatorPrompt: data.generatorPrompt,
+    generationMode: data.generationMode,
+    generatedAt: data.generatedAt ?? new Date().toISOString(),
+    dimensionCount: data.dimensionCount ?? 0,
+    evidenceCount: data.evidenceCount ?? 0,
+  }
 }
 
 export function useCognition() {
@@ -206,6 +266,79 @@ export function useCognition() {
     error: query.error?.message ?? null,
     refetch: query.refetch,
   }
+}
+
+export function useSubmitProfileFeedback() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      dimensionKey: string
+      nodeKey?: string
+      nodeLabel?: string
+      verdict: 'correct' | 'partial' | 'wrong'
+      confidence: number
+      note?: string
+      summary?: string
+    }) => {
+      const res = await (client.api.cognition as any)['profile-feedback'].$post({
+        query: currentVaultId ? { vid: currentVaultId } : {},
+        json: input,
+      })
+      const data = await res.json() as { success: boolean; error?: string }
+      if (!res.ok || !data.success) throw new Error(data.error || '画像反馈提交失败')
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+    },
+  })
+}
+
+export function useAddProfileObservation() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: {
+      dimensionKey: string
+      text: string
+    }) => {
+      const sourceObjectId = `profile-claim:${Date.now()}`
+      const res = await (client.api.cognition as any).observations.$post({
+        query: currentVaultId ? { vid: currentVaultId } : {},
+        json: {
+          text: input.text,
+          category: `profile_${input.dimensionKey}`,
+          sourceObjectType: 'derived',
+          sourceObjectId,
+          evidence: [{
+            sourceObjectType: 'derived',
+            sourceObjectId,
+            summary: '用户主动添加的画像陈述',
+          }],
+        },
+      })
+      const data = await res.json() as { success: boolean; error?: string }
+      if (!res.ok || !data.success) throw new Error(data.error || '画像添加失败')
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+    },
+  })
+}
+
+export function useSummarizeProfilePrompt() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => summarizeProfilePrompt(currentVaultId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+    },
+  })
 }
 
 export function useObservations() {

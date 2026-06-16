@@ -24,9 +24,28 @@ interface SkillUpdate {
 interface CardUpdate {
   type: 'fleeting' | 'permanent'; title: string; content: string; status?: string;
 }
-interface AnalysisResult {
-  profile?: ProfileUpdate; skills?: SkillUpdate[]; cards?: CardUpdate[]; observations?: string[];
+interface ProfileObservationUpdate {
+  dimensionKey?: string
+  claim?: string
+  text?: string
+  evidence?: string | string[]
+  confidence?: number
 }
+interface AnalysisResult {
+  profile?: ProfileUpdate
+  skills?: SkillUpdate[]
+  cards?: CardUpdate[]
+  observations?: Array<string | ProfileObservationUpdate>
+}
+
+const PROFILE_DIMENSION_KEYS = new Set([
+  'learningGoal',
+  'currentFoundation',
+  'bestExplanationPath',
+  'stuckPattern',
+  'paceAndLoad',
+  'masteryCheck',
+])
 
 // ── BackgroundAnalyzer ──
 
@@ -92,11 +111,45 @@ export class BackgroundAnalyzer {
         }
       }
 
-      // ── Write free-form observations from LLM ──
+      // ── Write observations from LLM. Prefer six-dimension profile observations. ──
       if (result.observations && result.observations.length > 0) {
-        for (const obsText of result.observations) {
-          if (typeof obsText === 'string' && obsText.trim().length > 0) {
-            await this.writeObservation(obsText.trim(), this.latestEvidence);
+        for (const observation of result.observations) {
+          if (typeof observation === 'string' && observation.trim().length > 0) {
+            await this.writeObservation(observation.trim(), this.latestEvidence);
+            continue
+          }
+
+          if (!observation || typeof observation !== 'object') continue
+          const dimensionKey = typeof observation.dimensionKey === 'string' && PROFILE_DIMENSION_KEYS.has(observation.dimensionKey)
+            ? observation.dimensionKey
+            : null
+          const claim = (typeof observation.claim === 'string'
+            ? observation.claim
+            : typeof observation.text === 'string'
+              ? observation.text
+              : '').trim()
+          if (!claim) continue
+
+          const llmEvidence = Array.isArray(observation.evidence)
+            ? observation.evidence.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+            : typeof observation.evidence === 'string' && observation.evidence.trim().length > 0
+              ? [observation.evidence.trim()]
+              : []
+          const evidence = uniqueStrings([...llmEvidence, ...this.latestEvidence]).slice(0, 5)
+          if (evidence.length === 0) continue
+
+          const confidence = typeof observation.confidence === 'number'
+            ? Math.max(0, Math.min(1, observation.confidence))
+            : undefined
+          await this.writeObservation(
+            claim.slice(0, 500),
+            evidence,
+            dimensionKey ? `profile_${dimensionKey}` : 'background-analysis',
+            confidence,
+          )
+          if (dimensionKey) {
+            const baVaultId = getCurrentVaultId()
+            if (baVaultId) emitNotification(baVaultId, { type: 'profile', message: '画像观察已更新' })
           }
         }
       }
@@ -195,24 +248,26 @@ export class BackgroundAnalyzer {
     } catch (err) { console.debug('[BackgroundAnalyzer] Card creation failed:', err); }
   }
 
-  private async writeObservation(text: string, evidence: string[]) {
+  private async writeObservation(text: string, evidence: string[], category = 'background-analysis', confidence?: number) {
     try {
       if (evidence.length === 0) return
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
       const vid = getCurrentVaultId()
       if (!vid) return
+      const sourceObjectId = `background:${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
       await prisma.vaultMemory.create({
         data: {
           vaultId: vid,
-          key: `obs_${Date.now()}`,
+          key: `obs_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           value: JSON.stringify({
             text,
-            category: 'background-analysis',
+            category,
+            confidence,
             sourceObjectType: 'derived',
-            sourceObjectId: `background:${Date.now()}`,
+            sourceObjectId,
             evidence: evidence.map((item, index) => ({
               sourceObjectType: 'derived',
-              sourceObjectId: `message:${index}`,
+              sourceObjectId: `${sourceObjectId}:message:${index}`,
               summary: item,
             })),
           }),
@@ -241,4 +296,8 @@ export class BackgroundAnalyzer {
     } catch { /* non-fatal */ }
   }
 
+}
+
+function uniqueStrings(items: string[]): string[] {
+  return [...new Set(items.map((item) => item.trim()).filter(Boolean))]
 }

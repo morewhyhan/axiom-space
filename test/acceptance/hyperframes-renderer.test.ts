@@ -58,5 +58,5 @@ async function writeArtifact(name: string, content: Buffer | string): Promise<vo
 }
 
 function toHex(buffer: Buffer): string {
-  return Buffer.from(buffer).toString('hex')
+  return buffer.toString('hex')
 }

@@ -19,7 +19,7 @@ import type { IntentRoute } from '../IntentRouter';
 import type { ChatMessage } from '../feedback/SteerMechanism';
 import type { ToolCall as EmptyToolCall, EmptyResponseMessage } from '../feedback/EmptyResponseHandler';
 import { AgentState } from '../AgentStateMachine';
-import { classifyIntent, classifyIntentSmart, filterToolsByIntent } from '../IntentRouter';
+import { classifyIntent, classifyIntentSmart } from '../IntentRouter';
 import { getSkillEngine } from '../SkillEngine';
 import { InterruptError } from '@/server/core/learning/core/interrupt';
 import { LogCategory } from '../audit/AuditLogger';
@@ -45,22 +45,6 @@ export interface PipelineContext {
 
 const INTENT_THRESHOLD = 0.5;
 const LEARNING_CONTEXTS = new Set(['learn', 'create', 'analyze', 'profile']);
-const SAFE_CONFIRMATION_TOOLS = new Set([
-  'read',
-  'grep',
-  'find',
-  'ls',
-  'search_cards',
-  'memory',
-  'memory_search',
-  'search_history',
-  'retrieve_memory',
-  'search_memory',
-  'read_skill',
-  'list_skills',
-  'ask_user',
-  'web_search',
-]);
 
 // ── Pipeline ──
 
@@ -1055,15 +1039,10 @@ export class AgentPipeline {
 }
 
 function selectToolsForTurn(tools: AgentTool<any>[], intentRoute: IntentRoute | null): AgentTool<any>[] {
-  if (!intentRoute) return tools.filter((tool) => SAFE_CONFIRMATION_TOOLS.has(tool.name));
-
-  const toolNames = tools.map((tool) => tool.name);
-  if (intentRoute.needsConfirmation || intentRoute.confidence < INTENT_THRESHOLD) {
-    return tools.filter((tool) => SAFE_CONFIRMATION_TOOLS.has(tool.name));
-  }
-
-  const byIntent = filterToolsByIntent(intentRoute, toolNames);
-  if (!byIntent) return tools;
-  const allowed = new Set(byIntent);
-  return tools.filter((tool) => allowed.has(tool.name));
+  // The AI Workbench is the system-level agent surface. Every built-in and MCP
+  // tool must stay visible on every turn so the agent can orchestrate across
+  // cards, learning paths, graph data, resources, prompts, and workspace UI.
+  // Safety is enforced by ToolContracts, confirmation tokens, path guards, and
+  // per-tool ownership checks rather than by hiding capabilities.
+  return tools;
 }

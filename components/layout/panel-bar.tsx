@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Check,
   Files,
@@ -51,6 +51,17 @@ export default function PanelBar() {
   const setChatPanelOpen = useAppStore((s) => s.setChatPanelOpen)
   const [open, setOpen] = useState(false)
 
+  useEffect(() => {
+    if (mode !== 'forge') return
+    const state = useAppStore.getState()
+    const desiredLayout = { left: [] as PanelId[], right: ['editor' as PanelId] }
+    const leftSame = state.panelLayout.left.length === desiredLayout.left.length && state.panelLayout.left.every((panel, index) => panel === desiredLayout.left[index])
+    const rightSame = state.panelLayout.right.length === desiredLayout.right.length && state.panelLayout.right.every((panel, index) => panel === desiredLayout.right[index])
+    if (!leftSame || !rightSame) state.setPanelLayout(desiredLayout)
+    if (state.chatPanelOpen) state.setChatPanelOpen(false)
+    setOpen(true)
+  }, [mode])
+
   const isVisible = useCallback(
     (id: PanelId) => panelLayout.left.includes(id) || panelLayout.right.includes(id),
     [panelLayout.left, panelLayout.right],
@@ -63,13 +74,45 @@ export default function PanelBar() {
 
   if (mode === 'forge') {
     return (
-      <div className="fixed bottom-4 left-4 z-40 pointer-events-auto">
+      <div className="forge-panel-switcher">
+        <div className="forge-panel-rail" aria-label="AI 工作台面板">
+          <button
+            className={`forge-panel-rail-btn forge-panel-home ${open ? 'active' : ''}`}
+            onClick={() => setOpen((value) => !value)}
+            title="工作台面板"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
+
+          <div className="forge-panel-rail-separator" />
+
+          {FORGE_ITEMS.map((item) => {
+            const Icon = item.icon
+            const active = item.id === 'chat' ? chatPanelOpen : isVisible(item.id)
+            return (
+              <button
+                key={item.id}
+                className={`forge-panel-rail-btn ${active ? 'active' : ''}`}
+                onClick={() => {
+                  if (item.id === 'chat') setChatPanelOpen(!chatPanelOpen)
+                  else togglePanel(item.id)
+                }}
+                title={item.label}
+              >
+                <Icon className={`h-4 w-4 ${active ? item.tone : ''}`} />
+              </button>
+            )
+          })}
+
+          <div className="forge-panel-open-count">{openCount}</div>
+        </div>
+
         {open && (
-          <div className="mb-2 w-[236px] overflow-hidden rounded-xl border border-white/10 bg-black/72 shadow-[0_20px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-            <div className="flex items-center justify-between border-b border-white/8 px-3 py-2">
+          <div className="forge-panel-drawer">
+            <div className="flex items-center justify-between border-b border-white/8 px-3 py-2.5">
               <div className="flex items-center gap-2">
-                <SlidersHorizontal className="h-3.5 w-3.5 text-white/45" />
-                <span className="mono text-[9px] uppercase tracking-[0.16em] text-white/45">Workspace Panels</span>
+                <SlidersHorizontal className="h-3.5 w-3.5 text-white/42" />
+                <span className="mono text-[9px] uppercase tracking-[0.16em] text-white/44">Workspace</span>
               </div>
               <span className="mono text-[8px] text-white/22">{openCount}/4 open</span>
             </div>
@@ -105,22 +148,6 @@ export default function PanelBar() {
             </div>
           </div>
         )}
-
-        <button
-          className={`flex h-9 items-center gap-2 rounded-full border px-3 shadow-[0_12px_36px_rgba(0,0,0,0.35)] backdrop-blur-xl transition-all active:scale-95 ${
-            open
-              ? 'border-pink-400/28 bg-pink-400/12 text-pink-200'
-              : 'border-white/10 bg-black/58 text-white/46 hover:border-white/16 hover:text-white/70'
-          }`}
-          onClick={() => setOpen((value) => !value)}
-          title="AI 工作台面板"
-        >
-          <PanelLeft className="h-4 w-4" />
-          <span className="mono text-[9px] uppercase tracking-[0.12em]">Workspace</span>
-          <span className="mono rounded-full border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[8px] text-white/36">
-            {openCount}
-          </span>
-        </button>
       </div>
     )
   }

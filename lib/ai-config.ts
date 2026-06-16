@@ -18,45 +18,55 @@ import { resolve } from 'path'
 
 let _envLoaded = false
 
+function parseEnvValue(raw: string): string {
+  let value = ''
+  let quote: '"' | "'" | null = null
+
+  for (let i = 0; i < raw.length; i++) {
+    const char = raw[i]
+    if ((char === '"' || char === "'") && (!quote || quote === char)) {
+      quote = quote === char ? null : char
+      value += char
+      continue
+    }
+    if (char === '#' && !quote && (i === 0 || /\s/.test(raw[i - 1] ?? ''))) {
+      break
+    }
+    value += char
+  }
+
+  value = value.trim()
+  if ((value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1)
+  }
+  return value.trim()
+}
+
+function loadEnvFile(path: string, override: boolean): void {
+  try {
+    const content = readFileSync(path, 'utf-8')
+    for (const line of content.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eqIdx = trimmed.indexOf('=')
+      if (eqIdx === -1) continue
+      const key = trimmed.slice(0, eqIdx).trim()
+      const value = parseEnvValue(trimmed.slice(eqIdx + 1))
+      if (key && (override || !process.env[key])) {
+        process.env[key] = value
+      }
+    }
+  } catch (_) { /* ok */ }
+}
+
 function ensureEnvLoaded(): void {
   if (_envLoaded) return
   _envLoaded = true
   const root = process.cwd()
   console.log('[ai-config] Loading .env from:', root)
-  try {
-    const content = readFileSync(resolve(root, '.env'), 'utf-8')
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
-      const eqIdx = trimmed.indexOf('=')
-      if (eqIdx === -1) continue
-      const key = trimmed.slice(0, eqIdx).trim()
-      let value = trimmed.slice(eqIdx + 1).trim()
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1)
-      }
-      if (key && !process.env[key]) {
-        process.env[key] = value
-      }
-    }
-  } catch (_) { /* ok */ }
-  try {
-    const content = readFileSync(resolve(root, '.env.local'), 'utf-8')
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
-      const eqIdx = trimmed.indexOf('=')
-      if (eqIdx === -1) continue
-      const key = trimmed.slice(0, eqIdx).trim()
-      let value = trimmed.slice(eqIdx + 1).trim()
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1)
-      }
-      if (key) process.env[key] = value // .env.local overrides
-    }
-  } catch (_) { /* ok */ }
+  loadEnvFile(resolve(root, '.env'), false)
+  loadEnvFile(resolve(root, '.env.local'), true)
 }
 
 export interface ResolvedModelConfig {

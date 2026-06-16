@@ -25,6 +25,7 @@ const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-li
 const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
+const GalaxyLayoutSwitcher = dynamic(() => import('@/components/galaxy/galaxy-layout-switcher'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
 const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
 const LearnWorkspace = dynamic(() => import('@/components/learn/learn-workspace'))
@@ -510,7 +511,7 @@ export default function Home() {
 
   const graphLayoutHint = useMemo(() => {
     const hints: Record<GraphLayoutMode, string> = {
-      galaxy: '拖拽旋转 · 滚轮缩放 · 星团总览',
+      galaxy: '拖拽旋转 · 滚轮缩放 · 知识域总览',
       flat: '拖拽平移 · 滚轮缩放 · 关系网络',
       radial: '轻微旋转 · 拖拽平移 · 环形连线',
       concentric: '中心旋转 · 点击换心 · 邻域外扩',
@@ -592,7 +593,7 @@ export default function Home() {
               )}
 
               {(visitedModes.has('forge') || mode === 'forge') && (
-                <div className={`mode-stage ${mode === 'forge' ? 'active' : ''}`} aria-hidden={mode !== 'forge'}>
+                <div className={`mode-stage forge-stage ${mode === 'forge' ? 'active' : ''}`} aria-hidden={mode !== 'forge'}>
                   <div className="left-zone">
                     {panelLayout.left.map((panelId: string) => {
                       const isFileTree = panelId === 'fileTree'
@@ -610,17 +611,8 @@ export default function Home() {
                       )
                     })}
                   </div>
-                  <section className={`flex-1 flex flex-col min-w-0 overflow-hidden ${chatPanelOpen ? '' : 'items-center justify-end pb-6'}`}>
+                  <section className="forge-workbench-center flex-1 flex flex-col min-w-0 overflow-hidden">
                     {chatPanelOpen && <ForgeChat />}
-                    {!chatPanelOpen && (
-                      <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
-                        <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
-                        <div className="w-px h-3 bg-white/10"></div>
-                        <button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入</button>
-                        <div className="w-px h-3 bg-white/10"></div>
-                        <button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('shortcuts')}>⌨ 快捷键</button>
-                      </div>
-                    )}
                   </section>
                   <div className="right-zone">
                     {panelLayout.right.map((panelId: string) => (
@@ -642,17 +634,11 @@ export default function Home() {
                       {graphLayoutHint}
                     </div>
                     <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'galaxy' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'galaxy' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
-                    <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
-                      <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
-                      <div className="w-px h-3 bg-white/10"></div>
-                      <button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入</button>
-                      <div className="w-px h-3 bg-white/10"></div>
-                      <button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('shortcuts')}>⌨ 快捷键</button>
-                    </div>
                   </section>
                   <div className="right-zone">
                     <GalaxyFilter />
                   </div>
+                  <GalaxyLayoutSwitcher />
                 </div>
               )}
 

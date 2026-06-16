@@ -6,7 +6,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
-import { Copy, Check, RefreshCw, Square, Bot, Send, Crosshair, Hammer, Sparkles, ShieldCheck, X } from 'lucide-react'
+import { Copy, Check, RefreshCw, Square, Bot, Send, Sparkles, ShieldCheck, X } from 'lucide-react'
 import 'katex/dist/katex.min.css'
 import { useAgent } from '@/hooks/use-agent'
 import { useLearningPaths } from '@/hooks/use-learning'
@@ -562,15 +562,6 @@ export default function ForgeChat() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
   const currentVaultId = useAppStore((s) => s.currentVaultId)
-  const oracle = useAppStore((s) => s.oracle)
-  const oracleLabel = ({
-    Oracle: 'AXIOM',
-    default: 'AXIOM',
-    socrates: '苏格拉底',
-    musk: '马斯克',
-    munger: '芒格',
-    wittgenstein: '维特根斯坦',
-  } as Record<string, string>)[oracle] ?? oracle
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -714,66 +705,45 @@ export default function ForgeChat() {
 
   return (
     <div className="flex-1 w-full h-full flex flex-col pointer-events-auto overflow-hidden forge-chat-shell">
-      <div className="glass-panel forge-console-panel flex-1 flex flex-col overflow-hidden" style={{ margin: 'var(--panel-py) 0' }}>
-        {/* Chat header */}
-        <div className="forge-console-header flex-shrink-0">
-          <div className="flex min-w-0 items-center gap-3">
-            <div className="forge-console-mark">
-              <Hammer className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <span className="mono text-pink-300/90 uppercase tracking-[0.26em]" style={{ fontSize: 'var(--f9)' }}>AI Workspace</span>
-              <div className="mt-1 mono text-white/28" style={{ fontSize: 'var(--f7)' }}>
-                {streaming
-                  ? PROGRESS_STEPS[progressStep]
-	                  : currentPath
-	                    ? '学习任务'
-	                    : isConversationSession
-	                      ? '自由对话'
-		                      : '理解卡线程'}
-              </div>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button
-              className="forge-oracle-btn"
-              onClick={() => useAppStore.getState().openModal('oracle')}
-              title="切换当前对话的 Oracle"
-            >
-              <span>ORACLE</span>
-              <strong>{oracleLabel}</strong>
-            </button>
-            <button className="forge-mini-btn" onClick={clearMessages}>清空</button>
-            <button className="forge-mini-btn primary" onClick={() => useAppStore.getState().openModal('newcard')}>新建卡片</button>
+      <div className="glass-panel workspace-surface workspace-chat-surface forge-console-panel flex-1 flex flex-col overflow-hidden">
+        {/* Chat header — matches prototype Forge_Console */}
+        <div className="forge-console-header workspace-chat-header flex-shrink-0">
+          <span className="mono text-pink-300/80 uppercase tracking-widest" style={{ fontSize: 'var(--f9)' }}>AI Workbench</span>
+          <div className="flex gap-3">
+            {streaming ? (
+              <button className="mono text-red-400/60 hover:text-red-400 transition-colors" style={{ fontSize: 'var(--f8)' }}
+                onClick={() => useAgentStore.getState()._abortStream()}>STOP</button>
+            ) : (
+              <button className="mono text-cyan-400/60 hover:text-cyan-400 transition-colors" style={{ fontSize: 'var(--f8)' }}
+                onClick={() => useAppStore.getState().openModal('oracle')}>ORACLE</button>
+            )}
+            <button className="mono text-white/30 hover:text-white/60 transition-colors" style={{ fontSize: 'var(--f8)' }} onClick={clearMessages}>CLEAR</button>
+            <button className="mono text-white/30 hover:text-white/60 transition-colors" style={{ fontSize: 'var(--f8)' }} onClick={() => useAppStore.getState().openModal('newcard')}>+NEW</button>
           </div>
         </div>
 
+        {/* Context bar — matches prototype Working_On */}
         <div className="forge-focus-card flex-shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="forge-focus-icon">
-              <Crosshair className="h-5 w-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-	              <div className="mono text-pink-300/70 uppercase tracking-[0.2em]" style={{ fontSize: 'var(--f8)' }}>当前焦点</div>
-              <div className="mt-1 truncate text-white/88" style={{ fontSize: 'var(--f10)' }}>
-                {currentPath
-                  ? (currentStep
-	                    ? `学习路径「${currentPath.name}」 · 当前任务「${currentStep.name}」`
-	                    : `学习路径「${currentPath.name}」`)
-	                  : isConversationSession
-	                    ? `自由对话「${currentSession?.title || '新对话'}」`
-	                    : selectedNode
-		                      ? `理解卡「${selectedNode.title}」`
-		                      : '选择学习任务、灵感草稿，或新建自由对话'}
-              </div>
-            </div>
-            <span className={`mono shrink-0 ${streaming ? 'text-cyan-300/80' : 'text-white/25'}`} style={{ fontSize: 'var(--f8)' }}>
-              {streaming ? `${elapsedSec}s` : '就绪'}
+          <span className="w-1.5 h-1.5 rounded-full bg-pink-400 flex-shrink-0"></span>
+          <span className="mono opacity-30 uppercase tracking-widest flex-shrink-0" style={{ fontSize: 'var(--f8)' }}>Working_On:</span>
+          <span className="text-white/70 font-medium truncate" style={{ fontSize: 'var(--f9)' }}>
+            {currentPath
+              ? (currentStep ? currentStep.name : currentPath.name)
+              : isConversationSession
+                ? (currentSession?.title || '新对话')
+                : selectedNode
+                  ? selectedNode.title
+                  : '选择任务或灵感卡'}
+          </span>
+          {selectedNode && (
+            <span className="mono text-pink-400/50 ml-auto flex-shrink-0" style={{ fontSize: 'var(--f7)' }}>
+              {selectedNode.type === 'permanent' ? 'PERM' : selectedNode.type === 'fleeting' ? 'FLEE' : selectedNode.type === 'literature' ? 'LIT' : ''}
             </span>
-          </div>
+          )}
         </div>
 
         {/* Messages area */}
+
         <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-4 pb-2 space-y-4">
           {messages.length === 0 ? (
             /* Welcome screen */

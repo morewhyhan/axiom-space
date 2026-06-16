@@ -1,93 +1,72 @@
 'use client'
 
-import { NotebookText } from 'lucide-react'
-import { useObservations } from '@/hooks/use-cognition'
-
-function formatTime(iso: string): string {
-  const d = new Date(iso)
-  const now = new Date()
-  const diffMs = now.getTime() - d.getTime()
-  const diffH = Math.floor(diffMs / 3600000)
-  if (diffH < 1) return '刚刚'
-  if (diffH < 24) return `${diffH} 小时前`
-  const diffD = Math.floor(diffH / 24)
-  if (diffD === 1) return '昨天'
-  if (diffD < 7) return `${diffD} 天前`
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
+import { useEffect, useMemo, useState } from 'react'
+import { MessageSquareText, RefreshCw } from 'lucide-react'
+import { useCognition, useSummarizeProfilePrompt } from '@/hooks/use-cognition'
 
 export default function InsightsPanel() {
-  const { observations, loading } = useObservations()
+  const { data, loading } = useCognition()
+  const summarizePrompt = useSummarizeProfilePrompt()
+  const [promptText, setPromptText] = useState('')
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null)
+
+  useEffect(() => {
+    setPromptText(data?.promptBlock ?? '')
+    setGeneratedAt(null)
+  }, [data?.promptBlock])
+
+  const statusText = useMemo(() => {
+    if (summarizePrompt.isPending) return '正在汇总'
+    if (generatedAt) return `已汇总 ${new Date(generatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+    if (loading) return '正在读取'
+    return data?.profileLoop?.lastObservationAt ? '来自当前画像' : '等待画像证据'
+  }, [data?.profileLoop?.lastObservationAt, generatedAt, loading, summarizePrompt.isPending])
+
+  const handleSummarize = () => {
+    summarizePrompt.mutate(undefined, {
+      onSuccess: (result) => {
+        setPromptText(result.promptBlock)
+        setGeneratedAt(result.generatedAt)
+      },
+    })
+  }
 
   return (
     <aside
       className="side-slot visible flex-col pointer-events-auto no-scrollbar"
       style={{ width: 'var(--panel-sm)', justifyContent: 'flex-start', padding: 'var(--panel-py) 0', overflow: 'hidden' }}
     >
-      <div className="glass-panel rounded-2xl flex-1 flex flex-col overflow-hidden border border-white/10 bg-black/45">
-        <div className="flex items-center justify-between border-b border-white/8 px-6 py-5">
-          <div className="flex items-center gap-3">
-            <NotebookText className="h-5 w-5 text-pink-200" />
-            <div>
-              <div className="font-medium text-white/78">AI 观察记录</div>
-              <div className="mt-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>可追溯认知观察</div>
+      <div className="glass-panel cognition-prompt-rail flex-1 flex flex-col overflow-hidden">
+        <div className="cognition-prompt-head">
+          <div className="flex min-w-0 items-center gap-3">
+            <MessageSquareText className="h-4 w-4 shrink-0 text-cyan-100/78" />
+            <div className="min-w-0">
+              <div className="font-medium text-white/78">注入提示词</div>
+              <div className="mt-1 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>{statusText}</div>
             </div>
           </div>
-          <span className="rounded-lg border border-pink-400/18 bg-pink-400/8 px-2 py-1 mono text-pink-100/75" style={{ fontSize: 'var(--f8)' }}>
-            {observations.length}
-          </span>
+          <button
+            type="button"
+            className="cognition-prompt-action"
+            onClick={handleSummarize}
+            disabled={loading || summarizePrompt.isPending}
+          >
+            <RefreshCw className={summarizePrompt.isPending ? 'h-3.5 w-3.5 animate-spin' : 'h-3.5 w-3.5'} />
+            <span>总结提示词</span>
+          </button>
         </div>
 
-        {loading ? (
-          <div className="flex-1 space-y-5 p-6">
-            {[1, 2, 3, 4].map((item) => (
-              <div key={item} className="animate-pulse space-y-2">
-                <div className="h-2 w-16 rounded bg-white/10" />
-                <div className="h-3 rounded bg-white/7" />
-                <div className="h-3 w-3/4 rounded bg-white/5" />
-              </div>
-            ))}
-          </div>
-        ) : observations.length > 0 ? (
-          <div className="flex-1 overflow-y-auto no-scrollbar px-6 py-5">
-            <div className="relative">
-              <div className="absolute bottom-4 left-[7px] top-2 w-px bg-gradient-to-b from-pink-300 via-cyan-300 to-purple-300 opacity-35" />
-              {observations.map((obs, index) => (
-                <div key={obs.id} className="relative pb-7 pl-8 last:pb-0">
-                  <span
-                    className={`absolute left-0 top-1 h-3.5 w-3.5 rounded-full border ${
-                      index % 3 === 0
-                        ? 'border-pink-200 bg-pink-400 shadow-[0_0_12px_rgba(244,114,182,0.45)]'
-                        : index % 3 === 1
-                          ? 'border-cyan-200 bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.42)]'
-                          : 'border-purple-200 bg-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.4)]'
-                    }`}
-                  />
-                  <div className="mono text-white/25" style={{ fontSize: 'var(--f7)' }}>{formatTime(obs.createdAt)}</div>
-                  <p className="mt-2 leading-relaxed text-white/62" style={{ fontSize: 'var(--f9)' }}>{obs.text}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
-              <NotebookText className="h-5 w-5 text-white/24" />
-            </div>
-            <div className="text-white/35">暂无观察记录</div>
-            <p className="mt-2 max-w-[220px] leading-relaxed text-white/18" style={{ fontSize: 'var(--f8)' }}>
-              当 AI 工作台明确写入观察时，这里会形成时间线。
-            </p>
-          </div>
-        )}
-
-        {observations.length > 0 && (
-          <div className="border-t border-white/8 px-6 py-4">
-            <div className="mono text-center text-white/28" style={{ fontSize: 'var(--f8)' }}>
-              已显示全部观察记录
-            </div>
-          </div>
-        )}
+        <div className="cognition-prompt-body no-scrollbar">
+          <section className="cognition-injection-card cognition-prompt-code-card">
+            <pre>
+              {loading
+                ? '正在读取画像上下文...'
+                : summarizePrompt.isError
+                  ? `提示词汇总失败：${summarizePrompt.error.message}`
+                  : promptText || '暂无可注入画像。完成一次 AI 工作台对话、主动添加画像或提交校验后，这里会显示画像上下文。'}
+            </pre>
+          </section>
+        </div>
       </div>
     </aside>
   )

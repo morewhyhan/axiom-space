@@ -5,6 +5,7 @@
  */
 import { Hono } from 'hono'
 import { prisma } from '@/lib/db'
+import { resolveAiConfig } from '@/lib/ai-config'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
 
@@ -16,6 +17,48 @@ type EvidenceRef = {
 
 function evidenceRef(sourceObjectType: EvidenceRef['sourceObjectType'], sourceObjectId: string, summary: string): EvidenceRef {
   return { sourceObjectType, sourceObjectId, summary }
+}
+
+async function callOpenAICompatibleChat(
+  systemPrompt: string,
+  userMessages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>,
+  options: { temperature?: number; maxTokens?: number } = {},
+): Promise<string> {
+  const config = resolveAiConfig().model
+  const baseUrl = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
+  if (!config.apiKey) {
+    throw new Error('AI_API_KEY is not configured')
+  }
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.modelId,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...userMessages,
+      ],
+      temperature: options.temperature ?? 0.7,
+      max_tokens: options.maxTokens ?? 4096,
+    }),
+    signal: AbortSignal.timeout(60_000),
+  })
+
+  const text = await response.text()
+  if (!response.ok) {
+    throw new Error(`AI request failed ${response.status}: ${text.slice(0, 500)}`)
+  }
+
+  const data = JSON.parse(text) as { choices?: Array<{ message?: { content?: unknown } }> }
+  const content = data.choices?.[0]?.message?.content
+  if (typeof content !== 'string' || !content.trim()) {
+    throw new Error('AI response is empty')
+  }
+  return content
 }
 
 function parseObservationValue(raw: string): {
@@ -83,7 +126,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     assessments,
     resourceJobs,
   ] = await Promise.all([
-    prisma.card.findMany({ where: { vaultId: vid }, select: { id: true, type: true, content: true, title: true, clusterId: true, tags: true, createdAt: true, cluster: { select: { name: true, color: true } } } }),
+    prisma.card.findMany({ where: { vaultId: vid }, select: { id: true, path: true, type: true, content: true, title: true, clusterId: true, tags: true, createdAt: true, cluster: { select: { name: true, color: true } } } }),
     prisma.card.count({ where: { vaultId: vid, type: 'permanent' } }),
     prisma.edge.findMany({ where: { vaultId: vid }, select: { sourceId: true, targetId: true, type: true } }),
     prisma.cluster.findMany({ where: { vaultId: vid }, select: { id: true, name: true, color: true, cards: { select: { id: true, type: true, content: true, title: true, createdAt: true } } }, orderBy: { position: 'asc' } }),
@@ -297,9 +340,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const profileSummary = {
     userLevel,
     goals: activeGoals,
-    activeDomains: timeDistribution.slice(0, 5).map((item) => item.domain),
+    activeDomains: clusters.slice(0, 5).map((item) => item.name),
     summary: n > 0
-      ? `当前画像显示：用户主要围绕「${activeGoals[0] || timeDistribution[0]?.domain || '当前知识库'}」构建知识，优势在「${dimensionLabelMap[strongestDimension?.[0] || 'depth']}」，下一步应优先补强「${dimensionLabelMap[weakestDimension?.[0] || 'connection']}」。`
+      ? `当前画像围绕「${activeGoals[0] || clusters[0]?.name || '当前知识库'}」生成，重点服务下一轮 AI 教学：明确学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。`
       : '当前画像仍在初始化。请先创建卡片、进入学习路径或在 AI 工作台中完成一次对话。',
     teachingFocus: teachingPolicy.shouldSuggestWikiLinks
       ? '后续教学应主动要求用户建立概念连接，并推荐相关卡片。'
@@ -441,6 +484,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     preferences: learningProfileContext?.preferences ?? preferences,
     teachingPolicy: learningProfileContext?.teachingPolicy ?? teachingPolicy,
     profileLoop: learningProfileContext?.profileLoop ?? profileLoop,
+    dimensionInsights: learningProfileContext?.dimensionInsights ?? [],
     promptBlock: learningProfileContext?.promptBlock ?? '',
   }
 
@@ -655,5 +699,122 @@ const routes = app
       },
     })
   })
+  .post('/summarize-prompt', async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
 
-export default routes
+    try {
+      const {
+        buildLearningProfileContext,
+        buildProfilePromptSummaryUserMessage,
+        normalizeLearningProfileBlock,
+        PROFILE_PROMPT_SUMMARY_INSTRUCTION,
+      } = await import('@/server/core/learning/profile-context')
+      const learningProfileContext = await buildLearningProfileContext({ vaultId: vault.id, userId })
+      const sourceContext = {
+        profileSummary: learningProfileContext.profileSummary,
+        knowledgeProfile: learningProfileContext.knowledgeProfile,
+        preferences: learningProfileContext.preferences,
+        teachingPolicy: learningProfileContext.teachingPolicy,
+        profileLoop: learningProfileContext.profileLoop,
+        dimensionInsights: learningProfileContext.dimensionInsights,
+      }
+      let promptBlock = learningProfileContext.promptBlock
+      let generationMode: 'ai' | 'fallback' = 'fallback'
+
+      try {
+        const generated = await callOpenAICompatibleChat(
+          PROFILE_PROMPT_SUMMARY_INSTRUCTION,
+          [{ role: 'user', content: buildProfilePromptSummaryUserMessage(sourceContext) }],
+          { temperature: 0.2, maxTokens: 1800 },
+        )
+        promptBlock = normalizeLearningProfileBlock(generated) || learningProfileContext.promptBlock
+        generationMode = 'ai'
+      } catch (error) {
+        console.warn('[Cognition] AI prompt summary failed, using fallback:', error)
+      }
+
+      await prisma.vaultMemory.create({
+        data: {
+          vaultId: vault.id,
+          key: `profile_prompt_summary_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          category: 'profile_prompt_summary',
+          value: JSON.stringify({
+            promptBlock,
+            generatorPrompt: PROFILE_PROMPT_SUMMARY_INSTRUCTION,
+            generationMode,
+            dimensionCount: learningProfileContext.dimensionInsights.length,
+            evidenceCount: learningProfileContext.profileLoop.evidenceCount,
+          }),
+        },
+      })
+
+      return c.json({
+        success: true,
+        promptBlock,
+        generatorPrompt: PROFILE_PROMPT_SUMMARY_INSTRUCTION,
+        generationMode,
+        generatedAt: new Date().toISOString(),
+        dimensionCount: learningProfileContext.dimensionInsights.length,
+        evidenceCount: learningProfileContext.profileLoop.evidenceCount,
+      })
+    } catch (error) {
+      console.warn('[Cognition] Prompt summary failed:', error)
+      return c.json({ success: false, error: 'PROMPT_SUMMARY_FAILED' }, 500)
+    }
+  })
+  .post('/profile-feedback', async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'Vault not found' })
+
+    const { dimensionKey, nodeKey, nodeLabel, verdict, confidence, note, summary } = await c.req.json()
+    const allowedDimensions = new Set(['learningGoal', 'currentFoundation', 'bestExplanationPath', 'stuckPattern', 'paceAndLoad', 'masteryCheck'])
+    const allowedVerdicts = new Set(['correct', 'partial', 'wrong'])
+    if (typeof dimensionKey !== 'string' || !allowedDimensions.has(dimensionKey)) {
+      return c.json({ success: false, error: 'Invalid dimensionKey' }, 400)
+    }
+    if (typeof verdict !== 'string' || !allowedVerdicts.has(verdict)) {
+      return c.json({ success: false, error: 'Invalid verdict' }, 400)
+    }
+    const normalizedConfidence = typeof confidence === 'number'
+      ? Math.max(0, Math.min(1, confidence))
+      : 0.6
+    const key = `profile_feedback_${dimensionKey}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+    const memory = await prisma.vaultMemory.create({
+      data: {
+        vaultId: vault.id,
+        key,
+        category: 'profile_feedback',
+        value: JSON.stringify({
+          dimensionKey,
+          nodeKey: typeof nodeKey === 'string' ? nodeKey.slice(0, 120) : undefined,
+          nodeLabel: typeof nodeLabel === 'string' ? nodeLabel.slice(0, 80) : undefined,
+          verdict,
+          confidence: normalizedConfidence,
+          note: typeof note === 'string' ? note.slice(0, 500) : '',
+          summary: typeof summary === 'string' ? summary.slice(0, 600) : undefined,
+          userId,
+        }),
+      },
+    })
+
+    return c.json({
+      success: true,
+      feedback: {
+        id: memory.id,
+        dimensionKey,
+        nodeKey: typeof nodeKey === 'string' ? nodeKey.slice(0, 120) : undefined,
+        nodeLabel: typeof nodeLabel === 'string' ? nodeLabel.slice(0, 80) : undefined,
+        verdict,
+        confidence: normalizedConfidence,
+        note: typeof note === 'string' ? note.slice(0, 500) : '',
+        summary: typeof summary === 'string' ? summary.slice(0, 600) : undefined,
+        createdAt: memory.createdAt.toISOString(),
+      },
+    })
+  })
+
+export default app
