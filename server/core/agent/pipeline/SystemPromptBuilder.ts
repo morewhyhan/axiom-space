@@ -113,38 +113,56 @@ export class SystemPromptBuilder {
       );
     }
 
+    let unifiedLearningProfileInjected = false;
+    try {
+      const { getCurrentVaultId } = await import('../agent-context');
+      const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context');
+      const vaultId = getCurrentVaultId();
+      if (vaultId) {
+        const learningProfile = await buildLearningProfileContext({ vaultId });
+        if (learningProfile.promptBlock.trim()) {
+          prompt += '\n\n' + learningProfile.promptBlock;
+          unifiedLearningProfileInjected = true;
+        }
+      }
+    } catch (err) {
+      console.debug('[Agent] Unified learning profile injection failed (non-fatal):', err);
+    }
+
     // User profile injection — feed BackgroundAnalyzer findings back to foreground.
     // Stable per session, so it sits inside system prompt and rides on cache breakpoint 1.
     try {
-      const { loadUserProfile } = await import(
-        '@/server/core/learning/memory/profile-manager'
-      );
-      const profile = await loadUserProfile();
-      if (profile) {
-        const goals = Array.isArray(profile.learningGoals) ? profile.learningGoals : [];
-        const patterns = Array.isArray(profile.interactionPatterns) ? profile.interactionPatterns : [];
-        const challenges = Array.isArray(profile.challengeAreas) ? profile.challengeAreas : [];
-        const domains = (profile.domainProgress && typeof profile.domainProgress === 'object')
-          ? profile.domainProgress as Record<string, string>
-          : {};
+      if (!unifiedLearningProfileInjected) {
+        const { loadUserProfile } = await import(
+          '@/server/core/learning/memory/profile-manager'
+        );
+        const profile = await loadUserProfile();
+        if (profile) {
+          const goals = Array.isArray(profile.learningGoals) ? profile.learningGoals : [];
+          const patterns = Array.isArray(profile.interactionPatterns) ? profile.interactionPatterns : [];
+          const challenges = Array.isArray(profile.challengeAreas) ? profile.challengeAreas : [];
+          const domains = (profile.domainProgress && typeof profile.domainProgress === 'object')
+            ? profile.domainProgress as Record<string, string>
+            : {};
 
-        const lines: string[] = [];
-        if (goals.length > 0) lines.push(`学习目标: ${goals.join('; ')}`);
-        if (patterns.length > 0) lines.push(`行为模式: ${patterns.join('; ')}`);
-        if (challenges.length > 0) lines.push(`困难领域: ${challenges.join('; ')}`);
-        const domainEntries = Object.entries(domains);
-        if (domainEntries.length > 0) {
-          lines.push(
-            `知识域进展:\n${domainEntries.map(([k, v]) => `  - ${k}: ${v}`).join('\n')}`,
-          );
-        }
+          const lines: string[] = [];
+          if (goals.length > 0) lines.push(`学习目标: ${goals.join('; ')}`);
+          if (patterns.length > 0) lines.push(`行为模式: ${patterns.join('; ')}`);
+          if (challenges.length > 0) lines.push(`困难领域: ${challenges.join('; ')}`);
+          const domainEntries = Object.entries(domains);
+          if (domainEntries.length > 0) {
+            lines.push(
+              `知识域进展:\n${domainEntries.map(([k, v]) => `  - ${k}: ${v}`).join('\n')}`,
+            );
+          }
 
-        if (lines.length > 0) {
-          prompt +=
-            '\n\n<user-profile>\n' +
-            '基于历史对话提炼的用户画像（用于个性化回应，不要在回复中复述）:\n' +
-            lines.join('\n') +
-            '\n</user-profile>';
+          if (lines.length > 0) {
+            prompt +=
+              '\n\n<user-profile>\n' +
+              '基于历史对话提炼的用户画像（用于个性化回应，不要在回复中复述）:\n' +
+              lines.join('\n') +
+              '\n</user-profile>';
+          }
         }
       }
     } catch (err) {

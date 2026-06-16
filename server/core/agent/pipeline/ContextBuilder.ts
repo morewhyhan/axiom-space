@@ -101,6 +101,12 @@ export class ContextBuilder {
       const vaultId = getCurrentVaultId();
       if (!vaultId) return '';
 
+      const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context');
+      const learningProfile = await buildLearningProfileContext({ vaultId });
+      if (learningProfile.promptBlock.trim()) {
+        return learningProfile.promptBlock;
+      }
+
       const vault = await prisma.vault.findUnique({
         where: { id: vaultId },
         select: { profileCache: true },

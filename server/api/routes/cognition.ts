@@ -78,6 +78,10 @@ const app = new Hono<{ Variables: { userId: string } }>()
     user,
     learningSessions,
     capabilities,
+    learningPaths,
+    observationMemories,
+    assessments,
+    resourceJobs,
   ] = await Promise.all([
     prisma.card.findMany({ where: { vaultId: vid }, select: { id: true, type: true, content: true, title: true, clusterId: true, tags: true, createdAt: true, cluster: { select: { name: true, color: true } } } }),
     prisma.card.count({ where: { vaultId: vid, type: 'permanent' } }),
@@ -89,6 +93,38 @@ const app = new Hono<{ Variables: { userId: string } }>()
     prisma.user.findUnique({ where: { id: userId }, select: { name: true, createdAt: true } }),
     prisma.learningSession.findMany({ where: { userId, vaultId: vid }, select: { id: true, status: true, createdAt: true } }),
     prisma.vaultCapability.findMany({ where: { vaultId: vid }, select: { concept: true, masteryLevel: true, status: true } }),
+    prisma.learningPath.findMany({
+      where: { userId, vaultId: vid },
+      orderBy: { updatedAt: 'desc' },
+      take: 5,
+      select: {
+        id: true,
+        name: true,
+        topic: true,
+        status: true,
+        totalSteps: true,
+        doneSteps: true,
+        steps: { select: { title: true, concept: true, status: true, mastery: true, cardId: true } },
+      },
+    }),
+    prisma.vaultMemory.findMany({
+      where: { vaultId: vid, category: 'observation' },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+      select: { id: true, value: true, createdAt: true },
+    }),
+    prisma.assessmentResult.findMany({
+      where: { userId, vaultId: vid },
+      orderBy: { createdAt: 'desc' },
+      take: 12,
+      select: { concept: true, passed: true, mastery: true, feedback: true, evidence: true, cardId: true, createdAt: true },
+    }),
+    prisma.resourceGenerationJob.findMany({
+      where: { vaultId: vid },
+      orderBy: { updatedAt: 'desc' },
+      take: 30,
+      select: { resourceType: true, label: true, status: true, topic: true },
+    }),
   ])
 
   const n = totalCards.length
@@ -121,6 +157,14 @@ const app = new Hono<{ Variables: { userId: string } }>()
   }
   const practicalEdges = edges.filter(e => e.type === 'prerequisite' || e.type === 'derived').length
   const application = Math.min(1, (uniqueTags.size / Math.max(n, 1)) * 0.5 + Math.min(practicalEdges / Math.max(e, 1), 1) * 0.5)
+  const completedSteps = learningPaths.reduce((sum, path) => sum + path.steps.filter((step) => step.status === 'completed' || step.status === 'mastered').length, 0)
+  const totalPathSteps = learningPaths.reduce((sum, path) => sum + path.steps.length, 0)
+  const passedAssessments = assessments.filter((assessment) => assessment.passed).length
+  const reflection = Math.min(1,
+    (totalPathSteps > 0 ? (completedSteps / totalPathSteps) * 0.45 : 0) +
+    (assessments.length > 0 ? (passedAssessments / assessments.length) * 0.35 : 0) +
+    Math.min(observationMemories.length / 8, 1) * 0.2
+  )
 
   const dimensions = {
     depth: Math.round(depth * 100) / 100,
@@ -128,6 +172,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     connection: Math.round(Math.min(connection, 1) * 100) / 100,
     expression: Math.round(expression * 100) / 100,
     application: Math.round(application * 100) / 100,
+    reflection: Math.round(reflection * 100) / 100,
   }
 
   // ── Learning stats ──
@@ -159,6 +204,130 @@ const app = new Hono<{ Variables: { userId: string } }>()
     level: i < 3 ? 'active' : 'developing',
     count,
   }))
+
+  const cardById = new Map(totalCards.map((card) => [card.id, card]))
+  const degree = new Map<string, number>()
+  edges.forEach((edge) => {
+    degree.set(edge.sourceId, (degree.get(edge.sourceId) ?? 0) + 1)
+    degree.set(edge.targetId, (degree.get(edge.targetId) ?? 0) + 1)
+  })
+  const isolatedCards = totalCards.filter((card) => (degree.get(card.id) ?? 0) === 0).slice(0, 8)
+  const noPermanentClusters = clusters.filter((cluster) => cluster.cards.length >= 2 && cluster.cards.every((card) => card.type !== 'permanent'))
+  const lowMasteryConcepts = capabilities
+    .filter((capability) => capability.masteryLevel < 55 || capability.status !== 'mastered')
+    .sort((a, b) => a.masteryLevel - b.masteryLevel)
+    .map((capability) => capability.concept)
+  const masteredConcepts = [
+    ...capabilities
+      .filter((capability) => capability.status === 'mastered' || capability.masteryLevel >= 80)
+      .sort((a, b) => b.masteryLevel - a.masteryLevel)
+      .map((capability) => capability.concept),
+    ...totalCards.filter((card) => card.type === 'permanent').map((card) => card.title || card.path),
+  ].filter(Boolean).slice(0, 10)
+  const weakConcepts = [
+    ...lowMasteryConcepts,
+    ...assessments.filter((assessment) => !assessment.passed || assessment.mastery < 60).map((assessment) => assessment.concept),
+    ...isolatedCards.map((card) => card.title || card.path),
+  ].filter(Boolean).slice(0, 10)
+  const missingPrerequisites = edges
+    .filter((edge) => edge.type === 'prerequisite')
+    .map((edge) => {
+      const source = cardById.get(edge.sourceId)
+      const target = cardById.get(edge.targetId)
+      if (!source || !target || target.type === 'permanent') return null
+      return source.title || source.path
+    })
+    .filter((item): item is string => !!item)
+    .slice(0, 8)
+  const domainProfiles = clusters.map((cluster) => {
+    const permanent = cluster.cards.filter((card) => card.type === 'permanent').length
+    const progress = cluster.cards.length > 0 ? permanent / cluster.cards.length : 0
+    return { name: cluster.name, progress, count: cluster.cards.length }
+  })
+  const strongDomains = domainProfiles.filter((item) => item.count > 0 && item.progress >= 0.45).sort((a, b) => b.progress - a.progress).map((item) => item.name).slice(0, 5)
+  const weakDomains = domainProfiles.filter((item) => item.count >= 2 && item.progress < 0.35).sort((a, b) => a.progress - b.progress).map((item) => item.name).slice(0, 5)
+  const activePaths = learningPaths.filter((path) => path.status !== 'completed')
+  const activeGoals = (activePaths.length > 0 ? activePaths.map((path) => path.topic || path.name) : clusters.slice(0, 3).map((cluster) => cluster.name)).filter(Boolean).slice(0, 4)
+  const dimensionEntries = Object.entries(dimensions)
+  const strongestDimension = dimensionEntries.sort((a, b) => b[1] - a[1])[0]
+  const weakestDimension = [...dimensionEntries].sort((a, b) => a[1] - b[1])[0]
+  const dimensionLabelMap: Record<string, string> = {
+    depth: '理解深度',
+    breadth: '知识广度',
+    connection: '关联能力',
+    expression: '表达清晰度',
+    application: '应用能力',
+    reflection: '反思纠错',
+  }
+  const avgDimension = dimensionEntries.reduce((sum, [, value]) => sum + value, 0) / Math.max(dimensionEntries.length, 1)
+  const userLevel = n < 8 || avgDimension < 0.36 ? 'beginner' : avgDimension >= 0.72 && n >= 30 ? 'advanced' : 'intermediate'
+  const observationTexts = observationMemories.map((memory) => parseObservationValue(memory.value).text).join('\n')
+  const resourceTypeCounts = new Map<string, number>()
+  resourceJobs.forEach((job) => resourceTypeCounts.set(job.resourceType, (resourceTypeCounts.get(job.resourceType) ?? 0) + 1))
+  const preferredResourceTypes = [...resourceTypeCounts.entries()].sort((a, b) => b[1] - a[1]).map(([type]) => type).slice(0, 4)
+  const explanationStyle = [
+    observationTexts.includes('图') || observationTexts.includes('流程') || observationTexts.includes('结构') ? '图解/流程优先' : null,
+    observationTexts.includes('代码') || observationTexts.includes('案例') ? '案例驱动' : null,
+    observationTexts.includes('例子') || observationTexts.includes('举例') || depth < 0.5 ? '例子先行' : null,
+    connection < 0.35 ? '强调概念连接' : null,
+    expression < 0.45 ? '要求用户复述' : null,
+  ].filter((item): item is string => !!item)
+  if (explanationStyle.length === 0) explanationStyle.push(userLevel === 'beginner' ? '先直觉后定义' : '边界和机制优先')
+  const preferences = {
+    explanationStyle: explanationStyle.slice(0, 4),
+    resourceTypes: preferredResourceTypes.length > 0 ? preferredResourceTypes : (application < 0.5 ? ['practice', 'diagram'] : ['summary', 'diagram']),
+    pace: userLevel === 'beginner' ? 'slow' : userLevel === 'advanced' ? 'fast' : 'normal',
+    needsExamples: depth < 0.58 || expression < 0.55 || observationTexts.includes('例子'),
+    prefersPractice: application < 0.55 || preferredResourceTypes.some((type) => /practice|quiz|exercise|练习/.test(type)),
+  }
+  const teachingPolicy = {
+    explainStyle: preferences.explanationStyle,
+    pace: preferences.pace,
+    shouldUseExamples: preferences.needsExamples,
+    shouldAskReflection: expression < 0.62 || reflection < 0.55,
+    shouldRecommendResources: application < 0.6 || preferredResourceTypes.length > 0,
+    shouldSuggestWikiLinks: connection < 0.5 || isolatedCards.length > 0,
+    shouldPreferPractice: preferences.prefersPractice,
+    avoidPatterns: [
+      userLevel === 'beginner' ? '避免连续堆叠术语' : null,
+      expression < 0.5 ? '避免只给答案不要求用户输出' : null,
+      connection < 0.45 ? '避免孤立解释概念' : null,
+    ].filter((item): item is string => !!item),
+  }
+  const profileSummary = {
+    userLevel,
+    goals: activeGoals,
+    activeDomains: timeDistribution.slice(0, 5).map((item) => item.domain),
+    summary: n > 0
+      ? `当前画像显示：用户主要围绕「${activeGoals[0] || timeDistribution[0]?.domain || '当前知识库'}」构建知识，优势在「${dimensionLabelMap[strongestDimension?.[0] || 'depth']}」，下一步应优先补强「${dimensionLabelMap[weakestDimension?.[0] || 'connection']}」。`
+      : '当前画像仍在初始化。请先创建卡片、进入学习路径或在 AI 工作台中完成一次对话。',
+    teachingFocus: teachingPolicy.shouldSuggestWikiLinks
+      ? '后续教学应主动要求用户建立概念连接，并推荐相关卡片。'
+      : teachingPolicy.shouldAskReflection
+        ? '后续教学应增加复述、纠错和反思问题，避免只被动接收解释。'
+        : '后续教学可以提高推进速度，并加入更强的迁移应用任务。',
+  }
+  const knowledgeProfile = {
+    masteredConcepts: uniqueStrings(masteredConcepts),
+    weakConcepts: uniqueStrings(weakConcepts),
+    missingPrerequisites: uniqueStrings(missingPrerequisites),
+    isolatedNodes: isolatedCards.map((card) => ({ id: card.id, title: card.title || card.path, type: card.type })),
+    strongDomains,
+    weakDomains,
+  }
+  const parsedObservations = observationMemories.map((memory) => ({ ...parseObservationValue(memory.value), createdAt: memory.createdAt }))
+  const profileLoop = {
+    evidenceCount: observationMemories.length + assessments.length + learningSessions.length,
+    gapCount: noPermanentClusters.length + isolatedCards.length,
+    lastObservationAt: observationMemories[0]?.createdAt?.toISOString() ?? null,
+    contextInjection: [
+      `用户水平：${userLevel}`,
+      activeGoals[0] ? `当前目标：${activeGoals[0]}` : null,
+      weakConcepts[0] ? `优先薄弱点：${weakConcepts[0]}` : null,
+      `教学策略：${teachingPolicy.explainStyle.join('、')}`,
+    ].filter((item): item is string => !!item),
+    recentEvidence: parsedObservations.slice(0, 3).map((item) => item.text),
+  }
 
   // ── Thinking pattern ──
   const crossClusterEdges = edges.filter(e => {
@@ -222,7 +391,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   // ── Next actions ──
   const nextActionItems: Array<{ text: string; targetType: string; targetId: string; evidence: EvidenceRef[] }> = []
   const weakestDim = Object.entries(dimensions).sort((a, b) => a[1] - b[1])
-  const dimLabels: Record<string, string> = { depth: '理解深度', breadth: '知识广度', connection: '关联能力', expression: '表达清晰度', application: '知识应用' }
+  const dimLabels: Record<string, string> = { depth: '理解深度', breadth: '知识广度', connection: '关联能力', expression: '表达清晰度', application: '知识应用', reflection: '反思纠错' }
   if (weakestDim.length > 0 && weakestDim[0][1] < 0.7) {
     nextActionItems.push({
       text: `提升「${dimLabels[weakestDim[0][0]] ?? weakestDim[0][0]}」— 当前 ${Math.round(weakestDim[0][1] * 100)}%`,
@@ -242,6 +411,14 @@ const app = new Hono<{ Variables: { userId: string } }>()
   }
   const nextActions = nextActionItems.map((item) => item.text)
 
+  let learningProfileContext: any = null;
+  try {
+    const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context');
+    learningProfileContext = await buildLearningProfileContext({ vaultId: vid, userId });
+  } catch (error) {
+    console.warn('[Cognition] Learning profile context failed, falling back to local stats:', error);
+  }
+
   const responseBody = {
     success: true,
     aiAvailable: true,
@@ -259,6 +436,12 @@ const app = new Hono<{ Variables: { userId: string } }>()
     knowledgeStructure,
     nextActions,
     nextActionItems,
+    profileSummary: learningProfileContext?.profileSummary ?? profileSummary,
+    knowledgeProfile: learningProfileContext?.knowledgeProfile ?? knowledgeProfile,
+    preferences: learningProfileContext?.preferences ?? preferences,
+    teachingPolicy: learningProfileContext?.teachingPolicy ?? teachingPolicy,
+    profileLoop: learningProfileContext?.profileLoop ?? profileLoop,
+    promptBlock: learningProfileContext?.promptBlock ?? '',
   }
 
   return c.json(responseBody)
@@ -277,6 +460,10 @@ function computeStreak(dates: Date[]): number {
     else if (i > 0) break // allow today to be missing
   }
   return streak
+}
+
+function uniqueStrings(items: string[]): string[] {
+  return [...new Set(items.map((item) => item.trim()).filter(Boolean))]
 }
 
 // ── AI Observations ──

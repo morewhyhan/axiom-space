@@ -1,15 +1,20 @@
 'use client'
 
-import { useState, useEffect, type ChangeEvent } from 'react'
-import { useGalaxyData, useCreateCluster, useUpdateCluster, useDeleteCluster, useAssignCardCluster } from '@/hooks/use-galaxy'
-import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
+import { useEffect, useState, type ChangeEvent } from 'react'
 import { toast } from 'sonner'
+import { useGalaxyData, useCreateCluster, useUpdateCluster, useDeleteCluster } from '@/hooks/use-galaxy'
+import { useAppStore, useGalaxyActions, type GraphLayoutMode } from '@/stores/mode-store'
 
-const STATIC_LAYOUTS = new Set(['flat', 'layered', 'matrix', 'task-flow', 'timeline', 'mastery', 'evidence'])
+const LAYOUTS: Array<{ mode: GraphLayoutMode; label: string; code: string }> = [
+  { mode: 'galaxy', label: '星系总览', code: 'MAP' },
+  { mode: 'flat', label: '关系平面', code: 'NET' },
+  { mode: 'concentric', label: '邻域展开', code: 'HOP' },
+  { mode: 'evidence', label: '证据支撑', code: 'RAG' },
+]
+
 type CanvasAction = (...args: unknown[]) => unknown
 
-/** Call a Three.js canvas bridge function; warn the user if the canvas hasn't mounted yet. */
-function callCanvas(name: string, args: unknown[]): boolean {
+function callCanvas(name: string, args: unknown[] = []): boolean {
   const storeName = name.replace(/^__/, '')
   const actions = useGalaxyActions.getState().actions as Record<string, CanvasAction | undefined>
   const fn = actions[storeName]
@@ -32,88 +37,83 @@ export default function GalaxyControls() {
   const createCluster = useCreateCluster()
   const updateCluster = useUpdateCluster()
   const deleteCluster = useDeleteCluster()
-  const assignCard = useAssignCardCluster()
-
-  const [autoRotate, setAutoRotate] = useState(true)
-  const [rotateSpeed, setRotateSpeed] = useState(0.2)
-  const [bloom, setBloom] = useState(1.4)
-  const hoverAttention = useAppStore((s) => s.graphHoverAttention)
-  const setHoverAttention = useAppStore((s) => s.setGraphHoverAttention)
+  const openModal = useAppStore((s) => s.openModal)
   const layoutMode = useAppStore((s) => s.graphLayoutMode)
   const setLayoutMode = useAppStore((s) => s.setGraphLayoutMode)
-  const [intEdges, setIntEdges] = useState(false)
-  const [extEdges, setExtEdges] = useState(false)
+  const hoverAttention = useAppStore((s) => s.graphHoverAttention)
+  const setHoverAttention = useAppStore((s) => s.setGraphHoverAttention)
+
+  const [autoRotate, setAutoRotate] = useState(true)
+  const [bloom, setBloom] = useState(0.8)
+  const [internalEdges, setInternalEdges] = useState(false)
+  const [externalEdges, setExternalEdges] = useState(false)
   const [filterPerm, setFilterPerm] = useState(true)
   const [filterFleet, setFilterFleet] = useState(true)
   const [filterLit, setFilterLit] = useState(true)
-  const [isDefaultView, setIsDefaultView] = useState(true)
-
-  // Track whether camera has moved from default by observing the DOM class
-  // on #reset-view-btn, which the 3D canvas toggles when a node is focused
-  useEffect(() => {
-    const btn = document.getElementById('reset-view-btn')
-    if (!btn) return
-
-    const check = () => setIsDefaultView(!btn.classList.contains('visible'))
-    check()
-
-    const observer = new MutationObserver(check)
-    observer.observe(btn, { attributes: true, attributeFilter: ['class'] })
-
-    return () => observer.disconnect()
-  }, [])
-
-  useEffect(() => {
-    let attempts = 0
-    const maxAttempts = 15
-    let timerId: ReturnType<typeof setTimeout> | null = null
-    const poll = () => {
-      const acts = useGalaxyActions.getState().actions
-      const ar = acts.getAutoRotate?.() as boolean | undefined; if (ar !== undefined) setAutoRotate(ar);
-      const sr = acts.getRotateSpeed?.() as number | undefined; if (sr !== undefined) setRotateSpeed(sr);
-      const bl = acts.getBloom?.() as number | undefined; if (bl !== undefined) setBloom(bl);
-      const ha = acts.getHoverAttention?.() as boolean | undefined; if (ha !== undefined) setHoverAttention(ha);
-      const lm = acts.getLayoutMode?.() as typeof layoutMode | undefined; if (lm !== undefined) setLayoutMode(lm);
-      // Did any of the reads succeed?  Stop polling.
-      if (ar !== undefined || sr !== undefined || bl !== undefined || ha !== undefined || lm !== undefined) return;
-      attempts++;
-      if (attempts < maxAttempts) timerId = setTimeout(poll, 200);
-    };
-    poll();
-    return () => { if (timerId !== null) clearTimeout(timerId) }
-  }, [layoutMode, setHoverAttention, setLayoutMode])
-
-  const toggleAutoRotate = () => {
-    if (STATIC_LAYOUTS.has(layoutMode)) {
-      setAutoRotate(false)
-      return
-    }
-    const v = !autoRotate
-    if (callCanvas('__setAutoRotate', [v])) setAutoRotate(v)
-  }
-  const handleSpeed = (e: ChangeEvent<HTMLInputElement>) => { const v = parseFloat(e.target.value); if (callCanvas('__setRotateSpeed', [v])) setRotateSpeed(v) }
-  const handleBloom = (e: ChangeEvent<HTMLInputElement>) => { const v = parseFloat(e.target.value); if (callCanvas('__setBloom', [v])) setBloom(v) }
-  const toggleHoverAttention = () => {
-    const v = !hoverAttention
-    setHoverAttention(v)
-    callCanvas('__setHoverAttention', [v])
-  }
-  const toggleIntEdges = () => { const v = !intEdges; if (callCanvas('__setInternalEdgesVisible', [v])) setIntEdges(v) }
-  const toggleExtEdges = () => { const v = !extEdges; if (callCanvas('__setExternalEdgesVisible', [v])) setExtEdges(v) }
-  const toggleType = (type: string, state: boolean, setter: (value: boolean) => void) => { const v = !state; if (callCanvas('__setNodeTypeVisible', [type, v])) setter(v) }
-  const resetView = () => {
-    if (callCanvas('__resetCameraView', [])) {
-      const lm = useGalaxyActions.getState().actions.getLayoutMode?.() as typeof layoutMode | undefined
-      if (lm) setLayoutMode(lm)
-    }
-  }
-  const fitSelection = () => { callCanvas('__fitSelection', []) }
-
-  // ── Cluster management state ──
   const [newClusterName, setNewClusterName] = useState('')
   const [editingClusterId, setEditingClusterId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
-  const [assigningCardId, setAssigningCardId] = useState<string | null>(null)
+
+  useEffect(() => {
+    let attempts = 0
+    const maxAttempts = 12
+    let timerId: ReturnType<typeof setTimeout> | null = null
+    const poll = () => {
+      const actions = useGalaxyActions.getState().actions
+      const ar = actions.getAutoRotate?.() as boolean | undefined
+      const bl = actions.getBloom?.() as number | undefined
+      const ha = actions.getHoverAttention?.() as boolean | undefined
+      const lm = actions.getLayoutMode?.() as GraphLayoutMode | undefined
+      if (ar !== undefined) setAutoRotate(ar)
+      if (bl !== undefined) setBloom(bl)
+      if (ha !== undefined) setHoverAttention(ha)
+      if (lm !== undefined) setLayoutMode(lm)
+      if (ar !== undefined || bl !== undefined || ha !== undefined || lm !== undefined) return
+      attempts += 1
+      if (attempts < maxAttempts) timerId = setTimeout(poll, 200)
+    }
+    poll()
+    return () => { if (timerId) clearTimeout(timerId) }
+  }, [setHoverAttention, setLayoutMode])
+
+  const setCanvasLayout = (mode: GraphLayoutMode) => {
+    setLayoutMode(mode)
+    callCanvas('__setLayoutMode', [mode])
+  }
+
+  const resetView = () => callCanvas('__resetCameraView')
+  const fitSelection = () => callCanvas('__fitSelection')
+
+  const toggleAutoRotate = () => {
+    const value = !autoRotate
+    if (callCanvas('__setAutoRotate', [value])) setAutoRotate(value)
+  }
+
+  const toggleHoverAttention = () => {
+    const value = !hoverAttention
+    setHoverAttention(value)
+    callCanvas('__setHoverAttention', [value])
+  }
+
+  const toggleInternalEdges = () => {
+    const value = !internalEdges
+    if (callCanvas('__setInternalEdgesVisible', [value])) setInternalEdges(value)
+  }
+
+  const toggleExternalEdges = () => {
+    const value = !externalEdges
+    if (callCanvas('__setExternalEdgesVisible', [value])) setExternalEdges(value)
+  }
+
+  const handleBloom = (event: ChangeEvent<HTMLInputElement>) => {
+    const value = Number(event.target.value)
+    if (callCanvas('__setBloom', [value])) setBloom(value)
+  }
+
+  const toggleType = (type: string, current: boolean, setCurrent: (value: boolean) => void) => {
+    const value = !current
+    if (callCanvas('__setNodeTypeVisible', [type, value])) setCurrent(value)
+  }
 
   const handleCreateCluster = async () => {
     const name = newClusterName.trim()
@@ -122,7 +122,9 @@ export default function GalaxyControls() {
       await createCluster.mutateAsync({ name })
       setNewClusterName('')
       toast.success(`星团「${name}」已创建`)
-    } catch { toast.error('创建星团失败') }
+    } catch {
+      toast.error('创建星团失败')
+    }
   }
 
   const handleRenameCluster = async (id: string) => {
@@ -132,7 +134,9 @@ export default function GalaxyControls() {
       await updateCluster.mutateAsync({ id, name })
       setEditingClusterId(null)
       setEditingName('')
-    } catch { toast.error('重命名失败') }
+    } catch {
+      toast.error('重命名失败')
+    }
   }
 
   const handleDeleteCluster = async (id: string, name: string) => {
@@ -140,190 +144,170 @@ export default function GalaxyControls() {
     try {
       await deleteCluster.mutateAsync(id)
       toast.success(`星团「${name}」已删除`)
-    } catch { toast.error('删除星团失败') }
-  }
-
-  const handleAssignCard = async (cardId: string, clusterId: string) => {
-    try {
-      await assignCard.mutateAsync({ cardId, clusterId })
-      setAssigningCardId(null)
-      toast.success('卡片已归入星团')
-    } catch { toast.error('分配失败') }
+    } catch {
+      toast.error('删除星团失败')
+    }
   }
 
   const clusters = galaxyData?.clusters ?? []
-  const allNodes = galaxyData?.nodes ?? []
-  const unattachedNodes = allNodes.filter(n => !n.clusterId)
-  const autoRotateOn = autoRotate && !STATIC_LAYOUTS.has(layoutMode)
+  const nodes = galaxyData?.nodes ?? []
+  const edges = galaxyData?.edges ?? []
+  const orphanCount = nodes.filter((node) => !node.clusterId).length
 
   return (
     <aside
       className="side-slot visible galaxy-panel flex-col pointer-events-auto no-scrollbar"
-      style={{ width: 'var(--panel-sm)', justifyContent: 'flex-start', gap: '10px', padding: 'var(--panel-py) 0', overflow: 'hidden' }}
+      style={{ width: '340px', justifyContent: 'space-between', gap: '12px', padding: 'var(--panel-py) 0', overflow: 'hidden' }}
     >
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f8)' }}>GALAXY_CONTROLS</span>
+      <section className="glass-panel rounded-2xl px-4 py-4">
+        <div className="mono text-cyan-300/75 uppercase tracking-[0.22em]" style={{ fontSize: 'var(--f8)' }}>GALAXY_VIEW</div>
+        <div className="mt-1 text-white/28" style={{ fontSize: 'var(--f8)' }}>知识星团 · 关系总览 · 学习路径</div>
       </section>
 
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-30 uppercase block mb-3" style={{ fontSize: 'var(--f7)' }}>ORBIT</span>
-        <div className="space-y-4">
-          <div className="flex justify-between items-center group cursor-pointer" onClick={toggleAutoRotate}>
-            <span className="mono text-white/60 group-hover:text-white transition-colors" style={{ fontSize: 'var(--f9)' }}>自动旋转</span>
-            <button className={`orbit-toggle ${autoRotateOn ? 'orbit-toggle-on' : ''}`}>
-              <span className={`orbit-toggle-dot ${autoRotateOn ? 'orbit-toggle-dot-on' : ''}`} />
-            </button>
-          </div>
-          <div>
-            <div className="flex justify-between mono mb-1.5" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">旋转速度</span><span className="opacity-60">{rotateSpeed.toFixed(1)}</span></div>
-            <input type="range" min="0" max="2" step="0.1" value={rotateSpeed} onChange={handleSpeed} className="orbit-slider cursor-pointer" />
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button className="axiom-btn secondary w-full border-white/10 bg-white/[0.025]" style={{ fontSize: 'var(--f9)', opacity: isDefaultView ? 0.2 : 1, pointerEvents: isDefaultView ? 'none' : 'auto' }} onClick={resetView}>重置视角</button>
-            <button className="axiom-btn secondary w-full border-white/10 bg-white/[0.025]" style={{ fontSize: 'var(--f9)', opacity: isDefaultView ? 0.2 : 1, pointerEvents: isDefaultView ? 'none' : 'auto' }} onClick={fitSelection}>适配关系</button>
-          </div>
+      <section className="glass-panel rounded-2xl px-4 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="mono text-white/34 uppercase" style={{ fontSize: 'var(--f7)' }}>VIEW_MODE</span>
+          <span className="mono text-white/18" style={{ fontSize: 'var(--f8)' }}>{nodes.length} nodes</span>
         </div>
-      </section>
-
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-30 uppercase block mb-3" style={{ fontSize: 'var(--f7)' }}>VISUAL</span>
-        <div className="space-y-4">
-          <div>
-            <div className="flex justify-between mono mb-1.5" style={{ fontSize: 'var(--f9)' }}><span className="opacity-40">BLOOM</span><span className="opacity-60">{bloom.toFixed(1)}</span></div>
-            <input type="range" min="0" max="2.5" step="0.1" value={bloom} onChange={handleBloom} className="orbit-slider cursor-pointer" />
-          </div>
-          {[
-            { label: '悬停聚焦', val: hoverAttention, fn: toggleHoverAttention },
-            { label: '内部连线', val: intEdges, fn: toggleIntEdges },
-            { label: '外部连线', val: extEdges, fn: toggleExtEdges },
-          ].map((item) => (
-            <div key={item.label} className="flex justify-between items-center group cursor-pointer" onClick={item.fn}>
-              <span className="mono text-white/60 group-hover:text-white transition-colors" style={{ fontSize: 'var(--f9)' }}>{item.label}</span>
-              <button className={`orbit-toggle ${item.val ? 'orbit-toggle-on' : ''}`}>
-                <span className={`orbit-toggle-dot ${item.val ? 'orbit-toggle-dot-on' : ''}`} />
+        <div className="grid grid-cols-2 gap-2">
+          {LAYOUTS.map((item) => {
+            const active = item.mode === layoutMode
+            return (
+              <button
+                key={item.mode}
+                className={[
+                  'rounded-lg border px-3 py-2 text-left transition-colors',
+                  active
+                    ? 'border-cyan-300/35 bg-cyan-300/[0.075] text-cyan-100'
+                    : 'border-white/8 bg-white/[0.018] text-white/42 hover:border-white/14 hover:bg-white/[0.035] hover:text-white/68',
+                ].join(' ')}
+                onClick={() => setCanvasLayout(item.mode)}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="mono" style={{ fontSize: 'var(--f9)' }}>{item.label}</span>
+                  <span className="mono text-white/20" style={{ fontSize: 'var(--f10)' }}>{item.code}</span>
+                </div>
               </button>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </section>
 
-      <section className="rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <span className="mono opacity-30 uppercase block mb-3" style={{ fontSize: 'var(--f7)' }}>FILTER</span>
-        <div className="space-y-3">
-          <label className="flex items-center justify-between cursor-pointer group" onClick={() => toggleType('permanent', filterPerm, setFilterPerm)}>
-            <span className="mono text-purple-400/80 group-hover:text-purple-300 transition-colors" style={{ fontSize: 'var(--f10)' }}>◆ 永久</span>
-            <button className={`orbit-toggle ${filterPerm ? 'orbit-toggle-on' : ''}`}><span className={`orbit-toggle-dot ${filterPerm ? 'orbit-toggle-dot-on' : ''}`} /></button>
-          </label>
-          <label className="flex items-center justify-between cursor-pointer group" onClick={() => toggleType('fleeting', filterFleet, setFilterFleet)}>
-            <span className="mono text-cyan-400/80 group-hover:text-cyan-300 transition-colors" style={{ fontSize: 'var(--f10)' }}>◇ 灵感</span>
-            <button className={`orbit-toggle ${filterFleet ? 'orbit-toggle-on' : ''}`}><span className={`orbit-toggle-dot ${filterFleet ? 'orbit-toggle-dot-on' : ''}`} /></button>
-          </label>
-          <label className="flex items-center justify-between cursor-pointer group" onClick={() => toggleType('literature', filterLit, setFilterLit)}>
-            <span className="mono text-pink-400/80 group-hover:text-pink-300 transition-colors" style={{ fontSize: 'var(--f10)' }}>○ 文献</span>
-            <button className={`orbit-toggle ${filterLit ? 'orbit-toggle-on' : ''}`}><span className={`orbit-toggle-dot ${filterLit ? 'orbit-toggle-dot-on' : ''}`} /></button>
-          </label>
+      <section className="glass-panel rounded-2xl px-4 py-4">
+        <span className="mono text-white/34 uppercase block mb-3" style={{ fontSize: 'var(--f7)' }}>NAVIGATION</span>
+        <div className="grid grid-cols-2 gap-2">
+          <button className="axiom-btn secondary border-white/10 bg-white/[0.025]" style={{ fontSize: 'var(--f9)' }} onClick={resetView}>重置视角</button>
+          <button className="axiom-btn secondary border-white/10 bg-white/[0.025]" style={{ fontSize: 'var(--f9)' }} onClick={fitSelection}>适配关系</button>
+          <button className="axiom-btn secondary border-white/10 bg-white/[0.025]" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('search')}>搜索节点</button>
+          <button className="axiom-btn secondary border-white/10 bg-white/[0.025]" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入资料</button>
         </div>
       </section>
 
-      {/* ── 星团管理 ── */}
-      <section className="min-h-0 flex-1 overflow-y-auto no-scrollbar rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <div className="flex items-center justify-between mb-3">
-          <span className="mono opacity-30 uppercase" style={{ fontSize: 'var(--f7)' }}>星团管理</span>
-          <span className="mono text-white/20 text-[8px]">{clusters.length} 个</span>
+      <section className="glass-panel rounded-2xl px-4 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="mono text-white/34 uppercase" style={{ fontSize: 'var(--f7)' }}>FILTER</span>
+          <span className="mono text-white/18" style={{ fontSize: 'var(--f8)' }}>{edges.length} links</span>
         </div>
+        <div className="space-y-2.5">
+          <FilterRow color="bg-purple-400" label="PERM — 永久知识" active={filterPerm} onClick={() => toggleType('permanent', filterPerm, setFilterPerm)} />
+          <FilterRow color="bg-cyan-400" label="FLEE — 灵感草稿" active={filterFleet} onClick={() => toggleType('fleeting', filterFleet, setFilterFleet)} />
+          <FilterRow color="bg-pink-400" label="LIT — 文献证据" active={filterLit} onClick={() => toggleType('literature', filterLit, setFilterLit)} />
+        </div>
+      </section>
 
-        {/* New cluster */}
-        <div className="flex items-center gap-2 mb-3">
+      <section className="glass-panel min-h-0 flex-1 overflow-y-auto no-scrollbar rounded-2xl px-4 py-4">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="mono text-white/34 uppercase" style={{ fontSize: 'var(--f7)' }}>CLUSTERS</span>
+          <span className="mono text-white/18" style={{ fontSize: 'var(--f8)' }}>{clusters.length} groups · {orphanCount} orphan</span>
+        </div>
+        <div className="mb-3 flex items-center gap-2">
           <input
-            className="flex-1 bg-white/[0.025] border border-white/10 rounded px-2 py-1 text-white/80 text-[10px] mono outline-none focus:border-purple-500/40"
-            placeholder="新星团名称"
+            className="flex-1 rounded-lg border border-white/8 bg-white/[0.025] px-3 py-2 mono text-white/72 outline-none transition-colors placeholder:text-white/16 focus:border-cyan-300/28"
+            style={{ fontSize: 'var(--f9)' }}
+            placeholder="新建星团..."
             value={newClusterName}
-            onChange={e => setNewClusterName(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') handleCreateCluster() }}
+            onChange={(event) => setNewClusterName(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Enter') handleCreateCluster() }}
           />
           <button
-            className="mono text-[9px] px-2 py-1 rounded bg-pink-500/12 border border-pink-500/24 text-pink-200/80 hover:bg-pink-500/18 disabled:opacity-20"
+            className="rounded-lg border border-cyan-300/20 bg-cyan-300/[0.06] px-3 py-2 mono text-cyan-100/70 hover:bg-cyan-300/[0.1] disabled:opacity-20"
+            style={{ fontSize: 'var(--f9)' }}
             disabled={!newClusterName.trim() || createCluster.isPending}
             onClick={handleCreateCluster}
           >创建</button>
         </div>
-
-        {/* Cluster list */}
-        <div className="space-y-1">
-          {clusters.map(cl => (
-            <div key={cl.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-white/5 group">
-              {editingClusterId === cl.id ? (
+        <div className="space-y-1.5">
+          {clusters.length === 0 && <div className="mono text-white/22" style={{ fontSize: 'var(--f9)' }}>暂无星团，导入或沉淀卡片后自动生成。</div>}
+          {clusters.map((cluster) => (
+            <div key={cluster.id} className="group rounded-lg border border-white/6 bg-white/[0.016] px-3 py-2 hover:bg-white/[0.032]">
+              {editingClusterId === cluster.id ? (
                 <input
-                  className="flex-1 bg-white/10 border border-purple-500/40 rounded px-1.5 py-0.5 text-white text-[10px] mono outline-none"
+                  className="w-full rounded border border-cyan-300/30 bg-black/30 px-2 py-1 mono text-white outline-none"
+                  style={{ fontSize: 'var(--f9)' }}
                   value={editingName}
-                  onChange={e => setEditingName(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') handleRenameCluster(cl.id)
-                    if (e.key === 'Escape') { setEditingClusterId(null); setEditingName('') }
+                  onChange={(event) => setEditingName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') handleRenameCluster(cluster.id)
+                    if (event.key === 'Escape') setEditingClusterId(null)
                   }}
                   autoFocus
                 />
               ) : (
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className="w-2 h-2 rounded-full shrink-0" style={{ background: cl.color }} />
-                  <span className="mono text-white/70 truncate text-[10px]">{cl.name}</span>
-                  <span className="mono text-white/15 shrink-0 text-[8px]">{cl.cardCount}</span>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="truncate text-white/68" style={{ fontSize: 'var(--f9)' }}>{cluster.name}</div>
+                    <div className="mono text-white/18" style={{ fontSize: 'var(--f10)' }}>CONSTELLATION</div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                    <button className="mono text-white/28 hover:text-cyan-200" style={{ fontSize: 'var(--f10)' }} onClick={() => { setEditingClusterId(cluster.id); setEditingName(cluster.name) }}>改名</button>
+                    <button className="mono text-white/24 hover:text-pink-200" style={{ fontSize: 'var(--f10)' }} onClick={() => handleDeleteCluster(cluster.id, cluster.name)}>删除</button>
+                  </div>
                 </div>
               )}
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                <button className="text-white/20 hover:text-white/60 text-[9px] px-1" onClick={() => { setEditingClusterId(cl.id); setEditingName(cl.name) }} title="重命名">✎</button>
-                <button className="text-red-400/30 hover:text-red-400 text-[9px] px-1" onClick={() => handleDeleteCluster(cl.id, cl.name)} title="删除星团">✕</button>
-              </div>
             </div>
           ))}
         </div>
+      </section>
 
-        {/* ── 游离节点 ── */}
-        {unattachedNodes.length > 0 && (
-          <>
-            <div className="my-3 h-px bg-white/6"></div>
-            <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f7)' }}>
-              游离节点
-              <span className="text-white/20 ml-1 text-[8px]">{unattachedNodes.length}</span>
-            </span>
-            <div className="space-y-1 max-h-[200px] overflow-y-auto no-scrollbar">
-              {unattachedNodes.slice(0, 30).map(node => (
-                <div key={node.id} className="flex items-center justify-between py-1 px-2 rounded hover:bg-white/5 group">
-                  <span className="mono text-white/40 truncate text-[9px] flex-1 min-w-0">
-                    {node.type === 'permanent' ? '◆' : node.type === 'literature' ? '○' : '◇'} {node.title}
-                  </span>
-                  {assigningCardId === node.id ? (
-                    <select
-                      className="bg-black/60 border border-purple-500/40 rounded px-1 py-0.5 text-white text-[8px] mono outline-none max-w-[90px]"
-                      onChange={e => { if (e.target.value) handleAssignCard(node.id, e.target.value) }}
-                      onBlur={() => setAssigningCardId(null)}
-                      autoFocus
-                    >
-                      <option value="">星团...</option>
-                      {clusters.map(cl => (<option key={cl.id} value={cl.id}>{cl.name}</option>))}
-                    </select>
-                  ) : (
-                    <button
-                      className="mono text-[8px] text-purple-400/60 hover:text-purple-400 opacity-0 group-hover:opacity-100 transition-opacity px-1 shrink-0"
-                      onClick={() => setAssigningCardId(node.id)}
-                    >→ 分配</button>
-                  )}
-                </div>
-              ))}
-              {unattachedNodes.length > 30 && (
-                <div className="mono text-white/15 text-[8px] text-center py-1">还有 {unattachedNodes.length - 30} 个...</div>
-              )}
+      <details className="glass-panel rounded-2xl px-4 py-3">
+        <summary className="cursor-pointer mono text-white/30 uppercase" style={{ fontSize: 'var(--f8)' }}>ADVANCED_RENDER</summary>
+        <div className="mt-3 space-y-3">
+          <SwitchRow label="自动旋转" active={autoRotate} onClick={toggleAutoRotate} />
+          <SwitchRow label="悬停聚焦" active={hoverAttention} onClick={toggleHoverAttention} />
+          <SwitchRow label="内部连线" active={internalEdges} onClick={toggleInternalEdges} />
+          <SwitchRow label="外部连线" active={externalEdges} onClick={toggleExternalEdges} />
+          <div>
+            <div className="mb-1.5 flex justify-between mono" style={{ fontSize: 'var(--f9)' }}>
+              <span className="text-white/30">BLOOM</span>
+              <span className="text-white/45">{bloom.toFixed(1)}</span>
             </div>
-          </>
-        )}
-      </section>
-
-      {/* ── Stats footer ── */}
-      <section className="grid shrink-0 grid-cols-3 gap-3 rounded-2xl border border-white/8 bg-white/[0.012] px-3 py-3">
-        <div><span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>NODES</span><div className="mono text-sm text-white/90 font-bold mt-0.5">{allNodes.length}</div></div>
-        <div><span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>FREE</span><div className="mono text-sm text-pink-400 font-bold mt-0.5">{unattachedNodes.length}</div></div>
-        <div><span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f7)' }}>FPS</span><div className="mono text-sm text-cyan-400 font-bold mt-0.5" id="fps-display">—</div></div>
-      </section>
+            <input type="range" min="0" max="1.6" step="0.1" value={bloom} onChange={handleBloom} className="orbit-slider cursor-pointer" />
+          </div>
+        </div>
+      </details>
     </aside>
+  )
+}
+
+function FilterRow({ color, label, active, onClick }: { color: string; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button className="flex w-full items-center justify-between gap-3 rounded-lg px-1 py-1.5 text-left hover:bg-white/[0.025]" onClick={onClick}>
+      <span className="flex min-w-0 items-center gap-2.5">
+        <span className={`h-2 w-2 rounded-full ${color} shadow-[0_0_8px_rgba(255,255,255,0.18)]`} />
+        <span className="mono truncate text-white/52" style={{ fontSize: 'var(--f9)' }}>{label}</span>
+      </span>
+      <span className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-cyan-300' : 'bg-white/12'}`} />
+    </button>
+  )
+}
+
+function SwitchRow({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button className="flex w-full items-center justify-between group" onClick={onClick}>
+      <span className="mono text-white/44 group-hover:text-white/68" style={{ fontSize: 'var(--f9)' }}>{label}</span>
+      <span className={`orbit-toggle ${active ? 'orbit-toggle-on' : ''}`}>
+        <span className={`orbit-toggle-dot ${active ? 'orbit-toggle-dot-on' : ''}`} />
+      </span>
+    </button>
   )
 }

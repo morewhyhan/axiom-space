@@ -24,9 +24,7 @@ const ForgeEditor = dynamic(() => import('@/components/forge/forge-editor'))
 const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-list'))
 const FileTree = dynamic(() => import('@/components/forge/file-tree'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
-const GalaxyLayoutPanel = dynamic(() => import('@/components/galaxy/galaxy-layout-panel'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
-const CognitionSidebar = dynamic(() => import('@/components/cognition/cognition-sidebar'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
 const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
 const LearnWorkspace = dynamic(() => import('@/components/learn/learn-workspace'))
@@ -638,7 +636,6 @@ export default function Home() {
                 <div className={`mode-stage ${mode === 'galaxy' ? 'active' : ''}`} aria-hidden={mode !== 'galaxy'}>
                   <div className="left-zone">
                     <GalaxyControls />
-                    <GalaxyLayoutPanel />
                   </div>
                   <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
                     <div className="graph-hint" id={mode === 'galaxy' ? 'graph-hint' : undefined}>
@@ -661,7 +658,6 @@ export default function Home() {
 
               {(visitedModes.has('cognition') || mode === 'cognition') && (
                 <div className={`mode-stage cognition-stage ${mode === 'cognition' ? 'active' : ''}`} aria-hidden={mode !== 'cognition'}>
-                  <CognitionSidebar />
                   <LearningProfile />
                   <InsightsPanel />
                 </div>

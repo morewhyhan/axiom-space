@@ -10,6 +10,7 @@ export interface CognitiveDimensions {
   connection: number
   expression: number
   application: number
+  reflection?: number
 }
 
 export interface CognitionSkill {
@@ -65,6 +66,46 @@ export interface CognitionData {
   knowledgeStructure: KnowledgeNode[]
   nextActions: string[]
   nextActionItems?: Array<{ text: string; targetType: string; targetId: string; evidence: EvidenceRef[] }>
+  profileSummary?: {
+    userLevel: 'beginner' | 'intermediate' | 'advanced' | string
+    goals: string[]
+    activeDomains: string[]
+    summary: string
+    teachingFocus: string
+  }
+  knowledgeProfile?: {
+    masteredConcepts: string[]
+    weakConcepts: string[]
+    missingPrerequisites: string[]
+    isolatedNodes: Array<{ id: string; title: string; type: string }>
+    strongDomains: string[]
+    weakDomains: string[]
+  }
+  preferences?: {
+    explanationStyle: string[]
+    resourceTypes: string[]
+    pace: 'slow' | 'normal' | 'fast' | string
+    needsExamples: boolean
+    prefersPractice: boolean
+  }
+  teachingPolicy?: {
+    explainStyle: string[]
+    pace: 'slow' | 'normal' | 'fast' | string
+    shouldUseExamples: boolean
+    shouldAskReflection: boolean
+    shouldRecommendResources: boolean
+    shouldSuggestWikiLinks: boolean
+    shouldPreferPractice: boolean
+    avoidPatterns: string[]
+  }
+  profileLoop?: {
+    evidenceCount: number
+    gapCount: number
+    lastObservationAt: string | null
+    contextInjection: string[]
+    recentEvidence: string[]
+  }
+  promptBlock?: string
 }
 
 export interface EvidenceRef {
@@ -107,7 +148,7 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     aiAvailable: data.aiAvailable as boolean ?? true,
     analysisMode: data.analysisMode as string ?? 'ai_assisted_evidence_based',
     user: data.user as CognitionData['user'] ?? { name: '学习者', joinedAt: '' },
-    dimensions: data.dimensions as CognitionData['dimensions'] ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0 },
+    dimensions: data.dimensions as CognitionData['dimensions'] ?? { depth: 0, breadth: 0, connection: 0, expression: 0, application: 0, reflection: 0 },
     stats: data.stats as CognitionData['stats'] ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 },
     skills: data.skills as CognitionData['skills'] ?? [],
     thinkingPattern: data.thinkingPattern as CognitionData['thinkingPattern'] ?? { text: '', highlights: [], detail: '' },
@@ -119,6 +160,12 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     knowledgeStructure: data.knowledgeStructure as CognitionData['knowledgeStructure'] ?? [],
     nextActions: data.nextActions as CognitionData['nextActions'] ?? [],
     nextActionItems: data.nextActionItems as CognitionData['nextActionItems'] ?? [],
+    profileSummary: data.profileSummary as CognitionData['profileSummary'],
+    knowledgeProfile: data.knowledgeProfile as CognitionData['knowledgeProfile'],
+    preferences: data.preferences as CognitionData['preferences'],
+    teachingPolicy: data.teachingPolicy as CognitionData['teachingPolicy'],
+    profileLoop: data.profileLoop as CognitionData['profileLoop'],
+    promptBlock: data.promptBlock as string | undefined,
   }
 }
 
