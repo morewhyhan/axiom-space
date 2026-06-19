@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { AlertTriangle, Trash2, X } from 'lucide-react'
 import { useSignIn, useSignUp, useSignOut } from '@/hooks/use-auth'
 import { useAppStore } from '@/stores/mode-store'
 import { client } from '@/lib/api-client'
+import type { VaultInfo } from '@/stores/mode-store'
 
 export default function LandingPage({
   showLoadingHint = false,
@@ -25,6 +27,10 @@ export default function LandingPage({
   onEnterApp?: () => void
 }) {
   const [showAuth, setShowAuth] = useState<'login' | 'register' | null>(null)
+  const [deletingVaultId, setDeletingVaultId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<VaultInfo | null>(null)
+  const [deleteConfirmName, setDeleteConfirmName] = useState('')
+  const [deleteStatus, setDeleteStatus] = useState<{ tone: 'error' | 'success'; text: string } | null>(null)
   const signOut = useSignOut()
 
   const vaults = useAppStore((s) => s.vaults)
@@ -36,6 +42,57 @@ export default function LandingPage({
     setLastVaultId(id)
     setCurrentVaultId(id)
     onEnterApp?.()
+  }
+
+  const handleDeleteVault = (vault: VaultInfo) => {
+    if (deletingVaultId) return
+    setDeleteTarget(vault)
+    setDeleteConfirmName('')
+    setDeleteStatus(null)
+  }
+
+  const handleCancelDelete = () => {
+    if (deletingVaultId) return
+    setDeleteTarget(null)
+    setDeleteConfirmName('')
+  }
+
+  const handleConfirmDeleteVault = async () => {
+    const vault = deleteTarget
+    if (!vault || deletingVaultId) return
+    const confirmName = deleteConfirmName.trim()
+    if (confirmName !== vault.name) {
+      setDeleteStatus({ tone: 'error', text: '名称不匹配，删除已取消。' })
+      return
+    }
+
+    setDeletingVaultId(vault.id)
+    setDeleteStatus(null)
+    try {
+      const res = await client.api.vaults[':id'].$delete({
+        param: { id: vault.id },
+        json: { confirmName },
+      })
+      const data = await res.json() as { success?: boolean; deletedVaultId?: string; error?: string }
+      if (!res.ok || data.success !== true) {
+        throw new Error(data.error || `删除失败 (${res.status})`)
+      }
+
+      const nextVaults = useAppStore.getState().vaults.filter((item) => item.id !== vault.id)
+      useAppStore.getState().setVaults(nextVaults)
+      if (useAppStore.getState().currentVaultId === vault.id) {
+        const nextSelected = nextVaults[0] ?? null
+        useAppStore.getState().setCurrentVaultId(nextSelected?.id ?? null)
+        if (nextSelected) useAppStore.getState().setLastVaultId(nextSelected.id)
+      }
+      setDeleteStatus({ tone: 'success', text: `已删除「${vault.name}」。` })
+      setDeleteTarget(null)
+      setDeleteConfirmName('')
+    } catch (err) {
+      setDeleteStatus({ tone: 'error', text: err instanceof Error ? err.message : '删除失败，请重试。' })
+    } finally {
+      setDeletingVaultId(null)
+    }
   }
 
   const renderGuestIntro = (checkingSession = false) => (
@@ -110,21 +167,99 @@ export default function LandingPage({
               <h2 className="landing-section-title">选择知识库</h2>
               <div className="landing-vault-list">
                 {vaults.map((v) => (
-                  <button key={v.id} className={`landing-vault-card ${v.id === currentVaultId ? 'landing-vault-active' : ''}`} onClick={() => handleSelectVault(v.id)}>
-                    <span className="landing-vault-icon">◆</span>
-                    <div className="landing-vault-info">
-                      <span className="landing-vault-name">{v.name}</span>
-                      <span className="landing-vault-count">{v.cardCount} 张卡片</span>
-                    </div>
-                  </button>
+                  <div key={v.id} className={`landing-vault-card ${v.id === currentVaultId ? 'landing-vault-active' : ''}`}>
+                    <button type="button" className="landing-vault-select" onClick={() => handleSelectVault(v.id)}>
+                      <span className="landing-vault-icon">◆</span>
+                      <span className="landing-vault-info">
+                        <span className="landing-vault-name">{v.name}</span>
+                        <span className="landing-vault-count">{v.cardCount} 张卡片</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="landing-vault-delete"
+                      onClick={() => handleDeleteVault(v)}
+                      disabled={deletingVaultId === v.id}
+                      title="删除知识库"
+                      aria-label={`删除知识库 ${v.name}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 ))}
               </div>
+              {deleteStatus && (
+                <p className={deleteStatus.tone === 'error' ? 'landing-delete-error' : 'landing-delete-success'}>
+                  {deleteStatus.text}
+                </p>
+              )}
               <CreateVaultInline onCreated={handleSelectVault} />
               {showLoadingHint && <p className="landing-loading-hint">正在准备数据...</p>}
             </>
           )}
         </div>
       </section>
+      {deleteTarget && (
+        <div className="landing-delete-dialog-backdrop" role="presentation">
+          <div
+            className="landing-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-vault-title"
+          >
+            <div className="landing-delete-dialog-header">
+              <div className="landing-delete-dialog-icon">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+              <button
+                type="button"
+                className="landing-delete-dialog-close"
+                onClick={handleCancelDelete}
+                disabled={deletingVaultId === deleteTarget.id}
+                aria-label="关闭删除确认"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <h3 id="delete-vault-title" className="landing-delete-dialog-title">永久删除知识库</h3>
+            <p className="landing-delete-dialog-copy">
+              这会删除「{deleteTarget.name}」以及其中所有卡片、会话、学习路径、画像、资源记录和索引数据。
+            </p>
+            <label className="landing-delete-dialog-label" htmlFor="delete-vault-confirm-name">
+              输入完整知识库名称确认
+            </label>
+            <input
+              id="delete-vault-confirm-name"
+              className="landing-delete-dialog-input"
+              value={deleteConfirmName}
+              onChange={(event) => setDeleteConfirmName(event.target.value)}
+              disabled={deletingVaultId === deleteTarget.id}
+              autoFocus
+            />
+            {deleteStatus?.tone === 'error' && (
+              <p className="landing-delete-dialog-error">{deleteStatus.text}</p>
+            )}
+            <div className="landing-delete-dialog-actions">
+              <button
+                type="button"
+                className="landing-delete-dialog-cancel"
+                onClick={handleCancelDelete}
+                disabled={deletingVaultId === deleteTarget.id}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="landing-delete-dialog-confirm"
+                onClick={handleConfirmDeleteVault}
+                disabled={deleteConfirmName.trim() !== deleteTarget.name || deletingVaultId === deleteTarget.id}
+              >
+                {deletingVaultId === deleteTarget.id ? '删除中...' : '永久删除'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showAuth && <AuthModal mode={showAuth} onClose={() => setShowAuth(null)} />}
     </div>
   )

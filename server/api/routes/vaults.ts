@@ -48,4 +48,35 @@ const app = new Hono<{ Variables: { userId: string } }>()
   return c.json({ success: true, vault: { id: vault.id, name: vault.name } })
 })
 
+// DELETE /api/vaults/:id — 真实删除当前用户的整个 vault 及其相关数据
+.delete('/:id', zValidator('json', z.object({
+  confirmName: z.string().min(1),
+})), async (c) => {
+  const userId = c.get('userId') as string
+  const vaultId = c.req.param('id')
+  const { confirmName } = c.req.valid('json')
+
+  const vault = await prisma.vault.findFirst({
+    where: { id: vaultId, userId },
+    select: { id: true, name: true },
+  })
+  if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
+  if (confirmName !== vault.name) {
+    return c.json({ success: false, error: '知识库名称不匹配，删除已取消' }, 409)
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.agentAuditLog.deleteMany({ where: { vaultId } })
+    await tx.agentConfirmationToken.deleteMany({ where: { vaultId } })
+    await tx.domainEvent.deleteMany({ where: { vaultId } })
+    await tx.promotionAttempt.deleteMany({ where: { vaultId } })
+    await tx.assessmentResult.deleteMany({ where: { vaultId } })
+    await tx.cardRevision.deleteMany({ where: { vaultId } })
+    await tx.sourceDocument.deleteMany({ where: { vaultId } })
+    await tx.vault.delete({ where: { id: vaultId } })
+  })
+
+  return c.json({ success: true, deletedVaultId: vaultId })
+})
+
 export default app

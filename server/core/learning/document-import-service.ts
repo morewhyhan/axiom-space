@@ -6,13 +6,17 @@ import { emitDomainEvent, recordSourceDocument } from '@/server/core/domain/even
 import { syncEdgesFromContent } from '@/lib/wiki-links'
 import {
   ensureContainsEdge,
+  ensureConceptCard,
   ensureRootContainsConcept,
 } from '@/server/core/domain/concept-graph'
 import {
   DOCUMENT_CHUNK_EXTRACTION_PROMPT,
   DOCUMENT_IMPORT_PATH_PROMPT,
   DOCUMENT_PARSE_PROMPT,
+  DOCUMENT_STRUCTURE_PLAN_PROMPT,
 } from '@/server/core/ai/prompts'
+import { buildGenerationRagContext } from '@/server/core/rag/generation-context'
+import { scheduleRagIndexCards } from '@/server/core/rag/auto-index'
 
 type AiManagerLike = {
   callAPI: (
@@ -44,6 +48,31 @@ type StructuredDocument = {
   concepts: ExtractedConcept[]
   fleetingCards: ExtractedFleeting[]
   relations: ExtractedRelation[]
+}
+
+type NecessaryCondition = {
+  title: string
+  description: string
+  whyNecessary: string
+  sufficiencyRole: string
+  coverage: 'documented' | 'mixed' | 'ai_generated'
+  evidenceTitles?: string[]
+}
+
+type StructureAssignment = {
+  cardTitle: string
+  conditionTitle: string
+  reason?: string
+}
+
+type StructurePlan = {
+  conditions: NecessaryCondition[]
+  assignments: StructureAssignment[]
+  coverageCheck?: {
+    sufficient?: boolean
+    missing?: string[]
+    summary?: string
+  }
 }
 
 type DocumentChunk = {
@@ -99,6 +128,10 @@ export async function importDocumentToVault(input: {
   topic: string
   source: string
   sourceTitle?: string | null
+  sourceMimeType?: string | null
+  originalFileName?: string | null
+  conversionKind?: string | null
+  skipAiExtraction?: boolean
   createLearningPath?: boolean
   aiManager?: AiManagerLike
 }): Promise<DocumentImportServiceResult> {
@@ -119,7 +152,13 @@ export async function importDocumentToVault(input: {
     source,
     contentHash,
     document,
-    metadata: { topic },
+    metadata: {
+      topic,
+      sourceTitle,
+      sourceMimeType: input.sourceMimeType || null,
+      originalFileName: input.originalFileName || null,
+      conversionKind: input.conversionKind || 'text',
+    },
   })
   const sourceDocumentId = sourceTrace?.id ?? null
   const primarySourceChunkId = sourceTrace?.chunks[0]?.id ?? null
@@ -154,9 +193,19 @@ export async function importDocumentToVault(input: {
     }
   }
 
-  const parsed = await parseDocumentWithAi({ aiManager: ai, document, topic, sourceTitle })
-  if (!parsed.concepts || parsed.concepts.length === 0) {
-    throw new DocumentImportError('NO_CONCEPTS_EXTRACTED', 'No concepts extracted from document', 422)
+  const stats: DocumentImportStats = { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: 0, errors: 0 }
+  const errors: Array<{ item: string; error: string }> = []
+  let parsed: StructuredDocument = { title: sourceTitle || topic, concepts: [], fleetingCards: [], relations: [] }
+  if (!input.skipAiExtraction) {
+    try {
+      parsed = await parseDocumentWithAi({ aiManager: ai, document, topic, sourceTitle })
+    } catch (err) {
+      stats.errors++
+      errors.push({
+        item: sourceTitle || topic,
+        error: err instanceof DocumentImportError ? err.code : err instanceof Error ? err.message : String(err),
+      })
+    }
   }
 
   const docTitle = parsed.title || sourceTitle || topic
@@ -175,8 +224,6 @@ export async function importDocumentToVault(input: {
     tags: [topic, 'import-topic'],
     content: `# ${clusterName}\n\n> 这是资料导入时识别到的主题/区域理解卡。导入资料和抽取出的概念会挂在这个节点下面。\n`,
   })
-  const stats: DocumentImportStats = { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: 0, errors: 0 }
-  const errors: Array<{ item: string; error: string }> = []
   const importedDraftCardIds: string[] = []
 
   const litContent = `## ${docTitle}
@@ -185,13 +232,14 @@ export async function importDocumentToVault(input: {
 
 **主题：** ${topic}
 **来源：** ${source}
+${input.originalFileName ? `**文件名：** ${input.originalFileName}\n` : ''}${input.sourceMimeType ? `**文件类型：** ${input.sourceMimeType}\n` : ''}**转换方式：** ${input.conversionKind || 'text'}
 **内容哈希：** ${contentHash}
 
-**核心概念：** ${conceptNames.map((name) => `[[${name}]]`).join('、')}
+**核心概念：** ${conceptNames.length > 0 ? conceptNames.map((name) => `[[${name}]]`).join('、') : '等待后续抽取'}
 
 ---
 
-${document.slice(0, 12000)}
+${document}
 
 ---
 _自动生成文献记录_`
@@ -220,12 +268,62 @@ _自动生成文献记录_`
     stats.created++
   }
 
-  for (const concept of parsed.concepts) {
+  const structurePlan = await planNecessaryStructure({
+    aiManager: ai,
+    parentTitle: topicConcept.title || clusterName,
+    parentContent: topicConcept.content || '',
+    topic,
+    sourceTitle: docTitle,
+    document,
+    conceptNames,
+    fleetingTitles: dedupeStrings((parsed.fleetingCards || []).map((card) => card.title).filter(Boolean)),
+  })
+  const conditionCards = new Map<string, { id: string; title: string | null; type: string; clusterId?: string | null; path?: string; content?: string }>()
+  const conditionCardIds: string[] = []
+  for (const condition of structurePlan.conditions) {
+    const conditionCard = await ensureConceptCard({
+      vaultId: input.vaultId,
+      title: condition.title,
+      type: 'fleeting',
+      clusterId: cluster.id,
+      pathFolder: clusterName,
+      tags: [
+        topic,
+        'necessary-condition',
+        'sufficient-condition',
+        condition.coverage === 'ai_generated' ? 'ai-generated' : 'document-supported',
+      ],
+      content: buildConditionContent({ condition, parentTitle: topicConcept.title || clusterName, docTitle, topic }),
+    })
+    conditionCardIds.push(conditionCard.id)
+    conditionCards.set(normalizeImportText(condition.title), conditionCard)
+    if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: topicConcept.id, childId: conditionCard.id, weight: condition.coverage === 'ai_generated' ? 0.76 : 0.9 })) {
+      stats.edges++
+      stats.created++
+    }
+    if (condition.coverage !== 'ai_generated' && await ensureTypedEdge({ vaultId: input.vaultId, sourceId: literatureCard.id, targetId: conditionCard.id, type: 'supports', weight: 0.74 })) {
+      stats.edges++
+      stats.created++
+    }
+  }
+  const resolveConditionCard = (title: string, index = 0) => {
+    const assignedTitle = findAssignedConditionTitle(structurePlan, title)
+    const byAssigned = assignedTitle ? conditionCards.get(normalizeImportText(assignedTitle)) : undefined
+    if (byAssigned) return byAssigned
+    const byTitle = conditionCards.get(normalizeImportText(title))
+    if (byTitle) return byTitle
+    return [...conditionCards.values()][index % Math.max(conditionCards.size, 1)] ?? topicConcept
+  }
+
+  for (const [conceptIndex, concept] of parsed.concepts.entries()) {
     const title = concept.name?.trim()
     if (!title) continue
+    const parentCondition = resolveConditionCard(title, conceptIndex)
     const content = `## ${title}
 
 ${concept.description || ''}
+
+**归属条件：** [[${parentCondition.title || clusterName}]]
 
 ---
 source: ${source}
@@ -262,7 +360,11 @@ _从「${docTitle}」自动生成_`
       stats.fleeting++
       if (existing) stats.skipped++
       else stats.created++
-      if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: topicConcept.id, childId: conceptCard.id })) {
+      if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: parentCondition.id, childId: conceptCard.id })) {
+        stats.edges++
+        stats.created++
+      }
+      if (await ensureTypedEdge({ vaultId: input.vaultId, sourceId: literatureCard.id, targetId: conceptCard.id, type: 'derived', weight: 0.86 })) {
         stats.edges++
         stats.created++
       }
@@ -272,12 +374,14 @@ _从「${docTitle}」自动生成_`
     }
   }
 
-  for (const fc of parsed.fleetingCards || []) {
+  for (const [cardIndex, fc] of (parsed.fleetingCards || []).entries()) {
     const title = fc.title?.trim()
     if (!title) continue
+    const parentCondition = resolveConditionCard(title, cardIndex)
     const links = Array.isArray(fc.linksTo) ? fc.linksTo.filter(Boolean) : []
-    const linksSection = links.length > 0
-      ? '\n\n**关联概念：** ' + dedupeStrings(links).map((target) => `[[${target}]]`).join('、')
+    const linkedTargets = dedupeStrings([parentCondition.title || '', ...links].filter(Boolean))
+    const linksSection = linkedTargets.length > 0
+      ? '\n\n**关联概念：** ' + linkedTargets.map((target) => `[[${target}]]`).join('、')
       : ''
     const content = `## ${title}
 
@@ -318,7 +422,11 @@ _从「${docTitle}」自动生成_`
       stats.fleeting++
       if (existing) stats.skipped++
       else stats.created++
-      if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: topicConcept.id, childId: fleetingCard.id })) {
+      if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: parentCondition.id, childId: fleetingCard.id })) {
+        stats.edges++
+        stats.created++
+      }
+      if (await ensureTypedEdge({ vaultId: input.vaultId, sourceId: literatureCard.id, targetId: fleetingCard.id, type: 'derived', weight: 0.82 })) {
         stats.edges++
         stats.created++
       }
@@ -367,6 +475,7 @@ _从「${docTitle}」自动生成_`
       topic,
       conceptNames,
       allCards,
+      literatureCard: { id: literatureCard.id, title: docTitle },
     })
 
   void emitDomainEvent({
@@ -386,6 +495,11 @@ _从「${docTitle}」自动生成_`
       stats,
     },
   })
+
+  scheduleRagIndexCards(
+    [topicConcept.id, literatureCard.id, ...conditionCardIds, ...importedDraftCardIds],
+    'document-import',
+  )
 
   return {
     source,
@@ -471,6 +585,239 @@ async function parseDocumentWithAi(params: {
   }
 }
 
+async function planNecessaryStructure(params: {
+  aiManager: AiManagerLike
+  parentTitle: string
+  parentContent: string
+  topic: string
+  sourceTitle: string
+  document: string
+  conceptNames: string[]
+  fleetingTitles: string[]
+}): Promise<StructurePlan> {
+  try {
+    const response = await params.aiManager.callAPI(
+      DOCUMENT_STRUCTURE_PLAN_PROMPT.system,
+      [{
+        role: 'user',
+        content: DOCUMENT_STRUCTURE_PLAN_PROMPT.buildUserMessage!({
+          parentTitle: params.parentTitle,
+          parentContent: params.parentContent,
+          topic: params.topic,
+          sourceTitle: params.sourceTitle,
+          conceptNames: params.conceptNames,
+          fleetingTitles: params.fleetingTitles,
+          documentExcerpt: params.document,
+        }),
+      }],
+      { temperature: 0.16, maxTokens: 4096 },
+    )
+    return sanitizeStructurePlan(parseJsonObject(response), params)
+  } catch (err) {
+    console.warn('[DocumentImportService] Failed to plan necessary structure with AI, using fallback:', err)
+    return fallbackStructurePlan(params)
+  }
+}
+
+function sanitizeStructurePlan(raw: Record<string, unknown>, params: {
+  parentTitle: string
+  topic: string
+  conceptNames: string[]
+  fleetingTitles: string[]
+}): StructurePlan {
+  const rawConditions = Array.isArray(raw.conditions) ? raw.conditions : []
+  const conditions: NecessaryCondition[] = []
+  const seenConditions = new Set<string>()
+  for (const item of rawConditions) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const title = typeof record.title === 'string' ? record.title.trim() : ''
+    const key = normalizeImportText(title)
+    if (!title || key === normalizeImportText(params.parentTitle) || seenConditions.has(key)) continue
+    seenConditions.add(key)
+    const coverage = record.coverage === 'documented' || record.coverage === 'mixed' || record.coverage === 'ai_generated'
+      ? record.coverage
+      : 'mixed'
+    conditions.push({
+      title,
+      description: typeof record.description === 'string' && record.description.trim()
+        ? record.description.trim()
+        : `这是理解「${params.parentTitle}」的一个直接必要条件。`,
+      whyNecessary: typeof record.whyNecessary === 'string' && record.whyNecessary.trim()
+        ? record.whyNecessary.trim()
+        : `缺少「${title}」会让「${params.parentTitle}」的解释不完整。`,
+      sufficiencyRole: typeof record.sufficiencyRole === 'string' && record.sufficiencyRole.trim()
+        ? record.sufficiencyRole.trim()
+        : `它与其他条件共同覆盖「${params.parentTitle}」。`,
+      coverage,
+      evidenceTitles: Array.isArray(record.evidenceTitles)
+        ? record.evidenceTitles.filter((value): value is string => typeof value === 'string' && value.trim().length > 0).slice(0, 8)
+        : [],
+    })
+  }
+
+  const fallback = fallbackStructurePlan(params)
+  const finalConditions = conditions.length >= 3 ? conditions.slice(0, 10) : mergeConditions(conditions, fallback.conditions).slice(0, 10)
+  const conditionTitles = new Set(finalConditions.map((condition) => normalizeImportText(condition.title)))
+  const rawAssignments = Array.isArray(raw.assignments) ? raw.assignments : []
+  const assignments: StructureAssignment[] = []
+  const seenAssignments = new Set<string>()
+  for (const item of rawAssignments) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    const cardTitle = typeof record.cardTitle === 'string' ? record.cardTitle.trim() : ''
+    const conditionTitle = typeof record.conditionTitle === 'string' ? record.conditionTitle.trim() : ''
+    const cardKey = normalizeImportText(cardTitle)
+    if (!cardTitle || !conditionTitle || seenAssignments.has(cardKey) || !conditionTitles.has(normalizeImportText(conditionTitle))) continue
+    seenAssignments.add(cardKey)
+    assignments.push({
+      cardTitle,
+      conditionTitle,
+      reason: typeof record.reason === 'string' ? record.reason.trim() : undefined,
+    })
+  }
+
+  const allTitles = dedupeStrings([...params.conceptNames, ...params.fleetingTitles])
+  allTitles.forEach((title, index) => {
+    const key = normalizeImportText(title)
+    if (seenAssignments.has(key)) return
+    const matched = finalConditions.find((condition) => normalizeImportText(title).includes(normalizeImportText(condition.title)) || normalizeImportText(condition.title).includes(normalizeImportText(title)))
+    assignments.push({
+      cardTitle: title,
+      conditionTitle: matched?.title ?? finalConditions[index % finalConditions.length]?.title ?? params.parentTitle,
+      reason: 'fallback assignment',
+    })
+  })
+
+  return {
+    conditions: finalConditions,
+    assignments,
+    coverageCheck: typeof raw.coverageCheck === 'object' && raw.coverageCheck
+      ? raw.coverageCheck as StructurePlan['coverageCheck']
+      : fallback.coverageCheck,
+  }
+}
+
+function fallbackStructurePlan(params: {
+  parentTitle: string
+  topic: string
+  conceptNames: string[]
+  fleetingTitles: string[]
+}): StructurePlan {
+  const candidateTitles = dedupeStrings(params.conceptNames).slice(0, 8)
+  const baseTitles = candidateTitles.length >= 4
+    ? candidateTitles
+    : dedupeStrings([
+      ...candidateTitles,
+      `${params.topic}的核心定义与边界`,
+      `${params.topic}的组成要素`,
+      `${params.topic}的因果机制`,
+      `${params.topic}的应用场景`,
+      `${params.topic}的掌握标准`,
+    ]).slice(0, 8)
+
+  const conditions = baseTitles.map<NecessaryCondition>((title, index) => ({
+    title,
+    description: `这是理解「${params.parentTitle}」时需要单独展开的直接子条件。`,
+    whyNecessary: `删掉「${title}」会导致「${params.parentTitle}」缺少一块必要解释。`,
+    sufficiencyRole: `第 ${index + 1} 个条件与同级条件共同覆盖「${params.parentTitle}」的定义、机制、边界和应用。`,
+    coverage: candidateTitles.includes(title) ? 'documented' : 'ai_generated',
+    evidenceTitles: candidateTitles.includes(title) ? [title] : [],
+  }))
+  const allTitles = dedupeStrings([...params.conceptNames, ...params.fleetingTitles])
+  const assignments = allTitles.map<StructureAssignment>((title, index) => ({
+    cardTitle: title,
+    conditionTitle: conditions[index % conditions.length]?.title ?? params.parentTitle,
+    reason: 'fallback assignment',
+  }))
+  return {
+    conditions,
+    assignments,
+    coverageCheck: {
+      sufficient: false,
+      missing: conditions.filter((condition) => condition.coverage === 'ai_generated').map((condition) => condition.title),
+      summary: 'AI 结构规划不可用，系统用保守模板保证父节点下仍有多个必要条件节点。',
+    },
+  }
+}
+
+function mergeConditions(primary: NecessaryCondition[], fallback: NecessaryCondition[]) {
+  const seen = new Set<string>()
+  const merged: NecessaryCondition[] = []
+  for (const condition of [...primary, ...fallback]) {
+    const key = normalizeImportText(condition.title)
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    merged.push(condition)
+  }
+  return merged
+}
+
+function buildConditionContent(input: {
+  condition: NecessaryCondition
+  parentTitle: string
+  docTitle: string
+  topic: string
+}) {
+  const evidence = input.condition.evidenceTitles?.length
+    ? input.condition.evidenceTitles.map((title) => `[[${title}]]`).join('、')
+    : input.condition.coverage === 'ai_generated'
+      ? '暂无直接文献证据'
+      : `[[${input.docTitle}]]`
+  return `## ${input.condition.title}
+
+${input.condition.description}
+
+**父节点：** [[${input.parentTitle}]]
+**必要性：** ${input.condition.whyNecessary}
+**充分性角色：** ${input.condition.sufficiencyRole}
+**证据覆盖：** ${input.condition.coverage}
+**资料依据：** ${evidence}
+
+---
+topic: ${input.topic}
+sourceTitle: ${input.docTitle}
+structure: sufficient-and-necessary
+_资料导入时自动生成的充分必要条件节点_`
+}
+
+function findAssignedConditionTitle(plan: StructurePlan, cardTitle: string): string | null {
+  const key = normalizeImportText(cardTitle)
+  const assignment = plan.assignments.find((item) => normalizeImportText(item.cardTitle) === key)
+  return assignment?.conditionTitle ?? null
+}
+
+async function ensureTypedEdge(params: {
+  vaultId: string
+  sourceId: string
+  targetId: string
+  type: string
+  weight?: number
+}): Promise<boolean> {
+  if (!params.sourceId || !params.targetId || params.sourceId === params.targetId) return false
+  const edgeType = normalizeEdgeType(params.type)
+  const existing = await prisma.edge.findFirst({
+    where: {
+      vaultId: params.vaultId,
+      sourceId: params.sourceId,
+      targetId: params.targetId,
+      type: edgeType,
+    },
+    select: { id: true },
+  })
+  if (existing) return false
+  await prisma.edge.create({
+    data: {
+      vaultId: params.vaultId,
+      sourceId: params.sourceId,
+      targetId: params.targetId,
+      type: edgeType,
+      weight: params.weight ?? 0.8,
+    },
+  })
+  return true
+}
+
 async function createLearningPathForImport(params: {
   aiManager: AiManagerLike
   userId: string
@@ -478,27 +825,57 @@ async function createLearningPathForImport(params: {
   topic: string
   conceptNames: string[]
   allCards: Array<{ id: string; title: string | null; type: string }>
+  literatureCard: { id: string; title: string }
 }): Promise<string | null> {
-  if (params.conceptNames.length === 0) return null
+  if (params.conceptNames.length === 0 && !params.literatureCard.id) return null
+  let rawSteps: Array<{ order?: number; title?: string; description?: string; concept?: string; chapter?: string; estimatedMinutes?: number }> = []
   try {
-    const pathPrompt = DOCUMENT_IMPORT_PATH_PROMPT.buildUserMessage!({
-      conceptNames: params.conceptNames,
-      topic: params.topic,
-    })
-
-    const response = await params.aiManager.callAPI(
-      DOCUMENT_IMPORT_PATH_PROMPT.system,
-      [{ role: 'user', content: pathPrompt }],
-      { temperature: 0.3, maxTokens: 4096 },
-    )
-    const pathData = parseJsonObject(response) as {
+    let pathData: {
       name?: string
       description?: string
       difficulty?: string
       steps?: Array<{ order?: number; title?: string; description?: string; concept?: string; chapter?: string; estimatedMinutes?: number }>
+    } = {
+      name: `${params.topic} 资料学习路径`,
+      description: '先阅读导入文献，再打磨从资料中抽取出的概念。',
+      difficulty: 'basic',
+      steps: [],
     }
-    const rawSteps = Array.isArray(pathData.steps) ? pathData.steps : []
-    if (rawSteps.length === 0) return null
+    if (params.conceptNames.length > 0) {
+      try {
+        const pathPrompt = DOCUMENT_IMPORT_PATH_PROMPT.buildUserMessage!({
+          conceptNames: params.conceptNames,
+          topic: params.topic,
+          ragContext: (await buildGenerationRagContext({
+            vaultId: params.vaultId,
+            query: `${params.topic}\n${params.conceptNames.join('、')}`,
+            topK: 8,
+            maxChars: 4500,
+          })).contextText,
+        })
+
+        const response = await params.aiManager.callAPI(
+          DOCUMENT_IMPORT_PATH_PROMPT.system,
+          [{ role: 'user', content: pathPrompt }],
+          { temperature: 0.3, maxTokens: 4096 },
+        )
+        pathData = {
+          ...pathData,
+          ...parseJsonObject(response),
+        }
+      } catch (err) {
+        console.warn('[DocumentImportService] Failed to plan import path with AI, using fallback steps:', err)
+        pathData.steps = params.conceptNames.map((concept, index) => ({
+          order: index + 1,
+          title: `理解：${concept}`,
+          description: `从导入资料中打磨「${concept}」这张理解卡。`,
+          concept,
+          chapter: params.topic,
+          estimatedMinutes: 15,
+        }))
+      }
+    }
+    rawSteps = Array.isArray(pathData.steps) ? pathData.steps : []
 
     const learningPath = await prisma.learningPath.create({
       data: {
@@ -510,13 +887,27 @@ async function createLearningPathForImport(params: {
         difficulty: normalizeDifficulty(pathData.difficulty),
         source: 'import-document',
         status: 'active',
-        totalSteps: rawSteps.length,
+        totalSteps: rawSteps.length + 1,
       },
     })
-    const usedOrders = new Set<number>()
+    const literatureStep = await prisma.learningPathStep.create({
+      data: {
+        pathId: learningPath.id,
+        order: 1,
+        title: `阅读资料：${params.literatureCard.title}`,
+        description: '这是本次导入的原始文献 MD 节点，后续概念卡都从它派生。',
+        concept: params.literatureCard.title,
+        chapter: '导入文献',
+        status: 'available',
+        estimatedMinutes: 10,
+        cardId: params.literatureCard.id,
+      },
+    })
+    const usedOrders = new Set<number>([1])
     for (const [index, step] of rawSteps.entries()) {
       const matchingCard = params.allCards.find((card) => card.type === 'fleeting' && card.title === step.concept)
-      let order = sanitizeOrder(step.order, index + 1)
+      let order = sanitizeOrder(step.order, index + 2)
+      if (order <= 1) order = index + 2
       while (usedOrders.has(order)) order++
       usedOrders.add(order)
       await prisma.learningPathStep.create({
@@ -527,9 +918,10 @@ async function createLearningPathForImport(params: {
           description: step.description || '',
           concept: step.concept || step.title || null,
           chapter: step.chapter || '基础',
-          status: index === 0 ? 'available' : 'locked',
+          status: 'locked',
           estimatedMinutes: step.estimatedMinutes || 15,
           cardId: matchingCard?.id || null,
+          prerequisites: JSON.stringify([literatureStep.id]),
         },
       })
     }

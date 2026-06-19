@@ -17,6 +17,9 @@ import { createHash } from 'node:crypto';
 import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
 import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
 import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
+import { buildGenerationRagContext, type GenerationRagContext } from '@/server/core/rag/generation-context';
+import { buildLearningProfileContext, type LearningProfileContext } from '@/server/core/learning/profile-context';
+import { scheduleRagIndexCard, scheduleRagIndexCards } from '@/server/core/rag/auto-index';
 
 const RESOURCE_LABELS: Record<string, string> = {
   document: '学习文档',
@@ -67,6 +70,16 @@ type GeneratedResourceManifestItem = {
   generatedAt: string;
 };
 
+type ResourceProfileEvidence = {
+  profileSummary: string;
+  remainingGaps: string[];
+  resourcePreference: string[];
+  recentEvidence: string[];
+  masteredConcepts: string[];
+  teachingFocus: string;
+  contextText: string;
+};
+
 function sha256Text(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
@@ -83,6 +96,49 @@ const pendingExtractCards = new Map<string, PendingExtractCards>();
 
 function rememberPendingExtractCards(token: string, pending: Omit<PendingExtractCards, 'createdAt'>): void {
   pendingExtractCards.set(token, { ...pending, createdAt: Date.now() });
+}
+
+function uniqueStrings(items: Array<string | null | undefined>): string[] {
+  return Array.from(new Set(items.map((item) => (item || '').trim()).filter(Boolean)));
+}
+
+function buildResourceProfileEvidence(profile: LearningProfileContext | null): ResourceProfileEvidence | null {
+  if (!profile) return null;
+  const remainingGaps = uniqueStrings([
+    ...profile.knowledgeProfile.weakConcepts,
+    ...profile.knowledgeProfile.missingPrerequisites,
+    ...profile.knowledgeProfile.isolatedNodes.map((node) => node.title),
+    ...profile.knowledgeProfile.weakDomains,
+  ]).slice(0, 8);
+  const resourcePreference = uniqueStrings([
+    ...profile.preferences.resourceTypes,
+    ...profile.teachingPolicy.explainStyle,
+    profile.teachingPolicy.shouldUseExamples ? '例子' : '',
+    profile.teachingPolicy.shouldPreferPractice ? '练习' : '',
+    profile.teachingPolicy.shouldSuggestWikiLinks ? '关系图' : '',
+  ]).slice(0, 8);
+
+  return {
+    profileSummary: profile.profileSummary.summary,
+    remainingGaps,
+    resourcePreference,
+    recentEvidence: profile.profileLoop.recentEvidence.slice(0, 5),
+    masteredConcepts: profile.knowledgeProfile.masteredConcepts.slice(0, 8),
+    teachingFocus: profile.profileSummary.teachingFocus,
+    contextText: profile.promptBlock,
+  };
+}
+
+function formatResourceProfileEvidence(evidence: ResourceProfileEvidence | null): string {
+  if (!evidence) return '- 未读取到可用画像';
+  return [
+    evidence.profileSummary ? `- 当前画像：${evidence.profileSummary}` : '',
+    evidence.remainingGaps.length ? `- 剩余缺口：${evidence.remainingGaps.join('、')}` : '- 剩余缺口：暂无稳定缺口',
+    evidence.resourcePreference.length ? `- 资源偏好：${evidence.resourcePreference.join('、')}` : '- 资源偏好：暂无稳定偏好',
+    evidence.masteredConcepts.length ? `- 已掌握概念：${evidence.masteredConcepts.join('、')}` : '',
+    evidence.teachingFocus ? `- 后续教学重点：${evidence.teachingFocus}` : '',
+    evidence.recentEvidence.length ? `- 触发证据：${evidence.recentEvidence.join('；')}` : '',
+  ].filter(Boolean).join('\n');
 }
 
 /** Persist a resource generation record to DB (fire-and-forget, scoped by userId+vaultId) */
@@ -120,7 +176,7 @@ function inferDefaultResourceTypes(
   userLevel: string,
 ): ResourceType[] {
   const text = `${topic} ${literatureContent || ''}`.toLowerCase();
-  const types = new Set<ResourceType>(['document']);
+  const types = new Set<ResourceType>(['document', 'mindmap', 'quiz', 'code', 'diagram']);
 
   if (/(图|流程|关系|结构|架构|路径|系统|网络|状态|sequence|flow|diagram|map)/i.test(text)) {
     types.add(/(关系|结构|体系|知识|章节|地图|mindmap|map)/i.test(text) ? 'mindmap' : 'diagram');
@@ -152,10 +208,13 @@ function inferDefaultResourceTypes(
     types.add('docx');
   }
 
-  if (types.size === 1) types.add('mindmap');
-  if (types.size < 3 && userLevel !== 'beginner') types.add('quiz');
+  if (/(初学|小白|入门|beginner)/i.test(userLevel)) {
+    types.add('document');
+    types.add('mindmap');
+    types.add('quiz');
+  }
 
-  return Array.from(types).slice(0, 4);
+  return Array.from(types).slice(0, 6);
 }
 
 const pushResourceTool = createTool(
@@ -166,14 +225,14 @@ const pushResourceTool = createTool(
   + '📊 SVG矢量图、🔀 Mermaid流程图/时序图/类图等、📝 Word文档(docx)、📑 PDF文档、📽️ PPT演示文稿。'
   + '【关键时机】当用户说"整理成学习资料"、"保存到文献盒"、"生成文档"、"导出Word"、"导出PDF"、"做个PPT"'
   + '"画个流程图"、"生成SVG"等类似请求时，必须直接调用此工具。不要在普通对话里打断式推送资源；'
-  + '不填 formats 时按用户意图生成 2-4 个核心资源，只有明确要求时才生成视频/PDF/Word/PPT 等重资源。'
+  + '不填 formats 时按用户意图和画像至少生成 5 个核心资源，只有明确要求时才生成视频/PDF/Word/PPT 等重资源。'
   + '用户水平自动从画像推断，无需询问用户。自动跳过已有资源。',
   Type.Object({
     topic: Type.String({ description: '学习主题（必填）。从对话上下文或用户消息中提取。' }),
     level: Type.Optional(Type.String({ description: '可选。不填则自动从 .axiom/user-profile.json 读取。' })),
     literatureTitle: Type.Optional(Type.String({ description: '关联的文献标题。' })),
     literatureContent: Type.Optional(Type.String({ description: '文献内容截取。' })),
-    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成SVG和图表。不填则按对话意图生成 2-4 个核心资源。可用值: document,mindmap,quiz,code,video,svg,diagram,docx,pdf,ppt' })),
+    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成SVG和图表。不填则按对话意图和画像生成至少 5 个核心资源。可用值: document,mindmap,quiz,code,video,svg,diagram,docx,pdf,ppt' })),
   }),
   async (_id, params) => {
     try {
@@ -199,6 +258,18 @@ const pushResourceTool = createTool(
       // Use topic as fallback literature title
       const litTitle = params.literatureTitle || params.topic;
       const progressVaultId = getCurrentVaultId();
+      const currentUserId = getCurrentUserId();
+      let profileEvidence: ResourceProfileEvidence | null = null;
+      if (progressVaultId) {
+        const learningProfile = await buildLearningProfileContext({
+          vaultId: progressVaultId,
+          userId: currentUserId,
+        }).catch(() => null);
+        profileEvidence = buildResourceProfileEvidence(learningProfile);
+        if (!params.level && learningProfile?.profileSummary.userLevel) {
+          userLevel = learningProfile.profileSummary.userLevel;
+        }
+      }
 
       // Dynamic imports for cross-module dependencies
       const { ResourceGenerationOrchestrator } = await import('../ResourceGenerationOrchestrator');
@@ -271,8 +342,31 @@ const pushResourceTool = createTool(
       const requestedTypes = formats && formats.length > 0
         ? formats
         : inferDefaultResourceTypes(params.topic, params.literatureContent, userLevel);
-      const currentUserId = getCurrentUserId();
       let orchestrationEvidence: ResourceOrchestrationEvidence | null = null;
+      let ragContext: GenerationRagContext = { enabled: false, used: false, contextText: '', references: [] };
+      if (progressVaultId) {
+        emitResourceProgress(progressVaultId, {
+          topic: params.topic,
+          resourceType: 'document',
+          label: 'RAG 检索',
+          status: 'generating',
+          progress: 3,
+          message: '正在检索当前知识库上下文',
+        });
+        ragContext = await buildGenerationRagContext({
+          vaultId: progressVaultId,
+          query: [
+            params.topic,
+            params.literatureTitle || '',
+            params.literatureContent?.slice(0, 1600) || '',
+            requestedTypes.join(', '),
+            profileEvidence?.remainingGaps.join(' ') || '',
+            profileEvidence?.resourcePreference.join(' ') || '',
+          ].filter(Boolean).join('\n\n'),
+          topK: 8,
+          maxChars: 5000,
+        });
+      }
       if (currentUserId) {
         try {
           if (progressVaultId) {
@@ -293,6 +387,11 @@ const pushResourceTool = createTool(
             requestedTypes,
             userLevel,
             literatureTitle: litTitle,
+            profile: profileEvidence ? {
+              remainingGaps: profileEvidence.remainingGaps,
+              resourcePreference: profileEvidence.resourcePreference,
+              teachingFocus: profileEvidence.teachingFocus,
+            } : null,
           });
           orchestrationEvidence = {
             id: orchestration.orchestrationId,
@@ -340,7 +439,27 @@ const pushResourceTool = createTool(
         }
       }
 
-      const generationResults = await orchestrator.orchestrate(params.topic, userLevel, litTitle, params.literatureContent, requestedTypes);
+      const generationResults = await orchestrator.orchestrate(
+        params.topic,
+        userLevel,
+        litTitle,
+        params.literatureContent,
+        requestedTypes,
+        {
+          contextText: ragContext.contextText,
+          references: ragContext.references,
+        },
+        profileEvidence ? {
+          contextText: profileEvidence.contextText,
+          evidence: {
+            remainingGaps: profileEvidence.remainingGaps,
+            resourcePreference: profileEvidence.resourcePreference,
+            recentEvidence: profileEvidence.recentEvidence,
+            masteredConcepts: profileEvidence.masteredConcepts,
+            teachingFocus: profileEvidence.teachingFocus,
+          },
+        } : undefined,
+      );
 
       // 读取生成的资源，合并为一个文献卡片
       const sanitizedDir = litTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
@@ -433,6 +552,17 @@ tags: [ai-generated, ${params.topic}]
 
 <!-- axiom-resources:${JSON.stringify(resourceManifest)} -->
 <!-- axiom-orchestration:${JSON.stringify(orchestrationEvidence)} -->
+<!-- axiom-rag-context:${JSON.stringify({
+  enabled: ragContext.enabled,
+  used: ragContext.used,
+  references: ragContext.references,
+  error: ragContext.error,
+})} -->
+<!-- axiom-profile-evidence:${JSON.stringify(profileEvidence)} -->
+
+## 画像驱动依据
+
+${formatResourceProfileEvidence(profileEvidence)}
 
 ${orchestrationEvidence ? [
   '## 多 Agent 协同记录',
@@ -453,7 +583,7 @@ ${sections.join('\n\n---\n\n')}
         const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
         const litVid = getCurrentVaultId();
         if (litVid) {
-          await litDb.card.upsert({
+          const resourceCard = await litDb.card.upsert({
             where: { vaultId_path: { vaultId: litVid, path: `literature/${litFileName}` } },
             create: {
               vaultId: litVid,
@@ -468,6 +598,7 @@ ${sections.join('\n\n---\n\n')}
               updatedAt: new Date(),
             },
           });
+          scheduleRagIndexCard(resourceCard.id, 'resource-generation');
         }
 
         // ── Assign to relevant cluster ──
@@ -530,6 +661,13 @@ ${sections.join('\n\n---\n\n')}
           requestedTypes,
           generationResults,
           orchestration: orchestrationEvidence,
+          rag: {
+            enabled: ragContext.enabled,
+            used: ragContext.used,
+            references: ragContext.references,
+            error: ragContext.error,
+          },
+          profileEvidence,
           resources: generatedResources,
         });
       }
@@ -559,6 +697,13 @@ ${sections.join('\n\n---\n\n')}
           resources: generatedResources,
           orchestration: orchestrationEvidence,
           generationResults,
+          rag: {
+            enabled: ragContext.enabled,
+            used: ragContext.used,
+            references: ragContext.references,
+            error: ragContext.error,
+          },
+          profileEvidence,
         },
       };
     } catch (error) {
@@ -858,6 +1003,7 @@ ${(concept.examples || []).map(e => `- ${e}`).join('\n')}
       } catch (updateError) {
         console.warn('[extract_cards] Failed to link cards to literature:', updateError);
       }
+      scheduleRagIndexCards(createdCards.map((card) => card.id), 'extract-cards-tool');
 
       const conceptNames = concepts.map(c => c.title).join('、');
       return {

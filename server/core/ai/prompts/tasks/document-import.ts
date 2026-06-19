@@ -25,6 +25,17 @@ export interface DocumentParseInput {
 export interface ImportedPathInput {
   topic: string;
   conceptNames: string[];
+  ragContext?: string;
+}
+
+export interface DocumentStructurePlanInput {
+  parentTitle: string;
+  parentContent?: string;
+  topic: string;
+  sourceTitle: string;
+  conceptNames: string[];
+  fleetingTitles: string[];
+  documentExcerpt: string;
 }
 
 const extractionContract = {
@@ -141,6 +152,108 @@ ${input.sourceTitle !== input.topic ? `标题：${input.sourceTitle}` : ''}
 ${input.document}`,
 });
 
+const structurePlanContract = {
+  id: 'document.import-necessary-structure',
+  version: '1.0.0',
+  name: 'Imported Document Necessary Structure',
+  purpose: 'Plan sufficient-and-necessary child nodes under the selected parent concept before imported material is written into the graph.',
+  whenToUse: [
+    'A document import has produced source material and extracted draft cards.',
+    'The system must decide the direct child conditions under the parent/root concept.',
+  ],
+  whenNotToUse: [
+    'Do not use to summarize the document as a reading outline.',
+    'Do not use to create arbitrary keyword clusters.',
+    'Do not create children that are merely examples, citations, or document section headings unless they are direct necessary conditions.',
+  ],
+  input: [
+    'Parent/root concept title and current content.',
+    'Imported document title, topic, extracted concepts, draft card titles, and document excerpt.',
+  ],
+  process: [
+    'Interpret the parent concept as the thing that must be fully explained.',
+    'List direct child nodes that are individually necessary and collectively sufficient for understanding or establishing the parent.',
+    'Use document evidence first; if the document is incomplete, add missing child nodes and mark them as ai_generated.',
+    'Assign every extracted concept or draft card to the most relevant child condition.',
+    'Avoid duplicates, section-heading outlines, and one giant catch-all node.',
+  ],
+  output: [
+    'Strict JSON with conditions, assignments, and coverageCheck.',
+    'conditions[].title is the direct child node title.',
+    'conditions[].whyNecessary explains what would be lost if this child were removed.',
+    'conditions[].sufficiencyRole explains how it contributes to the complete parent coverage.',
+    'conditions[].coverage is documented, mixed, or ai_generated.',
+    'assignments[] maps extracted card titles to one condition title.',
+  ],
+  correct: [
+    'Creates 4-10 direct child conditions for a non-trivial parent.',
+    'Every child is necessary; the set is collectively sufficient.',
+    'Imported cards are grouped under condition nodes, not directly flattened under the parent.',
+  ],
+  incorrect: [
+    'Only creates one vague child node.',
+    'Uses document sections as children without testing necessity.',
+    'Leaves extracted cards unassigned.',
+    'Creates overlapping child nodes that mean the same thing.',
+  ],
+};
+
+export const DOCUMENT_STRUCTURE_PLAN_PROMPT = definePrompt<DocumentStructurePlanInput>({
+  ...structurePlanContract,
+  outputMode: 'json',
+  system: buildSystemPrompt({
+    role: '你是 AXIOM 的知识结构规划专家。你负责把导入资料放进根节点/父节点下面的充分必要条件结构，而不是做普通摘要。',
+    contract: structurePlanContract,
+    standards: [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    extra: `Return strict JSON:
+{
+  "conditions": [
+    {
+      "title": "直接子节点标题",
+      "description": "这个条件的定义或范围（80-160字）",
+      "whyNecessary": "为什么删掉它，父节点就不完整",
+      "sufficiencyRole": "它和其他条件合起来如何覆盖父节点",
+      "coverage": "documented|mixed|ai_generated",
+      "evidenceTitles": ["来自资料或抽取卡片的标题"]
+    }
+  ],
+  "assignments": [
+    {
+      "cardTitle": "抽取出的概念或知识点标题",
+      "conditionTitle": "直接子节点标题",
+      "reason": "为什么归到这里"
+    }
+  ],
+  "coverageCheck": {
+    "sufficient": true,
+    "missing": ["如果仍有缺口，列出缺口；没有则空数组"],
+    "summary": "一句话说明这组子节点为什么充分且必要"
+  }
+}
+
+硬性要求：
+- conditions 必须是父节点的直接因果/构成条件，不是资料章节。
+- 非空资料下不要只给 1 个 conditions；通常 4-10 个。
+- assignments 必须覆盖所有 conceptNames 和 fleetingTitles，除非标题重复。
+- 如果资料没有覆盖父节点的全部必要条件，必须补 ai_generated 条件。`,
+  }),
+  buildUserMessage: (input) => `父节点：${input.parentTitle}
+父节点当前内容：
+${input.parentContent?.slice(0, 3000) || '(无)'}
+
+导入主题：${input.topic}
+资料标题：${input.sourceTitle}
+
+已抽取核心概念：
+${input.conceptNames.length ? input.conceptNames.map((name) => `- ${name}`).join('\n') : '(无)'}
+
+已抽取知识点草稿：
+${input.fleetingTitles.length ? input.fleetingTitles.map((title) => `- ${title}`).join('\n') : '(无)'}
+
+资料摘录：
+${input.documentExcerpt.slice(0, 12000)}`,
+});
+
 const pathContract = {
   id: 'document.import-path',
   version: '1.0.0',
@@ -156,11 +269,13 @@ const pathContract = {
   input: [
     'Topic.',
     'Extracted concept names.',
+    'Optional LightRAG context from the current Vault.',
   ],
   process: [
     'Order concepts from prerequisite/foundation to application.',
     'Group related steps into chapters.',
     'Keep the path beginner-friendly unless evidence suggests otherwise.',
+    'Use LightRAG context only to understand existing Vault structure and dependencies; do not add concepts outside the extracted list.',
   ],
   output: [
     'Strict JSON with name, description, difficulty, and steps[].',
@@ -201,5 +316,6 @@ export const DOCUMENT_IMPORT_PATH_PROMPT = definePrompt<ImportedPathInput>({
   }),
   buildUserMessage: (input) => `概念列表：${input.conceptNames.join('、')}
 主题：${input.topic}
+${input.ragContext || 'LightRAG 检索上下文：无。只使用导入文档中抽取出的概念排序。'}
 难度：beginner`,
 });

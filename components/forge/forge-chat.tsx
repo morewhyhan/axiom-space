@@ -155,7 +155,7 @@ function MarkdownContent({ content }: { content: string }) {
                   <td className="border border-white/10 px-3 py-1.5" {...props}>{children}</td>
                 ),
                 a: ({ href, children }) => (
-                  <span className="text-pink-400/80 underline decoration-pink-400/20 cursor-default" title={href}>
+                  <span className="text-cyan-300/80 underline decoration-cyan-300/20 cursor-default" title={href}>
                     {children}
                   </span>
                 ),
@@ -453,7 +453,7 @@ function ChatMessage({
       <div
         className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
           isUser
-            ? 'bg-pink-500/20 text-pink-400'
+            ? 'bg-cyan-500/14 text-cyan-200'
             : 'bg-cyan-500/20 text-cyan-400'
         }`}
       >
@@ -470,7 +470,7 @@ function ChatMessage({
         <div className="flex items-center gap-2 px-1">
           <span
             className={`mono uppercase tracking-wider ${
-              isUser ? 'text-white/40' : 'text-pink-400/60'
+              isUser ? 'text-white/40' : 'text-cyan-300/60'
             }`}
             style={{ fontSize: 'var(--f7)' }}
           >
@@ -482,7 +482,7 @@ function ChatMessage({
         <div
           className={`rounded-2xl px-4 py-2.5 ${
             isUser
-              ? 'bg-pink-500/15 border border-pink-500/20 rounded-tr-md'
+              ? 'bg-cyan-500/10 border border-cyan-400/18 rounded-tr-md'
               : 'bg-white/[0.03] border border-white/5 rounded-tl-md'
           }`}
         >
@@ -660,7 +660,7 @@ export default function ForgeChat() {
       // Subtle notification on first agent response per session
       if (!notifiedRef.current) {
         notifiedRef.current = true
-        toast('AI 已完成本轮回复，相关视图正在同步最新数据', { duration: 4000, style: { fontSize: '11px', background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.3)' } })
+        toast('AI 已完成本轮回复，相关视图正在同步最新数据', { duration: 4000, style: { fontSize: '11px', background: 'rgba(34,211,238,0.1)', border: '1px solid rgba(103,232,249,0.22)' } })
       }
     }
   }
@@ -708,7 +708,7 @@ export default function ForgeChat() {
       <div className="glass-panel workspace-surface workspace-chat-surface forge-console-panel flex-1 flex flex-col overflow-hidden">
         {/* Chat header — matches prototype Forge_Console */}
         <div className="forge-console-header workspace-chat-header flex-shrink-0">
-          <span className="mono text-pink-300/80 uppercase tracking-widest" style={{ fontSize: 'var(--f9)' }}>AI Workbench</span>
+          <span className="mono text-cyan-200/80 uppercase tracking-widest" style={{ fontSize: 'var(--f9)' }}>AI Workbench</span>
           <div className="flex gap-3">
             {streaming ? (
               <button className="mono text-red-400/60 hover:text-red-400 transition-colors" style={{ fontSize: 'var(--f8)' }}
@@ -724,7 +724,7 @@ export default function ForgeChat() {
 
         {/* Context bar — matches prototype Working_On */}
         <div className="forge-focus-card flex-shrink-0">
-          <span className="w-1.5 h-1.5 rounded-full bg-pink-400 flex-shrink-0"></span>
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 flex-shrink-0"></span>
           <span className="mono opacity-30 uppercase tracking-widest flex-shrink-0" style={{ fontSize: 'var(--f8)' }}>Working_On:</span>
           <span className="text-white/70 font-medium truncate" style={{ fontSize: 'var(--f9)' }}>
             {currentPath
@@ -736,7 +736,7 @@ export default function ForgeChat() {
                   : '选择任务或灵感卡'}
           </span>
           {selectedNode && (
-            <span className="mono text-pink-400/50 ml-auto flex-shrink-0" style={{ fontSize: 'var(--f7)' }}>
+            <span className="mono text-cyan-300/50 ml-auto flex-shrink-0" style={{ fontSize: 'var(--f7)' }}>
               {selectedNode.type === 'permanent' ? 'PERM' : selectedNode.type === 'fleeting' ? 'FLEE' : selectedNode.type === 'literature' ? 'LIT' : ''}
             </span>
           )}
@@ -744,7 +744,7 @@ export default function ForgeChat() {
 
         {/* Messages area */}
 
-        <div className="flex-1 overflow-y-auto no-scrollbar px-5 pt-4 pb-2 space-y-4">
+        <div className="forge-message-scroll flex-1 overflow-y-auto no-scrollbar px-5 pt-4 pb-2 space-y-4">
           {messages.length === 0 ? (
             /* Welcome screen */
             <div className="forge-empty-state">
@@ -812,7 +812,7 @@ export default function ForgeChat() {
         </div>
 
         {/* Quick chips */}
-        <div className="px-5 py-2 flex-shrink-0 border-t border-white/5">
+        <div className="forge-chat-actions px-5 py-2 flex-shrink-0 border-t border-white/5">
           <div className="quick-chips">
             <span className="quick-chip" onClick={() => handleSend('解释这个概念')}>解释</span>
             <span className="quick-chip" onClick={() => handleSend('举个例子')}>举例</span>
@@ -822,7 +822,7 @@ export default function ForgeChat() {
         </div>
 
         {/* Input area */}
-        <div className="px-4 pb-4 pt-2 relative flex-shrink-0">
+        <div className="forge-input-area px-4 pb-4 pt-2 relative flex-shrink-0">
           {showPalette && (
             <div className="command-palette">
               {filteredCommands.map((command, index) => {
@@ -853,7 +853,7 @@ export default function ForgeChat() {
               value={inputValue}
               onChange={handleInputChange}
               onKeyDown={handleTextareaKeyDown}
-              style={{ maxHeight: '120px', overflowY: 'auto' }}
+              style={{ maxHeight: '120px' }}
               disabled={streaming || !canChat}
             />
             {streaming ? (
@@ -869,7 +869,7 @@ export default function ForgeChat() {
               </button>
             ) : (
               <button
-                className="self-end mb-1 mono bg-pink-500/20 text-pink-300 px-3 py-2 rounded-lg border border-pink-500/30 hover:bg-pink-500/30 transition-colors disabled:opacity-30 flex items-center gap-1.5"
+                className="self-end mb-1 mono bg-cyan-500/12 text-cyan-100/85 px-3 py-2 rounded-lg border border-cyan-400/24 hover:bg-cyan-500/18 transition-colors disabled:opacity-30 flex items-center gap-1.5"
                 style={{ fontSize: 'var(--f9)' }}
                 onClick={() => handleSend()}
                 disabled={!inputValue.trim() || !canChat}

@@ -112,7 +112,7 @@ export default function Header() {
               }}>VIEW ALL</button>
             </div>
             {realNotifs.length > 0 ? realNotifs.map((n) => {
-              const dotMap: Record<string, string> = { toast: 'cyan', profile: 'purple', card: 'pink', skill: 'purple', graph: 'cyan' }
+              const dotMap: Record<string, string> = { toast: 'cyan', profile: 'purple', card: 'pink', skill: 'purple', graph: 'cyan', quality: 'pink' }
               const dot = dotMap[n.type] || 'purple'
               const label = n.type.charAt(0).toUpperCase() + n.type.slice(1)
               const time = new Date(n.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })

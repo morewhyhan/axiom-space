@@ -209,7 +209,7 @@ export default function FileTree() {
         <div className="workspace-panel-head border-b border-white/8 px-3 py-3">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-purple-400/18 bg-purple-400/8 text-purple-200">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-cyan-400/18 bg-cyan-400/8 text-cyan-100">
                 <Folder className="h-3.5 w-3.5" />
               </div>
               <div className="min-w-0">
@@ -222,7 +222,7 @@ export default function FileTree() {
 
           <div className="mt-3 grid grid-cols-2 gap-1.5">
             <button
-              className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-pink-400/18 bg-pink-400/8 text-[10px] text-pink-100/80 transition-colors hover:bg-pink-400/12 hover:text-pink-100"
+              className="flex h-8 items-center justify-center gap-1.5 rounded-lg border border-cyan-400/18 bg-cyan-400/8 text-[10px] text-cyan-100/80 transition-colors hover:bg-cyan-400/12 hover:text-cyan-100"
               onClick={() => openModal('newcard')}
             >
               <Plus className="h-3.5 w-3.5" />
@@ -231,7 +231,7 @@ export default function FileTree() {
             <button
               className={`flex h-8 items-center justify-center gap-1.5 rounded-lg border text-[10px] transition-colors ${
                 showNewSpace
-                  ? 'border-purple-400/24 bg-purple-400/12 text-purple-100'
+                  ? 'border-cyan-400/24 bg-cyan-400/12 text-cyan-100'
                   : 'border-white/8 bg-white/[0.025] text-white/44 hover:text-white/70'
               }`}
               onClick={() => setShowNewSpace((value) => !value)}
@@ -242,9 +242,9 @@ export default function FileTree() {
           </div>
 
           {showNewSpace && (
-            <div className="mt-2 rounded-xl border border-purple-400/14 bg-purple-400/[0.045] p-2">
+            <div className="mt-2 rounded-xl border border-cyan-400/14 bg-cyan-400/[0.045] p-2">
               <input
-                className="h-8 w-full rounded-lg border border-white/8 bg-black/30 px-2 text-[11px] text-white/72 outline-none placeholder:text-white/22 focus:border-purple-400/28"
+                className="h-8 w-full rounded-lg border border-white/8 bg-black/30 px-2 text-[11px] text-white/72 outline-none placeholder:text-white/22 focus:border-cyan-400/28"
                 value={newSpaceName}
                 onChange={(event) => setNewSpaceName(event.target.value)}
                 onKeyDown={(event) => {
@@ -265,7 +265,7 @@ export default function FileTree() {
                   />
                 ))}
                 <button
-                  className="ml-auto h-7 rounded-md border border-purple-400/20 bg-purple-400/10 px-2 text-[10px] text-purple-100/80 transition-colors hover:bg-purple-400/14 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="ml-auto h-7 rounded-md border border-cyan-400/20 bg-cyan-400/10 px-2 text-[10px] text-cyan-100/80 transition-colors hover:bg-cyan-400/14 disabled:cursor-not-allowed disabled:opacity-40"
                   disabled={!newSpaceName.trim() || createCluster.isPending}
                   onClick={() => void handleCreateSpace()}
                 >
@@ -293,7 +293,7 @@ export default function FileTree() {
                   key={item.id}
                   className={`h-7 rounded-md border text-[10px] transition-colors ${
                     active
-                      ? 'border-purple-400/25 bg-purple-400/12 text-purple-100'
+                      ? 'border-cyan-400/24 bg-cyan-400/10 text-cyan-100'
                       : 'border-white/6 bg-white/[0.025] text-white/34 hover:text-white/62'
                   }`}
                   onClick={() => setTypeFilter(item.id)}
@@ -407,13 +407,13 @@ function CardRow({
   return (
     <button
       className={`group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors ${
-        active ? 'bg-pink-400/[0.09] text-white' : 'text-white/48 hover:bg-white/[0.04] hover:text-white/78'
+        active ? 'bg-cyan-400/[0.075] text-white' : 'text-white/48 hover:bg-white/[0.04] hover:text-white/78'
       }`}
       onClick={onOpen}
       title={node.title}
     >
       <span className="relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-white/7 bg-black/24">
-        <FileText className={`h-3.5 w-3.5 ${active ? 'text-pink-200' : meta.tone}`} />
+        <FileText className={`h-3.5 w-3.5 ${active ? 'text-cyan-100' : meta.tone}`} />
         {clusterColor && <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border border-black/60" style={{ backgroundColor: clusterColor }} />}
       </span>
       <span className="min-w-0 flex-1">
@@ -429,7 +429,7 @@ function CardRow({
           )}
         </span>
       </span>
-      {active && <Check className="h-3.5 w-3.5 shrink-0 text-pink-200/70" />}
+      {active && <Check className="h-3.5 w-3.5 shrink-0 text-cyan-100/70" />}
     </button>
   )
 }

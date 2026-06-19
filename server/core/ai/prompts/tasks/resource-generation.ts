@@ -21,6 +21,16 @@ export interface ResourceGenerationInput {
   topic: string;
   userLevel: string;
   literatureContent?: string;
+  ragContext?: string;
+  ragReferences?: string[];
+  profileContext?: string;
+  profileEvidence?: {
+    remainingGaps?: string[];
+    resourcePreference?: string[];
+    recentEvidence?: string[];
+    masteredConcepts?: string[];
+    teachingFocus?: string;
+  };
 }
 
 interface ResourcePromptSpec {
@@ -41,12 +51,31 @@ const buildUserMessage = (input: ResourceGenerationInput) => [
   input.literatureContent
     ? `参考文献内容：\n${input.literatureContent.slice(0, 4000)}`
     : '参考文献内容：无',
+  input.ragContext
+    ? input.ragContext
+    : 'LightRAG 检索上下文：无。只能基于用户提供资料和通用必要解释生成，不能伪造当前知识库依据。',
+  input.ragReferences?.length
+    ? `RAG 引用：\n${input.ragReferences.map((item) => `- ${item}`).join('\n')}`
+    : '',
+  input.profileContext
+    ? `画像上下文：\n${input.profileContext.slice(0, 3000)}`
+    : '画像上下文：无。',
+  input.profileEvidence
+    ? [
+      '画像驱动依据：',
+      input.profileEvidence.remainingGaps?.length ? `- 剩余缺口：${input.profileEvidence.remainingGaps.join('、')}` : '',
+      input.profileEvidence.resourcePreference?.length ? `- 资源偏好：${input.profileEvidence.resourcePreference.join('、')}` : '',
+      input.profileEvidence.masteredConcepts?.length ? `- 已掌握概念：${input.profileEvidence.masteredConcepts.join('、')}` : '',
+      input.profileEvidence.teachingFocus ? `- 教学重点：${input.profileEvidence.teachingFocus}` : '',
+      input.profileEvidence.recentEvidence?.length ? `- 近期证据：\n${input.profileEvidence.recentEvidence.map((item) => `  - ${item}`).join('\n')}` : '',
+    ].filter(Boolean).join('\n')
+    : '',
 ].join('\n\n');
 
 function createResourcePrompt(spec: ResourcePromptSpec): PromptContract<ResourceGenerationInput> {
   const contract = {
     id: `resource.generation.${spec.type}`,
-    version: '2026-06-13',
+    version: '2026-06-17',
     name: spec.name,
     purpose: `Generate ${spec.type} learning resources from a topic and optional literature content.`,
     whenToUse: [
@@ -60,11 +89,16 @@ function createResourcePrompt(spec: ResourcePromptSpec): PromptContract<Resource
       'topic: 学习资源围绕的概念、课程或任务。',
       'userLevel: 用户当前水平，用来控制解释深度。',
       'literatureContent: 可选参考资料；有资料时必须优先依据资料。',
+      'ragContext/ragReferences: 可选当前知识库检索上下文；有检索结果时必须优先使用。',
+      'profileContext/profileEvidence: 可选学习画像；有画像时必须说明资源解决哪个剩余缺口，并按资源偏好组织形式。',
     ],
     process: [
       '先确定资源要解决的学习任务，不要泛泛介绍主题。',
       '只保留对用户学习有必要的内容；删掉空泛背景、口号和重复段落。',
       '区分资料明确给出的内容、通用知识和必要解释，不把猜测写成事实。',
+      '有 LightRAG 检索上下文时，优先依据当前知识库内容生成；如果检索上下文不足，只输出待补说明或练习入口，不写成确定知识结论。',
+      '有画像上下文时，必须围绕画像里的剩余缺口、资源偏好和教学重点生成，不能把画像当成装饰性文字。',
+      '生成结果必须满足清晰、准确、必要、可追溯、可执行。',
       ...spec.process,
     ],
     output: spec.output,
@@ -73,6 +107,7 @@ function createResourcePrompt(spec: ResourcePromptSpec): PromptContract<Resource
       '没有使用输入主题，或生成了与主题无关的内容。',
       '输出格式不符合指定格式，导致后续解析、渲染或保存失败。',
       '内容只有标题和空话，不能支持用户学习或练习。',
+      '有画像输入却看不出资源解决了哪个缺口，或生成形式违背用户资源偏好。',
       ...spec.incorrect,
     ],
   };

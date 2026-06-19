@@ -100,44 +100,12 @@ export class PrismaLearningAdapter {
 
   /**
    * Append a trajectory entry for pattern analysis.
-   * Stores as a learningMessage in the current session.
+   * Trajectory is internal learning telemetry and must not be rendered as chat.
+   * The in-memory PatternExtractor receives the same entry separately from the
+   * agent pipeline, so this adapter only keeps the session active.
    */
   async appendTrajectory(entry: TrajectoryEntry): Promise<void> {
-    let session = await prisma.learningSession.findFirst({
-      where: {
-        id: entry.session_id,
-        userId: this.userId,
-        domain: '__agent__',
-      },
-    })
-    if (session && !this.isUsableSession(session)) session = null
-
-    if (!session) {
-      session = await prisma.learningSession.findFirst({
-        where: {
-          userId: this.userId,
-          domain: '__agent__',
-          status: 'active',
-        },
-        orderBy: { updatedAt: 'desc' },
-      })
-    }
-
-    if (session && this.isUsableSession(session)) {
-      await prisma.learningMessage.create({
-        data: {
-          sessionId: session.id,
-          role: 'system' as string,
-          content: JSON.stringify({
-            phase: entry.phase,
-            user_message: entry.user_message,
-            assistant_message: entry.assistant_message,
-            timestamp: entry.timestamp,
-            _type: 'trajectory',
-          }),
-        },
-      })
-    }
+    await this.touchSession(entry.session_id)
   }
 
   /**

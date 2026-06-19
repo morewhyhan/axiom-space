@@ -12,6 +12,7 @@ import { getCurrentVaultId, getCurrentUserId } from '../agent-context';
 import { aiManager } from '../../ai/AIManager';
 import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
 import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
+import { buildGenerationRagContext } from '@/server/core/rag/generation-context';
 
 /**
  * 为某个主题创建学习路径
@@ -38,9 +39,18 @@ const createLearningPathTool = createTool(
         };
       }
 
+      const ragContext = await buildGenerationRagContext({
+        vaultId,
+        query: `${params.topic}\n${params.goal}\n${params.style || 'mixed'}`,
+        topK: 8,
+        maxChars: 4500,
+      });
+
       const prompt = `你是学习课程设计专家。为以下主题设计一个学习路径：
 
 ${AXIOM_KNOWLEDGE_STANDARD}
+
+${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于已有 DB 摘要和必要通用结构，不能伪造当前知识库依据。'}
 
 主题：${params.topic}
 目标：${params.goal}
@@ -244,8 +254,16 @@ const suggestNextTopicTool = createTool(
       });
 
       const conceptNames = learnedConcepts.map(c => c.title).join(', ');
+      const ragContext = await buildGenerationRagContext({
+        vaultId,
+        query: `已学概念：${conceptNames}\n推荐下一步学习主题`,
+        topK: 8,
+        maxChars: 4500,
+      });
 
       const prompt = `${AXIOM_KNOWLEDGE_STANDARD}
+
+${ragContext.contextText || 'LightRAG 检索上下文：无。只能基于已学概念列表推荐，不要编造当前知识库里不存在的依据。'}
 
 用户已学过的概念：${conceptNames}
 
@@ -330,6 +348,7 @@ const optimizePathOrderTool = createTool(
     try {
       const style = params.style || 'prerequisite_first';
       const concepts = params.concepts;
+      const vaultId = getCurrentVaultId();
 
       if (!concepts || concepts.length < 2) {
         return {
@@ -338,9 +357,18 @@ const optimizePathOrderTool = createTool(
         };
       }
 
+      const ragContext = await buildGenerationRagContext({
+        vaultId,
+        query: `优化学习顺序：${concepts.join(', ')}\n策略：${style}`,
+        topK: 8,
+        maxChars: 4500,
+      });
+
       const prompt = `你是有经验的课程设计师。优化以下一组 "${style}" 策略的学习顺序。
 
 ${AXIOM_KNOWLEDGE_STANDARD}
+
+${ragContext.contextText || 'LightRAG 检索上下文：无。只能基于输入概念和必要通用前置关系排序，不要编造当前知识库依据。'}
 
 概念列表：${concepts.join(', ')}
 

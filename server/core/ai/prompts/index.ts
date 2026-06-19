@@ -5,6 +5,7 @@ export * from './tasks/oracle-chat';
 export * from './tasks/learning-path';
 export * from './tasks/document-import';
 export * from './tasks/graph-relation';
+export * from './tasks/push-suggestion';
 export * from './tasks/background-analysis';
 export * from './tasks/utility';
 export * from './tasks/resource-generation';

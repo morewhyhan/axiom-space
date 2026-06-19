@@ -136,6 +136,7 @@ export function useGeneratePath() {
       queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['push-suggestions', currentVaultId] })
     },
   })
 }
@@ -212,6 +213,7 @@ export function useUpdateStepProgress() {
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['push-suggestions', currentVaultId] })
       void useAgentStore.getState().loadSessions()
     },
   })
@@ -313,14 +315,23 @@ export function useImportDocument() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (params: { document: string; topic: string; sourceTitle?: string }) => {
+    mutationFn: async (params: {
+      document: string
+      topic: string
+      sourceTitle?: string
+      source?: string
+      originalFileName?: string
+      sourceMimeType?: string
+      conversionKind?: string
+      skipAiExtraction?: boolean
+    }) => {
       if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning['import-document'].$post({
         query: { vid: currentVaultId },
         json: params,
       })
-      const data = await res.json() as ApiResult<ImportDocumentResult>
-      if (!data.success) throw new Error(data.error || 'Import failed')
+      const data = await res.json() as ApiResult<ImportDocumentResult> & { detail?: string }
+      if (!data.success) throw new Error(data.detail || data.error || 'Import failed')
       return data
     },
     onSuccess: () => {
@@ -331,6 +342,7 @@ export function useImportDocument() {
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['push-suggestions', currentVaultId] })
       void useAgentStore.getState().loadSessions()
     },
   })
@@ -566,6 +578,143 @@ export interface PushableResource {
   concepts: string[]
   tags: string[]
   createdAt: number
+}
+
+export type PushSuggestionBoxType = 'link' | 'resource'
+export type PushSuggestionItemType = 'link' | 'card' | 'resource' | 'task_group'
+export type PushSuggestionStatus = 'pending' | 'accepted' | 'rejected' | 'edited' | 'executed'
+
+export interface PushSuggestion {
+  id: string
+  userId: string
+  vaultId: string
+  boxType: PushSuggestionBoxType
+  itemType: PushSuggestionItemType
+  title: string
+  reason: string
+  evidence: string[]
+  confidence: number
+  trigger: string
+  source: string
+  status: PushSuggestionStatus
+  payload: Record<string, unknown>
+  viewedAt: number | null
+  acceptedAt: number | null
+  rejectedAt: number | null
+  executedAt: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PushSuggestionsData {
+  suggestions: PushSuggestion[]
+  counts: Record<string, number>
+}
+
+export function usePushSuggestions(options: {
+  boxType?: PushSuggestionBoxType
+  status?: PushSuggestionStatus | 'all'
+  limit?: number
+} = {}) {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const query = useQuery({
+    queryKey: ['push-suggestions', currentVaultId, options.boxType ?? 'all', options.status ?? 'pending', options.limit ?? 80],
+    queryFn: async () => {
+      const res = await client.api.learning['push-suggestions'].$get({
+        query: {
+          vid: currentVaultId ?? undefined,
+          ...(options.boxType ? { box: options.boxType } : {}),
+          ...(options.status ? { status: options.status } : { status: 'pending' }),
+          ...(options.limit ? { limit: String(options.limit) } : {}),
+        },
+      })
+      const data = await res.json() as ApiResult<PushSuggestionsData>
+      if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch push suggestions (${res.status})` : data.error || `Failed to fetch push suggestions (${res.status})`)
+      return data
+    },
+    enabled: !!currentVaultId,
+    refetchInterval: 45_000,
+    staleTime: 10 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+  })
+  return {
+    data: query.data ?? { suggestions: [], counts: {} },
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refetch: query.refetch,
+  }
+}
+
+export function useScanPushSuggestions() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (params: { trigger?: string; scope?: Record<string, unknown> } = {}) => {
+      if (!currentVaultId) throw new Error('No vault selected')
+      const res = await client.api.learning['push-suggestions'].scan.$post({
+        query: { vid: currentVaultId },
+        json: params,
+      })
+      const data = await res.json() as ApiResult<{ created: PushSuggestion[]; skipped: number; candidateCount: number }>
+      if (!data.success) throw new Error(data.error || 'Scan failed')
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['push-suggestions', currentVaultId] })
+    },
+  })
+}
+
+export function useUpdatePushSuggestionStatus() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (params: { suggestionId: string; status: 'accepted' | 'rejected' | 'pending' }) => {
+      if (!currentVaultId) throw new Error('No vault selected')
+      const res = await client.api.learning['push-suggestions'][':suggestionId'].status.$patch({
+        param: { suggestionId: params.suggestionId },
+        query: { vid: currentVaultId },
+        json: { status: params.status },
+      })
+      const data = await res.json() as ApiResult<{ suggestion: PushSuggestion }>
+      if (!data.success) throw new Error(data.error || 'Update failed')
+      return data.suggestion
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['push-suggestions', currentVaultId] })
+    },
+  })
+}
+
+export function useExecutePushSuggestion() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (suggestionId: string) => {
+      if (!currentVaultId) throw new Error('No vault selected')
+      const res = await client.api.learning['push-suggestions'][':suggestionId'].execute.$post({
+        param: { suggestionId },
+        query: { vid: currentVaultId },
+      })
+      const data = await res.json() as ApiResult<{ suggestion: PushSuggestion; result: Record<string, unknown> }>
+      if (!data.success) throw new Error(data.error || 'Execute failed')
+      return data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['push-suggestions', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+      void useAgentStore.getState().loadSessions()
+    },
+  })
 }
 
 export interface PushResourcesData {

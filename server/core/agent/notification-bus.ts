@@ -3,10 +3,13 @@
  */
 
 export interface NotificationEvent {
-  type: 'toast' | 'profile' | 'card' | 'skill' | 'graph'
+  type: 'toast' | 'profile' | 'card' | 'skill' | 'graph' | 'quality'
   message: string
   timestamp: number
   id?: string
+  targetId?: string
+  action?: string
+  severity?: 'info' | 'success' | 'warning' | 'error'
 }
 
 export type ResourceProgressStatus =

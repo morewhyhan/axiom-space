@@ -338,6 +338,41 @@ model PushRecord {
   @@index([expiresAt])
 }
 
+// 资源推送建议 — 新推送箱事实源
+// boxType: link | resource
+// itemType: link | card | resource | task_group
+// status: pending | accepted | rejected | edited | executed
+model pushSuggestion {
+  id          String    @id @default(uuid())
+  userId      String
+  vaultId     String
+  boxType     String
+  itemType    String
+  title       String
+  reason      String
+  evidence    String    @default("[]") // JSON array
+  confidence  Float     @default(0.5)
+  trigger     String
+  source      String    @default("push_engine")
+  status      String    @default("pending")
+  payload     String    @default("{}") // JSON object
+  dedupeKey   String    @unique
+  viewedAt    DateTime?
+  acceptedAt  DateTime?
+  rejectedAt  DateTime?
+  executedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user  user  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vault vault @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@index([userId, vaultId, status])
+  @@index([vaultId, boxType, status])
+  @@index([vaultId, itemType])
+  @@index([createdAt])
+}
+
 // ═══════════════════════════════════════════════
 // Complete model definitions (at end)
 // ═══════════════════════════════════════════════
@@ -356,6 +391,7 @@ model user {
   learningSessions       learningSession[]
   learningPaths          learningPath[]
   pushRecords            PushRecord[]
+  pushSuggestions        pushSuggestion[]
   notificationReceipts   NotificationReceipt[]
 }
 
@@ -392,6 +428,7 @@ model vault {
   learningPaths             learningPath[]
   educationProfileHistory   EducationProfileHistory[]
   pushRecords               PushRecord[]
+  pushSuggestions           pushSuggestion[]
   ragDocumentIndexes        ragDocumentIndex[]
   resourceGenerationJobs    ResourceGenerationJob[]
   notificationReceipts      NotificationReceipt[]

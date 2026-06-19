@@ -78,7 +78,7 @@ export default function ResizablePanel({ id, children, zone, minWidth = 200, max
 
   return (
     <div
-      className={`relative flex flex-col self-stretch ${dragging ? 'select-none' : ''}`}
+      className={`resizable-panel resizable-panel-${zone} resizable-panel-${id} relative flex flex-col self-stretch ${dragging ? 'select-none' : ''}`}
       style={{ width, minWidth, maxWidth, flexShrink: 0 }}
       onDragOver={handleDragOver}
       onDrop={handleDrop}

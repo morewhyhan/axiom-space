@@ -30,6 +30,7 @@ import {
 } from '@/server/core/domain/concept-graph'
 import { emitDomainEvent, recordAssessmentResult } from '@/server/core/domain/events'
 import { DocumentImportError, importDocumentToVault } from '@/server/core/learning/document-import-service'
+import { pushSuggestionEngine, type PushBoxType, type PushStatus } from '@/server/core/push/push-suggestion-engine'
 import {
   JSON_REPAIR_PROMPT,
   LEARNING_BATCH_CONCEPTS_PROMPT,
@@ -39,10 +40,154 @@ import {
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
 const pathAdjustmentsQuerySchema = vaultQuerySchema.extend({ pathId: z.string().optional() })
+const pushSuggestionsQuerySchema = vaultQuerySchema.extend({
+  box: z.enum(['link', 'resource']).optional(),
+  status: z.enum(['pending', 'accepted', 'rejected', 'edited', 'executed', 'all']).optional(),
+  limit: z.string().optional(),
+})
+
+const MAX_IMPORT_DOCUMENT_CHARS = 1_500_000
+const MAX_EMBEDDED_FILE_CHARS = 3_000_000
+
+type NormalizedImportPayload = {
+  document: string
+  sourceTitle?: string
+  source?: string
+  originalFileName?: string
+  sourceMimeType?: string
+  conversionKind?: string
+  skipAiExtraction?: boolean
+}
 
 async function getAiManager() {
   const mod = await import('@/server/core/ai/AIManager')
   return mod.aiManager
+}
+
+function normalizeImportPayload(body: Record<string, unknown>): NormalizedImportPayload {
+  const directDocument = typeof body.document === 'string' ? body.document : ''
+  const originalFileName = stringValue(body.originalFileName) || stringValue(body.fileName)
+  const sourceMimeType = stringValue(body.sourceMimeType) || stringValue(body.mimeType) || stringValue(body.fileType)
+  if (directDocument.trim()) {
+    return {
+      document: directDocument,
+      sourceTitle: stringValue(body.sourceTitle) || originalFileName,
+      source: stringValue(body.source) || originalFileName,
+      originalFileName,
+      sourceMimeType,
+      conversionKind: stringValue(body.conversionKind) || (originalFileName ? 'file-text' : 'pasted-text'),
+      skipAiExtraction: body.skipAiExtraction === true,
+    }
+  }
+
+  const fileText = stringValue(body.fileText) || ''
+  if (fileText.trim()) {
+    return {
+      document: convertTextFileToMarkdown(fileText, originalFileName || '导入资料.md', sourceMimeType),
+      sourceTitle: stringValue(body.sourceTitle) || originalFileName,
+      source: stringValue(body.source) || originalFileName,
+      originalFileName,
+      sourceMimeType,
+      conversionKind: 'server-text-file',
+    }
+  }
+
+  const rawBase64 = stringValue(body.fileBase64) || stringValue(body.fileDataBase64) || ''
+  const base64 = rawBase64.includes(',') ? rawBase64.split(',').pop() || '' : rawBase64
+  if (base64.trim()) {
+    const bytes = Buffer.from(base64, 'base64')
+    if (isTextLikeFile(originalFileName, sourceMimeType)) {
+      const text = bytes.toString('utf8')
+      return {
+        document: convertTextFileToMarkdown(text, originalFileName || '导入资料.txt', sourceMimeType),
+        sourceTitle: stringValue(body.sourceTitle) || originalFileName,
+        source: stringValue(body.source) || originalFileName,
+        originalFileName,
+        sourceMimeType,
+        conversionKind: 'server-base64-text',
+      }
+    }
+    return {
+      document: embedBinaryFileAsMarkdown({
+        fileName: originalFileName || 'imported-file',
+        mimeType: sourceMimeType || 'application/octet-stream',
+        base64,
+        byteLength: bytes.byteLength,
+      }),
+      sourceTitle: stringValue(body.sourceTitle) || originalFileName,
+      source: stringValue(body.source) || originalFileName,
+      originalFileName,
+      sourceMimeType,
+      conversionKind: 'embedded-file',
+      skipAiExtraction: true,
+    }
+  }
+
+  return { document: '' }
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+function isTextLikeFile(fileName?: string, mimeType?: string): boolean {
+  const normalizedMime = (mimeType || '').toLowerCase()
+  if (normalizedMime.startsWith('text/')) return true
+  if (normalizedMime.includes('json') || normalizedMime.includes('xml') || normalizedMime.includes('markdown')) return true
+  const ext = (fileName || '').split('.').pop()?.toLowerCase()
+  return !!ext && ['md', 'markdown', 'txt', 'csv', 'json', 'yaml', 'yml', 'xml', 'html', 'htm', 'ts', 'tsx', 'js', 'jsx', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'sql'].includes(ext)
+}
+
+function convertTextFileToMarkdown(text: string, fileName: string, mimeType?: string): string {
+  const ext = fileName.split('.').pop()?.toLowerCase() || ''
+  if (ext === 'md' || ext === 'markdown') return text
+  if (ext === 'html' || ext === 'htm' || (mimeType || '').toLowerCase().includes('html')) {
+    return `# ${fileName}\n\n${htmlToMarkdown(text)}`
+  }
+  if (['json', 'csv', 'xml', 'yaml', 'yml', 'ts', 'tsx', 'js', 'jsx', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs', 'sql'].includes(ext)) {
+    const fence = ext === 'markdown' ? 'md' : ext
+    return `# ${fileName}\n\n\`\`\`${fence}\n${text}\n\`\`\``
+  }
+  return `# ${fileName}\n\n${text}`
+}
+
+function htmlToMarkdown(html: string): string {
+  return html
+    .replace(/<\s*br\s*\/?>/gi, '\n')
+    .replace(/<\s*\/p\s*>/gi, '\n\n')
+    .replace(/<\s*h1[^>]*>([\s\S]*?)<\s*\/h1\s*>/gi, '# $1\n\n')
+    .replace(/<\s*h2[^>]*>([\s\S]*?)<\s*\/h2\s*>/gi, '## $1\n\n')
+    .replace(/<\s*h3[^>]*>([\s\S]*?)<\s*\/h3\s*>/gi, '### $1\n\n')
+    .replace(/<\s*li[^>]*>([\s\S]*?)<\s*\/li\s*>/gi, '- $1\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function embedBinaryFileAsMarkdown(input: { fileName: string; mimeType: string; base64: string; byteLength: number }): string {
+  const dataUrl = `data:${input.mimeType};base64,${input.base64}`
+  return `# ${input.fileName}
+
+> 这个文件暂时无法自动转换为可读 Markdown，系统已把原始文件以内嵌附件形式保存在本文献节点中。
+
+- 文件名：${input.fileName}
+- 文件类型：${input.mimeType}
+- 文件大小：${input.byteLength} bytes
+
+<a href="${dataUrl}" download="${input.fileName}">下载原始文件</a>
+
+<details>
+<summary>内嵌原始文件 Base64</summary>
+
+\`\`\`base64
+${input.base64}
+\`\`\`
+
+</details>`
 }
 
 function matchesRequestedVault(c: Context, vaultId: string | null | undefined): boolean {
@@ -231,7 +376,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
 
-    const body = await c.req.json().catch(() => ({}))
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
     const topic = (body.topic as string)?.trim()
     const material = (body.material as string)?.slice(0, 5000) || ''
     const level = normalizeDifficulty(body.level)
@@ -432,6 +577,13 @@ ${context.answer.slice(0, 2400)}
           }
         } catch { /* non-fatal */ }
 
+        triggerPushSuggestionScan(userId, vid, 'learning_path_generated', {
+          pathId: path.id,
+          topic,
+          mode: 'batch',
+          createdCards: createdCards.length,
+        })
+
         return c.json({
           success: true,
           path: {
@@ -574,6 +726,13 @@ ${context.answer.slice(0, 2400)}
       const responsePaths = createdPaths.map((item) => learningPathResponse(item.path, item.cardRecords))
       const primaryPath = responsePaths[0]
 
+      triggerPushSuggestionScan(userId, vid, 'learning_path_generated', {
+        pathIds: responsePaths.map((path) => path.id),
+        topic,
+        mode,
+        createdPathCount: responsePaths.length,
+      })
+
       return c.json({
         success: true,
         path: primaryPath,
@@ -651,6 +810,12 @@ ${context.answer.slice(0, 2400)}
             pathAdjustmentEngine.createInitialPath(userId, topic, concepts as string[])
           }
         } catch { /* non-fatal */ }
+
+        triggerPushSuggestionScan(userId, vid, 'learning_path_generated', {
+          pathId: path.id,
+          topic,
+          mode: 'fallback_graph',
+        })
 
         return c.json({
           success: true,
@@ -1068,6 +1233,14 @@ ${context.answer.slice(0, 2400)}
       },
     })
 
+    triggerPushSuggestionScan(userId, path.vaultId, finalStatus === 'completed' || finalStatus === 'mastered' ? 'learning_step_completed' : 'learning_step_updated', {
+      pathId,
+      stepId,
+      cardId: step.cardId,
+      status: finalStatus,
+      mastery: Math.min(100, Math.max(0, finalMastery)),
+    })
+
     return c.json({
       success: true,
       doneCount,
@@ -1146,7 +1319,7 @@ ${context.answer.slice(0, 2400)}
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: true, results: [] })
 
-    const body = await c.req.json().catch(() => ({}))
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
     const query = (body.query as string) ?? ''
     const limit = Math.min(Math.max((body.limit as number) ?? 10, 1), 50)
 
@@ -1545,6 +1718,124 @@ ${context.answer.slice(0, 2400)}
     }
   })
 
+  // GET /api/learning/push-suggestions — 新推送盒：连接推送 + 资源/任务推送
+  .get('/push-suggestions', zValidator('query', pushSuggestionsQuerySchema), async (c) => {
+    const userId = c.get('userId') as string
+    const query = c.req.valid('query')
+    const vault = await resolveVault(c, userId)
+    if (!vault) {
+      return c.json({
+        success: true,
+        suggestions: [],
+        counts: { link: 0, resource: 0, pending: 0, executed: 0 },
+      })
+    }
+
+    try {
+      const suggestions = await pushSuggestionEngine.list({
+        userId,
+        vaultId: vault.id,
+        boxType: query.box as PushBoxType | undefined,
+        status: query.status as PushStatus | 'all' | undefined,
+        limit: Math.min(200, Math.max(1, Number(query.limit) || 80)),
+      })
+      const counts = suggestions.reduce((acc, item) => {
+        acc[item.boxType] = (acc[item.boxType] ?? 0) + 1
+        acc[item.status] = (acc[item.status] ?? 0) + 1
+        return acc
+      }, { link: 0, resource: 0, pending: 0, executed: 0 } as Record<string, number>)
+      return c.json({ success: true, suggestions, counts })
+    } catch (error) {
+      console.error('[Learning] Failed to list push suggestions:', error)
+      return c.json({ success: false, error: 'PUSH_SUGGESTIONS_FETCH_FAILED' }, 500)
+    }
+  })
+
+  // POST /api/learning/push-suggestions/scan — 手动/Agent 触发推送扫描
+  .post('/push-suggestions/scan',
+    zValidator('query', vaultQuerySchema),
+    zValidator('json', z.object({
+      trigger: z.string().optional(),
+      scope: z.record(z.string(), z.unknown()).optional(),
+    }).optional()),
+    async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'VAULT_NOT_FOUND' }, 404)
+
+    const body = c.req.valid('json') ?? {}
+    const trigger = body.trigger?.trim() || 'manual_refresh'
+    const scope = body.scope
+
+    try {
+      const result = await pushSuggestionEngine.scanAndPersist({
+        userId,
+        vaultId: vault.id,
+        trigger,
+        scope,
+      })
+      return c.json({
+        success: true,
+        created: result.created,
+        skipped: result.skipped,
+        candidateCount: result.candidateCount,
+      })
+    } catch (error) {
+      console.error('[Learning] Failed to scan push suggestions:', error)
+      return c.json({ success: false, error: 'PUSH_SUGGESTIONS_SCAN_FAILED' }, 500)
+    }
+  })
+
+  // PATCH /api/learning/push-suggestions/:suggestionId/status — 接受/忽略/恢复待处理
+  .patch('/push-suggestions/:suggestionId/status',
+    zValidator('query', vaultQuerySchema),
+    zValidator('json', z.object({ status: z.enum(['accepted', 'rejected', 'pending']) })),
+    async (c) => {
+      const userId = c.get('userId') as string
+      const vault = await resolveVault(c, userId)
+      if (!vault) return c.json({ success: false, error: 'VAULT_NOT_FOUND' }, 404)
+      const suggestionId = c.req.param('suggestionId')
+      const { status } = c.req.valid('json')
+
+      try {
+        const suggestion = await pushSuggestionEngine.markStatus({
+          userId,
+          vaultId: vault.id,
+          suggestionId,
+          status,
+        })
+        return c.json({ success: true, suggestion })
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        if (message === 'SUGGESTION_NOT_FOUND') return c.json({ success: false, error: message }, 404)
+        console.error('[Learning] Failed to update push suggestion:', error)
+        return c.json({ success: false, error: 'PUSH_SUGGESTION_UPDATE_FAILED' }, 500)
+      }
+    },
+  )
+
+  // POST /api/learning/push-suggestions/:suggestionId/execute — 接受并执行推送建议
+  .post('/push-suggestions/:suggestionId/execute', zValidator('query', vaultQuerySchema), async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'VAULT_NOT_FOUND' }, 404)
+    const suggestionId = c.req.param('suggestionId')
+
+    try {
+      const result = await pushSuggestionEngine.execute({
+        userId,
+        vaultId: vault.id,
+        suggestionId,
+      })
+      return c.json({ success: true, ...result })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message === 'SUGGESTION_NOT_FOUND') return c.json({ success: false, error: message }, 404)
+      console.error('[Learning] Failed to execute push suggestion:', error)
+      return c.json({ success: false, error: 'PUSH_SUGGESTION_EXECUTE_FAILED', detail: message }, 500)
+    }
+  })
+
   // GET /api/learning/push-resources — 获取推送的资源
   .get('/push-resources', async (c) => {
     const userId = c.get('userId') as string
@@ -1682,14 +1973,16 @@ ${context.answer.slice(0, 2400)}
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
 
-    const body = await c.req.json().catch(() => ({}))
-    const document = (body.document as string)?.trim()
+    const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+    const normalized = normalizeImportPayload(body)
+    const document = normalized.document.trim()
     const topic = (body.topic as string)?.trim()
-    const sourceTitle = (body.sourceTitle as string)?.trim() || topic
-    const source = ((body.source as string) || (body.citation as string) || (body.sourceTitle as string) || '').trim()
+    const sourceTitle = (body.sourceTitle as string)?.trim() || normalized.sourceTitle || topic
+    const source = ((body.source as string) || (body.citation as string) || normalized.source || sourceTitle || '').trim()
 
     if (!document || !topic) return c.json({ success: false, error: 'DOCUMENT_AND_TOPIC_REQUIRED' }, 400)
-    if (document.length > 50000) return c.json({ success: false, error: 'DOCUMENT_TOO_LONG' }, 400)
+    const maxChars = normalized.skipAiExtraction ? MAX_EMBEDDED_FILE_CHARS : MAX_IMPORT_DOCUMENT_CHARS
+    if (document.length > maxChars) return c.json({ success: false, error: 'DOCUMENT_TOO_LONG' }, 400)
     if (!source) return c.json({ success: false, error: 'SOURCE_REQUIRED' }, 400)
 
     try {
@@ -1700,6 +1993,17 @@ ${context.answer.slice(0, 2400)}
         topic,
         source,
         sourceTitle,
+        sourceMimeType: normalized.sourceMimeType,
+        originalFileName: normalized.originalFileName,
+        conversionKind: normalized.conversionKind,
+        skipAiExtraction: normalized.skipAiExtraction,
+      })
+      triggerPushSuggestionScan(userId, vault.id, 'document_imported', {
+        topic,
+        sourceTitle,
+        sourceDocumentId: result.sourceDocumentId,
+        literatureCardId: result.literatureCardId,
+        pathId: result.pathId,
       })
       return c.json({
         success: true,
@@ -1744,6 +2048,18 @@ ${context.answer.slice(0, 2400)}
   })
 
 export default app
+
+function triggerPushSuggestionScan(
+  userId: string,
+  vaultId: string | null | undefined,
+  trigger: string,
+  scope?: Record<string, unknown>,
+) {
+  if (!userId || !vaultId) return
+  void pushSuggestionEngine.scanAndPersist({ userId, vaultId, trigger, scope }).catch((error) => {
+    console.warn('[Learning] Push suggestion scan failed:', error instanceof Error ? error.message : String(error))
+  })
+}
 
 const VIRTUAL_GRAPH_PATH_PREFIX = '__graph_virtual__:'
 const VIRTUAL_GRAPH_STEP_PREFIX = '__graph_step__:'

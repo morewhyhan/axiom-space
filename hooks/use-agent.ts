@@ -422,10 +422,33 @@ export function useAgent() {
       const decoder = new TextDecoder()
       let assistantContent = ''
       let buffer = ''
+      let sseEvent = 'message'
+      let hasVisibleAssistantContent = false
       let insertedResourceSummary = false
       const insertedToolPrompts = new Set<string>()
 
       store._appendMessage({ role: 'assistant', content: '' })
+
+      const updateAssistantMessage = () => {
+        if (useAgentStore.getState().sessionId === currentSessionId) {
+          useAgentStore.getState()._updateLastMessage(assistantContent)
+        }
+      }
+
+      const appendAssistantText = (textChunk: string) => {
+        if (!textChunk) return
+        assistantContent += textChunk
+        if (textChunk.trim()) hasVisibleAssistantContent = true
+        updateAssistantMessage()
+      }
+
+      const appendAssistantBlock = (textBlock: string) => {
+        const cleaned = textBlock.trim()
+        if (!cleaned) return
+        assistantContent += `${assistantContent.trim() ? '\n\n' : ''}${cleaned}`
+        hasVisibleAssistantContent = true
+        updateAssistantMessage()
+      }
 
       while (true) {
         const { done, value } = await reader.read()
@@ -441,20 +464,43 @@ export function useAgent() {
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
         for (const line of lines) {
+          if (line.startsWith('event:')) {
+            sseEvent = line.slice(6).trim() || 'message'
+            continue
+          }
+          if (!line.trim()) {
+            sseEvent = 'message'
+            continue
+          }
           if (line.startsWith('data:')) {
             try {
-              const payload = JSON.parse(line.slice(5).trim())
-              if (payload.text) {
-                assistantContent += payload.text
-                // Check again before writing to store
-                if (useAgentStore.getState().sessionId === currentSessionId) {
-                  useAgentStore.getState()._updateLastMessage(assistantContent)
+              const eventName = sseEvent
+              const payload = JSON.parse(line.slice(5).trim()) as Record<string, unknown>
+              const payloadType = typeof payload.type === 'string' ? payload.type : ''
+              const payloadTool = typeof payload.tool === 'string' ? payload.tool : ''
+              const payloadText = typeof payload.text === 'string' ? payload.text : ''
+              const payloadError = typeof payload.error === 'string' ? payload.error.trim() : ''
+
+              if (eventName === 'error' || payloadError) {
+                const errorText = payloadError || 'Agent 响应异常，请稍后重试。'
+                useAgentStore.getState()._setError(errorText)
+                appendAssistantBlock(errorText)
+                continue
+              }
+
+              if ((eventName === 'text' || (!payloadType && eventName === 'message')) && payloadText) {
+                appendAssistantText(payloadText)
+              }
+              if (eventName === 'done') {
+                if (!assistantContent.trim() && payloadText.trim()) {
+                  appendAssistantText(payloadText)
                 }
+                continue
               }
-              if (payload.type === 'tool_start') {
-                useAgentStore.getState()._setCurrentProgress(`正在执行 ${payload.tool || payload.text || ''}`)
+              if (payloadType === 'tool_start') {
+                useAgentStore.getState()._setCurrentProgress(`正在执行 ${payloadTool || payloadText}`)
               }
-              if (payload.type === 'resource_progress') {
+              if (payloadType === 'resource_progress') {
                 const status = typeof payload.status === 'string'
                   ? payload.status as ResourceProgressStatus
                   : 'generating'
@@ -471,7 +517,7 @@ export function useAgent() {
                   timestamp: typeof payload.timestamp === 'number' ? payload.timestamp : undefined,
                 })
               }
-              if (payload.type === 'rag_context' && Array.isArray(payload.references)) {
+              if (payloadType === 'rag_context' && Array.isArray(payload.references)) {
                 useAgentStore.getState()._setLastRagReferences(
                   payload.references.filter((reference: unknown): reference is RagReference => {
                     if (!reference || typeof reference !== 'object') return false
@@ -480,27 +526,35 @@ export function useAgent() {
                   }),
                 )
               }
-              if (payload.type === 'workspace_action' && Array.isArray(payload.actions)) {
+              if (payloadType === 'workspace_action' && Array.isArray(payload.actions)) {
                 applyWorkspaceActions(payload.actions, queryClient, currentVaultId)
                 useAgentStore.getState()._setCurrentProgress('')
               }
-              if (payload.type === 'tool_end') {
-                useAgentStore.getState()._setCurrentProgress('')
-                if (payload.tool === 'push_resource' && typeof payload.text === 'string' && payload.text.trim() && !insertedResourceSummary) {
-                  insertedResourceSummary = true
-                  assistantContent += `${assistantContent ? '\n\n' : ''}${payload.text.trim()}`
-                  if (useAgentStore.getState().sessionId === currentSessionId) {
-                    useAgentStore.getState()._updateLastMessage(assistantContent)
+              if (payloadType === 'profile_question') {
+                const askedInCurrentSession = payload.askedInCurrentSession === true
+                const question = typeof payload.question === 'string' ? payload.question.trim() : ''
+                if (askedInCurrentSession && question && useAgentStore.getState().sessionId === currentSessionId) {
+                  if (assistantContent.trim()) {
+                    useAgentStore.getState()._appendMessage({ role: 'assistant', content: question })
+                  } else {
+                    appendAssistantBlock(question)
                   }
+                  hasVisibleAssistantContent = true
                 }
-                if (payload.requiresUserInput === true && typeof payload.text === 'string' && payload.text.trim()) {
-                  const promptKey = `${payload.tool}:${payload.text.trim()}`
+                useAgentStore.getState().loadSessions().catch(() => {})
+                invalidateWorkspaceQueries(queryClient, currentVaultId)
+              }
+              if (payloadType === 'tool_end') {
+                useAgentStore.getState()._setCurrentProgress('')
+                if (payloadTool === 'push_resource' && payloadText.trim() && !insertedResourceSummary) {
+                  insertedResourceSummary = true
+                  appendAssistantBlock(payloadText)
+                }
+                if (payload.requiresUserInput === true && payloadText.trim()) {
+                  const promptKey = `${payloadTool}:${payloadText.trim()}`
                   if (!insertedToolPrompts.has(promptKey)) {
                     insertedToolPrompts.add(promptKey)
-                    assistantContent += `${assistantContent ? '\n\n' : ''}${payload.text.trim()}`
-                    if (useAgentStore.getState().sessionId === currentSessionId) {
-                      useAgentStore.getState()._updateLastMessage(assistantContent)
-                    }
+                    appendAssistantBlock(payloadText)
                   }
                 }
                 const confirmationRequest = extractConfirmationRequest(payload)
@@ -508,7 +562,6 @@ export function useAgent() {
                   useAgentStore.getState()._upsertLastConfirmationRequest(confirmationRequest)
                 }
               }
-              if (payload.error) useAgentStore.getState()._setError(payload.error)
             } catch {
               // skip non-JSON data lines
             }
@@ -518,8 +571,8 @@ export function useAgent() {
 
       // Only write final content if still on same session
       if (useAgentStore.getState().sessionId === currentSessionId) {
-        if (!assistantContent) {
-          useAgentStore.getState()._updateLastMessage('收到，但未能生成回复。请重试。')
+        if (!hasVisibleAssistantContent && !assistantContent.trim()) {
+          useAgentStore.getState()._updateLastMessage('AI 服务没有完成本轮回复。请重发刚才的问题，系统会重新请求模型。')
         }
       }
 
@@ -546,7 +599,9 @@ export function useAgent() {
     return useAgentStore.getState().switchSession(id)
   }, [])
   const createSession = useCallback(() => useAgentStore.getState().createSession(), [])
-  const createTalkSession = useCallback(() => useAgentStore.getState().createTalkSession(), [])
+  const createTalkSession = useCallback((options?: { title?: string; purpose?: 'initial_profile' }) => {
+    return useAgentStore.getState().createTalkSession(options)
+  }, [])
   const renameSession = useCallback((id: string, title: string) => useAgentStore.getState().renameSession(id, title), [])
   const autoTitleSession = useCallback((id: string) => useAgentStore.getState().autoTitleSession(id), [])
   const openCardThread = useCallback((card: { id: string; title: string; type: string }) => {

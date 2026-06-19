@@ -14,6 +14,7 @@ import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-c
 import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
 import { assertCardType, inferCardTypeFromPath } from '@/server/core/domain/contracts'
 import { ensureVaultRootCard } from '@/server/core/domain/concept-graph'
+import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
 
 export class DbAdapter implements IFileStorage {
   private resolvedUserId: string
@@ -158,6 +159,7 @@ export class DbAdapter implements IFileStorage {
         return upserted
       }, { timeout: 30_000 })
 
+      scheduleRagIndexCard(card.id, 'db-adapter-write')
       return { success: true }
     } catch (err: unknown) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }

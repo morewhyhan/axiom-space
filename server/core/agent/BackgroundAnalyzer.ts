@@ -8,10 +8,11 @@
 import { getFileStorage } from '@/server/infra/storage/GlobalFileStorage'
 import { prisma } from '@/lib/db'
 import { emitNotification } from './notification-bus'
-import { getCurrentVaultId } from './agent-context'
+import { getCurrentUserId, getCurrentVaultId } from './agent-context'
 import type { UserProfile } from '@/server/core/learning/memory/profile-manager'
-import { assertCardType } from '@/server/core/domain/contracts'
+import { assertCardType, validatePermanentCardContent } from '@/server/core/domain/contracts'
 import { BACKGROUND_ANALYSIS_PROMPT } from '@/server/core/ai/prompts'
+import { pushSuggestionEngine } from '@/server/core/push/push-suggestion-engine'
 
 const ANALYSIS_PROMPT = BACKGROUND_ANALYSIS_PROMPT.system;
 
@@ -154,6 +155,24 @@ export class BackgroundAnalyzer {
         }
       }
 
+      const baUserId = getCurrentUserId()
+      const baVaultId = getCurrentVaultId()
+      if (baUserId && baVaultId && hasBackgroundPushSignal(result)) {
+        void pushSuggestionEngine.scanAndPersist({
+          userId: baUserId,
+          vaultId: baVaultId,
+          trigger: 'background_analysis',
+          scope: {
+            cards: result.cards?.length ?? 0,
+            observations: result.observations?.length ?? 0,
+            skills: result.skills?.length ?? 0,
+            evidence: this.latestEvidence.length,
+          },
+        }).catch((error) => {
+          console.debug('[BackgroundAnalyzer] Push suggestion scan failed:', error)
+        })
+      }
+
       return result;
     } catch (err) {
       console.debug('[BackgroundAnalyzer] Failed:', err);
@@ -215,6 +234,7 @@ export class BackgroundAnalyzer {
           demonstratedAt: new Date(),
         },
       })
+      void emitNotification(vaultId, { type: 'skill', message: `技能观察已更新：${skill.name}` })
     } catch (err) { console.debug('[BackgroundAnalyzer] Skill update failed:', err); }
   }
 
@@ -227,16 +247,11 @@ export class BackgroundAnalyzer {
 
       const type = assertCardType(card.type)
       if (type === 'permanent') {
-        const qualityChecks = [
-          /定义|是|指|means|is a/i.test(card.content),
-          /例如|比如|举例|Example|for example/i.test(card.content),
-          /\[\[.+?\]\]/.test(card.content),
-          /应用|使用|场景|用途|use case/i.test(card.content),
-        ]
-        if (qualityChecks.some((passed) => !passed)) return
+        const quality = validatePermanentCardContent(card.content)
+        if (!quality.passed) return
       }
       const safeTitle = card.title.replace(/[/\\:*?"<>|]/g, '-').slice(0, 100)
-      await prisma.card.create({
+      const created = await prisma.card.create({
         data: {
           vaultId: vid,
           path: `${type === 'permanent' ? 'permanent' : 'fleeting'}/${safeTitle}.md`,
@@ -244,6 +259,12 @@ export class BackgroundAnalyzer {
           content: `# ${card.title}\n\n${card.content}\n\n---\nevidence:\n${evidence.map((item) => `- ${item}`).join('\n')}`,
           type,
         },
+      })
+      void emitNotification(vid, {
+        type: 'card',
+        message: `后台生成卡片：${card.title}`,
+        targetId: created.id,
+        action: 'background_card_created',
       })
     } catch (err) { console.debug('[BackgroundAnalyzer] Card creation failed:', err); }
   }
@@ -274,6 +295,9 @@ export class BackgroundAnalyzer {
           category: 'observation',
         },
       })
+      if (!category.startsWith('profile_')) {
+        void emitNotification(vid, { type: 'profile', message: 'AI 观察记录已更新' })
+      }
     } catch { /* non-critical */ }
   }
 
@@ -300,4 +324,13 @@ export class BackgroundAnalyzer {
 
 function uniqueStrings(items: string[]): string[] {
   return [...new Set(items.map((item) => item.trim()).filter(Boolean))]
+}
+
+function hasBackgroundPushSignal(result: AnalysisResult): boolean {
+  return Boolean(
+    (result.cards && result.cards.length > 0) ||
+    (result.observations && result.observations.length > 0) ||
+    (result.skills && result.skills.length > 0) ||
+    (result.profile && Object.keys(result.profile).length > 0),
+  )
 }

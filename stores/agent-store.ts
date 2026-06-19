@@ -77,9 +77,33 @@ export interface SessionSummary {
   sessionKind?: string | null
 }
 
+type CreateTalkSessionOptions = {
+  title?: string
+  purpose?: 'initial_profile'
+}
+
 function currentVaultQuery(): { query: { vid: string } } | undefined {
   const vid = useAppStore.getState().currentVaultId
   return vid ? { query: { vid } } : undefined
+}
+
+function isVisibleAgentStoreMessage(role: string, content: string): role is AgentMessage['role'] {
+  if (role !== 'user' && role !== 'assistant') return false
+  const text = content.trim()
+  if (!text) return false
+  if (!text.startsWith('{') || !text.endsWith('}')) return true
+  try {
+    const parsed = JSON.parse(text) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return true
+    const record = parsed as Record<string, unknown>
+    if (record._type === 'trajectory') return false
+    if ('phase' in record && 'user_message' in record && 'assistant_message' in record) return false
+    if (record.type === 'resource_progress' || record.type === 'workspace_action') return false
+    if (record.type === 'tool_start' || record.type === 'tool_end') return false
+    return true
+  } catch {
+    return true
+  }
 }
 
 async function readApiResult<T extends { success: boolean; error?: string }>(
@@ -140,7 +164,7 @@ interface AgentStore {
   loadSessions: () => Promise<SessionSummary[]>
   switchSession: (id: string) => Promise<void>
   createSession: () => Promise<void>
-  createTalkSession: () => Promise<SessionSummary | null>
+  createTalkSession: (options?: CreateTalkSessionOptions) => Promise<SessionSummary | null>
   renameSession: (id: string, title: string) => Promise<boolean>
   autoTitleSession: (id: string) => Promise<boolean>
   openCardThread: (card: { id: string; title: string; type: string }) => Promise<void>
@@ -308,7 +332,12 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
       const data = await readApiResult<{ success: boolean; messages?: Array<{ role: string; content: string }>; error?: string }>(res, '加载历史失败')
       if (data.success && data.messages?.length) {
         set({
-          messages: data.messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          messages: data.messages
+            .flatMap((m): AgentMessage[] => (
+              isVisibleAgentStoreMessage(m.role, m.content)
+                ? [{ role: m.role, content: m.content }]
+                : []
+            )),
         })
       }
     } catch (err) {
@@ -320,13 +349,16 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     useAppStore.getState().openModal('newcard')
   },
 
-  createTalkSession: async () => {
+  createTalkSession: async (options) => {
     try {
       const vid = useAppStore.getState().currentVaultId
       if (!vid) return null
       const res = await client.api.agent.sessions.new.$post({
         query: { vid },
-        json: { title: '新对话' },
+        json: {
+          title: options?.title || (options?.purpose === 'initial_profile' ? '初始画像构建' : '新对话'),
+          ...(options?.purpose ? { purpose: options.purpose } : {}),
+        },
       })
       const data = await readApiResult<{ success: boolean; session?: SessionSummary; error?: string }>(res, '创建会话失败')
       if (data.session) {
@@ -342,6 +374,10 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
             ...state.sessions.filter((item) => item.id !== data.session!.id),
           ],
         }))
+        if (options?.purpose === 'initial_profile') {
+          await get().switchSession(data.session.id)
+          return data.session
+        }
         await get().loadSessions()
         return data.session
       }

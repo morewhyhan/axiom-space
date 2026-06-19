@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Trash2, X } from 'lucide-react'
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { client } from '@/lib/api-client'
@@ -56,6 +57,28 @@ type RelatedRagCard = {
   reason: string
 }
 
+type QualityIssue = {
+  dimension: 'clarity' | 'accuracy' | 'necessity'
+  code: string
+  label: string
+  message: string
+  fix: string
+}
+
+type QualityRejection = {
+  title: string
+  error: string
+  missingElements: string[]
+  issues: QualityIssue[]
+}
+
+type CardSaveSnapshot = {
+  id: string
+  content: string
+  title?: string | null
+  vaultId?: string | null
+}
+
 const CARD_TYPE_LABELS: Record<string, string> = {
   fleeting: '◇ 灵感草稿',
   literature: '○ 文献资料',
@@ -90,6 +113,12 @@ function ragStatusTone(status: RagCardStatusValue | undefined) {
   return 'text-amber-300/70'
 }
 
+function qualityDimensionLabel(dimension: QualityIssue['dimension']) {
+  if (dimension === 'clarity') return '清晰'
+  if (dimension === 'accuracy') return '准确'
+  return '必要'
+}
+
 export default function ForgeEditor() {
   const [editorMode, setEditorMode] = useState<'live' | 'read'>('live')
   const [cardContent, setCardContent] = useState('')
@@ -99,6 +128,7 @@ export default function ForgeEditor() {
   const [dirty, setDirty] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [relatedOpen, setRelatedOpen] = useState(false)
+  const [qualityRejection, setQualityRejection] = useState<QualityRejection | null>(null)
 
   // Video detection: if card content has axiom-video marker, fetch and render video HTML
   const [videoHtml, setVideoHtml] = useState<string | null>(null)
@@ -129,6 +159,14 @@ export default function ForgeEditor() {
   const currentVaultId = useAppStore((state) => state.currentVaultId)
   const queryClient = useQueryClient()
   const readContainerRef = useRef<HTMLDivElement>(null)
+  const saveSeqRef = useRef(0)
+  const editorSnapshotRef = useRef<{
+    id: string | null
+    content: string
+    title: string | null
+    vaultId: string | null
+    dirty: boolean
+  }>({ id: null, content: '', title: null, vaultId: null, dirty: false })
   const ragStatusQuery = useQuery({
     queryKey: ['rag-card-status', currentVaultId, selectedNode?.id],
     enabled: !!currentVaultId && !!selectedNode?.id,
@@ -162,6 +200,16 @@ export default function ForgeEditor() {
     },
     staleTime: 60_000,
   })
+
+  useEffect(() => {
+    editorSnapshotRef.current = {
+      id: selectedNode?.id ?? null,
+      content: cardContent,
+      title: cardTitle,
+      vaultId: currentVaultId,
+      dirty,
+    }
+  }, [selectedNode?.id, cardContent, cardTitle, currentVaultId, dirty])
 
   const parseResourceManifest = useCallback((content: string): ResourceManifestItem[] => {
     const match = content.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
@@ -299,6 +347,7 @@ export default function ForgeEditor() {
 
   // Fetch card content when selected node changes
   useEffect(() => {
+    setQualityRejection(null)
     if (!selectedNodeId) {
       setCardContent('')
       setCardTitle(null)
@@ -433,6 +482,83 @@ export default function ForgeEditor() {
     requestAnimationFrame(() => { ta.selectionStart = newPos; ta.selectionEnd = newPos; ta.focus() })
   }, [wikiSuggestions, wikiIdx, cardContent])
 
+  const saveCardSnapshot = useCallback(async (
+    snapshot: CardSaveSnapshot,
+    options: { silent?: boolean; force?: boolean } = {},
+  ) => {
+    if (!snapshot.id) return true
+    const current = editorSnapshotRef.current
+    if (!options.force && current.id === snapshot.id && !current.dirty) return true
+    const seq = ++saveSeqRef.current
+    setSaving(true)
+    try {
+      const res = await (client.api.vault['card'][':id'].$put as (args: {
+        param: { id: string }; json: { content: string; title?: string; type?: string }; query?: Record<string, string | undefined>
+      }) => Promise<Response>)({
+        param: { id: snapshot.id },
+        json: { content: snapshot.content, title: snapshot.title || undefined },
+        query: snapshot.vaultId ? { vid: snapshot.vaultId } : undefined,
+      })
+      const data: {
+        success: boolean
+        card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }
+        error?: string
+        missingElements?: string[]
+        qualityIssues?: QualityIssue[]
+      } = await res.json()
+      if (res.ok && data.success) {
+        const latest = editorSnapshotRef.current
+        if (latest.id === snapshot.id && latest.content === snapshot.content) {
+          setDirty(false)
+          setUndoStack([])
+        }
+        const now = new Date()
+        const ts = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+        setLastSavedAt(ts)
+        // Auto-clear saved timestamp after 10 seconds
+        setTimeout(() => setLastSavedAt(prev => prev === ts ? null : prev), 10000)
+        if (!options.silent) toast.success('已自动保存', { duration: 1800 })
+
+        // P1 FIX: Force refetch Galaxy data (not just invalidate) to ensure immediate sync
+        await queryClient.refetchQueries({ queryKey: ['galaxy', snapshot.vaultId ?? null] })
+
+        // Invalidate other views (these can use invalidate since they're secondary)
+        queryClient.invalidateQueries({ queryKey: ['dashboard-stats', snapshot.vaultId ?? null] })
+        queryClient.invalidateQueries({ queryKey: ['learning-paths', snapshot.vaultId ?? null] })
+        queryClient.invalidateQueries({ queryKey: ['cognition', snapshot.vaultId ?? null] })
+        queryClient.invalidateQueries({ queryKey: ['observations', snapshot.vaultId ?? null] })
+        // Invalidate all card-links — saving this card may affect backlinks on other cards
+        queryClient.invalidateQueries({ queryKey: ['card-links'] })
+        queryClient.invalidateQueries({ queryKey: ['rag-card-status', snapshot.vaultId ?? null, snapshot.id] })
+        queryClient.invalidateQueries({ queryKey: ['rag-related-cards', snapshot.vaultId ?? null, snapshot.id] })
+        queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', snapshot.vaultId ?? null] })
+        return true
+      } else {
+        // Keep dirty so the user can retry; surface server-side reason.
+        toast.error(`自动保存失败: ${data?.error || `HTTP ${res.status}`}`)
+        return false
+      }
+    } catch (err) {
+      console.warn('[ForgeEditor] failed to save:', err)
+      toast.error(`自动保存失败: ${(err as Error)?.message || '网络异常'}`)
+      return false
+    } finally {
+      if (seq === saveSeqRef.current) setSaving(false)
+    }
+  }, [queryClient])
+
+  const saveCurrentCard = useCallback((options: { silent?: boolean; force?: boolean } = {}) => {
+    const snapshot = editorSnapshotRef.current
+    if (!snapshot.id) return Promise.resolve(true)
+    if (!options.force && !snapshot.dirty) return Promise.resolve(true)
+    return saveCardSnapshot({
+      id: snapshot.id,
+      content: snapshot.content,
+      title: snapshot.title,
+      vaultId: snapshot.vaultId,
+    }, options)
+  }, [saveCardSnapshot])
+
   const insertWikiLink = useCallback((title: string) => {
     if (!title.trim()) return
     const link = `[[${title.trim()}]]`
@@ -440,61 +566,82 @@ export default function ForgeEditor() {
       toast('这条关联已经存在', { duration: 1800 })
       return
     }
-    setCardContent((current) => `${current.trimEnd()}\n\n${link}\n`)
+    const nextContent = `${cardContent.trimEnd()}\n\n${link}\n`
+    setCardContent(nextContent)
     setDirty(true)
     toast.success('已插入关联链接')
-  }, [cardContent])
+    const snapshot = editorSnapshotRef.current
+    if (snapshot.id) {
+      void saveCardSnapshot({
+        id: snapshot.id,
+        content: nextContent,
+        title: snapshot.title,
+        vaultId: snapshot.vaultId,
+      }, { silent: true, force: true })
+    }
+  }, [cardContent, saveCardSnapshot])
 
-  const handleSave = useCallback(async () => {
-    if (!selectedNode || !dirty) return
-    setSaving(true)
+  useEffect(() => {
+    if (!dirty || !selectedNode?.id) return
+    const timer = window.setTimeout(() => {
+      void saveCurrentCard({ silent: true })
+    }, 1400)
+    return () => window.clearTimeout(timer)
+  }, [dirty, cardContent, cardTitle, selectedNode?.id, saveCurrentCard])
+
+  useEffect(() => {
+    const flushOnVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') void saveCurrentCard({ silent: true })
+    }
+    document.addEventListener('visibilitychange', flushOnVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', flushOnVisibilityChange)
+  }, [saveCurrentCard])
+
+  useEffect(() => {
+    const flushOnPointerAway = (event: PointerEvent) => {
+      const snapshot = editorSnapshotRef.current
+      if (!snapshot.dirty || !textareaRef.current) return
+      if (textareaRef.current.contains(event.target as Node)) return
+      void saveCardSnapshot({
+        id: snapshot.id || '',
+        content: snapshot.content,
+        title: snapshot.title,
+        vaultId: snapshot.vaultId,
+      }, { silent: true, force: true })
+    }
+    document.addEventListener('pointerdown', flushOnPointerAway, true)
+    return () => document.removeEventListener('pointerdown', flushOnPointerAway, true)
+  }, [saveCardSnapshot])
+
+  const reloadCardContent = useCallback(async (cardId: string) => {
+    const snapshot = editorSnapshotRef.current
+    if (snapshot.id !== cardId || snapshot.dirty) return
     try {
-      const res = await (client.api.vault['card'][':id'].$put as (args: {
-        param: { id: string }; json: { content: string; title?: string; type?: string }; query?: Record<string, string | undefined>
-      }) => Promise<Response>)({
-        param: { id: selectedNode.id },
-        json: { content: cardContent, title: cardTitle || undefined },
-        query: currentVaultId ? { vid: currentVaultId } : undefined,
+      const res = await client.api.vault.card[':id'].$get({
+        param: { id: cardId },
+        query: { vid: snapshot.vaultId ?? undefined },
       })
-      const data: {
-        success: boolean
-        card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }
-        error?: string
-        missingElements?: string[]
-      } = await res.json()
-      if (res.ok && data.success) {
+      const data = await res.json() as { success: boolean; card?: { content: string; title: string }; error?: string }
+      if (data.success && data.card && editorSnapshotRef.current.id === cardId && !editorSnapshotRef.current.dirty) {
+        setCardContent(data.card.content || '')
+        setCardTitle(data.card.title || cardTitle)
         setDirty(false)
         setUndoStack([])
-        const now = new Date()
-        const ts = now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-        setLastSavedAt(ts)
-        // Auto-clear saved timestamp after 10 seconds
-        setTimeout(() => setLastSavedAt(prev => prev === ts ? null : prev), 10000)
-        toast.success('已保存', { duration: 2000 })
-
-        // P1 FIX: Force refetch Galaxy data (not just invalidate) to ensure immediate sync
-        await queryClient.refetchQueries({ queryKey: ['galaxy', currentVaultId] })
-
-        // Invalidate other views (these can use invalidate since they're secondary)
-        queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
-        queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
-        queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
-        // Invalidate all card-links — saving this card may affect backlinks on other cards
-        queryClient.invalidateQueries({ queryKey: ['card-links'] })
-        queryClient.invalidateQueries({ queryKey: ['rag-card-status', currentVaultId, selectedNode.id] })
-        queryClient.invalidateQueries({ queryKey: ['rag-related-cards', currentVaultId, selectedNode.id] })
-        queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
-      } else {
-        // Keep dirty so the user can retry; surface server-side reason.
-        toast.error(`保存失败: ${data?.error || `HTTP ${res.status}`}`)
       }
     } catch (err) {
-      console.warn('[ForgeEditor] failed to save:', err)
-      toast.error(`保存失败: ${(err as Error)?.message || '网络异常'}`)
-    } finally {
-      setSaving(false)
+      console.warn('[ForgeEditor] failed to reload card:', err)
     }
-  }, [selectedNode, cardContent, cardTitle, dirty, currentVaultId, queryClient])
+  }, [cardTitle])
+
+  useEffect(() => {
+    const onCardUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ cardId?: string }>).detail
+      if (!detail?.cardId) return
+      void reloadCardContent(detail.cardId)
+    }
+    window.addEventListener('axiom:card-updated', onCardUpdated)
+    return () => window.removeEventListener('axiom:card-updated', onCardUpdated)
+  }, [reloadCardContent])
 
   const handleRetryRagSync = useCallback(async () => {
     if (!selectedNode) return
@@ -517,9 +664,9 @@ export default function ForgeEditor() {
     }
   }, [selectedNode, currentVaultId, queryClient])
 
-  // Ctrl+S to save (use ref to avoid re-registration on every keystroke)
-  const handleSaveRef = useRef(handleSave)
-  handleSaveRef.current = handleSave
+  // Ctrl+S triggers the same auto-save path immediately.
+  const handleSaveRef = useRef(saveCurrentCard)
+  handleSaveRef.current = saveCurrentCard
 
   /** Upgrade fleeting card → permanent */
   const handleUpgradeType = useCallback(async () => {
@@ -539,8 +686,11 @@ export default function ForgeEditor() {
         card?: { id: string; title: string | null; type: string; content: string; updatedAt: string }
         error?: string
         missingElements?: string[]
+        qualityIssues?: QualityIssue[]
       } = await res.json()
       if (res.ok && data.success) {
+        setQualityRejection(null)
+        setDirty(false)
         toast.success('已沉淀为永久知识卡')
         queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
         queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
@@ -556,7 +706,17 @@ export default function ForgeEditor() {
         useAgentStore.getState().loadSessions()
       } else {
         const missing = data.missingElements?.length ? `，缺少：${data.missingElements.join(', ')}` : ''
-        toast.error(`升级失败: ${data.error || `HTTP ${res.status}`}${missing}`)
+        if (data.error === 'PROMOTION_CRITERIA_FAILED') {
+          setQualityRejection({
+            title: cardTitle || selectedNode.title || '当前卡片',
+            error: '这张卡片还没有达到永久知识卡标准。',
+            missingElements: data.missingElements ?? [],
+            issues: data.qualityIssues ?? [],
+          })
+          toast.warning('升级被驳回：需要先补齐清晰、准确、必要')
+        } else {
+          toast.error(`升级失败: ${data.error || `HTTP ${res.status}`}${missing}`)
+        }
       }
     } catch (err) {
       toast.error(`升级失败: ${(err as Error)?.message || '网络异常'}`)
@@ -619,7 +779,7 @@ export default function ForgeEditor() {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault()
-        handleSaveRef.current()
+        void handleSaveRef.current({ silent: false, force: true })
       }
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         // Only handle undo when the editor textarea is focused
@@ -661,6 +821,7 @@ export default function ForgeEditor() {
           })
           const data = await res.json() as { success: boolean; card?: { id: string; title: string; type?: string } | null; error?: string }
           if (data.success && data.card) {
+            await saveCurrentCard({ silent: true })
             useAppStore.getState().setSelectedNode({
               id: data.card.id,
               title: data.card.title,
@@ -678,7 +839,7 @@ export default function ForgeEditor() {
 
     container.addEventListener('click', handleClick)
     return () => container.removeEventListener('click', handleClick)
-  }, [editorMode, currentVaultId])
+  }, [editorMode, currentVaultId, saveCurrentCard])
 
   // Mermaid 异步渲染
   useEffect(() => {
@@ -686,7 +847,8 @@ export default function ForgeEditor() {
     renderMermaidBlocks(readContainerRef.current)
   }, [editorMode, cardContent])
 
-  const handleClose = () => {
+  const handleClose = async () => {
+    await saveCurrentCard({ silent: true })
     clearSelectedNode()
   }
 
@@ -721,21 +883,26 @@ export default function ForgeEditor() {
             <div className="flex bg-white/5 rounded-lg p-0.5">
               <button
                 className={`editor-mode-tab ${editorMode === 'live' ? 'active' : ''}`}
-                onClick={() => setEditorMode('live')}
+                onClick={async () => {
+                  await saveCurrentCard({ silent: true })
+                  setEditorMode('live')
+                }}
               >
                 LIVE
               </button>
               <button
                 className={`editor-mode-tab ${editorMode === 'read' ? 'active' : ''}`}
-                onClick={() => setEditorMode('read')}
+                onClick={async () => {
+                  await saveCurrentCard({ silent: true })
+                  setEditorMode('read')
+                }}
               >
                 READ
               </button>
             </div>
             {hasCard && (
               <button
-                className="mono text-white/30 hover:text-red-400 transition-colors px-1"
-                style={{ fontSize: 'var(--f10)' }}
+                className="forge-paper-icon-btn danger"
                 onClick={async () => {
                   if (!selectedNode || !window.confirm('确定删除这张卡片？此操作不可撤销。')) return
                   const deletedCardId = selectedNode.id
@@ -779,17 +946,16 @@ export default function ForgeEditor() {
                 }}
                 title="删除卡片"
               >
-                🗑
+                <Trash2 className="h-3.5 w-3.5" />
               </button>
             )}
             {hasCard && (
               <button
-                className="mono text-white/30 hover:text-white/60 transition-colors px-1"
-                style={{ fontSize: 'var(--f10)' }}
+                className="forge-paper-icon-btn"
                 onClick={handleClose}
                 title="关闭"
               >
-                ✕
+                <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
@@ -811,9 +977,9 @@ export default function ForgeEditor() {
           /* Loading state - P2 FIX: More visible loading indicator */
           <div className="flex-1 flex flex-col items-center justify-center gap-4">
             <div className="flex gap-1">
-              <div className="w-2 h-2 bg-purple-400/60 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-              <div className="w-2 h-2 bg-purple-400/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-              <div className="w-2 h-2 bg-purple-400/60 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+              <div className="w-2 h-2 bg-cyan-300/60 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+              <div className="w-2 h-2 bg-cyan-300/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+              <div className="w-2 h-2 bg-cyan-300/60 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
             </div>
             <div className="mono text-white/40 text-center" style={{ fontSize: 'var(--f10)' }}>
               加载卡片内容...
@@ -880,28 +1046,20 @@ export default function ForgeEditor() {
                 )}
               </div>
               <div className="flex-1" />
-              {lastSavedAt ? (
-                <span className="mono text-green-400/70" style={{ fontSize: 'var(--f8)' }}>
-                  已保存 {lastSavedAt}
-                </span>
-              ) : dirty ? (
-                <span className="mono text-amber-400/60" style={{ fontSize: 'var(--f8)' }}>
-                  ● 未保存
-                </span>
-              ) : null}
-              <button
-                className={`mono px-3 py-1 rounded-lg transition-colors ${
-                  dirty
-                    ? 'bg-purple-600/30 text-purple-300 hover:bg-purple-600/50'
-                    : 'bg-white/5 text-white/20 cursor-not-allowed'
-                }`}
-                style={{ fontSize: 'var(--f9)' }}
-                onClick={handleSave}
-                disabled={!dirty || saving}
-              >
-                {saving ? '保存中...' : '保存'}
-              </button>
-            </div>
+	              {saving ? (
+	                <span className="mono text-cyan-300/70" style={{ fontSize: 'var(--f8)' }}>
+	                  正在自动保存...
+	                </span>
+	              ) : lastSavedAt ? (
+	                <span className="mono text-green-400/70" style={{ fontSize: 'var(--f8)' }}>
+	                  已自动保存 {lastSavedAt}
+	                </span>
+	              ) : dirty ? (
+	                <span className="mono text-amber-400/60" style={{ fontSize: 'var(--f8)' }}>
+	                  ● 自动保存待同步
+	                </span>
+	              ) : null}
+	            </div>
             {/* Editor content */}
             {relatedCardsQuery.data && relatedCardsQuery.data.length > 0 && (
               <div className="border-b border-white/5 bg-emerald-400/[0.025]">
@@ -926,7 +1084,10 @@ export default function ForgeEditor() {
                           <button
                             className="min-w-0 truncate text-left text-white/70 hover:text-white"
                             style={{ fontSize: 'var(--f9)' }}
-                            onClick={() => useAppStore.getState().setSelectedNode({ id: card.id, title: card.title, type: card.type })}
+                            onClick={async () => {
+                              await saveCurrentCard({ silent: true })
+                              useAppStore.getState().setSelectedNode({ id: card.id, title: card.title, type: card.type })
+                            }}
                             title={card.title}
                           >
                             {card.title}
@@ -953,11 +1114,12 @@ export default function ForgeEditor() {
                 <textarea
                   ref={textareaRef}
                   className="forge-editor forge-editor-paper"
-                  value={cardContent}
-                  onChange={handleContentChange}
-                  onKeyDown={handleWikiKeyDown}
-                  placeholder="在此编辑 Markdown 内容...（Ctrl+S 保存 · Ctrl+Z 撤销 · [[ 搜索卡片）"
-                />
+	                  value={cardContent}
+	                  onChange={handleContentChange}
+	                  onKeyDown={handleWikiKeyDown}
+	                  onBlur={() => { void saveCurrentCard({ silent: true }) }}
+	                  placeholder="在此编辑 Markdown 内容...（自动保存 · Ctrl+Z 撤销 · [[ 搜索卡片）"
+	                />
                 {/* Wiki-link autocomplete dropdown */}
                 {wikiActive && wikiSuggestions.length > 0 && (
                   <div
@@ -972,7 +1134,7 @@ export default function ForgeEditor() {
                       <div
                         key={s.title}
                         className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${
-                          i === wikiIdx ? 'bg-purple-500/15 text-white' : 'text-white/60 hover:bg-white/5'
+                          i === wikiIdx ? 'bg-cyan-500/12 text-white' : 'text-white/60 hover:bg-white/5'
                         }`}
                         style={{ fontSize: '12px' }}
                         onMouseDown={(e) => {
@@ -1000,7 +1162,7 @@ export default function ForgeEditor() {
               >
                 <div className="max-w-2xl mx-auto">
                   <div
-                    className="mono text-purple-400 uppercase mb-2"
+                    className="mono text-cyan-300/75 uppercase mb-2"
                     style={{ fontSize: 'var(--f8)' }}
                   >
                     Markdown Preview
@@ -1041,8 +1203,67 @@ export default function ForgeEditor() {
               </div>
             )}
           </>
+	        )}
+	      </div>
+        {qualityRejection && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+            <div className="w-full max-w-lg rounded-xl border border-amber-300/20 bg-[rgba(15,12,20,0.96)] p-5 shadow-2xl">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="mono text-amber-300/70 uppercase" style={{ fontSize: 'var(--f8)' }}>
+                    升级被驳回
+                  </div>
+                  <h3 className="mt-2 text-white/86" style={{ fontSize: 'var(--t-section)' }}>
+                    {qualityRejection.title}
+                  </h3>
+                  <p className="mt-2 text-white/45" style={{ fontSize: 'var(--f9)' }}>
+                    {qualityRejection.error}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-lg px-2 py-1 text-white/35 transition-colors hover:bg-white/8 hover:text-white/70"
+                  onClick={() => setQualityRejection(null)}
+                  aria-label="关闭"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {qualityRejection.issues.length > 0 ? qualityRejection.issues.map((issue) => (
+                  <div key={`${issue.dimension}:${issue.code}`} className="rounded-lg border border-white/8 bg-white/[0.035] p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="mono rounded border border-amber-300/15 px-1.5 py-0.5 text-amber-200/65" style={{ fontSize: 'var(--f7)' }}>
+                        {qualityDimensionLabel(issue.dimension)}
+                      </span>
+                      <span className="text-white/75" style={{ fontSize: 'var(--f9)' }}>
+                        {issue.label}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-white/45" style={{ fontSize: 'var(--f9)' }}>{issue.message}</p>
+                    <p className="mt-1 text-cyan-100/55" style={{ fontSize: 'var(--f9)' }}>{issue.fix}</p>
+                  </div>
+                )) : (
+                  <div className="rounded-lg border border-white/8 bg-white/[0.035] p-3 text-white/55" style={{ fontSize: 'var(--f9)' }}>
+                    缺少：{qualityRejection.missingElements.join('、') || '清晰、准确、必要的必要信息'}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  className="rounded-lg bg-amber-300/15 px-4 py-2 text-amber-100/80 transition-colors hover:bg-amber-300/22"
+                  style={{ fontSize: 'var(--f9)' }}
+                  onClick={() => setQualityRejection(null)}
+                >
+                  回到卡片补全
+                </button>
+              </div>
+            </div>
+          </div>
         )}
-      </div>
-    </aside>
-  )
-}
+	    </aside>
+	  )
+	}

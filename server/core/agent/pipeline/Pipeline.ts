@@ -17,7 +17,7 @@ import type { StreamCallbacks, AgentMessage } from '@/types/agent';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { IntentRoute } from '../IntentRouter';
 import type { ChatMessage } from '../feedback/SteerMechanism';
-import type { ToolCall as EmptyToolCall, EmptyResponseMessage } from '../feedback/EmptyResponseHandler';
+import type { ToolCall as EmptyToolCall, EmptyResponseAction, EmptyResponseMessage } from '../feedback/EmptyResponseHandler';
 import { AgentState } from '../AgentStateMachine';
 import { classifyIntent, classifyIntentSmart } from '../IntentRouter';
 import { getSkillEngine } from '../SkillEngine';
@@ -356,6 +356,9 @@ export class AgentPipeline {
     const textQueue: string[] = [];
     let streamComplete = false;
     let inThinking = false;
+    let shouldContinueAfterEmpty = false;
+    let emptyContinuationCount = 0;
+    const maxEmptyContinuations = 3;
 
     // ── Event subscription ──
     const unsubscribe = this.services.agent.subscribe(
@@ -480,14 +483,30 @@ export class AgentPipeline {
               }
             }
 
-            this._handleEmptyResponse(
+            const emptyRecovery = this._handleEmptyResponse(
               assistantContent,
               callbacks,
               userMessageWithContext,
             );
+            if (emptyRecovery.recoveredContent) {
+              textQueue.push(emptyRecovery.recoveredContent);
+            }
+
+            if (
+              emptyRecovery.shouldContinue &&
+              emptyContinuationCount < maxEmptyContinuations
+            ) {
+              emptyContinuationCount++;
+              shouldContinueAfterEmpty = true;
+              this.services.infra.audit.info(LogCategory.AGENT, 'empty_response_continue', {
+                action: emptyRecovery.action,
+                attempt: emptyContinuationCount,
+              });
+              break;
+            }
 
             // ── Post-turn processing ──
-            await this.postTurnProcessing(ctx, assistantContent);
+            await this.postTurnProcessing(ctx, textQueue.join(''));
 
             streamComplete = true;
             callbacks?.onEnd?.({
@@ -517,7 +536,10 @@ export class AgentPipeline {
 
     // ── Call LLM with error recovery ──
     try {
-      await this.services.agent.prompt(userMessageWithContext);
+      do {
+        shouldContinueAfterEmpty = false;
+        await this.services.agent.prompt(userMessageWithContext);
+      } while (shouldContinueAfterEmpty);
     } catch (error: unknown) {
       console.error('[Agent] Error:', error);
       // Close dangling thinking tag before error recovery
@@ -845,7 +867,11 @@ export class AgentPipeline {
     assistantContent: string,
     callbacks?: StreamCallbacks,
     userMessageWithContext?: string,
-  ): void {
+  ): {
+    action?: EmptyResponseAction;
+    recoveredContent?: string;
+    shouldContinue: boolean;
+  } {
     const turnToolCalls = this.agent.getToolCalls();
     if (!assistantContent.trim()) {
       this.services.infra.emptyResponseHandler.recordToolCalls(turnToolCalls);
@@ -865,25 +891,37 @@ export class AgentPipeline {
           timestamp: Date.now(),
         } as unknown as import('@mariozechner/pi-agent-core/dist/types').AgentMessage);
         callbacks?.onTextDelta?.(emptyAction.reusedContent);
+        return {
+          action: emptyAction.action,
+          recoveredContent: emptyAction.reusedContent,
+          shouldContinue: false,
+        };
       } else if (emptyAction.action === 'retry') {
         this.services.agent.state.messages.push({
           role: 'user',
           content: 'Please continue. Your previous response was empty.',
           timestamp: Date.now(),
         });
-        if (userMessageWithContext) {
-          this.services.agent
-            .prompt(userMessageWithContext)
-            .catch((retryErr) =>
-              console.warn('[Agent] Empty response retry failed:', retryErr),
-            );
-        }
+        return {
+          action: emptyAction.action,
+          shouldContinue: Boolean(userMessageWithContext),
+        };
+      } else if (emptyAction.action === 'nudge') {
+        return {
+          action: emptyAction.action,
+          shouldContinue: Boolean(userMessageWithContext),
+        };
       }
       // nudge: emptyAction already injected the nudge
       // abort: do nothing, agent ends
+      return {
+        action: emptyAction.action,
+        shouldContinue: false,
+      };
     } else {
       this.services.infra.emptyResponseHandler.recordContent(assistantContent);
     }
+    return { shouldContinue: false };
   }
 
   /**

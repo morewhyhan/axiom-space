@@ -20,6 +20,44 @@ import { toolRegistry } from '@/server/core/agent/tools';
 import { hydrateConfirmationToken, revokeConfirmationToken } from '@/server/core/agent/OperationConfirmation';
 import { requiresConfirmation } from '@/server/core/agent/ToolContracts';
 import { AGENT_TOOL_PROMPTS, ORACLE_CHAT_PROMPT } from '@/server/core/ai/prompts';
+import { maybeCaptureFeynmanExplanation } from '@/server/core/learning/feynman-card-capture';
+import { maybeCreateProfileQuestion } from '@/server/core/agent/profile-questioner';
+import { getProfileCacheEntry, setProfileCacheEntry } from '@/server/api/profile-cache';
+
+const INITIAL_PROFILE_INTRO = '我会按六个教学决策维度建立初始画像：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。每轮只问一个问题，你可以一句话回答。'
+const INITIAL_PROFILE_STEPS = [
+  {
+    key: 'learningGoal',
+    label: '学什么',
+    question: '先确定目标：这个知识库主要想帮你学什么？最好带上使用场景，比如考试、项目、面试、写作或纯理解。',
+  },
+  {
+    key: 'currentFoundation',
+    label: '会什么',
+    question: '再确认基础：你对这个主题现在大概到哪一步了？可以说会哪些、不会哪些、最近卡在哪里。',
+  },
+  {
+    key: 'bestExplanationPath',
+    label: '怎么讲',
+    question: '讲法偏好：同一个知识点，你更希望我先用例子、图解流程、代码/案例，还是先给整体框架？',
+  },
+  {
+    key: 'stuckPattern',
+    label: '哪里会卡',
+    question: '常见卡点：你学习这个领域时最容易出现哪种卡住？比如术语看不懂、题会听不会做、知识点连不起来、容易忘。',
+  },
+  {
+    key: 'paceAndLoad',
+    label: '一次讲多少',
+    question: '节奏负荷：每次你希望我推多少内容？短快概览、一步一步细讲，还是直接练习推进？',
+  },
+  {
+    key: 'masteryCheck',
+    label: '怎么算学会',
+    question: '掌握标准：你希望我怎么判断你真的学会了？复述、做题、改错、做项目，还是产出一张总结卡？',
+  },
+] as const
+type InitialProfileStep = typeof INITIAL_PROFILE_STEPS[number]
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .post('/chat', requireAuth, zValidator('json', z.object({
@@ -33,6 +71,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const { message, sessionId: explicitSessionId, vaultId, oracleId } = c.req.valid('json')
 
     return streamSSE(c, async (stream) => {
+      try {
       const resolvedVaultId = await resolveAgentVaultId(userId, vaultId)
       await runWithAgentContext({ userId, ...(resolvedVaultId ? { vaultId: resolvedVaultId } : {}) }, async () => {
       if (!explicitSessionId) {
@@ -56,6 +95,40 @@ const app = new Hono<{ Variables: { userId: string } }>()
         })
         return
       }
+      // Ensure DB session exists for this user's agent conversation
+      const dbSessionId = await ensureAgentSession(userId, resolvedVaultId, explicitSessionId).catch(() => null)
+      if (!dbSessionId) {
+        await stream.writeSSE({
+          event: 'error',
+          data: JSON.stringify({
+            error: 'Forge conversations must be bound to a card thread.',
+          }),
+        })
+        return
+      }
+
+      const initialProfileReply = await maybeHandleInitialProfileTurn({
+        userId,
+        vaultId: resolvedVaultId,
+        sessionId: dbSessionId,
+        sessionMetadata: requestedMeta,
+        message,
+      }).catch((err) => {
+        console.debug('[Agent API] Initial profile turn skipped:', err)
+        return null
+      })
+      if (initialProfileReply) {
+        await stream.writeSSE({
+          event: 'text',
+          data: JSON.stringify({ text: initialProfileReply.text }),
+        })
+        await stream.writeSSE({
+          event: 'done',
+          data: JSON.stringify({ text: initialProfileReply.text }),
+        })
+        return
+      }
+
       const agent = await getAgentForUser(userId, oracleId, resolvedVaultId)
       const unsubscribeProgress = resolvedVaultId
         ? subscribeResourceProgress(resolvedVaultId, (event) => {
@@ -66,22 +139,10 @@ const app = new Hono<{ Variables: { userId: string } }>()
         })
         : null
 
-      // Ensure DB session exists for this user's agent conversation
-      const dbSessionId = await ensureAgentSession(userId, resolvedVaultId, explicitSessionId).catch(() => null)
-      if (!dbSessionId) {
-        await stream.writeSSE({
-          event: 'error',
-          data: JSON.stringify({
-            error: 'Forge conversations must be bound to a card thread.',
-          }),
-        })
-        unsubscribeProgress?.()
-        return
-      }
-
       try {
         await hydrateAgentFromDb(agent, dbSessionId)
         const toolSummaries: string[] = []
+        const hiddenToolSummaries: string[] = []
         const callbacks: StreamCallbacks = {
           onToolStart: (toolName, _args) => {
             stream.writeSSE({
@@ -90,12 +151,16 @@ const app = new Hono<{ Variables: { userId: string } }>()
             }).catch(() => {})
           },
           onToolEnd: (toolName, result) => {
-            const toolText = extractToolResultText(result)
+            const toolText = extractToolResultText(result).trim()
             const details = (result as { details?: unknown } | null)?.details
             const interactive = isInteractiveToolResult(toolName, details)
             const workspaceActions = extractWorkspaceActions(details)
-            if (toolName === 'push_resource' && toolText.trim()) {
-              toolSummaries.push(toolText.trim())
+            const streamsToolText = toolName === 'push_resource' || interactive || workspaceActions.length > 0
+            if (toolName === 'push_resource' && toolText) {
+              toolSummaries.push(toolText)
+            }
+            if (toolText && !streamsToolText) {
+              hiddenToolSummaries.push(formatToolDisplaySummary(toolName, toolText))
             }
             if (workspaceActions.length > 0) {
               stream.writeSSE({
@@ -122,6 +187,17 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
         // Persist user message to DB
         if (dbSessionId) await persistMessage(dbSessionId, 'user', message)
+        if (dbSessionId && resolvedVaultId && requestedMeta.cardId && requestedKind !== 'conversation') {
+          void maybeCaptureFeynmanExplanation({
+            userId,
+            vaultId: resolvedVaultId,
+            sessionId: dbSessionId,
+            cardId: requestedMeta.cardId,
+            message,
+          }).catch((err) => {
+            console.debug('[Agent API] Feynman capture failed:', err)
+          })
+        }
 
         const ragEnhanced = await buildRagEnhancedMessage(message, resolvedVaultId)
         if (ragEnhanced.references.length > 0) {
@@ -139,10 +215,43 @@ const app = new Hono<{ Variables: { userId: string } }>()
             data: JSON.stringify({ text: chunk }),
           })
         }
+        const toolFallbackText = fullText.trim() ? '' : buildToolOnlyAssistantText(hiddenToolSummaries)
+        if (toolFallbackText) {
+          fullText = toolFallbackText
+          await stream.writeSSE({
+            event: 'text',
+            data: JSON.stringify({ text: toolFallbackText }),
+          })
+        }
+        let usedDirectFallback = false
+        if (!fullText.trim()) {
+          fullText = await generateDirectAgentReply({
+            userId,
+            vaultId: resolvedVaultId,
+            sessionId: dbSessionId,
+            userMessage: message,
+          }).catch((err) => {
+            console.warn('[Agent API] Direct reply fallback failed:', err)
+            return ''
+          })
+          usedDirectFallback = Boolean(fullText.trim())
+        }
+        if (!fullText.trim()) {
+          fullText = 'AI 服务这轮没有返回正文。请直接重发刚才的问题，系统会重新请求模型。'
+          await stream.writeSSE({
+            event: 'text',
+            data: JSON.stringify({ text: fullText }),
+          })
+        } else if (usedDirectFallback) {
+          await stream.writeSSE({
+            event: 'text',
+            data: JSON.stringify({ text: fullText }),
+          })
+        }
 
         // Persist assistant response to DB. Resource tool summaries are also
         // stored so reloaded sessions match what the UI showed during streaming.
-        const persistedAssistantText = toolSummaries.length > 0
+        const persistedAssistantText = toolSummaries.length > 0 && !toolFallbackText
           ? [fullText.trim(), ...toolSummaries].filter(Boolean).join('\n\n')
           : fullText
         if (dbSessionId) await persistMessage(dbSessionId, 'assistant', persistedAssistantText)
@@ -152,6 +261,25 @@ const app = new Hono<{ Variables: { userId: string } }>()
           event: 'done',
           data: JSON.stringify({ text: fullText }),
         })
+
+        const profileQuestion = dbSessionId && resolvedVaultId
+          ? await maybeCreateProfileQuestion({
+            userId,
+            vaultId: resolvedVaultId,
+            sourceSessionId: dbSessionId,
+            sourceSessionKind: requestedKind,
+            userMessage: message,
+          }).catch((err) => {
+            console.debug('[Agent API] Profile question skipped:', err)
+            return null
+          })
+          : null
+        if (profileQuestion?.asked) {
+          await stream.writeSSE({
+            event: 'profile_question',
+            data: JSON.stringify({ type: 'profile_question', ...profileQuestion }),
+          })
+        }
 
         if (dbSessionId) {
           void maybeAutoTitleSession(dbSessionId, userId, resolvedVaultId).catch((err) => {
@@ -170,6 +298,15 @@ const app = new Hono<{ Variables: { userId: string } }>()
         unsubscribeProgress?.()
       }
       })
+      } catch (err: unknown) {
+        console.error('[Agent API] Stream setup error:', err)
+        await stream.writeSSE({
+          event: 'error',
+          data: JSON.stringify({
+            error: err instanceof Error ? err.message : 'Agent 对话初始化失败，请稍后重试。',
+          }),
+        }).catch(() => {})
+      }
     })
   })
   // GET /api/agent/sessions/list — List all agent session summaries
@@ -189,6 +326,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
         createdAt: true,
         updatedAt: true,
         messages: {
+          where: { role: { in: ['user', 'assistant'] } },
           orderBy: { timestamp: 'asc' },
           take: 1,
           select: { content: true, role: true },
@@ -201,11 +339,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const lastMessages = sessionIds.length > 0
       ? (await Promise.all(sessionIds.map((sessionId) =>
           prisma.learningMessage.findFirst({
-            where: { sessionId },
+            where: { sessionId, role: { in: ['user', 'assistant'] } },
             orderBy: { timestamp: 'desc' },
-            select: { sessionId: true, content: true },
+            select: { sessionId: true, role: true, content: true },
           })
-        ))).filter((message): message is { sessionId: string; content: string } => !!message)
+        ))).filter((message): message is { sessionId: string; role: string; content: string } => !!message && isVisibleAgentMessage(message.role, message.content))
       : []
 
     const lastMsgMap = new Map(lastMessages.map(m => [m.sessionId, m.content]))
@@ -392,6 +530,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     vid: z.string().optional(),
   })), zValidator('json', z.object({
     title: z.string().trim().min(1).max(80).optional(),
+    purpose: z.enum(['initial_profile']).optional(),
   })), async (c) => {
     const userId = c.get('userId') as string
     const vaultId = await resolveAgentVaultId(userId, c.req.query('vid'))
@@ -403,7 +542,10 @@ const app = new Hono<{ Variables: { userId: string } }>()
     })
 
     const body = c.req.valid('json')
-    const title = body.title?.trim() || '新对话'
+    const title = body.title?.trim() || (body.purpose === 'initial_profile' ? '初始画像构建' : '新对话')
+    const metadata = body.purpose === 'initial_profile'
+      ? { sessionKind: 'conversation', purpose: 'initial_profile', initialProfileStep: 0 }
+      : { sessionKind: 'conversation' }
     const session = await prisma.learningSession.create({
       data: {
         userId,
@@ -412,9 +554,34 @@ const app = new Hono<{ Variables: { userId: string } }>()
         concept: title,
         status: 'active',
         phase: 'conversation',
-        metadata: JSON.stringify({ sessionKind: 'conversation' }),
+        metadata: JSON.stringify(metadata),
       },
     })
+
+    const initialProfileQuestion = body.purpose === 'initial_profile'
+      ? [
+        INITIAL_PROFILE_INTRO,
+        '',
+        await generateInitialProfileQuestion({
+          userId,
+          vaultId,
+          step: INITIAL_PROFILE_STEPS[0],
+          stepIndex: 0,
+          answers: {},
+        }),
+      ].join('\n')
+      : ''
+
+    if (initialProfileQuestion) {
+      await prisma.learningMessage.create({
+        data: {
+          sessionId: session.id,
+          role: 'assistant',
+          content: initialProfileQuestion,
+          metadata: JSON.stringify({ purpose: 'initial_profile', source: 'onboarding' }),
+        },
+      })
+    }
 
     agentSessionMap.set(buildSessionMapKey(userId, vaultId), session.id)
 
@@ -423,7 +590,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       session: {
         id: session.id,
         title,
-        preview: '',
+        preview: initialProfileQuestion,
         updatedAt: session.updatedAt,
         createdAt: session.createdAt,
         status: session.status,
@@ -634,15 +801,16 @@ const app = new Hono<{ Variables: { userId: string } }>()
     }
 
     const messages = await prisma.learningMessage.findMany({
-      where: { sessionId: session.id },
+      where: { sessionId: session.id, role: { in: ['user', 'assistant'] } },
       orderBy: { timestamp: 'asc' },
       select: { role: true, content: true, timestamp: true },
     })
 
+    const visibleMessages = messages.filter((message) => isVisibleAgentMessage(message.role, message.content))
     return c.json({
       success: true,
       sessionId: session.id,
-      messages: messages.map(m => ({
+      messages: visibleMessages.map(m => ({
         role: m.role,
         content: m.content,
         timestamp: m.timestamp,
@@ -894,6 +1062,506 @@ function clearAgentRuntimeForVault(userId: string, vaultId?: string | null): voi
   }
 }
 
+type DirectChatMessage = {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+async function callOpenAiCompatibleChat(input: {
+  messages: DirectChatMessage[]
+  temperature?: number
+  maxTokens?: number
+}): Promise<string> {
+  const config = resolveAiConfig().model
+  const apiKey = config.apiKey?.trim()
+  if (!apiKey) throw new Error('AI_API_KEY is not configured')
+  const baseUrl = (config.baseUrl || 'https://api.openai.com').replace(/\/+$/, '')
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.modelId,
+      messages: input.messages,
+      temperature: input.temperature ?? 0.35,
+      max_tokens: input.maxTokens ?? 900,
+    }),
+  })
+  const raw = await response.text()
+  if (!response.ok) {
+    throw new Error(`AI chat completion failed (${response.status})`)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return cleanModelText(raw)
+  }
+  const data = isRecord(parsed) ? parsed : {}
+  const choices = Array.isArray(data.choices) ? data.choices : []
+  const first = isRecord(choices[0]) ? choices[0] : {}
+  const message = isRecord(first.message) ? first.message : {}
+  const content = typeof message.content === 'string'
+    ? message.content
+    : typeof first.text === 'string'
+      ? first.text
+      : ''
+  return cleanModelText(content)
+}
+
+function cleanModelText(text: string): string {
+  return text
+    .replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '')
+    .replace(/<think(?:ing)?>[\s\S]*$/gi, '')
+    .replace(/^["“”']+|["“”']+$/g, '')
+    .trim()
+}
+
+async function generateDirectAgentReply(input: {
+  userId: string
+  vaultId: string | null
+  sessionId: string
+  userMessage: string
+}): Promise<string> {
+  const recentMessages = await prisma.learningMessage.findMany({
+    where: { sessionId: input.sessionId },
+    orderBy: { timestamp: 'desc' },
+    take: 10,
+    select: { role: true, content: true },
+  })
+  const history = recentMessages.reverse().flatMap((message): DirectChatMessage[] => {
+    if (message.role !== 'user' && message.role !== 'assistant') return []
+    const content = message.content.trim()
+    if (!isVisibleAgentMessage(message.role, content)) return []
+    return [{ role: message.role, content }]
+  })
+
+  let profileContext = ''
+  if (input.vaultId) {
+    try {
+      const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context')
+      const profile = await buildLearningProfileContext({ vaultId: input.vaultId, userId: input.userId })
+      profileContext = profile.promptBlock.trim()
+    } catch (err) {
+      console.debug('[Agent API] Direct reply profile context skipped:', err)
+    }
+  }
+
+  const messages: DirectChatMessage[] = [
+    {
+      role: 'system',
+      content: [
+        '你是 AXIOM AI 工作台的对话助手。',
+        '当前复杂 Agent 流没有产出可展示正文，你需要直接回答用户本轮问题。',
+        '不要提到“兜底”“空回复”“工具流失败”。',
+        '如果用户是在学习或画像上下文中提问，用简洁中文给出可继续推进的回答。',
+        profileContext ? `\n${profileContext}` : '',
+      ].filter(Boolean).join('\n'),
+    },
+    ...history,
+  ]
+  if (!history.some((message) => message.role === 'user' && message.content.trim() === input.userMessage.trim())) {
+    messages.push({ role: 'user', content: input.userMessage.trim() })
+  }
+  return callOpenAiCompatibleChat({ messages, temperature: 0.35, maxTokens: 900 })
+}
+
+async function generateInitialProfileQuestion(input: {
+  userId: string
+  vaultId: string
+  step: InitialProfileStep
+  stepIndex: number
+  answers: Record<string, string>
+}): Promise<string> {
+  const answeredLines = INITIAL_PROFILE_STEPS
+    .map((step) => {
+      const answer = input.answers[step.key]
+      return answer ? `- ${step.label}: ${answer}` : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+  const fallback = input.step.question
+  const generated = await callOpenAiCompatibleChat({
+    temperature: 0.45,
+    maxTokens: 180,
+    messages: [
+      {
+        role: 'system',
+        content: [
+          '你是 AXIOM 的学习画像访谈员。',
+          '目标：基于六维教学画像标准，生成下一轮只问一个问题的中文提问。',
+          '六维标准：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。',
+          '硬性要求：只输出一个问题；不要编号；不要列多个问题；不要寒暄；不要解释标准；不超过 60 个汉字。',
+          '问题要自然，结合已有回答，避免生硬模板。',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          `当前要收集的维度：${input.step.label}`,
+          `这是第 ${input.stepIndex + 1} 轮。`,
+          answeredLines ? `已有回答：\n${answeredLines}` : '已有回答：暂无',
+          `这个维度需要弄清楚：${fallback}`,
+          '请生成这一轮要问用户的一个自然问题。',
+        ].join('\n'),
+      },
+    ],
+  }).catch((err) => {
+    console.debug('[Agent API] Initial profile question generation failed:', err)
+    return ''
+  })
+  const question = generated
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find(Boolean)
+  return question || fallback
+}
+
+async function maybeHandleInitialProfileTurn(input: {
+  userId: string
+  vaultId: string | null
+  sessionId: string
+  sessionMetadata: ReturnType<typeof parseSessionMetadata>
+  message: string
+}): Promise<{ text: string } | null> {
+  if (!input.vaultId) return null
+  if (input.sessionMetadata.purpose !== 'initial_profile') return null
+  if (input.sessionMetadata.initialProfileCompleted) return null
+
+  const stepIndex = normalizeInitialProfileStep(input.sessionMetadata.initialProfileStep)
+  const answeredStep = INITIAL_PROFILE_STEPS[stepIndex] ?? INITIAL_PROFILE_STEPS[0]
+  const nextStep = INITIAL_PROFILE_STEPS[stepIndex + 1]
+  const answeredAt = new Date()
+
+  await persistMessage(input.sessionId, 'user', input.message)
+
+  const rawMemory = await prisma.vaultMemory.create({
+    data: {
+      vaultId: input.vaultId,
+      key: `initial_profile_${input.sessionId}_${answeredStep.key}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      category: 'initial_profile',
+      value: JSON.stringify({
+        userId: input.userId,
+        sessionId: input.sessionId,
+        key: answeredStep.key,
+        question: answeredStep.question,
+        answer: input.message.trim(),
+        createdAt: answeredAt.toISOString(),
+      }),
+    },
+  })
+  await writeInitialProfileObservation({
+    vaultId: input.vaultId,
+    rawMemoryId: rawMemory.id,
+    step: answeredStep,
+    answer: input.message.trim(),
+  })
+
+  const current = await prisma.learningSession.findUnique({
+    where: { id: input.sessionId },
+    select: { metadata: true },
+  })
+  const metadata = parseMetadataRecord(current?.metadata)
+  const answers: Record<string, unknown> = isRecord(metadata.initialProfileAnswers)
+    ? { ...metadata.initialProfileAnswers }
+    : {}
+  answers[answeredStep.key] = input.message.trim().slice(0, 1200)
+  const normalizedAnswers = normalizeInitialProfileAnswers(answers)
+  const assistantText = nextStep
+    ? await generateInitialProfileQuestion({
+      userId: input.userId,
+      vaultId: input.vaultId,
+      step: nextStep,
+      stepIndex: stepIndex + 1,
+      answers: normalizedAnswers,
+    })
+    : '收到，初始画像已经写入。后面我会按这六个维度调整讲解、资料、练习和追问；你也可以随时修正画像。现在可以直接发一个主题、材料或问题。'
+  await persistMessage(input.sessionId, 'assistant', assistantText)
+
+  await updateInitialProfileCache({
+    userId: input.userId,
+    vaultId: input.vaultId,
+    sessionId: input.sessionId,
+    answers,
+    answeredStep,
+    answeredAt,
+    completed: !nextStep,
+  })
+
+  await prisma.learningSession.update({
+    where: { id: input.sessionId },
+    data: {
+      updatedAt: answeredAt,
+      metadata: JSON.stringify({
+        ...metadata,
+        sessionKind: 'conversation',
+        purpose: 'initial_profile',
+        initialProfileStep: nextStep ? stepIndex + 1 : stepIndex,
+        initialProfileCompleted: !nextStep,
+        initialProfileAnswers: answers,
+        lastInitialProfileAnswerAt: answeredAt.toISOString(),
+      }),
+    },
+  })
+
+  return { text: assistantText }
+}
+
+async function writeInitialProfileObservation(input: {
+  vaultId: string
+  rawMemoryId: string
+  step: InitialProfileStep
+  answer: string
+}): Promise<void> {
+  const answer = input.answer.slice(0, 1200)
+  if (!answer) return
+  await prisma.vaultMemory.create({
+    data: {
+      vaultId: input.vaultId,
+      key: `observation_initial_profile_${input.step.key}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      category: 'observation',
+      value: JSON.stringify({
+        text: `${input.step.label}：${answer}`,
+        category: `profile_${input.step.key}`,
+        sourceObjectType: 'vaultMemory',
+        sourceObjectId: input.rawMemoryId,
+        evidence: [{
+          sourceObjectType: 'vaultMemory',
+          sourceObjectId: input.rawMemoryId,
+          summary: `初始画像回答：${input.step.label}`,
+        }],
+      }),
+    },
+  })
+}
+
+async function updateInitialProfileCache(input: {
+  userId: string
+  vaultId: string
+  sessionId: string
+  answers: Record<string, unknown>
+  answeredStep: InitialProfileStep
+  answeredAt: Date
+  completed: boolean
+}): Promise<void> {
+  const vault = await prisma.vault.findUnique({
+    where: { id: input.vaultId },
+    select: { profileCache: true },
+  })
+  const answers = normalizeInitialProfileAnswers(input.answers)
+  const currentAgentProfile = getProfileCacheEntry<Record<string, unknown>>(vault?.profileCache, 'agentProfile')?.data ?? {}
+  const nextAgentProfile = buildInitialAgentProfile({
+    current: currentAgentProfile,
+    userId: input.userId,
+    sessionId: input.sessionId,
+    answers,
+    completed: input.completed,
+    updatedAt: input.answeredAt,
+  })
+  const currentEducationProfile = getProfileCacheEntry<Record<string, unknown>>(vault?.profileCache, 'educationProfile')?.data ?? {}
+  const nextEducationProfile = buildInitialEducationProfile({
+    current: currentEducationProfile,
+    userId: input.userId,
+    answers,
+    answeredStep: input.answeredStep,
+    updatedAt: input.answeredAt,
+  })
+  const withAgentProfile = setProfileCacheEntry(vault?.profileCache, 'agentProfile', nextAgentProfile)
+  const withEducationProfile = setProfileCacheEntry(withAgentProfile, 'educationProfile', nextEducationProfile)
+
+  await prisma.$transaction([
+    prisma.vault.update({
+      where: { id: input.vaultId },
+      data: {
+        profileCache: withEducationProfile,
+        updatedAt: input.answeredAt,
+      },
+    }),
+    prisma.educationProfileHistory.create({
+      data: {
+        vaultId: input.vaultId,
+        profile: JSON.stringify(nextEducationProfile),
+        snapshot: JSON.stringify({
+          source: 'initial_profile',
+          sessionId: input.sessionId,
+          dimension: input.answeredStep.key,
+          completed: input.completed,
+          evidenceCount: Object.keys(answers).length,
+          updatedAt: input.answeredAt.toISOString(),
+        }),
+      },
+    }),
+  ])
+}
+
+function buildInitialAgentProfile(input: {
+  current: Record<string, unknown>
+  userId: string
+  sessionId: string
+  answers: Record<string, string>
+  completed: boolean
+  updatedAt: Date
+}): Record<string, unknown> {
+  const currentGoals = Array.isArray(input.current.learningGoals)
+    ? input.current.learningGoals.map(String)
+    : []
+  const currentChallenges = Array.isArray(input.current.challengeAreas)
+    ? input.current.challengeAreas.map(String)
+    : []
+  const currentPatterns = Array.isArray(input.current.interactionPatterns)
+    ? input.current.interactionPatterns.map(String)
+    : []
+  const goal = input.answers.learningGoal
+  const foundation = input.answers.currentFoundation
+  const explanation = input.answers.bestExplanationPath
+  const stuck = input.answers.stuckPattern
+  const pace = input.answers.paceAndLoad
+  const mastery = input.answers.masteryCheck
+
+  const dimensions = INITIAL_PROFILE_STEPS.map((step) => ({
+    key: step.key,
+    label: step.label,
+    answer: input.answers[step.key] ?? '',
+    status: input.answers[step.key] ? 'answered' : 'missing',
+  }))
+
+  return {
+    ...input.current,
+    updatedAt: input.updatedAt.getTime(),
+    userId: input.userId,
+    learningGoals: uniqueStrings([...currentGoals, goal || '']),
+    challengeAreas: uniqueStrings([...currentChallenges, foundation || '', stuck || '']),
+    interactionPatterns: uniqueStrings([...currentPatterns, explanation || '', pace || '', mastery || '']),
+    initialProfile: {
+      standard: 'six-dimension-teaching-profile',
+      sessionId: input.sessionId,
+      completed: input.completed,
+      updatedAt: input.updatedAt.toISOString(),
+      dimensions,
+    },
+  }
+}
+
+function buildInitialEducationProfile(input: {
+  current: Record<string, unknown>
+  userId: string
+  answers: Record<string, string>
+  answeredStep: InitialProfileStep
+  updatedAt: Date
+}): Record<string, unknown> {
+  const dimensions = isRecord(input.current.dimensions) ? input.current.dimensions : {}
+  const nextDimensions = {
+    depth: mergeInitialDimension(dimensions.depth, input.answers.currentFoundation, '初始画像：当前基础'),
+    breadth: mergeInitialDimension(dimensions.breadth, input.answers.learningGoal, '初始画像：学习目标'),
+    connection: mergeInitialDimension(dimensions.connection, input.answers.stuckPattern, '初始画像：常见卡点'),
+    expression: mergeInitialDimension(dimensions.expression, input.answers.bestExplanationPath || input.answers.masteryCheck, '初始画像：讲法/掌握标准'),
+    application: mergeInitialDimension(dimensions.application, input.answers.masteryCheck, '初始画像：掌握标准'),
+    learning_pace: mergeInitialDimension(dimensions.learning_pace, input.answers.paceAndLoad, '初始画像：节奏负荷'),
+  }
+  const updateHistory = Array.isArray(input.current.updateHistory)
+    ? input.current.updateHistory
+    : []
+  const answeredKeys = Object.keys(input.answers)
+  return {
+    ...input.current,
+    userId: input.userId,
+    dimensions: nextDimensions,
+    updateHistory: [
+      ...updateHistory.slice(-20),
+      {
+        timestamp: input.updatedAt.getTime(),
+        trigger: 'manual',
+        dimensionsUpdated: [input.answeredStep.key],
+        changes: {},
+      },
+    ],
+    sessionCount: typeof input.current.sessionCount === 'number' ? input.current.sessionCount : 0,
+    totalLearningMinutes: typeof input.current.totalLearningMinutes === 'number' ? input.current.totalLearningMinutes : 0,
+    createdAt: typeof input.current.createdAt === 'number' ? input.current.createdAt : input.updatedAt.getTime(),
+    updatedAt: input.updatedAt.getTime(),
+    initialProfileEvidence: {
+      standard: 'six-dimension-teaching-profile',
+      answered: answeredKeys,
+      answers: input.answers,
+    },
+  }
+}
+
+function mergeInitialDimension(current: unknown, answer: string | undefined, evidenceLabel: string): {
+  score: number
+  confidence: number
+  evidence: string[]
+} {
+  const record = isRecord(current) ? current : {}
+  const evidence = Array.isArray(record.evidence)
+    ? record.evidence.map(String)
+    : []
+  const nextEvidence = answer
+    ? uniqueStrings([...evidence, `${evidenceLabel}：${answer.slice(0, 120)}`])
+    : evidence
+  return {
+    score: typeof record.score === 'number' ? record.score : (answer ? 10 : 0),
+    confidence: Math.max(typeof record.confidence === 'number' ? record.confidence : 0, answer ? 0.22 : 0),
+    evidence: nextEvidence.slice(-8),
+  }
+}
+
+function normalizeInitialProfileAnswers(answers: Record<string, unknown>): Record<string, string> {
+  return Object.fromEntries(
+    INITIAL_PROFILE_STEPS
+      .map((step) => [step.key, typeof answers[step.key] === 'string' ? String(answers[step.key]).trim().slice(0, 1200) : ''])
+      .filter(([, value]) => value),
+  )
+}
+
+function uniqueStrings(items: string[]): string[] {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)))
+}
+
+function normalizeInitialProfileStep(step?: number): number {
+  if (typeof step !== 'number' || !Number.isFinite(step)) return 0
+  return Math.max(0, Math.min(INITIAL_PROFILE_STEPS.length - 1, Math.floor(step)))
+}
+
+function parseMetadataRecord(metadata?: string | null): Record<string, unknown> {
+  if (!metadata) return {}
+  try {
+    const parsed = JSON.parse(metadata) as unknown
+    return isRecord(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function isVisibleAgentMessage(role: string, content: string): boolean {
+  if (role !== 'user' && role !== 'assistant') return false
+  const text = content.trim()
+  if (!text) return false
+  const parsed = parseMaybeJsonRecord(text)
+  if (!parsed) return true
+  if (parsed._type === 'trajectory') return false
+  if ('phase' in parsed && 'user_message' in parsed && 'assistant_message' in parsed) return false
+  if (parsed.type === 'resource_progress' || parsed.type === 'workspace_action') return false
+  if (parsed.type === 'tool_start' || parsed.type === 'tool_end') return false
+  return true
+}
+
+function parseMaybeJsonRecord(text: string): Record<string, unknown> | null {
+  if (!text.startsWith('{') || !text.endsWith('}')) return null
+  try {
+    const parsed = JSON.parse(text) as unknown
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 function parseSessionMetadata(metadata?: string | null): {
   cardId?: string
   cardType?: string
@@ -905,6 +1573,9 @@ function parseSessionMetadata(metadata?: string | null): {
   sessionKind?: string
   customTitle?: string
   autoTitle?: string
+  purpose?: string
+  initialProfileStep?: number
+  initialProfileCompleted?: boolean
 } {
   if (!metadata) return {}
   try {
@@ -919,6 +1590,9 @@ function parseSessionMetadata(metadata?: string | null): {
       sessionKind?: unknown
       customTitle?: unknown
       autoTitle?: unknown
+      purpose?: unknown
+      initialProfileStep?: unknown
+      initialProfileCompleted?: unknown
     }
     return {
       cardId: typeof parsed.cardId === 'string' ? parsed.cardId : undefined,
@@ -931,6 +1605,9 @@ function parseSessionMetadata(metadata?: string | null): {
       sessionKind: typeof parsed.sessionKind === 'string' ? parsed.sessionKind : undefined,
       customTitle: typeof parsed.customTitle === 'string' ? parsed.customTitle : undefined,
       autoTitle: typeof parsed.autoTitle === 'string' ? parsed.autoTitle : undefined,
+      purpose: typeof parsed.purpose === 'string' ? parsed.purpose : undefined,
+      initialProfileStep: typeof parsed.initialProfileStep === 'number' ? parsed.initialProfileStep : undefined,
+      initialProfileCompleted: parsed.initialProfileCompleted === true,
     }
   } catch {
     return {}
@@ -1011,7 +1688,7 @@ globalForSessions.__agentSessionMap = agentSessionMap
  * Awaits the write to guarantee the message is saved.
  */
 async function persistMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
-  if (!content.trim()) return
+  if (!isVisibleAgentMessage(role, content)) return
   try {
     await prisma.learningMessage.create({
       data: { sessionId, role, content },
@@ -1050,13 +1727,13 @@ async function hydrateAgentFromDb(agent: AxiomAgent, sessionId: string): Promise
   const messages = await prisma.learningMessage.findMany({
     where: {
       sessionId,
-      role: { in: ['user', 'assistant', 'system'] },
+      role: { in: ['user', 'assistant'] },
     },
     orderBy: { timestamp: 'desc' },
     take: 40,
     select: { role: true, content: true, timestamp: true },
   })
-  agent.hydrateMessages(messages.reverse())
+  agent.hydrateMessages(messages.reverse().filter((message) => isVisibleAgentMessage(message.role, message.content)))
 }
 
 function resolveSessionKind(
@@ -1180,6 +1857,34 @@ function extractToolResultText(result: unknown): string {
     .map((item) => typeof item?.text === 'string' ? item.text : '')
     .filter(Boolean)
     .join('\n\n')
+}
+
+function buildToolOnlyAssistantText(summaries: string[]): string {
+  const unique = Array.from(new Set(summaries.map((summary) => summary.trim()).filter(Boolean))).slice(-3)
+  if (unique.length === 0) return ''
+  return ['已完成操作，结果如下：', ...unique].join('\n\n')
+}
+
+function formatToolDisplaySummary(toolName: string, text: string): string {
+  const limit = 2200
+  const body = text.length > limit ? `${text.slice(0, limit)}\n...` : text
+  return `【${describeToolForDisplay(toolName)}】\n${body}`
+}
+
+function describeToolForDisplay(toolName: string): string {
+  const labels: Record<string, string> = {
+    search_cards: '搜索卡片',
+    read_card: '读取卡片',
+    list_cards: '列出卡片',
+    create_fleeing_card: '创建灵感草稿',
+    create_permanent_card: '创建永久知识卡',
+    analyze_content_quality: '内容质量检查',
+    suggest_links: '关联推荐',
+    find_path_between_concepts: '概念路径查询',
+    create_learning_path: '创建学习路径',
+    get_learning_stats: '学习统计',
+  }
+  return labels[toolName] || toolName
 }
 
 function isInteractiveToolResult(toolName: string, details: unknown): boolean {

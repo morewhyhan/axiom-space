@@ -10,7 +10,7 @@ import { renderDocx, renderPdf, renderPptx } from '../ai/hyperframes/resource-re
 import { hyperframesRenderer } from '../ai/hyperframes/renderer';
 import { contentSafetyGuardrail } from '../ai/guardrails/content-safety';
 import { factualCheckGuardrail } from '../ai/guardrails/factual-check';
-import { RESOURCE_GENERATION_PROMPTS } from '../ai/prompts';
+import { RESOURCE_GENERATION_PROMPTS, type ResourceGenerationInput } from '../ai/prompts';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -166,6 +166,8 @@ export class ResourceGenerationOrchestrator {
     literatureTitle: string,
     literatureContent?: string,
     formats?: string[],
+    ragContext?: { contextText: string; references: string[] },
+    profileContext?: { contextText: string; evidence: ResourceGenerationInput['profileEvidence'] },
   ): Promise<GenerationResult[]> {
     const results: GenerationResult[] = [];
     const types = formats && formats.length > 0
@@ -202,7 +204,15 @@ export class ResourceGenerationOrchestrator {
         try {
           content = await this.deps.callLLM(
             prompt.system,
-            prompt.buildUserMessage!({ topic, userLevel, literatureContent }),
+            prompt.buildUserMessage!({
+              topic,
+              userLevel,
+              literatureContent,
+              ragContext: ragContext?.contextText,
+              ragReferences: ragContext?.references,
+              profileContext: profileContext?.contextText,
+              profileEvidence: profileContext?.evidence,
+            }),
           );
         } catch (error: any) {
           if (type !== 'svg') throw error;

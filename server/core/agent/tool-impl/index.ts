@@ -14,3 +14,4 @@ export { registerResourceTools } from './resource-tools';
 export { registerImportDocumentTool } from './import-document-tool';
 export { registerPromptTools } from './prompt-tools';
 export { registerWorkspaceTools } from './workspace-tools';
+export { registerPushSuggestionTools } from './push-suggestion-tools';

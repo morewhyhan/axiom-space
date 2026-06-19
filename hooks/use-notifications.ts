@@ -1,25 +1,33 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/mode-store'
 import { client } from '@/lib/api-client'
+import { toast } from 'sonner'
 
 export interface AppNotification {
-  type: 'toast' | 'profile' | 'card' | 'skill' | 'graph'
+  type: 'toast' | 'profile' | 'card' | 'skill' | 'graph' | 'quality'
   message: string
   timestamp: number
   id: string
+  targetId?: string
+  action?: string
+  severity?: 'info' | 'success' | 'warning' | 'error'
 }
 
 export function useNotifications() {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const seenIdsRef = useRef<Set<string>>(new Set())
 
   useEffect(() => {
     if (!currentVaultId) return
     let cancelled = false
+    seenIdsRef.current.clear()
 
     client.api.events.unread.$get({ query: { vid: currentVaultId } })
       .then((res) => res.json())
@@ -43,11 +51,19 @@ export function useNotifications() {
           ...data,
           id: typeof data.id === 'string' ? data.id : event.lastEventId || `notif_${data.timestamp}`,
         }
+        if (seenIdsRef.current.has(notif.id)) return
+        seenIdsRef.current.add(notif.id)
         setNotifications(prev => {
-          if (prev.some((item) => item.id === notif.id)) return prev
           return [notif, ...prev].slice(0, 50)
         })
         setUnreadCount(prev => prev + 1)
+        announceNotification(notif)
+        invalidateNotificationTargets(queryClient, currentVaultId, notif)
+        if (notif.type === 'card' && notif.targetId) {
+          window.dispatchEvent(new CustomEvent('axiom:card-updated', {
+            detail: { cardId: notif.targetId, action: notif.action, notificationId: notif.id },
+          }))
+        }
       } catch {}
     })
 
@@ -60,7 +76,7 @@ export function useNotifications() {
       es.close()
       eventSourceRef.current = null
     }
-  }, [currentVaultId])
+  }, [currentVaultId, queryClient])
 
   const dismissAll = useCallback(() => {
     const ids = notifications.map((notification) => notification.id)
@@ -70,4 +86,40 @@ export function useNotifications() {
   }, [currentVaultId, notifications])
 
   return { notifications, unreadCount, dismissAll }
+}
+
+function announceNotification(notification: AppNotification) {
+  const message = notification.message || '系统记录已更新'
+  if (notification.severity === 'error') {
+    toast.error(message)
+    return
+  }
+  if (notification.severity === 'warning' || notification.type === 'quality') {
+    toast.warning(message)
+    return
+  }
+  if (notification.type === 'card' || notification.type === 'profile' || notification.type === 'skill') {
+    toast.success(message)
+    return
+  }
+  toast(message)
+}
+
+function invalidateNotificationTargets(
+  queryClient: ReturnType<typeof useQueryClient>,
+  vaultId: string | null,
+  notification: AppNotification,
+) {
+  if (!vaultId) return
+  if (notification.type === 'profile' || notification.type === 'skill' || notification.type === 'card') {
+    queryClient.invalidateQueries({ queryKey: ['cognition', vaultId] })
+    queryClient.invalidateQueries({ queryKey: ['observations', vaultId] })
+  }
+  if (notification.type === 'card') {
+    queryClient.invalidateQueries({ queryKey: ['galaxy', vaultId] })
+    queryClient.invalidateQueries({ queryKey: ['dashboard-stats', vaultId] })
+    queryClient.invalidateQueries({ queryKey: ['learning-paths', vaultId] })
+    queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', vaultId] })
+    queryClient.invalidateQueries({ queryKey: ['card-links'] })
+  }
 }

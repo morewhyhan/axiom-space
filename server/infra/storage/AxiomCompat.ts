@@ -185,6 +185,9 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
         return {
           success: false,
           error: `PROMOTION_CRITERIA_FAILED: missing ${quality.missingElements.join(', ')}`,
+          missingElements: quality.missingElements,
+          qualityChecks: quality.checks,
+          qualityIssues: quality.issues,
         }
       }
       const title = item.title || `perm-${Date.now()}`

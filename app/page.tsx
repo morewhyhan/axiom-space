@@ -1,10 +1,12 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { Files, Layers3, MessageSquareText, PenLine } from 'lucide-react'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import type { Mode, PanelId } from '@/stores/mode-store'
+import type { ForgeResourceView } from '@/components/forge/forge-resource-panel'
 import { useAgentStore } from '@/stores/agent-store'
 import ResizablePanel from '@/components/layout/ResizablePanel'
 import { useAuthSession } from '@/hooks/use-auth'
@@ -21,13 +23,11 @@ const DashboardLeft = dynamic(() => import('@/components/dashboard/dashboard-lef
 const DashboardRight = dynamic(() => import('@/components/dashboard/dashboard-right'))
 const ForgeChat = dynamic(() => import('@/components/forge/forge-chat'))
 const ForgeEditor = dynamic(() => import('@/components/forge/forge-editor'))
-const ChatSessionList = dynamic(() => import('@/components/forge/chat-session-list'))
-const FileTree = dynamic(() => import('@/components/forge/file-tree'))
+const ForgeResourcePanel = dynamic(() => import('@/components/forge/forge-resource-panel'))
 const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
 const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
 const GalaxyLayoutSwitcher = dynamic(() => import('@/components/galaxy/galaxy-layout-switcher'))
 const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
-const InsightsPanel = dynamic(() => import('@/components/cognition/observations-panel'))
 const LearnWorkspace = dynamic(() => import('@/components/learn/learn-workspace'))
 const PanelBar = dynamic(() => import('@/components/layout/panel-bar'))
 const Header = dynamic(() => import('@/components/layout/header'))
@@ -35,6 +35,7 @@ const BottomBar = dynamic(() => import('@/components/layout/bottom-bar'))
 
 const createCardTypes = ['fleeting', 'literature', 'permanent'] as const
 type CreateCardType = typeof createCardTypes[number]
+const WARMUP_MODES: Mode[] = ['dashboard', 'forge', 'galaxy', 'cognition', 'learn']
 
 function isCreateCardType(type: string): type is CreateCardType {
   return (createCardTypes as readonly string[]).includes(type)
@@ -57,7 +58,9 @@ export default function Home() {
   const setImmersive = useAppStore(s => s.setImmersive)
   // Panel state
   const panelLayout = useAppStore((s) => s.panelLayout)
+  const panelSizes = useAppStore((s) => s.panelSizes)
   const chatPanelOpen = useAppStore((s) => s.chatPanelOpen)
+  const setChatPanelOpen = useAppStore((s) => s.setChatPanelOpen)
   const { data: session, isPending: authPending } = useAuthSession()
   const isLoggedIn = !!session?.session
   const [showApp, setShowApp] = useState(false)
@@ -68,6 +71,7 @@ export default function Home() {
   const [vaultLoadNonce, setVaultLoadNonce] = useState(0)
   const [vaultPickerOpen, setVaultPickerOpen] = useState(false)
   const [visitedModes, setVisitedModes] = useState<Set<Mode>>(() => new Set([mode]))
+  const panelWarmupStartedRef = useRef(false)
   const queryClient = useQueryClient()
   const vaults = useAppStore((s) => s.vaults)
   const currentVaultId = useAppStore((s) => s.currentVaultId)
@@ -99,18 +103,102 @@ export default function Home() {
   const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding)
   const setHasCompletedOnboarding = useAppStore((s) => s.setHasCompletedOnboarding)
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const forgeLeftWidth = panelLayout.left.length > 0
+    ? Math.max(...panelLayout.left.map((panel) => panelSizes[panel] ?? 300))
+    : 0
+  const forgeRightWidth = panelLayout.right.length > 0
+    ? Math.max(...panelLayout.right.map((panel) => panelSizes[panel] ?? 420))
+    : 0
+  const [forgeResourceView, setForgeResourceView] = useState<ForgeResourceView>(() => (
+    panelLayout.left.includes('fileTree') ? 'cards' : 'context'
+  ))
+  const resourcePanelOpen = panelLayout.left.includes('sessionList') || panelLayout.left.includes('fileTree')
+  const editorPanelOpen = panelLayout.right.includes('editor')
+  const setPanelLayout = useAppStore((s) => s.setPanelLayout)
+
+  const changeForgeResourceView = useCallback((view: ForgeResourceView) => {
+    const targetPanel: PanelId = view === 'cards' ? 'fileTree' : 'sessionList'
+    setForgeResourceView(view)
+    if (!resourcePanelOpen || panelLayout.left.includes(targetPanel)) return
+    setPanelLayout({
+      left: [targetPanel],
+      right: panelLayout.right.filter((panel) => panel === 'editor'),
+    })
+  }, [panelLayout.left, panelLayout.right, resourcePanelOpen, setPanelLayout])
+
+  const toggleForgeResource = useCallback((view: ForgeResourceView) => {
+    const targetPanel: PanelId = view === 'cards' ? 'fileTree' : 'sessionList'
+    const currentlyOpen = panelLayout.left.includes(targetPanel)
+    setForgeResourceView(view)
+    setPanelLayout({
+      left: currentlyOpen && resourcePanelOpen ? [] : [targetPanel],
+      right: panelLayout.right.filter((panel) => panel === 'editor'),
+    })
+  }, [panelLayout.left, panelLayout.right, resourcePanelOpen, setPanelLayout])
+
+  const toggleForgeEditor = useCallback(() => {
+    setPanelLayout({
+      left: panelLayout.left.filter((panel) => panel === 'sessionList' || panel === 'fileTree'),
+      right: editorPanelOpen ? [] : ['editor'],
+    })
+  }, [editorPanelOpen, panelLayout.left, setPanelLayout])
+
+  useEffect(() => {
+    if (panelLayout.left.includes('fileTree')) setForgeResourceView('cards')
+    else if (panelLayout.left.includes('sessionList')) setForgeResourceView('context')
+  }, [panelLayout.left])
 
   // Show onboarding after app loads for first-time users
   useEffect(() => {
-    if (showApp && !hasCompletedOnboarding && vaults.length > 0) {
+    if (!showApp || !selectedVault) return
+    const vaultOnboardingKey = `axiom-vault-onboarding:${selectedVault.id}`
+    const vaultSeen = typeof window !== 'undefined' && window.localStorage.getItem(vaultOnboardingKey) === '1'
+    if (!hasCompletedOnboarding || !vaultSeen) {
       const t = setTimeout(() => setShowOnboarding(true), 800)
       return () => clearTimeout(t)
     }
-  }, [showApp, hasCompletedOnboarding, vaults.length])
+  }, [showApp, hasCompletedOnboarding, selectedVault])
+
+  const markCurrentVaultOnboardingSeen = useCallback(() => {
+    const vaultId = useAppStore.getState().currentVaultId
+    if (!vaultId || typeof window === 'undefined') return
+    window.localStorage.setItem(`axiom-vault-onboarding:${vaultId}`, '1')
+  }, [])
 
   const handleCompleteOnboarding = () => {
+    markCurrentVaultOnboardingSeen()
     setShowOnboarding(false)
     setHasCompletedOnboarding(true)
+  }
+
+  const handleStartInitialProfile = async () => {
+    setShowOnboarding(false)
+    closeModal()
+    const appStore = useAppStore.getState()
+    appStore.clearSelectedNode()
+    appStore.setSelectedPathId(null)
+    appStore.setActiveLearningStepId(null)
+    appStore.setMode('forge')
+    appStore.setChatPanelOpen(true)
+    appStore.setPanelLayout({ left: ['sessionList'], right: ['editor'] })
+
+    const agentStore = useAgentStore.getState()
+    agentStore._abortStream()
+    const session = await agentStore.createTalkSession({
+      title: '初始画像构建',
+      purpose: 'initial_profile',
+    })
+    if (!session) {
+      toast.error('初始画像会话创建失败')
+      return
+    }
+    markCurrentVaultOnboardingSeen()
+    setHasCompletedOnboarding(true)
+    toast('已打开初始画像对话', {
+      description: '先回答几个必要问题，系统会据此调整后续教学、资源和推送。',
+      duration: 3200,
+      style: { fontSize: '11px', background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.28)' },
+    })
   }
 
   // Auto-open onboarding modal
@@ -480,9 +568,24 @@ export default function Home() {
     }
   }
 
-  // Preload all mode panel JS chunks during idle time
+  // Preload and progressively mount mode panels during idle time.
+  // This separates the expensive first mount from the user's actual mode switch.
   useEffect(() => {
     if (!showApp) return
+    if (panelWarmupStartedRef.current) return
+    panelWarmupStartedRef.current = true
+    const warmTimers: ReturnType<typeof setTimeout>[] = []
+    let cancelled = false
+
+    const warmMode = (warmModeId: Mode) => {
+      setVisitedModes((prev) => {
+        if (prev.has(warmModeId)) return prev
+        const next = new Set(prev)
+        next.add(warmModeId)
+        return next
+      })
+    }
+
     const preloadPanels = async () => {
       await Promise.all([
         import('@/components/layout/header'),
@@ -498,14 +601,24 @@ export default function Home() {
         import('@/components/galaxy/galaxy-filter'),
         import('@/components/cognition/cognition-sidebar'),
         import('@/components/cognition/learning-profile'),
-        import('@/components/cognition/observations-panel'),
         import('@/components/learn/learn-workspace'),
       ])
+      if (cancelled) return
+      const activeMode = useAppStore.getState().mode
+      WARMUP_MODES
+        .filter((warmModeId) => warmModeId !== activeMode)
+        .forEach((warmModeId, index) => {
+          warmTimers.push(setTimeout(() => warmMode(warmModeId), 140 * (index + 1)))
+        })
     }
     if ('requestIdleCallback' in window) {
       requestIdleCallback(() => preloadPanels())
     } else {
       setTimeout(preloadPanels, 2000)
+    }
+    return () => {
+      cancelled = true
+      warmTimers.forEach(clearTimeout)
     }
   }, [showApp])
 
@@ -594,33 +707,85 @@ export default function Home() {
 
               {(visitedModes.has('forge') || mode === 'forge') && (
                 <div className={`mode-stage forge-stage ${mode === 'forge' ? 'active' : ''}`} aria-hidden={mode !== 'forge'}>
-                  <div className="left-zone">
-                    {panelLayout.left.map((panelId: string) => {
-                      const isFileTree = panelId === 'fileTree'
-                      return (
+                  <section
+                    className={`forge-ide pointer-events-auto ${resourcePanelOpen ? 'has-left' : 'no-left'} ${editorPanelOpen ? 'has-right' : 'no-right'}`}
+                    style={{
+                      '--forge-left-live': `${Math.max(240, Math.min(420, forgeLeftWidth || 300))}px`,
+                      '--forge-right-live': `${Math.max(340, Math.min(720, forgeRightWidth || 460))}px`,
+                    } as CSSProperties}
+                  >
+                    <nav className="forge-activity glass-panel" aria-label="AI 工作台面板">
+                      <button
+                        type="button"
+                        className={resourcePanelOpen && forgeResourceView === 'context' ? 'active' : ''}
+                        onClick={() => toggleForgeResource('context')}
+                        title="路径与会话"
+                      >
+                        <Layers3 className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className={resourcePanelOpen && forgeResourceView === 'cards' ? 'active' : ''}
+                        onClick={() => toggleForgeResource('cards')}
+                        title="卡片库"
+                      >
+                        <Files className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className={chatPanelOpen ? 'active' : ''}
+                        onClick={() => setChatPanelOpen(!chatPanelOpen)}
+                        title="AI 对话"
+                      >
+                        <MessageSquareText className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className={editorPanelOpen ? 'active' : ''}
+                        onClick={toggleForgeEditor}
+                        title="卡片编辑"
+                      >
+                        <PenLine className="h-4 w-4" />
+                      </button>
+                    </nav>
+
+                    <aside className={`forge-ide-rail ${resourcePanelOpen ? '' : 'empty'}`}>
+                      {resourcePanelOpen && (
                         <ResizablePanel
-                          key={panelId}
-                          id={panelId as PanelId}
+                          key={forgeResourceView}
+                          id={forgeResourceView === 'cards' ? 'fileTree' : 'sessionList'}
                           zone="left"
-                          minWidth={isFileTree ? 240 : 300}
-                          maxWidth={isFileTree ? 340 : 420}
+                          minWidth={240}
+                          maxWidth={420}
                         >
-                          {panelId === 'sessionList' ? <ChatSessionList /> : null}
-                          {panelId === 'fileTree' ? <FileTree /> : null}
+                          <ForgeResourcePanel view={forgeResourceView} onViewChange={changeForgeResourceView} />
                         </ResizablePanel>
-                      )
-                    })}
-                  </div>
-                  <section className="forge-workbench-center flex-1 flex flex-col min-w-0 overflow-hidden">
-                    {chatPanelOpen && <ForgeChat />}
+                      )}
+                    </aside>
+
+                    <main className={`forge-ide-workbench ${chatPanelOpen ? 'active' : 'empty'}`}>
+                      {chatPanelOpen ? (
+                        <ForgeChat />
+                      ) : (
+                        <div className="forge-ide-empty">
+                          <span className="mono">AI WORKSPACE</span>
+                          <p>打开对话区，围绕当前任务、会话或卡片继续工作。</p>
+                          <div>
+                            <button type="button" onClick={() => setChatPanelOpen(true)}>打开对话</button>
+                            <button type="button" onClick={() => openModal('newcard')}>新建卡片</button>
+                          </div>
+                        </div>
+                      )}
+                    </main>
+
+                    <aside className={`forge-ide-editor ${editorPanelOpen ? '' : 'empty'}`}>
+                      {editorPanelOpen && (
+                        <ResizablePanel key="editor" id="editor" zone="right">
+                          <ForgeEditor />
+                        </ResizablePanel>
+                      )}
+                    </aside>
                   </section>
-                  <div className="right-zone">
-                    {panelLayout.right.map((panelId: string) => (
-                      <ResizablePanel key={panelId} id={panelId as PanelId} zone="right">
-                        {panelId === 'editor' ? <ForgeEditor /> : null}
-                      </ResizablePanel>
-                    ))}
-                  </div>
                 </div>
               )}
 
@@ -645,19 +810,18 @@ export default function Home() {
               {(visitedModes.has('cognition') || mode === 'cognition') && (
                 <div className={`mode-stage cognition-stage ${mode === 'cognition' ? 'active' : ''}`} aria-hidden={mode !== 'cognition'}>
                   <LearningProfile />
-                  <InsightsPanel />
                 </div>
               )}
 
               {(visitedModes.has('learn') || mode === 'learn') && (
-                <div className={`mode-stage ${mode === 'learn' ? 'active' : ''}`} aria-hidden={mode !== 'learn'}>
+                <div className={`mode-stage learn-stage ${mode === 'learn' ? 'active' : ''}`} aria-hidden={mode !== 'learn'}>
                   <section className="flex-1 min-w-0 overflow-hidden pointer-events-auto">
                     <LearnWorkspace />
                   </section>
                 </div>
               )}
             </main>
-            {(mode === 'forge' || mode === 'cognition') && <PanelBar />}
+            {mode === 'cognition' && <PanelBar />}
           </div>}
 
           {modal && (
@@ -983,12 +1147,20 @@ export default function Home() {
                         ))}
                       </div>
                     </div>
-                    <button
-                      className="axiom-btn primary w-full text-center"
-                      onClick={() => { closeModal(); handleCompleteOnboarding() }}
-                    >
-                      开始使用 AXIOM
-                    </button>
+                    <div className="space-y-2">
+                      <button
+                        className="axiom-btn primary w-full text-center"
+                        onClick={handleStartInitialProfile}
+                      >
+                        让 AI 先了解我
+                      </button>
+                      <button
+                        className="axiom-btn w-full text-center"
+                        onClick={() => { closeModal(); handleCompleteOnboarding() }}
+                      >
+                        直接开始使用
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}

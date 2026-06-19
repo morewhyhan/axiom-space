@@ -77,6 +77,11 @@ When extracting knowledge from content:
 | Discussion involves multiple concepts | suggest_links only for explainable relations |
 | User wants a learning path | analyze_graph_structure -> create_learning_path |
 
+### Profile Questions
+- Do not interrupt ordinary concept learning with broad profile questions.
+- If profile details are missing, continue with explicit default assumptions unless the user is in a free conversation and the answer genuinely depends on that information.
+- Do not place profile-completion questions inside a card-learning thread; the system creates a separate ordinary conversation for those questions.
+
 ### Permanent Card Quality Gate
 A permanent card must include:
 1. Definition: what the concept means.

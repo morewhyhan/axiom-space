@@ -13,6 +13,7 @@ import { parseWikiLinks, resolveWikiLinkTitle, syncEdgesFromContent } from '@/li
 import { runWithAgentContext } from '@/server/core/agent/agent-context'
 import { CARD_TYPES, validatePermanentCardContent } from '@/server/core/domain/contracts'
 import { emitDomainEvent, recordCardRevision, recordPromotionAttempt } from '@/server/core/domain/events'
+import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
 
@@ -132,6 +133,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
         error: 'PROMOTION_CRITERIA_FAILED',
         missingElements: quality.missingElements,
         qualityChecks: quality.checks,
+        qualityIssues: quality.issues,
       }, 422)
     }
   }
@@ -142,6 +144,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const result = await runWithAgentContext({ userId, vaultId }, () => storage.writeFile(path, content, type))
     if (result.success) {
       const writtenCard = await prisma.card.findUnique({ where: { vaultId_path: { vaultId, path } } }).catch(() => null)
+      scheduleRagIndexCard(writtenCard?.id, 'vault-write')
       void emitDomainEvent({
         userId,
         vaultId,
@@ -315,6 +318,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
         error: 'PROMOTION_CRITERIA_FAILED',
         missingElements: quality.missingElements,
         qualityChecks: quality.checks,
+        qualityIssues: quality.issues,
       }, 422)
     }
   }
@@ -421,6 +425,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
     })
   }
 
+  scheduleRagIndexCard(updated.id, type === 'permanent' && card.type !== 'permanent' ? 'card-promoted' : 'card-updated')
+
   return c.json({
     success: true,
     card: {
@@ -489,6 +495,7 @@ ${content?.trim() || ''}
     },
   })
   await syncEdgesFromContent(prisma, created.id, created.vaultId, created.content)
+  scheduleRagIndexCard(created.id, 'extract-fleeting')
 
   void emitDomainEvent({
     userId,

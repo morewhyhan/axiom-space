@@ -11,7 +11,7 @@ import { prisma } from '@/lib/db';
 import { getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { emitNotification } from '../notification-bus';
 import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
-import { clampEdgeWeight, normalizeEdgeType } from '@/server/core/domain/contracts';
+import { clampEdgeWeight, normalizeEdgeType, validatePermanentCardContent } from '@/server/core/domain/contracts';
 const axiom = createAxiomCompat(getFileStorage());
 
 const createFleeingCardTool = createTool(
@@ -97,20 +97,11 @@ const createPermanentCardTool = createTool(
           details: { error: 'No vault open' },
         };
       }
-      // 质量验证：检查 4 要素
-      const qualityChecks: Record<string, boolean> = {
-        hasDefinition: /定义|是|指|means|is a/i.test(params.content),
-        hasExamples: /例如|比如|举例|Example|for example/i.test(params.content),
-        hasRelations: /\[\[.+?\]\]/.test(params.content),
-        hasApplications: /应用|使用|场景|用途|use case/i.test(params.content),
-      };
-      const missingElements = Object.entries(qualityChecks)
-        .filter(([, v]) => !v)
-        .map(([k]) => k.replace('has', '').toLowerCase());
-      if (missingElements.length > 0) {
+      const quality = validatePermanentCardContent(params.content);
+      if (!quality.passed) {
         return {
-          content: [{ type: 'text', text: `永久知识卡创建被拒绝：内容缺少 ${missingElements.join(', ')}。请补齐定义、例子、关联和应用后再创建。` }],
-          details: { error: 'PERMANENT_CARD_QUALITY_FAILED', missingElements, quality_checks: qualityChecks },
+          content: [{ type: 'text', text: `永久知识卡创建被拒绝：${quality.issues.map((issue) => issue.label).join('、')}。请补齐清晰、准确、必要三个标准后再创建。` }],
+          details: { error: 'PERMANENT_CARD_QUALITY_FAILED', missingElements: quality.missingElements, quality_checks: quality.checks, issues: quality.issues },
         };
       }
 
@@ -125,12 +116,12 @@ const createPermanentCardTool = createTool(
         }
         return {
           content: [{ type: 'text', text: contentParts.join('\n') }],
-          details: { title: params.title, id: cardPath, cardPath, quality_checks: qualityChecks },
+          details: { title: params.title, id: cardPath, cardPath, quality_checks: quality.checks },
         };
       }
       return {
         content: [{ type: 'text', text: `创建失败: ${result?.error || '未知错误'}` }],
-        details: { error: result?.error, quality_checks: qualityChecks },
+        details: { error: result?.error, quality_checks: quality.checks },
       };
     } catch (error) {
       return {

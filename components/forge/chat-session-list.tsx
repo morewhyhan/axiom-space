@@ -221,12 +221,12 @@ export default function ChatSessionList() {
       className="side-slot visible forge-context-tray flex-col pointer-events-auto"
       style={{ width: '100%', flex: 1, padding: 'var(--panel-py) 0' }}
     >
-      <div className="glass-panel workspace-surface workspace-context-surface rounded-2xl flex-1 flex flex-col overflow-hidden border-purple-500/20 shadow-[0_0_28px_rgba(244,114,182,0.06)]">
+      <div className="glass-panel workspace-surface workspace-context-surface rounded-2xl flex-1 flex flex-col overflow-hidden border-cyan-400/15 shadow-[0_0_28px_rgba(34,211,238,0.04)]">
         <div className="workspace-panel-head border-b border-white/8 px-5 py-4">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <FolderKanban className="h-4 w-4 text-pink-300/80" />
+                <FolderKanban className="h-4 w-4 text-cyan-200/80" />
                 <div className="mono text-white/35 uppercase tracking-[0.22em]" style={{ fontSize: 'var(--f8)' }}>
                   Context
                 </div>
@@ -234,14 +234,9 @@ export default function ChatSessionList() {
               <div className="mt-1 text-white/88 font-medium" style={{ fontSize: 'var(--f10)' }}>
                 学习路径与自由对话
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <TypeLegend color={TYPE_COLOR.fleeting} label="灵感草稿" />
-                <TypeLegend color={TYPE_COLOR.literature} label="文献资料" />
-                <TypeLegend color={TYPE_COLOR.permanent} label="永久知识" />
-              </div>
             </div>
             <button
-              className="flex h-9 w-9 items-center justify-center rounded-lg border border-pink-400/25 bg-pink-400/10 text-pink-300 transition-colors hover:bg-pink-400/15"
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-cyan-400/20 bg-cyan-400/8 text-cyan-200 transition-colors hover:bg-cyan-400/14"
               onClick={() => openModal('newcard')}
               title="新建卡片"
             >
@@ -267,7 +262,7 @@ export default function ChatSessionList() {
                 <button
                   key={item.id}
                   className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[10px] mono transition-colors ${
-                    active ? 'bg-pink-400/12 text-pink-200' : 'text-white/28 hover:text-white/60'
+                    active ? 'bg-cyan-400/10 text-cyan-100' : 'text-white/28 hover:text-white/60'
                   }`}
                   onClick={() => setView(item.id)}
                 >
@@ -346,19 +341,6 @@ export default function ChatSessionList() {
               )}
             </div>
           )}
-        </div>
-
-        <div className="flex items-center justify-between border-t border-white/5 px-4 py-3">
-          <button
-            className="inline-flex items-center gap-2 text-white/25 transition-colors hover:text-white/50"
-            onClick={() => openModal('newcard')}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span className="mono" style={{ fontSize: 'var(--f8)' }}>新建卡片</span>
-          </button>
-          <span className="mono text-white/18" style={{ fontSize: 'var(--f7)' }}>
-            {taskPaths.length} 路径 · {talkSessions.length} 对话
-          </span>
         </div>
       </div>
     </aside>
@@ -445,7 +427,7 @@ function TaskGroupCard({
                 {aiChatCount} 段 AI 对话
               </span>
               {nextStep && (
-                <span className="inline-flex items-center gap-1 rounded-md border border-purple-400/15 bg-purple-400/8 px-1.5 py-0.5 mono text-purple-200/80" style={{ fontSize: 'var(--f7)' }}>
+                <span className="inline-flex items-center gap-1 rounded-md border border-cyan-400/15 bg-cyan-400/8 px-1.5 py-0.5 mono text-cyan-100/80" style={{ fontSize: 'var(--f7)' }}>
                   当前：{nextStep.name}
                 </span>
               )}
@@ -463,7 +445,7 @@ function TaskGroupCard({
           {expanded ? '已展开任务' : inbox ? '展开后选择要打磨的灵感草稿' : '展开后选择具体学习任务'}
         </div>
         <button
-          className="inline-flex items-center gap-1 rounded-lg border border-pink-400/20 bg-pink-400/8 px-2.5 py-1.5 text-[10px] mono text-pink-200 transition-colors hover:bg-pink-400/14 disabled:cursor-not-allowed disabled:opacity-40"
+          className="inline-flex items-center gap-1 rounded-lg border border-cyan-400/20 bg-cyan-400/8 px-2.5 py-1.5 text-[10px] mono text-cyan-100/85 transition-colors hover:bg-cyan-400/14 disabled:cursor-not-allowed disabled:opacity-40"
           onClick={onOpen}
           disabled={!canContinue}
           title={!canContinue ? nextStep?.lockedReason || '需要先完成前置任务' : '继续当前任务'}
@@ -543,7 +525,7 @@ function ConversationCard({
     <div
       className={`group relative rounded-xl border p-3 transition-all ${deleting ? 'cursor-wait opacity-55' : 'cursor-pointer'} ${
         active
-          ? 'border-pink-400/30 bg-pink-400/[0.08] shadow-[0_0_18px_rgba(244,114,182,0.08)]'
+          ? 'border-cyan-400/28 bg-cyan-400/[0.075] shadow-[0_0_18px_rgba(34,211,238,0.07)]'
           : 'border-white/6 bg-white/[0.025] hover:border-white/10 hover:bg-white/[0.045]'
       }`}
       onClick={() => {
@@ -557,7 +539,7 @@ function ConversationCard({
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <div className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-pink-300' : isThread ? 'bg-cyan-300/70' : 'bg-white/18'}`} />
+            <div className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-cyan-200' : isThread ? 'bg-cyan-300/70' : 'bg-white/18'}`} />
             <div className={`truncate font-medium ${active ? 'text-white' : 'text-white/68 group-hover:text-white/85'}`} style={{ fontSize: 'var(--f9)' }}>
               {session.pathTitle
                 ? `${session.pathTitle} · ${session.stepTitle || session.cardTitle || session.title}`
@@ -577,7 +559,7 @@ function ConversationCard({
               </span>
             )}
             {session.pathTitle && (
-              <span className="rounded-md border border-purple-400/15 bg-purple-400/8 px-1.5 py-0.5 mono text-purple-200/80" style={{ fontSize: 'var(--f7)' }}>
+              <span className="rounded-md border border-cyan-400/15 bg-cyan-400/8 px-1.5 py-0.5 mono text-cyan-100/80" style={{ fontSize: 'var(--f7)' }}>
                 {session.pathTitle}
               </span>
             )}
@@ -643,15 +625,6 @@ function SectionLabel({
       <div className="mono text-[9px] text-white/40 uppercase tracking-[0.18em]">{title}</div>
       <div className="mono text-[9px] text-white/20">{count}</div>
     </div>
-  )
-}
-
-function TypeLegend({ color, label }: { color: string; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 mono text-white/25" style={{ fontSize: 'var(--f7)' }}>
-      <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: color }} />
-      {label}
-    </span>
   )
 }
 
@@ -766,7 +739,7 @@ function stepTone(status: LearningStep['status']) {
     return { label: '学习中', text: 'text-cyan-300', fill: 'bg-cyan-400', border: 'border-cyan-500/30' }
   }
   if (status === 'available') {
-    return { label: '可开始', text: 'text-purple-300', fill: 'bg-purple-400', border: 'border-purple-500/30' }
+    return { label: '可开始', text: 'text-cyan-300', fill: 'bg-cyan-400', border: 'border-cyan-500/30' }
   }
   return { label: '前置未满足', text: 'text-white/25', fill: 'bg-white/20', border: 'border-white/10' }
 }
