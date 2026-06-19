@@ -2,35 +2,8 @@
 
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { client } from '@/lib/api-client'
-import { useAppStore } from '@/stores/mode-store'
 import { useState, useEffect } from 'react'
-
-function CountUp({ end, duration = 1000, loading = false }: { end: number; duration?: number; loading?: boolean }) {
-  const [count, setCount] = useState(0)
-  const hasCounted = useAppStore((s) => s.hasCounted)
-  const setHasCounted = useAppStore((s) => s.setHasCounted)
-
-  useEffect(() => {
-    if (loading || hasCounted) {
-      if (!loading && hasCounted) setCount(end)
-      return
-    }
-    let start = 0
-    const increment = end / (duration / 16)
-    const timer = setInterval(() => {
-      start += increment
-      if (start >= end) {
-        setCount(end)
-        setHasCounted(true)
-        clearInterval(timer)
-      } else {
-        setCount(Math.floor(start))
-      }
-    }, 16)
-    return () => clearInterval(timer)
-  }, [end, duration, loading, hasCounted, setHasCounted])
-  return <>{loading ? '—' : count.toLocaleString()}</>
-}
+import { MetricBlock } from './metric-block'
 
 export default function DashboardLeft() {
   const { stats, loading } = useDashboardStats()
@@ -72,45 +45,75 @@ export default function DashboardLeft() {
         padding: 'var(--panel-py) 0 var(--panel-py) 14px',
       }}
     >
-      <div className={metricBlock}>
-        <span className={labelClass} style={{ fontSize: 'clamp(12px, 1.25vh, 18px)' }}>NODES</span>
-        <div className="serif font-bold glow-text-purple leading-none mt-1" style={{ fontSize: 'clamp(78px, 10.5vh, 142px)' }}>
-          <CountUp end={stats?.totalNodes ?? 0} loading={loading} />
-        </div>
-        <span className={hintClass} style={{ fontSize: 'clamp(12px, 1.18vh, 17px)' }}>Total knowledge nodes</span>
-      </div>
-      <div className={metricBlock}>
-        <span className={labelClass} style={{ fontSize: 'clamp(12px, 1.25vh, 18px)' }}>EDGES</span>
-        <div className="serif font-bold glow-text-cyan leading-none mt-1" style={{ fontSize: 'clamp(62px, 8.2vh, 112px)' }}>
-          <CountUp end={stats?.totalEdges ?? 0} loading={loading} />
-        </div>
-        <span className={hintClass} style={{ fontSize: 'clamp(12px, 1.18vh, 17px)' }}>Total connections in system</span>
-      </div>
+      <MetricBlock
+        className={metricBlock}
+        labelClassName={labelClass}
+        valueClassName="serif font-bold glow-text-purple leading-none mt-1"
+        hintClassName={hintClass}
+        labelStyle={{ fontSize: 'clamp(12px, 1.25vh, 18px)' }}
+        valueStyle={{ fontSize: 'clamp(78px, 10.5vh, 142px)' }}
+        hintStyle={{ fontSize: 'clamp(12px, 1.18vh, 17px)' }}
+        label="NODES"
+        value={stats?.totalNodes ?? 0}
+        hint="Total knowledge nodes"
+        loading={loading}
+      />
+      <MetricBlock
+        className={metricBlock}
+        labelClassName={labelClass}
+        valueClassName="serif font-bold glow-text-cyan leading-none mt-1"
+        hintClassName={hintClass}
+        labelStyle={{ fontSize: 'clamp(12px, 1.25vh, 18px)' }}
+        valueStyle={{ fontSize: 'clamp(62px, 8.2vh, 112px)' }}
+        hintStyle={{ fontSize: 'clamp(12px, 1.18vh, 17px)' }}
+        label="EDGES"
+        value={stats?.totalEdges ?? 0}
+        hint="Total connections in system"
+        loading={loading}
+      />
 
       <div className="hud-line"></div>
 
       <div className="flex flex-col" style={{ gap: 'clamp(8px, 1.5vh, 22px)' }}>
-        <div className={smallMetricBlock}>
-          <span className={labelClass} style={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}>PERMANENT</span>
-          <div className="serif font-bold text-purple-200 leading-none mt-1" style={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}>
-            <CountUp end={stats?.permanent ?? 0} loading={loading} />
-          </div>
-          <span className={hintClass} style={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}>Solidified knowledge cards</span>
-        </div>
-        <div className={smallMetricBlock}>
-          <span className={labelClass} style={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}>FLEETING</span>
-          <div className="serif font-bold text-cyan-200 leading-none mt-1" style={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}>
-            <CountUp end={stats?.fleeting ?? 0} loading={loading} />
-          </div>
-          <span className={hintClass} style={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}>Ideas awaiting refinement</span>
-        </div>
-        <div className={smallMetricBlock}>
-          <span className={labelClass} style={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}>LITERATURE</span>
-          <div className="serif font-bold text-pink-200 leading-none mt-1" style={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}>
-            <CountUp end={stats?.literature ?? 0} loading={loading} />
-          </div>
-          <span className={hintClass} style={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}>Source materials imported</span>
-        </div>
+        <MetricBlock
+          className={smallMetricBlock}
+          labelClassName={labelClass}
+          valueClassName="serif font-bold text-purple-200 leading-none mt-1"
+          hintClassName={hintClass}
+          labelStyle={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}
+          valueStyle={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}
+          hintStyle={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}
+          label="PERMANENT"
+          value={stats?.permanent ?? 0}
+          hint="Solidified knowledge cards"
+          loading={loading}
+        />
+        <MetricBlock
+          className={smallMetricBlock}
+          labelClassName={labelClass}
+          valueClassName="serif font-bold text-cyan-200 leading-none mt-1"
+          hintClassName={hintClass}
+          labelStyle={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}
+          valueStyle={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}
+          hintStyle={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}
+          label="FLEETING"
+          value={stats?.fleeting ?? 0}
+          hint="Ideas awaiting refinement"
+          loading={loading}
+        />
+        <MetricBlock
+          className={smallMetricBlock}
+          labelClassName={labelClass}
+          valueClassName="serif font-bold text-pink-200 leading-none mt-1"
+          hintClassName={hintClass}
+          labelStyle={{ fontSize: 'clamp(11px, 1.15vh, 16px)' }}
+          valueStyle={{ fontSize: 'clamp(48px, 6.2vh, 88px)' }}
+          hintStyle={{ fontSize: 'clamp(11px, 1.08vh, 16px)' }}
+          label="LITERATURE"
+          value={stats?.literature ?? 0}
+          hint="Source materials imported"
+          loading={loading}
+        />
       </div>
 
       <div className="hud-line"></div>

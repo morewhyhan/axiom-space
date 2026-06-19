@@ -1,14 +1,12 @@
 'use client'
 
 import dynamic from 'next/dynamic'
-import { useEffect, useState, useRef, useCallback, useMemo, type CSSProperties } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { Files, Layers3, MessageSquareText, PenLine } from 'lucide-react'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import type { Mode, PanelId } from '@/stores/mode-store'
 import type { ForgeResourceView } from '@/components/forge/forge-resource-panel'
 import { useAgentStore } from '@/stores/agent-store'
-import ResizablePanel from '@/components/layout/ResizablePanel'
 import { useAuthSession } from '@/hooks/use-auth'
 import { useGalaxyData } from '@/hooks/use-galaxy'
 import { useLearningPaths, useLearningProfile, useMemorySearch } from '@/hooks/use-learning'
@@ -17,21 +15,23 @@ import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
 import type { GraphLayoutMode } from '@/stores/mode-store'
 import LandingPage from '@/components/landing/landing-page'
+import { Button } from '@/components/ui'
+import {
+  AppModals,
+  CognitionStage,
+  DashboardStage,
+  ForgeStage,
+  GalaxyStage,
+  ImmersiveExitButton,
+  LearnStage,
+  LoadingOverlay,
+} from '@/components/app-shell'
+import {
+  PanelBarComponent as PanelBar,
+} from '@/components/panels'
 
 const GalaxyCanvas = dynamic(() => import('@/components/three/galaxy-canvas'), { ssr: false })
-const DashboardLeft = dynamic(() => import('@/components/dashboard/dashboard-left'))
-const DashboardRight = dynamic(() => import('@/components/dashboard/dashboard-right'))
-const ForgeChat = dynamic(() => import('@/components/forge/forge-chat'))
-const ForgeEditor = dynamic(() => import('@/components/forge/forge-editor'))
-const ForgeResourcePanel = dynamic(() => import('@/components/forge/forge-resource-panel'))
-const GalaxyControls = dynamic(() => import('@/components/galaxy/galaxy-controls'))
-const GalaxyFilter = dynamic(() => import('@/components/galaxy/galaxy-filter'))
-const GalaxyLayoutSwitcher = dynamic(() => import('@/components/galaxy/galaxy-layout-switcher'))
-const LearningProfile = dynamic(() => import('@/components/cognition/learning-profile'))
-const LearnWorkspace = dynamic(() => import('@/components/learn/learn-workspace'))
-const PanelBar = dynamic(() => import('@/components/layout/panel-bar'))
 const Header = dynamic(() => import('@/components/layout/header'))
-const BottomBar = dynamic(() => import('@/components/layout/bottom-bar'))
 
 const createCardTypes = ['fleeting', 'literature', 'permanent'] as const
 type CreateCardType = typeof createCardTypes[number]
@@ -468,6 +468,27 @@ export default function Home() {
     finally { setSearching(false) }
   }, [currentVaultId, galaxyData?.nodes, memorySearch])
 
+  const handleOpenSearchResult = useCallback((result: { path: string; title: string; snippet: string }) => {
+    let node = galaxyData?.nodes.find((item) => item.id === result.path)
+    if (!node) {
+      node = galaxyData?.nodes.find((item) => {
+        const nodeTitle = (item.title ?? '').toLowerCase().trim()
+        const resultTitle = (result.title ?? '').toLowerCase().trim()
+        return nodeTitle === resultTitle
+      })
+    }
+    if (node) {
+      setSelectedNode({ id: node.id, title: node.title, type: node.type })
+      useAppStore.getState().setMode('forge')
+      const focusFn = useGalaxyActions.getState().actions.focusNodeById
+      if (typeof focusFn === 'function') focusFn(node.id)
+    } else {
+      useAppStore.getState().setSelectedNode({ id: result.path, title: result.title, type: '' })
+      useAppStore.getState().setMode('forge')
+    }
+    closeModal()
+  }, [closeModal, galaxyData?.nodes, setSelectedNode])
+
   // ── Keyboard shortcuts ──
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -595,11 +616,8 @@ export default function Home() {
         import('@/components/dashboard/dashboard-right'),
         import('@/components/forge/forge-chat'),
         import('@/components/forge/forge-editor'),
-        import('@/components/forge/chat-session-list'),
-        import('@/components/forge/file-tree'),
         import('@/components/galaxy/galaxy-controls'),
         import('@/components/galaxy/galaxy-filter'),
-        import('@/components/cognition/cognition-sidebar'),
         import('@/components/cognition/learning-profile'),
         import('@/components/learn/learn-workspace'),
       ])
@@ -672,539 +690,97 @@ export default function Home() {
             vaultId={currentVaultId}
             learningPathSteps={learningPathSteps}
           />
-          <button id="reset-view-btn" onClick={() => {
+          <Button id="reset-view-btn" onClick={() => {
             const resetFn = useGalaxyActions.getState().actions.resetCameraView
             if (resetFn) resetFn()
-          }}>⊙ RESET VIEW</button>
+          }}>⊙ RESET VIEW</Button>
 
           {!immersive && <div className="relative z-10 flex flex-col h-screen pointer-events-none">
             <Header />
             <main className={`main-grid mode-${mode}${mode !== 'dashboard' ? ' no-bottom-pad' : ''}${mode === 'cognition' ? ' cognition-mode' : ''}`}>
               {(visitedModes.has('dashboard') || mode === 'dashboard') && (
-                <div className={`mode-stage ${mode === 'dashboard' ? 'active' : ''}`} aria-hidden={mode !== 'dashboard'}>
-                  <div className="left-zone">
-                    <DashboardLeft />
-                  </div>
-                  <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
-                    <div className="graph-hint" id={mode === 'dashboard' ? 'graph-hint' : undefined}>
-                      {graphLayoutHint}
-                    </div>
-                    <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'dashboard' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'dashboard' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
-                    <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
-                      <button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('newcard')}>+ 新建</button>
-                      <div className="w-px h-3 bg-white/10"></div>
-                      <button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('importtext')}>导入</button>
-                      <div className="w-px h-3 bg-white/10"></div>
-                      <button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => openModal('shortcuts')}>⌨ 快捷键</button>
-                    </div>
-                  </section>
-                  <div className="right-zone">
-                    <DashboardRight />
-                  </div>
-                  <BottomBar />
-                </div>
+                <DashboardStage
+                  active={mode === 'dashboard'}
+                  graphLayoutHint={graphLayoutHint}
+                  onOpenModal={openModal}
+                />
               )}
 
               {(visitedModes.has('forge') || mode === 'forge') && (
-                <div className={`mode-stage forge-stage ${mode === 'forge' ? 'active' : ''}`} aria-hidden={mode !== 'forge'}>
-                  <section
-                    className={`forge-ide pointer-events-auto ${resourcePanelOpen ? 'has-left' : 'no-left'} ${editorPanelOpen ? 'has-right' : 'no-right'}`}
-                    style={{
-                      '--forge-left-live': `${Math.max(240, Math.min(420, forgeLeftWidth || 300))}px`,
-                      '--forge-right-live': `${Math.max(340, Math.min(720, forgeRightWidth || 460))}px`,
-                    } as CSSProperties}
-                  >
-                    <nav className="forge-activity glass-panel" aria-label="AI 工作台面板">
-                      <button
-                        type="button"
-                        className={resourcePanelOpen && forgeResourceView === 'context' ? 'active' : ''}
-                        onClick={() => toggleForgeResource('context')}
-                        title="路径与会话"
-                      >
-                        <Layers3 className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className={resourcePanelOpen && forgeResourceView === 'cards' ? 'active' : ''}
-                        onClick={() => toggleForgeResource('cards')}
-                        title="卡片库"
-                      >
-                        <Files className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className={chatPanelOpen ? 'active' : ''}
-                        onClick={() => setChatPanelOpen(!chatPanelOpen)}
-                        title="AI 对话"
-                      >
-                        <MessageSquareText className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className={editorPanelOpen ? 'active' : ''}
-                        onClick={toggleForgeEditor}
-                        title="卡片编辑"
-                      >
-                        <PenLine className="h-4 w-4" />
-                      </button>
-                    </nav>
-
-                    <aside className={`forge-ide-rail ${resourcePanelOpen ? '' : 'empty'}`}>
-                      {resourcePanelOpen && (
-                        <ResizablePanel
-                          key={forgeResourceView}
-                          id={forgeResourceView === 'cards' ? 'fileTree' : 'sessionList'}
-                          zone="left"
-                          minWidth={240}
-                          maxWidth={420}
-                        >
-                          <ForgeResourcePanel view={forgeResourceView} onViewChange={changeForgeResourceView} />
-                        </ResizablePanel>
-                      )}
-                    </aside>
-
-                    <main className={`forge-ide-workbench ${chatPanelOpen ? 'active' : 'empty'}`}>
-                      {chatPanelOpen ? (
-                        <ForgeChat />
-                      ) : (
-                        <div className="forge-ide-empty">
-                          <span className="mono">AI WORKSPACE</span>
-                          <p>打开对话区，围绕当前任务、会话或卡片继续工作。</p>
-                          <div>
-                            <button type="button" onClick={() => setChatPanelOpen(true)}>打开对话</button>
-                            <button type="button" onClick={() => openModal('newcard')}>新建卡片</button>
-                          </div>
-                        </div>
-                      )}
-                    </main>
-
-                    <aside className={`forge-ide-editor ${editorPanelOpen ? '' : 'empty'}`}>
-                      {editorPanelOpen && (
-                        <ResizablePanel key="editor" id="editor" zone="right">
-                          <ForgeEditor />
-                        </ResizablePanel>
-                      )}
-                    </aside>
-                  </section>
-                </div>
+                <ForgeStage
+                  active={mode === 'forge'}
+                  resourcePanelOpen={resourcePanelOpen}
+                  editorPanelOpen={editorPanelOpen}
+                  chatPanelOpen={chatPanelOpen}
+                  forgeLeftWidth={forgeLeftWidth}
+                  forgeRightWidth={forgeRightWidth}
+                  forgeResourceView={forgeResourceView}
+                  onToggleResource={toggleForgeResource}
+                  onChangeResourceView={changeForgeResourceView}
+                  onToggleEditor={toggleForgeEditor}
+                  onChatPanelOpenChange={setChatPanelOpen}
+                  onOpenNewCard={() => openModal('newcard')}
+                />
               )}
 
               {(visitedModes.has('galaxy') || mode === 'galaxy') && (
-                <div className={`mode-stage ${mode === 'galaxy' ? 'active' : ''}`} aria-hidden={mode !== 'galaxy'}>
-                  <div className="left-zone">
-                    <GalaxyControls />
-                  </div>
-                  <section className="flex-1 flex flex-col min-w-0 overflow-hidden items-center justify-end pb-6">
-                    <div className="graph-hint" id={mode === 'galaxy' ? 'graph-hint' : undefined}>
-                      {graphLayoutHint}
-                    </div>
-                    <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={mode === 'galaxy' ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={mode === 'galaxy' ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
-                  </section>
-                  <div className="right-zone">
-                    <GalaxyFilter />
-                  </div>
-                  <GalaxyLayoutSwitcher />
-                </div>
+                <GalaxyStage
+                  active={mode === 'galaxy'}
+                  graphLayoutHint={graphLayoutHint}
+                />
               )}
 
               {(visitedModes.has('cognition') || mode === 'cognition') && (
-                <div className={`mode-stage cognition-stage ${mode === 'cognition' ? 'active' : ''}`} aria-hidden={mode !== 'cognition'}>
-                  <LearningProfile />
-                </div>
+                <CognitionStage active={mode === 'cognition'} />
               )}
 
               {(visitedModes.has('learn') || mode === 'learn') && (
-                <div className={`mode-stage learn-stage ${mode === 'learn' ? 'active' : ''}`} aria-hidden={mode !== 'learn'}>
-                  <section className="flex-1 min-w-0 overflow-hidden pointer-events-auto">
-                    <LearnWorkspace />
-                  </section>
-                </div>
+                <LearnStage active={mode === 'learn'} />
               )}
             </main>
             {mode === 'cognition' && <PanelBar />}
           </div>}
 
-          {modal && (
-            <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeModal() }}>
-              {/* ── Search ── */}
-              {modal === 'search' && (
-                <div className="modal-panel">
-                  <div className="modal-header">
-                    <span className="mono text-purple-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>Search_Nodes</span>
-                    <button className="modal-close" onClick={closeModal}>✕</button>
-                  </div>
-                  <div className="p-5">
-                    <input
-                      type="text"
-                      className="axiom-input"
-                      placeholder="输入关键词搜索全部节点..."
-                      value={searchQuery}
-                      onChange={e => handleSearch(e.target.value)}
-                      autoFocus
-                    />
-                    <div className="mt-3">
-                      {searching ? (
-                        <div className="mono opacity-25 text-center" style={{ fontSize: 'var(--f8)' }}>搜索中...</div>
-                      ) : searchResults.length > 0 ? (
-                        <div className="space-y-2 max-h-60 overflow-y-auto no-scrollbar">
-                          {searchResults.map((r, i) => (
-                            <div
-                              key={i}
-                              className="p-3 bg-white/5 rounded-lg border border-white/5 cursor-pointer hover:bg-white/8 transition-colors"
-                              onClick={() => {
-                                // Find matching node in galaxy by ID first, then title fallback
-                                let node = galaxyData?.nodes.find(n => n.id === r.path)
-                                if (!node) {
-                                  node = galaxyData?.nodes.find(n => {
-                                    const nodeTitle = (n.title ?? '').toLowerCase().trim()
-                                    const resultTitle = (r.title ?? '').toLowerCase().trim()
-                                    return nodeTitle === resultTitle
-                                  })
-                                }
-                                if (node) {
-                                  setSelectedNode({ id: node.id, title: node.title, type: node.type })
-                                  useAppStore.getState().setMode('forge')
-                                  // Focus camera on this node in the galaxy
-                                  const focusFn = useGalaxyActions.getState().actions.focusNodeById
-                                  if (typeof focusFn === 'function') focusFn(node.id)
-                                } else {
-                                  // Node not in current galaxy view → focus might be in a different vault
-                                  useAppStore.getState().setSelectedNode({ id: r.path, title: r.title, type: '' })
-                                  useAppStore.getState().setMode('forge')
-                                }
-                                closeModal()
-                              }}
-                            >
-                              <div className="text-white/70 font-medium" style={{ fontSize: 'var(--f10)' }}>{r.title}</div>
-                              <div className="mono opacity-25 mt-0.5 truncate" style={{ fontSize: 'var(--f7)' }}>{r.snippet.slice(0, 80)}...</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : searchQuery ? (
-                        <div className="mono opacity-25 text-center" style={{ fontSize: 'var(--f8)' }}>未找到匹配节点</div>
-                      ) : (
-                        <div className="mono opacity-25 text-center" style={{ fontSize: 'var(--f8)' }}>输入关键词开始搜索...</div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── New Card ── */}
-              {modal === 'newcard' && (
-                <div className="modal-panel">
-                  <div className="modal-header">
-                    <span className="mono text-purple-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>New_Card</span>
-                    <button className="modal-close" onClick={closeModal}>✕</button>
-                  </div>
-                  <div className="p-5 space-y-4">
-                    <div>
-                      <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>Title</span>
-                      <input
-                        type="text"
-                        className="axiom-input"
-                        placeholder="卡片标题..."
-                        value={newCardTitle}
-                        onChange={e => setNewCardTitle(e.target.value)}
-                        autoFocus
-                      />
-                    </div>
-                    <div>
-                      <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>Type</span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {cardTypeOptions.map((type) => (
-                          <button
-                            key={type.id}
-                            className={`mono rounded-lg border px-2.5 py-1.5 transition-colors ${
-                              newCardType === type.id
-                                ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200/80'
-                                : 'border-white/8 bg-white/[0.025] text-white/38 hover:text-white/68'
-                            }`}
-                            style={{ fontSize: 'var(--f9)' }}
-                            onClick={() => setNewCardType(type.id)}
-                          >
-                            {type.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>Content</span>
-                      <textarea
-                        className="forge-chat-input"
-                        rows={5}
-                        placeholder="在此输入内容 (Markdown)..."
-                        value={newCardContent}
-                        onChange={e => setNewCardContent(e.target.value)}
-                      />
-                    </div>
-                    <button
-                      className="axiom-btn primary w-full text-center"
-                      disabled={!newCardTitle.trim() || creating}
-                      onClick={() => handleCreateCard()}
-                    >
-                      {creating ? '创建中...' : '创建卡片'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Import Text ── */}
-              {modal === 'importtext' && (
-                <div className="modal-panel">
-                  <div className="modal-header">
-                    <span className="mono text-cyan-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>Import_Text</span>
-                    <button className="modal-close" onClick={closeModal}>✕</button>
-                  </div>
-                  <div className="p-5 space-y-4">
-                    <div>
-                      <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>TITLE</span>
-                      <input
-                        type="text"
-                        className="axiom-input"
-                        placeholder="文献/材料标题..."
-                        value={newCardTitle}
-                        onChange={e => setNewCardTitle(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <span className="mono opacity-30 uppercase block mb-2" style={{ fontSize: 'var(--f8)' }}>CONTENT</span>
-                      <textarea
-                        className="forge-chat-input"
-                        rows={8}
-                        placeholder="粘贴文献内容、学习笔记、或任何文本..."
-                        value={newCardContent}
-                        onChange={e => setNewCardContent(e.target.value)}
-                      />
-                    </div>
-                    <button
-                      className="axiom-btn primary w-full text-center"
-                      disabled={!newCardTitle.trim() || creating}
-                      onClick={() => handleCreateCard('literature')}
-                    >
-                      {creating ? '导入中...' : '导入为文献资料'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Oracle Switch ── */}
-              {modal === 'oracle' && (
-                <div className="modal-panel">
-                  <div className="modal-header">
-                    <span className="mono text-purple-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>Switch_Oracle</span>
-                    <button className="modal-close" onClick={closeModal}>✕</button>
-                  </div>
-                  <div className="p-5 grid grid-cols-2 gap-3">
-                    {[
-                      { id: 'default', letter: 'A', name: 'AXIOM', desc: '通用学习助手 · 苏格拉底式提问引导', color: 'purple' },
-                      { id: 'socrates', letter: 'S', name: '苏格拉底', desc: '哲学导师 · 问答法 · 从不直接给答案', color: 'purple' },
-                      { id: 'musk', letter: 'M', name: '马斯克', desc: '第一性原理 · 质疑假设 · 物理思维', color: 'pink' },
-                      { id: 'munger', letter: 'C', name: '芒格', desc: '多元思维模型 · 逆向思维 · 跨学科', color: 'cyan' },
-                      { id: 'wittgenstein', letter: 'W', name: '维特根斯坦', desc: '语言分析 · 澄清概念 · 追问意义', color: 'purple' },
-                    ].map((agent, idx) => {
-                      const c = oracleColors[agent.color] ?? oracleColors.purple
-                      return (
-                        <div key={agent.id} className={`p-4 bg-white/5 rounded-xl border cursor-pointer hover:bg-white/8 transition-colors ${idx === 0 ? 'border-purple-500/20' : 'border-white/5'}`} onClick={() => { useAppStore.getState().setOracle(agent.id); closeModal() }}>
-                          <div className={`oracle-avatar ${c.bg} ${c.text} ${c.border} mb-2`}>{agent.letter}</div>
-                          <div className="text-white/70 font-medium" style={{ fontSize: 'var(--t-label)' }}>{agent.name}</div>
-                          <div className="mono opacity-35 mt-1" style={{ fontSize: 'var(--f8)' }}>{agent.desc}</div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Profile ── */}
-              {modal === 'profile' && (
-                <div className="modal-panel">
-                  <div className="modal-header">
-                    <span className="mono text-purple-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>User_Profile</span>
-                    <button className="modal-close" onClick={closeModal}>✕</button>
-                  </div>
-                  <div className="p-6">
-                    <div className="flex items-center gap-5 mb-6">
-                      <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500/40 to-cyan-500/40 border border-white/10 flex items-center justify-center">
-                        <span className="serif text-2xl">{(session?.user?.name ?? 'A').charAt(0).toUpperCase()}</span>
-                      </div>
-                      <div>
-                        <div className="text-lg font-medium">{session?.user?.name ?? '学习者'}</div>
-                        <div className="mono opacity-35 mt-1" style={{ fontSize: 'var(--f9)' }}>Nodes: {galaxyData?.nodes.length ?? 0} · Links: {galaxyData?.edges.length ?? 0}</div>
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 gap-3 mb-5">
-                      <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-purple-400">{galaxyData?.nodes.length ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>TOTAL</div></div>
-                      <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-cyan-400">{galaxyData?.edges.length ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>LINKS</div></div>
-                      <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-pink-400">{dashStats?.orphanCount ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>ORPHANS</div></div>
-                      <div className="text-center bg-white/5 rounded-lg p-3"><div className="serif text-xl text-white/60">{dashStats?.fleeting ?? 0}</div><div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>灵感草稿</div></div>
-                    </div>
-                    {/* Learning Profile Stats */}
-                    {learningProfile && (
-                      <div className="mb-5 space-y-3">
-                        <div className="hud-line"></div>
-                        <span className="mono opacity-40 uppercase tracking-widest block" style={{ fontSize: 'var(--f8)' }}>Ability_Profile</span>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div className="text-center bg-white/5 rounded-lg p-3">
-                            <div className="serif text-lg text-green-400">{learningProfile.masteryRate}%</div>
-                            <div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>掌握率</div>
-                          </div>
-                          <div className="text-center bg-white/5 rounded-lg p-3">
-                            <div className="serif text-lg text-cyan-400">{learningProfile.permanentCount}</div>
-                            <div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>永久知识</div>
-                          </div>
-                          <div className="text-center bg-white/5 rounded-lg p-3">
-                            <div className="serif text-lg text-purple-400">{learningProfile.domains.length}</div>
-                            <div className="mono opacity-30 mt-1" style={{ fontSize: 'var(--f7)' }}>领域</div>
-                          </div>
-                        </div>
-                        {learningProfile.domains.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {learningProfile.domains.map(d => (
-                              <span key={d.id} className="px-2 py-0.5 rounded mono text-[10px] border border-white/10" style={{ color: d.color || '#a855f7' }}>
-                                {d.name} ({d.cardCount})
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    <button className="axiom-btn secondary w-full text-center" onClick={closeModal} style={{ fontSize: 'var(--f8)' }}>CLOSE</button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Shortcuts ── */}
-              {modal === 'shortcuts' && (
-                <div className="modal-panel">
-                  <div className="modal-header">
-                    <span className="mono text-purple-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>Shortcuts</span>
-                    <button className="modal-close" onClick={closeModal}>✕</button>
-                  </div>
-                  <div className="p-5 space-y-2">
-                    {[
-                      ['⌘K', '搜索节点'], ['⌘N', '新建节点'], ['⌘1/2/3/4/5', '切换页面（仪表板/AI工作台/知识图谱/认知洞察/路径规划）'], ['/', '命令面板'], ['Esc', '关闭面板'], ['Ctrl+S', '保存卡片（编辑器中）'], ['Ctrl+Z', '撤销编辑（编辑器中）'],
-                    ].map(([key, desc]) => (
-                      <div key={key as string} className="flex justify-between items-center py-2 border-b border-white/5">
-                        <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>{key as string}</span>
-                        <span className="text-white/35" style={{ fontSize: 'var(--f10)' }}>{desc as string}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* ── Onboarding ── */}
-              {modal === 'onboarding' && (
-                <div className="modal-panel" style={{ maxWidth: '520px' }}>
-                  <div className="modal-header">
-                    <span className="mono text-purple-400 uppercase tracking-widest" style={{ fontSize: 'var(--f10)' }}>Welcome_to_AXIOM</span>
-                    <button className="modal-close" onClick={() => { closeModal(); handleCompleteOnboarding() }}>✕</button>
-                  </div>
-                  <div className="p-6 space-y-5">
-                    <div>
-                      <h2 className="serif text-xl text-white/80 mb-2">欢迎来到 AXIOM 认知操作系统</h2>
-                      <p className="text-white/40 leading-relaxed" style={{ fontSize: 'var(--f10)' }}>
-                        AXIOM 将你的知识可视化为知识图谱，让 AI 帮助你整理、连接、深化认知。
-                      </p>
-                    </div>
-                    <div className="hud-line"></div>
-                    <div>
-                      <span className="mono opacity-30 uppercase tracking-wider block mb-3" style={{ fontSize: 'var(--f8)' }}>5 个页面</span>
-                      <div className="space-y-2.5">
-                        {[
-                          { key: '1', name: '仪表板', sub: 'Dashboard', desc: '查看知识统计、最近活动和系统状态概览', color: 'text-white/60', dot: 'bg-white/40' },
-                          { key: '2', name: 'AI 工作台', sub: 'Workspace', desc: '围绕理解卡对话、补例子和打磨理解', color: 'text-pink-400', dot: 'bg-pink-400' },
-                          { key: '3', name: '知识图谱', sub: 'Graph', desc: '可视化浏览和整理你的知识网络，发现隐藏关联', color: 'text-cyan-400', dot: 'bg-cyan-400' },
-                          { key: '4', name: '认知洞察', sub: 'Insights', desc: '查看能力画像、观察记录和下一步建议', color: 'text-purple-400', dot: 'bg-purple-400' },
-                          { key: '5', name: '路径规划', sub: 'Path', desc: '从主题或资料生成学习路径 — 推荐从这里开始', color: 'text-amber-400', dot: 'bg-amber-400', recommend: true },
-                        ].map(m => (
-                          <div key={m.key} className={`flex items-start gap-3 p-3 rounded-lg ${m.recommend ? 'bg-pink-500/5 border border-pink-500/15' : 'bg-white/[0.02] border border-white/5'}`}>
-                            <span className={`w-5 h-5 rounded-full ${m.dot} flex items-center justify-center shrink-0 mt-0.5`}>
-                              <span className="mono text-[9px] text-black/60 font-bold">{m.key}</span>
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2">
-                                <span className={`font-medium ${m.color}`} style={{ fontSize: 'var(--f10)' }}>{m.name}</span>
-                                <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>{m.sub}</span>
-                                {m.recommend && <span className="mono text-[8px] px-1.5 py-0.5 rounded bg-pink-500/15 text-pink-400 border border-pink-500/20">推荐</span>}
-                              </div>
-                              <p className="text-white/35 mt-0.5" style={{ fontSize: 'var(--f9)' }}>{m.desc}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="hud-line"></div>
-                    <div>
-                      <span className="mono opacity-30 uppercase tracking-wider block mb-2" style={{ fontSize: 'var(--f8)' }}>快捷键</span>
-                      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                        {[['⌘K', '搜索'], ['⌘N', '新建卡片'], ['⌘1-5', '切换页面'], ['/', '命令面板']].map(([k, d]) => (
-                          <div key={k as string} className="flex gap-2">
-                            <span className="mono text-white/50 shrink-0" style={{ fontSize: 'var(--f9)' }}>{k as string}</span>
-                            <span className="text-white/30" style={{ fontSize: 'var(--f9)' }}>{d as string}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <button
-                        className="axiom-btn primary w-full text-center"
-                        onClick={handleStartInitialProfile}
-                      >
-                        让 AI 先了解我
-                      </button>
-                      <button
-                        className="axiom-btn w-full text-center"
-                        onClick={() => { closeModal(); handleCompleteOnboarding() }}
-                      >
-                        直接开始使用
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          <AppModals
+            modal={modal}
+            searchQuery={searchQuery}
+            searching={searching}
+            searchResults={searchResults}
+            newCardTitle={newCardTitle}
+            newCardContent={newCardContent}
+            newCardType={newCardType}
+            cardTypeOptions={cardTypeOptions}
+            creating={creating}
+            oracleColors={oracleColors}
+            userName={session?.user?.name}
+            nodeCount={galaxyData?.nodes.length ?? 0}
+            edgeCount={galaxyData?.edges.length ?? 0}
+            orphanCount={dashStats?.orphanCount ?? 0}
+            fleetingCount={dashStats?.fleeting ?? 0}
+            learningProfile={learningProfile}
+            onClose={closeModal}
+            onSearch={handleSearch}
+            onOpenSearchResult={handleOpenSearchResult}
+            onNewCardTitleChange={setNewCardTitle}
+            onNewCardContentChange={setNewCardContent}
+            onNewCardTypeChange={setNewCardType}
+            onCreateCard={handleCreateCard}
+            onSetOracle={(oracle) => useAppStore.getState().setOracle(oracle)}
+            onStartInitialProfile={handleStartInitialProfile}
+            onCompleteOnboarding={handleCompleteOnboarding}
+          />
         </>
       )}
 
-      {/* ── Loading Overlay ── */}
-      <div className={`loading-overlay ${showLoading ? 'loading-overlay-active' : ''}`}>
-        <div className="loading-overlay-bg" />
-        <div className="loading-overlay-content">
-          <h1 className="loading-overlay-title">AXIOM</h1>
-          <p className="loading-overlay-subtitle">Cognitive Operating System</p>
-          {!loadError ? (
-            <>
-              <div className="loading-overlay-bar">
-                <span style={{ width: loadProgress + '%' }} />
-              </div>
-              <p className="loading-overlay-pct">{loadProgress}%</p>
-              <p className="loading-overlay-status">{loadStatusText}</p>
-            </>
-          ) : (
-            <div className="text-center mt-4">
-              <p className="mono text-white/40 mb-4" style={{ fontSize: 'var(--f10)' }}>数据加载超时</p>
-              <button className="axiom-btn primary" onClick={() => { setLoadError(false); setShowLoading(false); setShowApp(false) }}>返回重试</button>
-            </div>
-          )}
-        </div>
-      </div>
+      <LoadingOverlay
+        active={showLoading}
+        loadError={loadError}
+        loadProgress={loadProgress}
+        loadStatusText={loadStatusText}
+        onRetry={() => { setLoadError(false); setShowLoading(false); setShowApp(false) }}
+      />
 
-      {/* ── Exit Immersive ── */}
-      {immersive && (
-        <button
-          onClick={() => setImmersive(false)}
-          style={{
-            position: "fixed", bottom: "24px", right: "24px", zIndex: 60,
-            fontFamily: "JetBrains Mono, monospace", fontSize: "12px",
-            padding: "10px 20px", color: "rgba(255,255,255,0.6)",
-            background: "rgba(10,10,15,0.8)", backdropFilter: "blur(12px)",
-            border: "1px solid rgba(255,255,255,0.1)", borderRadius: "20px", cursor: "pointer"
-          }}
-        >退出沉浸</button>
-      )}
+      {immersive && <ImmersiveExitButton onExit={() => setImmersive(false)} />}
 
       {/* ── Landing Page ── */}
       <div className={`landing-stage ${showApp ? 'landing-stage-exit' : ''}`}>

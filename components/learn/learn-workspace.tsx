@@ -1,148 +1,35 @@
 'use client'
 
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
-  ArrowRight,
-  BookOpen,
-  CheckCircle2,
-  Circle,
-  Clock3,
-  ExternalLink,
-  FileText,
-  Layers3,
-  Loader2,
-  Plus,
-  Route,
-  Sparkles,
-  Target,
-} from 'lucide-react'
-import { useLearningPaths, useGeneratePath, useDeletePath, useImportDocument, useExecuteStep, useUpdateStepProgress, useArchivePath } from '@/hooks/use-learning'
+  AI_GENERATION_STAGES,
+  ChapterStack,
+  CreatePathPanel,
+  DOCUMENT_IMPORT_STAGES,
+  EmptyLearnPanel,
+  PathSidebar,
+  RouteHeader,
+  canOpenStep,
+  getNextStep,
+  isArchivedPath,
+  isUnassignedTaskPath,
+  type CreateMode,
+  type PathBuckets,
+  type PathFilter,
+} from './workspace'
+import {
+  useArchivePath,
+  useDeletePath,
+  useExecuteStep,
+  useGeneratePath,
+  useImportDocument,
+  useLearningPaths,
+  useUpdateStepProgress,
+} from '@/hooks/use-learning'
 import type { LearningPath, LearningStep } from '@/hooks/use-learning'
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
-
-type CreateMode = 'ai' | 'material'
-type PathFilter = 'active' | 'all' | 'archived'
-
-const AI_GENERATION_STAGES = [
-  { label: '理解学习目标', desc: '识别这是单一概念还是复合课程目标' },
-  { label: '拆解知识模块', desc: '把主题拆成星团、任务组和前置关系' },
-  { label: '匹配已有知识库', desc: '复用已有卡片，避免重复创建' },
-  { label: '生成任务路径', desc: '创建可推进的学习步骤和理解卡' },
-  { label: '写入知识图谱', desc: '生成星团、卡片和关系边' },
-]
-
-const DOCUMENT_IMPORT_STAGES = [
-  { label: '解析资料内容', desc: '识别标题、来源、章节和核心概念' },
-  { label: '匹配星团', desc: '判断资料属于已有主题还是新主题' },
-  { label: '抽取灵感草稿', desc: '把资料拆成可打磨的灵感卡片' },
-  { label: '生成学习路径', desc: '把概念编排成可推进的任务组' },
-  { label: '同步知识图谱', desc: '写入卡片、星团和关联边' },
-]
-
-function formatTime(value?: string) {
-  if (!value) return '刚刚'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '刚刚'
-  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
-
-function getNextStep(steps: LearningStep[]) {
-  return steps.find((step) => step.status === 'available' || step.status === 'learning') ?? steps[0] ?? null
-}
-
-function isArchivedPath(path: LearningPath) {
-  return path.status === 'archived'
-}
-
-function isUnassignedTaskPath(path: LearningPath) {
-  return path.source === 'unassigned' || path.id === '__unassigned_tasks__' || path.id === '__fleeting_inbox__'
-}
-
-function statusMeta(step: LearningStep) {
-  if (step.status === 'mastered') {
-    return { label: '已掌握', tone: 'text-green-300', bar: 'bg-green-400', border: 'border-green-500/30', state: 'done' }
-  }
-  if (step.status === 'completed') {
-    return { label: '任务已完成', tone: 'text-green-300', bar: 'bg-green-400', border: 'border-green-500/30', state: 'done' }
-  }
-  if (step.status === 'learning') {
-    return { label: '学习中', tone: 'text-cyan-300', bar: 'bg-cyan-400', border: 'border-cyan-500/30', state: 'active' }
-  }
-  if (step.status === 'available') {
-    return { label: '可开始', tone: 'text-cyan-200', bar: 'bg-cyan-300', border: 'border-cyan-300/25', state: 'ready' }
-  }
-  return { label: '前置未满足', tone: 'text-white/34', bar: 'bg-white/20', border: 'border-white/10', state: 'locked' }
-}
-
-function cardTypeLabel(type?: string | null) {
-  if (type === 'permanent') return '永久知识卡'
-  if (type === 'literature') return '文献资料'
-  return '灵感草稿'
-}
-
-function canOpenStep(step: LearningStep) {
-  return step.status !== 'locked'
-}
-
-function GenerationStatusHint({ stage }: { stage: { label: string; desc: string } }) {
-  return (
-    <div className="learn-generation-hint">
-      <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-cyan-100/80" />
-      <div className="min-w-0">
-        <div className="mono text-[10px] text-white/62">AI 正在{stage.label}...</div>
-        <div className="mt-0.5 text-white/38" style={{ fontSize: 'var(--f8)' }}>
-          {stage.desc}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function EmptyLearnPanel({
-  title,
-  desc,
-  onCreate,
-  onImport,
-}: {
-  title: string
-  desc: string
-  onCreate?: () => void
-  onImport?: () => void
-}) {
-  return (
-    <div className="learn-empty-panel glass-panel">
-      <div className="learn-empty-orbit" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </div>
-      <div className="learn-empty-icon">
-        <Route className="h-5 w-5" />
-      </div>
-      <div className="learn-empty-kicker">PATH WORKSPACE</div>
-      <h3>{title}</h3>
-      <p>{desc}</p>
-      {(onCreate || onImport) && (
-        <div className="learn-empty-actions">
-          {onCreate && (
-            <button onClick={onCreate}>
-              <Sparkles className="h-3.5 w-3.5" />
-              生成路径
-            </button>
-          )}
-          {onImport && (
-            <button onClick={onImport}>
-              <FileText className="h-3.5 w-3.5" />
-              导入资料
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
 
 export default function LearnWorkspace() {
   const { data, loading, refetch } = useLearningPaths()
@@ -418,341 +305,67 @@ export default function LearnWorkspace() {
     }
   }
 
-  const renderPathCapsule = (path: LearningPath, active: boolean) => {
-    const done = path.progress >= 100 || isArchivedPath(path)
-    const progress = Math.max(0, Math.min(100, Math.round(path.progress || 0)))
-    const age = formatTime(path.updatedAt ?? path.createdAt)
-    return (
-      <button
-        key={path.id}
-        type="button"
-        onClick={() => handleSelectPath(path)}
-        className={`learn-path-capsule${active ? ' active' : ''}${done ? ' done' : ''}${path.progress > 0 && !done ? ' in-progress' : ''}`}
-        style={{ '--path-progress': `${progress}%` } as CSSProperties}
-      >
-        <span className={`learn-path-capsule-dot${done ? ' done' : active ? ' active' : ''}`} />
-        <span className="learn-path-capsule-main">
-          <span className="learn-path-capsule-name">{path.name}</span>
-          <span className="learn-path-capsule-meta">
-            <span>{age}</span>
-            <span>{path.difficulty || 'path'}</span>
-          </span>
-        </span>
-        <span className="learn-path-capsule-count">{path.doneCount}/{path.totalCount}</span>
-      </button>
-    )
-  }
-
   return (
     <div className="learn-workspace">
       <div className="learn-orbit-grid">
-        <aside className="learn-path-sidebar">
-          <div className="learn-filter-dock">
-              {[
-                { id: 'active' as const, label: '进行中' },
-                { id: 'all' as const, label: '全部' },
-                { id: 'archived' as const, label: '归档' },
-              ].map((item) => (
-                <button
-                  key={item.id}
-                  className={`learn-filter-pill${pathFilter === item.id ? ' active' : ''}`}
-                  onClick={() => setPathFilter(item.id)}
-                >
-                  {item.label}
-                </button>
-              ))}
-          </div>
-
-          <div className="learn-path-scroll no-scrollbar">
-            {loading ? (
-              <div className="learn-empty-state">路径加载中...</div>
-            ) : isEmpty ? (
-              <div className="learn-empty-state">
-                <div>还没有学习路径</div>
-                <span>输入主题或导入资料</span>
-              </div>
-            ) : pathBuckets.visible.length === 0 ? (
-              <div className="learn-empty-state">
-                {pathFilter === 'archived' ? '暂无已归档路径' : '暂无符合筛选的路径'}
-              </div>
-            ) : (
-              <div className="learn-path-groups">
-                {pathBuckets.inbox.length > 0 && (
-                  <div className="learn-path-group">
-                    <div className="learn-path-group-label"><Layers3 className="h-3 w-3" />草稿箱</div>
-                    <div className="space-y-1">
-                      {pathBuckets.inbox.map((path) => renderPathCapsule(path, path.id === currentPath?.id))}
-                    </div>
-                  </div>
-                )}
-                {(pathBuckets.active.length > 0 || pathBuckets.queued.length > 0) && (
-                  <div className="learn-path-group">
-                    <div className="learn-path-group-label"><Route className="h-3 w-3" />学习路径</div>
-                    <div className="space-y-1">
-                      {pathBuckets.active.map((path) => renderPathCapsule(path, path.id === currentPath?.id))}
-                      {pathBuckets.queued.map((path) => renderPathCapsule(path, path.id === currentPath?.id))}
-                    </div>
-                  </div>
-                )}
-                {pathBuckets.done.length > 0 && (
-                  <div className="learn-path-group">
-                    <div className="learn-path-group-label"><CheckCircle2 className="h-3 w-3" />
-                      {pathFilter === 'archived' ? '已归档' : '已完成'}
-                    </div>
-                    <div className="space-y-1">
-                      {pathBuckets.done.map((path) => renderPathCapsule(path, path.id === currentPath?.id))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <div className="learn-create-shell">
-            {!createPanelOpen ? (
-              <button
-                className="learn-create-button"
-                onClick={() => setCreatePanelOpen(true)}
-              >
-                <Plus className="h-3 w-3" />
-                新任务
-              </button>
-            ) : (
-              <div className="learn-create-panel">
-                <div className="learn-create-tabs">
-                  {[
-                    { id: 'ai' as const, label: 'AI' },
-                    { id: 'material' as const, label: '导入' },
-                  ].map((item) => (
-                    <button
-                      key={item.id}
-                      className={`learn-create-tab${createMode === item.id ? ' active' : ''}`}
-                      onClick={() => setCreateMode(item.id)}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-                <input
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder={createMode === 'material' ? '匹配星团主题' : '主题/课程/概念'}
-                  className="learn-input"
-                />
-                {createMode === 'ai' ? (
-                  <>
-                    <textarea
-                      value={pathMaterial}
-                      onChange={(e) => setPathMaterial(e.target.value)}
-                      rows={3}
-                      placeholder="补充目标、资料或限制（可选）"
-                      className="learn-input learn-textarea"
-                    />
-                    <div className="learn-level-grid">
-                      {(['beginner', 'intermediate', 'advanced'] as const).map((item) => (
-                        <button
-                          key={item}
-                          onClick={() => setLevel(item)}
-                          className={`learn-level-pill${level === item ? ' active' : ''}`}
-                        >
-                          {item === 'beginner' ? '基础' : item === 'intermediate' ? '进阶' : '高级'}
-                        </button>
-                      ))}
-                    </div>
-                    <button
-                      onClick={handleGeneratePath}
-                      disabled={generatePath.isPending || !topic.trim()}
-                      className="learn-submit-button"
-                    >
-                      <Sparkles className="h-3 w-3" />
-                      {generatePath.isPending ? currentGenerationStage.label : '生成路径'}
-                    </button>
-                    {generatePath.isPending && <GenerationStatusHint stage={currentGenerationStage} />}
-                  </>
-                ) : (
-                  <>
-                    <textarea
-                      value={documentText}
-                      onChange={(e) => setDocumentText(e.target.value)}
-                      rows={4}
-                      placeholder="粘贴资料全文"
-                      className="learn-input learn-textarea"
-                    />
-                    <button
-                      onClick={handleImportDocument}
-                      disabled={importDocument.isPending || !documentText.trim() || !topic.trim()}
-                      className="learn-submit-button"
-                    >
-                      <FileText className="h-3 w-3" />
-                      {importDocument.isPending ? currentGenerationStage.label : '导入并生成'}
-                    </button>
-                    {importDocument.isPending && <GenerationStatusHint stage={currentGenerationStage} />}
-                  </>
-                )}
-                {error && (
-                  <div className="learn-form-error">{error}</div>
-                )}
-                <button
-                  className="learn-collapse-button"
-                  onClick={() => { setCreatePanelOpen(false); setError(null) }}
-                >
-                  收起
-                </button>
-              </div>
-            )}
-          </div>
-        </aside>
+        <PathSidebar
+          loading={loading}
+          isEmpty={isEmpty}
+          pathFilter={pathFilter}
+          pathBuckets={pathBuckets}
+          currentPathId={currentPath?.id}
+          onPathFilterChange={setPathFilter}
+          onSelectPath={handleSelectPath}
+          createPanel={(
+            <CreatePathPanel
+              open={createPanelOpen}
+              createMode={createMode}
+              topic={topic}
+              level={level}
+              documentText={documentText}
+              pathMaterial={pathMaterial}
+              error={error}
+              currentGenerationStage={currentGenerationStage}
+              generatePending={generatePath.isPending}
+              importPending={importDocument.isPending}
+              onOpen={() => setCreatePanelOpen(true)}
+              onClose={() => { setCreatePanelOpen(false); setError(null) }}
+              onCreateModeChange={setCreateMode}
+              onTopicChange={setTopic}
+              onLevelChange={setLevel}
+              onDocumentTextChange={setDocumentText}
+              onPathMaterialChange={setPathMaterial}
+              onGeneratePath={handleGeneratePath}
+              onImportDocument={handleImportDocument}
+            />
+          )}
+        />
 
         <section className={`learn-detail${!currentPath ? ' empty' : ''}${sparsePath ? ' sparse' : ''}`}>
           {currentPath && (
-            <section
-              className="learn-route-header glass-panel"
-              style={{ '--path-progress': `${totalProgress}%` } as CSSProperties}
-            >
-              <div>
-                <div className="learn-route-main">
-                  <div className="learn-route-emblem">
-                    <Route className="h-4 w-4" />
-                  </div>
-                  <div className="learn-route-copy">
-                    <div className="learn-route-eyebrow">
-                      <Target className="h-3 w-3" />
-                      PATH ORCHESTRATION
-                    </div>
-                    <div className="learn-route-title-row">
-                      <h2>{currentPath.name}</h2>
-                      <span className="learn-route-count">{totalDone}/{currentSteps.length} steps</span>
-                    </div>
-                    {currentPath.description && (
-                      <p className="learn-route-description">{currentPath.description}</p>
-                    )}
-                  </div>
-                  <div className="learn-route-actions">
-                    {allDone && (
-                      <span className="learn-route-chip done">已完成</span>
-                    )}
-                    {!isUnassignedTaskPath(currentPath) && (
-                      <>
-                        <button
-                          className="learn-route-action"
-                          onClick={() => handleArchivePath(currentPath, !isArchivedPath(currentPath))}
-                        >
-                          {isArchivedPath(currentPath) ? '恢复' : '归档'}
-                        </button>
-                        <button
-                          className="learn-route-action danger"
-                          onClick={() => handleDeletePath(currentPath.id)}
-                        >
-                          删除
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <div className="learn-progress-row">
-                  <div className="learn-progress-track">
-                    <div className="learn-progress-fill" />
-                  </div>
-                  <span>{totalProgress}%</span>
-                </div>
-              </div>
-            </section>
+            <RouteHeader
+              path={currentPath}
+              steps={currentSteps}
+              totalDone={totalDone}
+              totalProgress={totalProgress}
+              allDone={allDone}
+              onArchivePath={handleArchivePath}
+              onDeletePath={handleDeletePath}
+            />
           )}
 
           <div className={`learn-step-scroll no-scrollbar${sparsePath ? ' sparse' : ''}${emptyStepArea ? ' empty' : ''}`}>
             {currentPath ? (
               groupedSteps.length > 0 ? (
-                <div className={`learn-chapter-stack${sparsePath ? ' sparse' : ''}`}>
-                  {groupedSteps.map(([chapter, steps], chapterIndex) => {
-                    const chapterDone = steps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
-                    const chapterNext = getNextStep(steps)
-                    return (
-                      <section
-                        key={chapter}
-                        className="learn-chapter-card glass-panel"
-                        style={{ '--chapter-delay': `${chapterIndex * 46}ms` } as CSSProperties}
-                      >
-                        <div className="learn-chapter-head">
-                          <div>
-                            <span className={`learn-chapter-dot ${chapterDone === steps.length ? 'done' : chapterNext ? 'active' : ''}`} />
-                            <h3>{chapter}</h3>
-                          </div>
-                          <span>{chapterDone}/{steps.length}</span>
-                        </div>
-
-                        <div className="learn-step-list">
-                          {steps.map((step) => {
-                            const meta = statusMeta(step)
-                            const selected = step.id === currentStep?.id
-                            const done = step.status === 'completed' || step.status === 'mastered'
-                            const sessionId = stepSessionIds[step.id]
-                            return (
-                              <div
-                                key={step.id}
-                                onClick={() => setActiveLearningStepId(step.id)}
-                                className={`learn-step-card${selected ? ' selected' : ''}${done ? ' done' : ''}`}
-                                style={{ '--step-delay': `${Math.min(step.index, 10) * 18}ms` } as CSSProperties}
-                              >
-                                <div className="learn-step-content">
-                                  <span className={`learn-step-orb ${meta.state}`}>
-                                    {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
-                                  </span>
-                                  <div className="learn-step-copy">
-                                    <div className="learn-step-title-row">
-                                      <h4>{step.name}</h4>
-                                      <span className={`learn-step-badge ${meta.state}`}>
-                                        <span className={meta.bar} />
-                                        <span className={meta.tone}>{meta.label}</span>
-                                      </span>
-                                    </div>
-                                    {step.desc && (
-                                      <p>{step.desc}</p>
-                                    )}
-                                    <div className="learn-step-meta">
-                                      {step.estimatedMinutes && <span><Clock3 className="h-3 w-3" />{step.estimatedMinutes} min</span>}
-                                      {step.cardType && <span><BookOpen className="h-3 w-3" />{cardTypeLabel(step.cardType)}</span>}
-                                      {step.concept && <span>{step.concept}</span>}
-                                    </div>
-                                  </div>
-                                  <div className="learn-step-actions">
-                                    {canOpenStep(step) && (
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); void openStepInForge(step) }}
-                                        className="learn-step-action"
-                                      >
-                                        <ExternalLink className="h-3 w-3" />
-                                        AI 工作台
-                                      </button>
-                                    )}
-                                    {sessionId && (
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); void openStepInForge(step) }}
-                                        className="learn-step-action"
-                                      >
-                                        <ArrowRight className="h-3 w-3" />
-                                        继续
-                                      </button>
-                                    )}
-                                    {(step.status === 'learning' || step.status === 'available') && (
-                                      <button
-                                        onClick={(e) => { e.stopPropagation(); handleMarkComplete(step) }}
-                                        className="learn-step-action complete"
-                                      >
-                                        <CheckCircle2 className="h-3 w-3" />
-                                        完成
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </section>
-                    )
-                  })}
-                </div>
+                <ChapterStack
+                  groupedSteps={groupedSteps}
+                  sparse={sparsePath}
+                  currentStepId={currentStep?.id}
+                  stepSessionIds={stepSessionIds}
+                  onSelectStep={setActiveLearningStepId}
+                  onOpenStep={openStepInForge}
+                  onMarkComplete={handleMarkComplete}
+                />
               ) : (
                 <EmptyLearnPanel
                   title="这条路径还没有任务"

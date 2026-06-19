@@ -1,0 +1,164 @@
+'use client'
+
+import { useRef, useState } from 'react'
+import { Download, Maximize2, Play } from 'lucide-react'
+import { Button } from '@/components/ui'
+
+type VideoCardProps = {
+  title: string
+  videoUrl?: string
+  htmlContent?: string
+  duration: number
+  topic: string
+  thumbnail?: string
+}
+
+export function VideoCard({
+  title,
+  videoUrl,
+  htmlContent,
+  duration,
+  topic,
+  thumbnail,
+}: VideoCardProps) {
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
+  }
+
+  const totalDuration = duration
+
+  return (
+    <>
+      <div className="glass-panel rounded-xl p-4 mb-4 border border-white/10">
+        <div className="flex gap-4">
+          <div
+            className="flex-shrink-0 w-48 h-32 bg-black rounded-lg relative group cursor-pointer"
+            onClick={() => setIsPlaying(true)}
+          >
+            {videoUrl ? (
+              <video
+                src={videoUrl}
+                className="w-full h-full object-cover rounded-lg"
+                poster={thumbnail}
+                muted
+              />
+            ) : htmlContent ? (
+              <iframe
+                srcDoc={htmlContent}
+                className="w-full h-full rounded-lg pointer-events-none"
+                style={{ border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left', width: '200%', height: '200%' }}
+                title={title}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-900/50 to-purple-900/50 rounded-lg">
+                <span className="text-white/60 text-sm">视频预览</span>
+              </div>
+            )}
+            {!isPlaying && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/60 transition-all rounded-lg">
+                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center">
+                  <Play className="w-8 h-8 text-white ml-1 fill-white" />
+                </div>
+              </div>
+            )}
+            <div className="absolute bottom-2 right-2 bg-black/70 px-2 py-1 rounded text-xs font-semibold">
+              {formatTime(totalDuration)}
+            </div>
+          </div>
+
+          <div className="flex-1">
+            <h3 className="text-lg font-semibold mb-2">{title}</h3>
+            <p className="text-sm text-gray-400 mb-3">
+              主题: <span className="text-gray-300">{topic}</span>
+            </p>
+            <p className="text-sm text-gray-400 mb-4">
+              时长: <span className="text-gray-300">{formatTime(totalDuration)}</span>
+            </p>
+
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                onClick={() => setIsPlaying(true)}
+                className="px-4 py-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 transition-colors text-sm flex items-center gap-2"
+              >
+                <Play className="w-4 h-4" /> 播放
+              </Button>
+              {videoUrl && (
+                <Button
+                  onClick={() => {
+                    const a = document.createElement('a')
+                    a.href = videoUrl
+                    a.download = `${title.replace(/[\/\\:*?"<>|]/g, '-')}.mp4`
+                    a.click()
+                  }}
+                  className="px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-colors text-sm flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> 下载 MP4
+                </Button>
+              )}
+              {htmlContent && !videoUrl && (
+                <Button
+                  onClick={() => {
+                    const blob = new Blob([htmlContent], { type: 'text/html' })
+                    const url = URL.createObjectURL(blob)
+                    const a = document.createElement('a')
+                    a.href = url
+                    a.download = `${title.replace(/[\/\\:*?"<>|]/g, '-')}.html`
+                    a.click()
+                    URL.revokeObjectURL(url)
+                  }}
+                  className="px-4 py-2 bg-purple-500/20 text-purple-400 rounded-lg hover:bg-purple-500/30 transition-colors text-sm flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" /> 下载
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {isPlaying && (
+        <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center">
+          <Button
+            onClick={() => setIsPlaying(false)}
+            className="absolute top-4 right-4 text-white hover:text-gray-300 text-2xl z-10"
+          >
+            ✕
+          </Button>
+
+          <Button
+            onClick={() => setIsFullscreen(!isFullscreen)}
+            className="absolute bottom-4 right-4 text-white hover:text-gray-300 z-10"
+          >
+            <Maximize2 className="w-6 h-6" />
+          </Button>
+
+          {videoUrl ? (
+            <video
+              ref={videoRef}
+              src={videoUrl}
+              className={`${isFullscreen ? 'w-full h-full' : 'max-w-5xl max-h-[80vh]'} object-contain rounded-lg`}
+              controls
+              autoPlay
+            />
+          ) : htmlContent ? (
+            <iframe
+              ref={iframeRef}
+              srcDoc={htmlContent}
+              className={`${isFullscreen ? 'w-full h-full' : 'w-full max-w-5xl h-[80vh]'} rounded-lg`}
+              style={{ border: 'none' }}
+              title={title}
+              allowFullScreen
+            />
+          ) : null}
+        </div>
+      )}
+    </>
+  )
+}

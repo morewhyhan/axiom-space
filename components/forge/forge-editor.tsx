@@ -2,122 +2,28 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Trash2, X } from 'lucide-react'
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
 import { LearningResourcePanel, VideoCard, type GeneratedResourceItem } from '@/components/resources/resource-cards'
-
-interface WikiSuggestion {
-  id: string
-  title: string
-  type: string
-}
-
-type ResourceManifestItem = {
-  type: string
-  title: string
-  path: string
-  ref?: string
-  mp4Path?: string
-  mp4Ref?: string
-  fileName: string
-  status?: string
-  source?: string
-  sourceObjectType?: string
-  sourceObjectId?: string
-  sourcePath?: string
-  sourceTitle?: string
-  contentHash?: string
-  generatedAt?: string
-}
-
-type RagCardStatusValue = 'pending' | 'indexing' | 'indexed' | 'failed' | 'disabled'
-
-type RagCardStatus = {
-  status: RagCardStatusValue
-  synced: boolean
-  index: {
-    status: RagCardStatusValue
-    lastError: string | null
-    indexedAt: string | null
-    lastSyncedAt: string | null
-  } | null
-}
-
-type RelatedRagCard = {
-  id: string
-  title: string
-  type: string
-  path: string
-  clusterName: string | null
-  clusterColor: string | null
-  reason: string
-}
-
-type QualityIssue = {
-  dimension: 'clarity' | 'accuracy' | 'necessity'
-  code: string
-  label: string
-  message: string
-  fix: string
-}
-
-type QualityRejection = {
-  title: string
-  error: string
-  missingElements: string[]
-  issues: QualityIssue[]
-}
-
-type CardSaveSnapshot = {
-  id: string
-  content: string
-  title?: string | null
-  vaultId?: string | null
-}
-
-const CARD_TYPE_LABELS: Record<string, string> = {
-  fleeting: '◇ 灵感草稿',
-  literature: '○ 文献资料',
-  permanent: '◆ 永久知识',
-}
-
-function cardTypeLabel(type: string | undefined) {
-  if (!type) return '◇ 灵感草稿'
-  return CARD_TYPE_LABELS[type] ?? type
-}
-
-function cardTypeTone(type: string | undefined) {
-  if (type === 'permanent') return 'text-purple-400/70'
-  if (type === 'literature') return 'text-pink-400/70'
-  if (type === 'fleeting') return 'text-cyan-400/70'
-  return 'text-emerald-300/70'
-}
-
-function ragStatusLabel(status: RagCardStatusValue | undefined) {
-  if (status === 'indexed') return '已进入知识库'
-  if (status === 'indexing') return '索引中'
-  if (status === 'failed') return '同步失败'
-  if (status === 'disabled') return '未启用'
-  return '等待同步'
-}
-
-function ragStatusTone(status: RagCardStatusValue | undefined) {
-  if (status === 'indexed') return 'text-emerald-300/75'
-  if (status === 'indexing') return 'text-cyan-300/75'
-  if (status === 'failed') return 'text-red-300/80'
-  if (status === 'disabled') return 'text-white/30'
-  return 'text-amber-300/70'
-}
-
-function qualityDimensionLabel(dimension: QualityIssue['dimension']) {
-  if (dimension === 'clarity') return '清晰'
-  if (dimension === 'accuracy') return '准确'
-  return '必要'
-}
+import {
+  EditorEmptyState,
+  EditorHeader,
+  EditorLoadingState,
+  EditorStatusBar,
+  QualityRejectionDialog,
+  RelatedCardsPanel,
+  WikiSuggestionMenu,
+  type CardSaveSnapshot,
+  type QualityIssue,
+  type QualityRejection,
+  type RagCardStatus,
+  type RelatedRagCard,
+  type ResourceManifestItem,
+  type WikiSuggestion,
+} from './editor'
 
 export default function ForgeEditor() {
   const [editorMode, setEditorMode] = useState<'live' | 'read'>('live')
@@ -852,6 +758,63 @@ export default function ForgeEditor() {
     clearSelectedNode()
   }
 
+  const handleModeChange = async (mode: 'live' | 'read') => {
+    await saveCurrentCard({ silent: true })
+    setEditorMode(mode)
+  }
+
+  const handleOpenRelatedCard = async (card: RelatedRagCard) => {
+    await saveCurrentCard({ silent: true })
+    useAppStore.getState().setSelectedNode({ id: card.id, title: card.title, type: card.type })
+  }
+
+  const handleWikiSelectIndex = (index: number) => {
+    setWikiIdx(index)
+    acceptWikiSuggestion()
+  }
+
+  const handleDeleteCard = async () => {
+    if (!selectedNode || !window.confirm('确定删除这张卡片？此操作不可撤销。')) return
+    const deletedCardId = selectedNode.id
+    try {
+      const res = await client.api.vault['card'][':id'].$delete({
+        param: { id: deletedCardId },
+        query: { vid: currentVaultId ?? undefined },
+      })
+      const data: { success: boolean; error?: string; deletedSessionIds?: string[] } = await res.json()
+      if (res.ok && data.success) {
+        const agentStore = useAgentStore.getState()
+        const currentSession = agentStore.sessions.find((session) => session.id === agentStore.sessionId)
+        if (currentSession?.cardId === deletedCardId || data.deletedSessionIds?.includes(agentStore.sessionId ?? '')) {
+          agentStore._abortStream()
+          agentStore._setSessionId(null)
+          agentStore._setMessages([])
+          agentStore._setError(null)
+        }
+        await agentStore.loadSessions()
+        toast.success('卡片已删除')
+        clearSelectedNode()
+        queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+        queryClient.invalidateQueries({ queryKey: ['card-links'] })
+        queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+        queryClient.removeQueries({ queryKey: ['rag-card-status', currentVaultId, deletedCardId] })
+        queryClient.removeQueries({ queryKey: ['rag-related-cards', currentVaultId, deletedCardId] })
+        window.dispatchEvent(new CustomEvent('axiom:card-deleted', {
+          detail: { cardId: deletedCardId, deletedSessionIds: data.deletedSessionIds ?? [] },
+        }))
+      } else {
+        toast.error(`删除失败: ${data?.error || '未知错误'}`)
+      }
+    } catch (err) {
+      toast.error(`删除失败: ${(err as Error)?.message || '网络异常'}`)
+    }
+  }
+
   const hasCard = !!selectedNode
   // Count words: handle both CJK characters and Latin words
   const wordCount = cardContent
@@ -865,250 +828,40 @@ export default function ForgeEditor() {
       style={{ maxWidth: 'var(--panel-xl)', minWidth: 'var(--panel-lg)' }}
     >
       <div className="glass-panel workspace-surface forge-paper-surface rounded-2xl flex-1 flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="forge-paper-header flex justify-between items-center px-5 py-3 border-b border-white/10">
-          <div className="flex items-center gap-4 min-w-0">
-            <span className="mono opacity-40 uppercase shrink-0" style={{ fontSize: 'var(--f9)' }}>
-              Editing
-            </span>
-            <span
-              className="text-white/70 truncate"
-              style={{ fontSize: 'var(--t-label)' }}
-              title={cardTitle ?? ''}
-            >
-              {cardTitle || '未选择卡片'}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="flex bg-white/5 rounded-lg p-0.5">
-              <button
-                className={`editor-mode-tab ${editorMode === 'live' ? 'active' : ''}`}
-                onClick={async () => {
-                  await saveCurrentCard({ silent: true })
-                  setEditorMode('live')
-                }}
-              >
-                LIVE
-              </button>
-              <button
-                className={`editor-mode-tab ${editorMode === 'read' ? 'active' : ''}`}
-                onClick={async () => {
-                  await saveCurrentCard({ silent: true })
-                  setEditorMode('read')
-                }}
-              >
-                READ
-              </button>
-            </div>
-            {hasCard && (
-              <button
-                className="forge-paper-icon-btn danger"
-                onClick={async () => {
-                  if (!selectedNode || !window.confirm('确定删除这张卡片？此操作不可撤销。')) return
-                  const deletedCardId = selectedNode.id
-                  try {
-                    const res = await client.api.vault['card'][':id'].$delete({
-                      param: { id: deletedCardId },
-                      query: { vid: currentVaultId ?? undefined },
-                    })
-                    const data: { success: boolean; error?: string; deletedSessionIds?: string[] } = await res.json()
-                    if (res.ok && data.success) {
-                      const agentStore = useAgentStore.getState()
-                      const currentSession = agentStore.sessions.find((session) => session.id === agentStore.sessionId)
-                      if (currentSession?.cardId === deletedCardId || data.deletedSessionIds?.includes(agentStore.sessionId ?? '')) {
-                        agentStore._abortStream()
-                        agentStore._setSessionId(null)
-                        agentStore._setMessages([])
-                        agentStore._setError(null)
-                      }
-                      await agentStore.loadSessions()
-                      toast.success('卡片已删除')
-                      clearSelectedNode()
-                      queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
-                      queryClient.invalidateQueries({ queryKey: ['dashboard', currentVaultId] })
-                      queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
-                      queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
-                      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
-                      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
-                      queryClient.invalidateQueries({ queryKey: ['card-links'] })
-                      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
-                      queryClient.removeQueries({ queryKey: ['rag-card-status', currentVaultId, deletedCardId] })
-                      queryClient.removeQueries({ queryKey: ['rag-related-cards', currentVaultId, deletedCardId] })
-                      window.dispatchEvent(new CustomEvent('axiom:card-deleted', {
-                        detail: { cardId: deletedCardId, deletedSessionIds: data.deletedSessionIds ?? [] },
-                      }))
-                    } else {
-                      toast.error(`删除失败: ${data?.error || '未知错误'}`)
-                    }
-                  } catch (err) {
-                    toast.error(`删除失败: ${(err as Error)?.message || '网络异常'}`)
-                  }
-                }}
-                title="删除卡片"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-            {hasCard && (
-              <button
-                className="forge-paper-icon-btn"
-                onClick={handleClose}
-                title="关闭"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-        </div>
+        <EditorHeader
+          editorMode={editorMode}
+          cardTitle={cardTitle}
+          hasCard={hasCard}
+          onModeChange={handleModeChange}
+          onDelete={handleDeleteCard}
+          onClose={handleClose}
+        />
 
         {!hasCard ? (
-          /* Empty / select state */
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="serif text-2xl text-white/10 mb-4">Card Preview</div>
-              <p className="mono text-white/20" style={{ fontSize: 'var(--f10)' }}>
-                从知识图谱中选择节点，或在 AI 工作台开始对话
-                <br />
-                以查看和编辑卡片
-              </p>
-            </div>
-          </div>
+          <EditorEmptyState />
         ) : loading ? (
-          /* Loading state - P2 FIX: More visible loading indicator */
-          <div className="flex-1 flex flex-col items-center justify-center gap-4">
-            <div className="flex gap-1">
-              <div className="w-2 h-2 bg-cyan-300/60 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
-              <div className="w-2 h-2 bg-cyan-300/60 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
-              <div className="w-2 h-2 bg-cyan-300/60 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
-            </div>
-            <div className="mono text-white/40 text-center" style={{ fontSize: 'var(--f10)' }}>
-              加载卡片内容...
-            </div>
-          </div>
+          <EditorLoadingState />
         ) : (
           <>
-            {/* Status bar */}
-            <div className="forge-paper-meta px-5 py-2 border-b border-white/5 flex items-center gap-4">
-              <div className="flex items-center gap-1.5">
-                <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>
-                  Words
-                </span>
-                <span className="mono text-white/60" style={{ fontSize: 'var(--f9)' }}>
-                  {wordCount}
-                </span>
-              </div>
-              <div className="w-px h-3 bg-white/5" />
-              <div className="flex items-center gap-1.5">
-                <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>
-                  Type
-                </span>
-                <span className={`mono ${cardTypeTone(selectedNode?.type)}`} style={{ fontSize: 'var(--f8)' }}>
-                  {cardTypeLabel(selectedNode?.type)}
-                </span>
-                {/* Upgrade button: fleeting → permanent */}
-                {selectedNode?.type === 'fleeting' && (
-                  <button
-                    className="mono text-amber-400/60 hover:text-amber-400 hover:bg-amber-500/10 px-2 py-0.5 rounded transition-colors"
-                    style={{ fontSize: 'var(--f8)' }}
-                    onClick={handleUpgradeType}
-                  >↑ 提炼为永久</button>
-                )}
-                {/* Extract button: literature → new fleeting */}
-                {selectedNode?.type === 'literature' && (
-                  <button
-                    className="mono text-cyan-400/60 hover:text-cyan-400 hover:bg-cyan-500/10 px-2 py-0.5 rounded transition-colors"
-                    style={{ fontSize: 'var(--f8)' }}
-                    onClick={handleExtractFleeting}
-	                  >◇ 提取灵感草稿</button>
-                )}
-              </div>
-              <div className="w-px h-3 bg-white/5" />
-              <div className="flex items-center gap-1.5 min-w-0">
-                <span className="mono opacity-25 uppercase" style={{ fontSize: 'var(--f7)' }}>
-                  RAG
-                </span>
-                <span
-                  className={`mono truncate ${ragStatusTone(ragStatusQuery.data?.status)}`}
-                  style={{ fontSize: 'var(--f8)' }}
-                  title={ragStatusQuery.data?.index?.lastError || undefined}
-                >
-                  {ragStatusQuery.isLoading ? '检查中' : ragStatusLabel(ragStatusQuery.data?.status)}
-                </span>
-                {ragStatusQuery.data?.status === 'failed' && (
-                  <button
-                    className="mono text-red-300/70 hover:text-red-200 hover:bg-red-500/10 px-2 py-0.5 rounded transition-colors"
-                    style={{ fontSize: 'var(--f8)' }}
-                    onClick={handleRetryRagSync}
-                    title={ragStatusQuery.data.index?.lastError || '重新同步知识库'}
-                  >
-                    重试
-                  </button>
-                )}
-              </div>
-              <div className="flex-1" />
-	              {saving ? (
-	                <span className="mono text-cyan-300/70" style={{ fontSize: 'var(--f8)' }}>
-	                  正在自动保存...
-	                </span>
-	              ) : lastSavedAt ? (
-	                <span className="mono text-green-400/70" style={{ fontSize: 'var(--f8)' }}>
-	                  已自动保存 {lastSavedAt}
-	                </span>
-	              ) : dirty ? (
-	                <span className="mono text-amber-400/60" style={{ fontSize: 'var(--f8)' }}>
-	                  ● 自动保存待同步
-	                </span>
-	              ) : null}
-	            </div>
-            {/* Editor content */}
-            {relatedCardsQuery.data && relatedCardsQuery.data.length > 0 && (
-              <div className="border-b border-white/5 bg-emerald-400/[0.025]">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between px-5 py-2 text-left transition-colors hover:bg-white/[0.025]"
-                  onClick={() => setRelatedOpen((open) => !open)}
-                >
-                  <span className="mono text-emerald-300/70 uppercase" style={{ fontSize: 'var(--f8)' }}>
-                    可能关联 {relatedCardsQuery.data.length}
-                  </span>
-                  <span className="mono text-white/28" style={{ fontSize: 'var(--f8)' }}>
-                    {relatedOpen ? '收起' : '展开'}
-                  </span>
-                </button>
-                {relatedOpen && (
-                  <div className="grid grid-cols-2 gap-2 px-5 pb-3">
-                    {relatedCardsQuery.data.map((card) => (
-                      <div key={card.id} className="rounded-lg border border-white/8 bg-black/20 p-2">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={`h-2 w-2 shrink-0 rounded-full ${card.type === 'permanent' ? 'bg-purple-400' : card.type === 'literature' ? 'bg-pink-400' : 'bg-cyan-400'}`} />
-                          <button
-                            className="min-w-0 truncate text-left text-white/70 hover:text-white"
-                            style={{ fontSize: 'var(--f9)' }}
-                            onClick={async () => {
-                              await saveCurrentCard({ silent: true })
-                              useAppStore.getState().setSelectedNode({ id: card.id, title: card.title, type: card.type })
-                            }}
-                            title={card.title}
-                          >
-                            {card.title}
-                          </button>
-                        </div>
-                        <div className="mt-1 truncate text-white/30" style={{ fontSize: 'var(--f8)' }}>
-                          {card.clusterName || card.path}
-                        </div>
-                        <button
-                          className="mono mt-2 rounded border border-emerald-300/15 px-2 py-0.5 text-emerald-200/65 hover:bg-emerald-400/10"
-                          style={{ fontSize: 'var(--f8)' }}
-                          onClick={() => insertWikiLink(card.title)}
-                        >
-                          建立链接
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+            <EditorStatusBar
+              wordCount={wordCount}
+              cardType={selectedNode?.type}
+              ragStatus={ragStatusQuery.data}
+              ragLoading={ragStatusQuery.isLoading}
+              saving={saving}
+              lastSavedAt={lastSavedAt}
+              dirty={dirty}
+              onUpgradeType={handleUpgradeType}
+              onExtractFleeting={handleExtractFleeting}
+              onRetryRagSync={handleRetryRagSync}
+            />
+            <RelatedCardsPanel
+              cards={relatedCardsQuery.data ?? []}
+              open={relatedOpen}
+              onToggle={() => setRelatedOpen((open) => !open)}
+              onOpenCard={handleOpenRelatedCard}
+              onInsertLink={insertWikiLink}
+            />
             {editorMode === 'live' ? (
               <div className="flex-1 p-0 overflow-hidden relative">
                 <textarea
@@ -1122,37 +875,12 @@ export default function ForgeEditor() {
 	                />
                 {/* Wiki-link autocomplete dropdown */}
                 {wikiActive && wikiSuggestions.length > 0 && (
-                  <div
+                  <WikiSuggestionMenu
                     ref={wikiRef}
-                    className="absolute left-4 bottom-4 z-50 bg-[rgba(10,10,15,0.95)] backdrop-blur-xl border border-white/10 rounded-xl py-1 shadow-[0_8px_32px_rgba(0,0,0,0.6)]"
-                    style={{ minWidth: '220px', maxWidth: '320px', maxHeight: '240px', overflowY: 'auto' }}
-                  >
-                    <div className="mono text-white/30 px-3 py-1.5 text-[10px] uppercase tracking-wider border-b border-white/5">
-                      Link card — {wikiSuggestions.length} results
-                    </div>
-                    {wikiSuggestions.map((s, i) => (
-                      <div
-                        key={s.title}
-                        className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${
-                          i === wikiIdx ? 'bg-cyan-500/12 text-white' : 'text-white/60 hover:bg-white/5'
-                        }`}
-                        style={{ fontSize: '12px' }}
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          setWikiIdx(i)
-                          acceptWikiSuggestion()
-                        }}
-                      >
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{
-                            backgroundColor: s.type === 'permanent' ? '#a855f7' : s.type === 'literature' ? '#f472b6' : s.type === 'fleeting' ? '#22d3ee' : '#34d399',
-                          }}
-                        />
-                        <span className="truncate">{s.title}</span>
-                      </div>
-                    ))}
-                  </div>
+                    suggestions={wikiSuggestions}
+                    activeIndex={wikiIdx}
+                    onSelectIndex={handleWikiSelectIndex}
+                  />
                 )}
               </div>
             ) : (
@@ -1206,63 +934,10 @@ export default function ForgeEditor() {
 	        )}
 	      </div>
         {qualityRejection && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
-            <div className="w-full max-w-lg rounded-xl border border-amber-300/20 bg-[rgba(15,12,20,0.96)] p-5 shadow-2xl">
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="mono text-amber-300/70 uppercase" style={{ fontSize: 'var(--f8)' }}>
-                    升级被驳回
-                  </div>
-                  <h3 className="mt-2 text-white/86" style={{ fontSize: 'var(--t-section)' }}>
-                    {qualityRejection.title}
-                  </h3>
-                  <p className="mt-2 text-white/45" style={{ fontSize: 'var(--f9)' }}>
-                    {qualityRejection.error}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="rounded-lg px-2 py-1 text-white/35 transition-colors hover:bg-white/8 hover:text-white/70"
-                  onClick={() => setQualityRejection(null)}
-                  aria-label="关闭"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="mt-4 space-y-2">
-                {qualityRejection.issues.length > 0 ? qualityRejection.issues.map((issue) => (
-                  <div key={`${issue.dimension}:${issue.code}`} className="rounded-lg border border-white/8 bg-white/[0.035] p-3">
-                    <div className="flex items-center gap-2">
-                      <span className="mono rounded border border-amber-300/15 px-1.5 py-0.5 text-amber-200/65" style={{ fontSize: 'var(--f7)' }}>
-                        {qualityDimensionLabel(issue.dimension)}
-                      </span>
-                      <span className="text-white/75" style={{ fontSize: 'var(--f9)' }}>
-                        {issue.label}
-                      </span>
-                    </div>
-                    <p className="mt-2 text-white/45" style={{ fontSize: 'var(--f9)' }}>{issue.message}</p>
-                    <p className="mt-1 text-cyan-100/55" style={{ fontSize: 'var(--f9)' }}>{issue.fix}</p>
-                  </div>
-                )) : (
-                  <div className="rounded-lg border border-white/8 bg-white/[0.035] p-3 text-white/55" style={{ fontSize: 'var(--f9)' }}>
-                    缺少：{qualityRejection.missingElements.join('、') || '清晰、准确、必要的必要信息'}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-5 flex justify-end">
-                <button
-                  type="button"
-                  className="rounded-lg bg-amber-300/15 px-4 py-2 text-amber-100/80 transition-colors hover:bg-amber-300/22"
-                  style={{ fontSize: 'var(--f9)' }}
-                  onClick={() => setQualityRejection(null)}
-                >
-                  回到卡片补全
-                </button>
-              </div>
-            </div>
-          </div>
+          <QualityRejectionDialog
+            rejection={qualityRejection}
+            onClose={() => setQualityRejection(null)}
+          />
         )}
 	    </aside>
 	  )

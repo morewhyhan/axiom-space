@@ -1,9 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { useAppStore, Mode } from '@/stores/mode-store'
+import { useAppStore } from '@/stores/mode-store'
 import { useAuthSession } from '@/hooks/use-auth'
 import { useNotifications } from '@/hooks/use-notifications'
+import { Button } from '@/components/ui'
+import { ModeNav } from './mode-nav'
 
 export default function Header() {
   const mode = useAppStore((s) => s.mode)
@@ -50,35 +52,21 @@ export default function Header() {
         </div>
         <div className="w-[1px] bg-white/10" style={{ height: 'var(--divider-h)' }}></div>
         <nav className="flex gap-4" id="mode-nav">
-          <button className={`mode-btn ${mode === 'dashboard' ? 'active' : ''}`} onClick={() => setMode('dashboard' as Mode)} title="仪表板 — 查看知识统计、最近活动和系统状态">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>仪表板</span>DASHBOARD
-          </button>
-          <button className={`mode-btn forge-mode ${mode === 'forge' ? 'active' : ''}`} onClick={() => setMode('forge' as Mode)} title="AI 工作台 — 继续任务、普通对话和卡片加工">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>AI 工作台</span>WORKSPACE
-          </button>
-          <button className={`mode-btn ${mode === 'galaxy' ? 'active' : ''}`} onClick={() => setMode('galaxy' as Mode)} title="知识图谱 — 可视化浏览和整理知识网络">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>知识图谱</span>GRAPH
-          </button>
-          <button className={`mode-btn cognition-mode ${mode === 'cognition' ? 'active' : ''}`} onClick={() => setMode('cognition' as Mode)} title="认知洞察 — 查看能力画像、观察记录和下一步建议">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>认知洞察</span>INSIGHTS
-          </button>
-          <button className={`mode-btn learn-mode ${mode === 'learn' ? 'active' : ''}`} onClick={() => setMode('learn' as Mode)} title="路径规划 — 创建、整理和推进任务路径">
-            <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>路径规划</span>PATH
-          </button>
+          <ModeNav mode={mode} onModeChange={setMode} />
           {vaults.length > 0 && (
             <>
               <div className="w-px h-6 bg-white/10 self-center mx-1"></div>
               <div className="relative self-center" ref={vaultRef}>
-                <button className="mono text-white/40 hover:text-white/60 transition-colors flex items-center gap-1.5" style={{ fontSize: 'var(--f9)' }} onClick={() => setVaultOpen(!vaultOpen)}>
+                <Button className="mono text-white/40 hover:text-white/60 transition-colors flex items-center gap-1.5" style={{ fontSize: 'var(--f9)' }} onClick={() => setVaultOpen(!vaultOpen)}>
                   <span className="opacity-30">◆</span>
                   {vaults.find((v) => v.id === currentVaultId)?.name || 'Select Vault'}
-                </button>
+                </Button>
                 <div className={`absolute top-full mt-2 right-0 bg-[var(--glass-bg)] backdrop-blur-xl border border-white/10 rounded-xl py-1 min-w-[180px] ${vaultOpen ? '' : 'hidden'}`} style={{ zIndex: 100 }}>
                   {vaults.map((v) => (
-                    <button key={v.id} className={`w-full text-left px-4 py-2 mono transition-colors ${v.id === currentVaultId ? 'text-purple-400 bg-purple-500/10' : 'text-white/50 hover:text-white/70 hover:bg-white/5'}`} style={{ fontSize: 'var(--f9)' }} onClick={() => { setCurrentVaultId(v.id); setVaultOpen(false) }}>
+                    <Button key={v.id} className={`w-full text-left px-4 py-2 mono transition-colors ${v.id === currentVaultId ? 'text-purple-400 bg-purple-500/10' : 'text-white/50 hover:text-white/70 hover:bg-white/5'}`} style={{ fontSize: 'var(--f9)' }} onClick={() => { setCurrentVaultId(v.id); setVaultOpen(false) }}>
                       {v.name}
                       <span className="ml-2 opacity-30">{v.cardCount}</span>
-                    </button>
+                    </Button>
                   ))}
                 </div>
               </div>
@@ -91,12 +79,12 @@ export default function Header() {
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>⌘K</span>
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>搜索节点...</span>
         </div>
-        <button
+        <Button
           className="w-6 h-6 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-colors"
           style={{ fontSize: 'var(--f9)' }}
           onClick={() => openModal('shortcuts')}
           title="快捷键帮助"
-        >?</button>
+        >?</Button>
         <div className="notif-bell relative" ref={notifRef}>
           <div onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
@@ -105,11 +93,11 @@ export default function Header() {
           <div className={`notif-dropdown ${notifOpen ? '' : 'hidden'}`}>
             <div style={{padding:'10px 14px',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
               <span className="mono opacity-40 uppercase" style={{ fontSize: 'var(--f8)' }}>Recent Activity</span>
-              <button className="mono text-purple-400/60 hover:text-purple-400" style={{ fontSize: 'var(--f7)' }} onClick={() => {
+              <Button className="mono text-purple-400/60 hover:text-purple-400" style={{ fontSize: 'var(--f7)' }} onClick={() => {
                 setNotifOpen(false)
                 dismissAll()
                 useAppStore.getState().setMode('dashboard')
-              }}>VIEW ALL</button>
+              }}>VIEW ALL</Button>
             </div>
             {realNotifs.length > 0 ? realNotifs.map((n) => {
               const dotMap: Record<string, string> = { toast: 'cyan', profile: 'purple', card: 'pink', skill: 'purple', graph: 'cyan', quality: 'pink' }
@@ -124,10 +112,10 @@ export default function Header() {
             )}
           </div>
         </div>
-        <button className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center hover:border-white/30 transition-colors" onClick={() => openModal('profile')}>
+        <Button className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center hover:border-white/30 transition-colors" onClick={() => openModal('profile')}>
           <span className="serif" style={{ fontSize: 'var(--f10)' }}>{(session?.user?.name ?? 'A').charAt(0).toUpperCase()}</span>
-        </button>
-        <button
+        </Button>
+        <Button
           className="mono text-white/30 hover:text-white/60 transition-colors px-2"
           style={{ fontSize: 'var(--f9)' }}
           onClick={() => {
@@ -141,7 +129,7 @@ export default function Header() {
           title="导出知识库"
         >
           ⬇ EXPORT
-        </button>
+        </Button>
         <div id="clock" className="opacity-50" style={{ fontSize: 'var(--f10)' }}>{time}</div>
       </div>
     </header>

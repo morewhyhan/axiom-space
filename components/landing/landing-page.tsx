@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { AlertTriangle, Trash2, X } from 'lucide-react'
-import { useSignIn, useSignUp, useSignOut } from '@/hooks/use-auth'
+import { useState } from 'react'
+import { Trash2 } from 'lucide-react'
+import { useSignOut } from '@/hooks/use-auth'
 import { useAppStore } from '@/stores/mode-store'
 import { client } from '@/lib/api-client'
 import type { VaultInfo } from '@/stores/mode-store'
+import { AuthModal, CreateVault, CreateVaultInline, DeleteVaultDialog } from './index'
 
 export default function LandingPage({
   showLoadingHint = false,
@@ -200,210 +201,17 @@ export default function LandingPage({
         </div>
       </section>
       {deleteTarget && (
-        <div className="landing-delete-dialog-backdrop" role="presentation">
-          <div
-            className="landing-delete-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-vault-title"
-          >
-            <div className="landing-delete-dialog-header">
-              <div className="landing-delete-dialog-icon">
-                <AlertTriangle className="h-4 w-4" />
-              </div>
-              <button
-                type="button"
-                className="landing-delete-dialog-close"
-                onClick={handleCancelDelete}
-                disabled={deletingVaultId === deleteTarget.id}
-                aria-label="关闭删除确认"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            <h3 id="delete-vault-title" className="landing-delete-dialog-title">永久删除知识库</h3>
-            <p className="landing-delete-dialog-copy">
-              这会删除「{deleteTarget.name}」以及其中所有卡片、会话、学习路径、画像、资源记录和索引数据。
-            </p>
-            <label className="landing-delete-dialog-label" htmlFor="delete-vault-confirm-name">
-              输入完整知识库名称确认
-            </label>
-            <input
-              id="delete-vault-confirm-name"
-              className="landing-delete-dialog-input"
-              value={deleteConfirmName}
-              onChange={(event) => setDeleteConfirmName(event.target.value)}
-              disabled={deletingVaultId === deleteTarget.id}
-              autoFocus
-            />
-            {deleteStatus?.tone === 'error' && (
-              <p className="landing-delete-dialog-error">{deleteStatus.text}</p>
-            )}
-            <div className="landing-delete-dialog-actions">
-              <button
-                type="button"
-                className="landing-delete-dialog-cancel"
-                onClick={handleCancelDelete}
-                disabled={deletingVaultId === deleteTarget.id}
-              >
-                取消
-              </button>
-              <button
-                type="button"
-                className="landing-delete-dialog-confirm"
-                onClick={handleConfirmDeleteVault}
-                disabled={deleteConfirmName.trim() !== deleteTarget.name || deletingVaultId === deleteTarget.id}
-              >
-                {deletingVaultId === deleteTarget.id ? '删除中...' : '永久删除'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteVaultDialog
+          target={deleteTarget}
+          deletingVaultId={deletingVaultId}
+          confirmName={deleteConfirmName}
+          error={deleteStatus?.tone === 'error' ? deleteStatus.text : null}
+          onConfirmNameChange={setDeleteConfirmName}
+          onCancel={handleCancelDelete}
+          onConfirm={handleConfirmDeleteVault}
+        />
       )}
       {showAuth && <AuthModal mode={showAuth} onClose={() => setShowAuth(null)} />}
-    </div>
-  )
-}
-
-function CreateVault({ onCreated, onSkip }: { onCreated: (id: string) => void; onSkip?: () => void }) {
-  const [name, setName] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [error, setError] = useState('')
-
-  const handleCreate = async () => {
-    if (!name.trim()) return
-    setError('')
-    setCreating(true)
-    try {
-      const res = await client.api.vaults.$post({ json: { name: name.trim() } })
-      const data: { success: boolean; vault?: { id: string; name: string }; vaults?: Array<{ id: string; name: string }>; error?: string } = await res.json()
-      if (data.success && data.vault?.id) {
-        const existingVaults = useAppStore.getState().vaults
-        const nextVaults = existingVaults.some((vault) => vault.id === data.vault!.id)
-          ? existingVaults
-          : [...existingVaults, { id: data.vault.id, name: data.vault.name, cardCount: 0 }]
-        useAppStore.getState().setCurrentVaultId(data.vault.id)
-        useAppStore.getState().setVaults(nextVaults)
-        useAppStore.getState().setLastVaultId(data.vault.id)
-        onCreated(data.vault.id)
-        return
-      } else {
-        setError(data.error || '创建失败，请重试')
-      }
-    } catch {
-      setError('网络错误，请检查连接后重试')
-    }
-    setCreating(false)
-  }
-
-  return (
-    <div className="landing-create-vault">
-      <h2 className="landing-section-title">创建你的第一个知识库</h2>
-      <p className="landing-desc" style={{ marginBottom: 20 }}>知识库用于存放你的知识卡片，你可以创建多个知识库来管理不同领域的学习。</p>
-      <div className="landing-create-form">
-        <input className="landing-input" placeholder="知识库名称" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCreate()} autoFocus maxLength={100} />
-        <button className="landing-btn landing-btn-primary" onClick={handleCreate} disabled={creating || !name.trim()}>
-          {creating ? '创建中...' : '创建'}
-        </button>
-        {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
-      </div>
-      {onSkip && (
-        <button className="landing-btn landing-btn-ghost" style={{ marginTop: 12, fontSize: '12px' }} data-action="skip-onboarding" onClick={onSkip}>
-          跳过，直接进入
-        </button>
-      )}
-    </div>
-  )
-}
-
-function CreateVaultInline({ onCreated }: { onCreated: (id: string) => void }) {
-  const [show, setShow] = useState(false)
-  return show ? (
-    <div className="landing-create-inline">
-      <CreateVault onCreated={(id) => { setShow(false); onCreated(id) }} />
-    </div>
-  ) : (
-    <button className="landing-btn landing-btn-ghost" style={{ marginTop: 12, fontSize: '13px' }} onClick={() => setShow(true)}>
-      + 创建新知识库
-    </button>
-  )
-}
-
-function AuthModal({ mode, onClose }: { mode: 'login' | 'register'; onClose: () => void }) {
-  const [tab, setTab] = useState(mode)
-  const [passwordError, setPasswordError] = useState('')
-  const signIn = useSignIn()
-  const signUp = useSignUp()
-  const isSubmitting = signIn.isPending || signUp.isPending
-
-  // 登录/注册成功后自动关闭弹窗
-  useEffect(() => {
-    if (signIn.isSuccess || signUp.isSuccess) onClose()
-  }, [signIn.isSuccess, signUp.isSuccess, onClose])
-
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault()
-    setPasswordError('')
-    const form = e.currentTarget
-    const formData = new FormData(form)
-    const email = formData.get('email') as string
-    const password = formData.get('password') as string
-    if (tab === 'register') {
-      const name = formData.get('name') as string
-      const confirmPassword = formData.get('confirmPassword') as string
-      if (password !== confirmPassword) { setPasswordError('两次密码输入不一致'); return }
-      signUp.mutate({ email, password, name })
-    } else {
-      signIn.mutate({ email, password })
-    }
-  }
-
-  return (
-    <div className="landing-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
-      role="dialog"
-      aria-modal="true"
-      aria-label={tab === 'login' ? '登录' : '注册'}
-      onKeyDown={(e) => {
-        if (e.key === 'Escape') { onClose(); return }
-        if (e.key !== 'Tab') return
-        const focusable = (e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        )
-        if (focusable.length === 0) return
-        const first = focusable[0]
-        const last = focusable[focusable.length - 1]
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault()
-          last.focus()
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault()
-          first.focus()
-        }
-      }}
-    >
-      <div className="landing-modal">
-        <button className="landing-modal-close" onClick={onClose}>✕</button>
-        <div className="landing-modal-tabs">
-          <button className={`landing-modal-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>登录</button>
-          <button className={`landing-modal-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>注册</button>
-        </div>
-        <form className="landing-auth-form" onSubmit={handleSubmit}>
-          {tab === 'register' && (
-            <div className="landing-field"><label htmlFor="name">昵称</label><input id="name" name="name" type="text" className="landing-input" placeholder="你的名字" required /></div>
-          )}
-          <div className="landing-field"><label htmlFor="email">邮箱</label><input id="email" name="email" type="email" className="landing-input" placeholder="you@example.com" required /></div>
-          <div className="landing-field"><label htmlFor="password">密码</label><input id="password" name="password" type="password" className="landing-input" placeholder="至少 8 位" minLength={8} required /></div>
-          {tab === 'register' && (
-            <div className="landing-field"><label htmlFor="confirmPassword">确认密码</label><input id="confirmPassword" name="confirmPassword" type="password" className="landing-input" placeholder="再次输入密码" minLength={8} required /></div>
-          )}
-          {passwordError && <p className="landing-auth-error">{passwordError}</p>}
-          {signIn.error && <p className="landing-auth-error">{signIn.error.message}</p>}
-          {signUp.error && <p className="landing-auth-error">{signUp.error.message}</p>}
-          <button type="submit" className="landing-btn landing-btn-primary landing-btn-full" disabled={isSubmitting}>
-            {isSubmitting ? '处理中...' : tab === 'login' ? '登录' : '注册'}
-          </button>
-        </form>
-      </div>
     </div>
   )
 }

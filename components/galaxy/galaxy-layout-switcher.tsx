@@ -2,6 +2,7 @@
 
 import { toast } from 'sonner'
 import { useAppStore, useGalaxyActions, type GraphLayoutMode } from '@/stores/mode-store'
+import { SegmentedControl } from '@/components/ui'
 
 type LayoutItem = {
   mode: GraphLayoutMode
@@ -48,20 +49,16 @@ export default function GalaxyLayoutSwitcher() {
   }
 
   return (
-    <div className="galaxy-layout-dock pointer-events-auto">
-      {LAYOUTS.map((item) => {
-        const active = item.mode === layoutMode
-        return (
-          <button
-            key={item.mode}
-            title={item.title}
-            className={`galaxy-layout-pill ${active ? 'active' : ''}`}
-            onClick={() => handleLayout(item.mode)}
-          >
-            {item.label}
-          </button>
-        )
-      })}
-    </div>
+    <SegmentedControl
+      className="galaxy-layout-dock pointer-events-auto"
+      itemClassName="galaxy-layout-pill"
+      value={layoutMode}
+      onValueChange={handleLayout}
+      items={LAYOUTS.map((item) => ({
+        value: item.mode,
+        label: item.label,
+        title: item.title,
+      }))}
+    />
   )
 }

@@ -15,6 +15,15 @@ import { useExecuteStep, useLearningPaths, type LearningPath, type LearningStep 
 import { useGalaxyData } from '@/hooks/use-galaxy'
 import { useAppStore, type PanelLayout } from '@/stores/mode-store'
 import type { GalaxyNode } from '@/types/galaxy'
+import { PanelShell } from '@/components/panels/panel-shell'
+import {
+  EmptyState,
+  Button,
+  SearchField,
+  SegmentedControl,
+  StatusIndicator,
+  Surface,
+} from '@/components/ui'
 
 export type ForgeResourceView = 'context' | 'cards'
 
@@ -175,51 +184,54 @@ export default function ForgeResourcePanel({ view, onViewChange }: Props) {
   }
 
   return (
-    <aside className="forge-resource-panel">
-      <header className="forge-resource-top glass-panel">
+    <PanelShell className="forge-resource-panel">
+      <Surface as="header" variant="glass" className="forge-resource-top">
         <div>
           <span className="mono">Resources</span>
           <strong>{view === 'context' ? '路径与会话' : '卡片库'}</strong>
         </div>
         <div className="forge-resource-actions">
-          <button type="button" onClick={() => openModal('newcard')} title="新建卡片">
+          <Button variant="icon" onClick={() => openModal('newcard')} title="新建卡片">
             <Plus className="h-3.5 w-3.5" />
-          </button>
-          <button type="button" onClick={() => void createTalkSession()} title="新建对话">
+          </Button>
+          <Button variant="icon" onClick={() => void createTalkSession()} title="新建对话">
             <MessageSquareText className="h-3.5 w-3.5" />
-          </button>
+          </Button>
         </div>
-      </header>
+      </Surface>
 
-      <section className="forge-resource-controls glass-panel">
-        <div className="forge-resource-switch">
-          <button type="button" className={view === 'context' ? 'active' : ''} onClick={() => onViewChange('context')}>
-            <Layers3 className="h-3.5 w-3.5" />
-            路径
-          </button>
-          <button type="button" className={view === 'cards' ? 'active' : ''} onClick={() => onViewChange('cards')}>
-            <Files className="h-3.5 w-3.5" />
-            卡片
-          </button>
-        </div>
+      <Surface as="section" variant="glass" className="forge-resource-controls">
+        <SegmentedControl
+          className="forge-resource-switch"
+          value={view}
+          onValueChange={onViewChange}
+          items={[
+            { value: 'context', label: '路径', icon: <Layers3 className="h-3.5 w-3.5" /> },
+            { value: 'cards', label: '卡片', icon: <Files className="h-3.5 w-3.5" /> },
+          ]}
+        />
 
-        <label className="forge-resource-search">
-          <Search className="h-3.5 w-3.5" />
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={view === 'context' ? '搜索路径或对话' : '搜索卡片、标签、星团'}
-          />
-        </label>
-      </section>
+        <SearchField
+          className="forge-resource-search"
+          icon={<Search className="h-3.5 w-3.5" />}
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder={view === 'context' ? '搜索路径或对话' : '搜索卡片、标签、星团'}
+        />
+      </Surface>
 
       {view === 'context' ? (
         <>
-          <div className="forge-resource-tabs two glass-panel">
-            <button type="button" className={contextTab === 'tasks' ? 'active' : ''} onClick={() => setContextTab('tasks')}>任务 {paths.length}</button>
-            <button type="button" className={contextTab === 'talks' ? 'active' : ''} onClick={() => setContextTab('talks')}>对话 {talks.length}</button>
-          </div>
-          <div className="forge-resource-list glass-panel">
+          <SegmentedControl
+            className="forge-resource-tabs two glass-panel"
+            value={contextTab}
+            onValueChange={setContextTab}
+            items={[
+              { value: 'tasks', label: `任务 ${paths.length}` },
+              { value: 'talks', label: `对话 ${talks.length}` },
+            ]}
+          />
+          <Surface variant="glass" className="forge-resource-list">
             {contextTab === 'tasks' ? (
               paths.length ? paths.map((path) => {
                 const step = resolveTaskStep(path, activeLearningStepId)
@@ -227,7 +239,7 @@ export default function ForgeResourcePanel({ view, onViewChange }: Props) {
                 return (
                   <section key={path.id} className="forge-path-item">
                     <button type="button" className="forge-path-main" onClick={() => void handleOpenPath(path)} disabled={!step || !canOpenStep(step)}>
-                      <StatusDot status={step?.status ?? 'available'} />
+                      <StepStatusIndicator status={step?.status ?? 'available'} />
                       <span className="forge-pill-text">
                         <strong>{path.name}</strong>
                         <small>{step ? step.name : path.topic || '暂无可开始任务'}</small>
@@ -247,7 +259,7 @@ export default function ForgeResourcePanel({ view, onViewChange }: Props) {
                             disabled={!canOpenStep(item)}
                             onClick={() => void handleOpenStep(path, item)}
                           >
-                            <StatusDot status={item.status} />
+                            <StepStatusIndicator status={item.status} />
                             <span className="forge-pill-text">{item.name}</span>
                             <small>{stepStatusLabel(item.status)}</small>
                           </button>
@@ -274,18 +286,20 @@ export default function ForgeResourcePanel({ view, onViewChange }: Props) {
                 </section>
               )) : <EmptyLine label="暂无自由对话" />
             )}
-          </div>
+          </Surface>
         </>
       ) : (
         <>
-          <div className="forge-resource-tabs four glass-panel">
-            {(['all', 'permanent', 'literature', 'fleeting'] as CardFilter[]).map((filter) => (
-              <button key={filter} type="button" className={cardFilter === filter ? 'active' : ''} onClick={() => setCardFilter(filter)}>
-                {filter === 'all' ? '全部' : TYPE_LABEL[filter]}
-              </button>
-            ))}
-          </div>
-          <div className="forge-resource-list glass-panel">
+          <SegmentedControl
+            className="forge-resource-tabs four glass-panel"
+            value={cardFilter}
+            onValueChange={setCardFilter}
+            items={(['all', 'permanent', 'literature', 'fleeting'] as CardFilter[]).map((filter) => ({
+              value: filter,
+              label: filter === 'all' ? '全部' : TYPE_LABEL[filter],
+            }))}
+          />
+          <Surface variant="glass" className="forge-resource-list">
             {cards.length ? cards.map((node) => (
               <button
                 key={node.id}
@@ -300,19 +314,19 @@ export default function ForgeResourcePanel({ view, onViewChange }: Props) {
                 </span>
               </button>
             )) : <EmptyLine label="没有匹配的卡片" />}
-          </div>
+          </Surface>
         </>
       )}
-    </aside>
+    </PanelShell>
   )
 }
 
 function EmptyLine({ label }: { label: string }) {
-  return <div className="forge-empty-line">{label}</div>
+  return <EmptyState className="forge-empty-line">{label}</EmptyState>
 }
 
-function StatusDot({ status }: { status: LearningStep['status'] }) {
-  return <span className={`forge-status-dot ${status}`} />
+function StepStatusIndicator({ status }: { status: LearningStep['status'] }) {
+  return <StatusIndicator className="forge-status-dot" status={status} />
 }
 
 function canOpenStep(step: LearningStep) {

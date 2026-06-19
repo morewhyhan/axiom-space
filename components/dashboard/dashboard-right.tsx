@@ -7,16 +7,17 @@ import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
 import { toast } from 'sonner'
 import type { GrowthPoint, RecentActivity } from '@/types/dashboard'
 import { client } from '@/lib/api-client'
+import { Button } from '@/components/ui'
 
 type FocusMode = 'overview' | 'by-cluster' | 'zen' | 'recent'
 type MetricsMode = 'all' | 'perm' | 'fleet' | 'orphans'
 
 function Dot({ sel, label, onClick }: { sel: boolean; label: string; onClick: () => void }) {
   return (
-    <div className={`flex items-center gap-2 cursor-pointer transition-colors ${sel ? 'text-white/80 font-medium' : 'text-white/45 hover:text-white/80'}`} style={{ fontSize: 'var(--f10)' }} onClick={onClick}>
+    <Button className={`flex items-center gap-2 cursor-pointer transition-colors ${sel ? 'text-white/80 font-medium' : 'text-white/45 hover:text-white/80'}`} style={{ fontSize: 'var(--f10)' }} onClick={onClick}>
       <span style={{ fontSize: 'var(--f7)', color: sel ? 'var(--axiom-cyan)' : 'rgba(255,255,255,0.25)' }}>{sel ? '●' : '○'}</span>
       {label}
-    </div>
+    </Button>
   )
 }
 
