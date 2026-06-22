@@ -45,6 +45,23 @@ export type RelatedRagCard = {
   reason: string
 }
 
+export type HiddenRelationSuggestion = {
+  id: string
+  sourceCardId: string
+  sourceTitle: string
+  targetCardId: string
+  targetTitle: string
+  targetType: string
+  relationType: 'wikilink' | 'contains' | 'related' | 'prerequisite' | 'derived' | 'supports' | 'contradicts'
+  reason: string
+  strength: number
+  vectorRank: number
+  vectorReason: string
+  reviewStatus: 'llm' | 'vector_only'
+  sourceClusterName: string | null
+  targetClusterName: string | null
+}
+
 export type QualityIssue = {
   dimension: 'clarity' | 'accuracy' | 'necessity'
   code: string

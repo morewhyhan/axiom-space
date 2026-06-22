@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Check, ShieldCheck, X } from 'lucide-react'
+import { HudPanel } from '@/components/ui'
 import type { AgentConfirmationRequest } from '@/stores/agent-store'
 
 export function ConfirmationPanel({
@@ -33,7 +34,7 @@ export function ConfirmationPanel({
           ? Math.max(0, Math.ceil((request.expiresAt - now) / 1000))
           : null
         return (
-        <div key={request.id} className="rounded-lg border border-red-400/20 bg-red-400/[0.045] px-3 py-2">
+        <HudPanel key={request.id} as="div" className="rounded-lg border-red-400/20 bg-red-400/[0.045] px-3 py-2">
           <div className="flex items-start gap-2">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-red-300/80" />
             <div className="min-w-0 flex-1">
@@ -74,10 +75,10 @@ export function ConfirmationPanel({
               </button>
             </div>
           </div>
-        </div>
+        </HudPanel>
       )})}
       {settled.map((request) => (
-        <div key={request.id} className="rounded border border-white/5 bg-white/[0.025] px-3 py-1.5 text-white/35" style={{ fontSize: 'var(--f8)' }}>
+        <HudPanel key={request.id} as="div" className="rounded px-3 py-1.5 text-white/35" style={{ fontSize: 'var(--f8)' }}>
           {request.status === 'confirmed'
             ? '已确认执行'
             : request.status === 'failed'
@@ -85,7 +86,7 @@ export function ConfirmationPanel({
               : request.status === 'expired'
                 ? '确认已失效'
                 : '已取消'}：{request.target || request.tool}
-        </div>
+        </HudPanel>
       ))}
     </div>
   )

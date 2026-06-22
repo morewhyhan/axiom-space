@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
@@ -8,17 +8,22 @@ import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
 import { LearningResourcePanel, VideoCard, type GeneratedResourceItem } from '@/components/resources/resource-cards'
+import { HudPanel } from '@/components/ui'
 import {
   EditorEmptyState,
   EditorHeader,
   EditorLoadingState,
   EditorStatusBar,
+  AgentOrchestrationPanel,
+  HiddenRelationsPanel,
   QualityRejectionDialog,
   RelatedCardsPanel,
   WikiSuggestionMenu,
   type CardSaveSnapshot,
+  type HiddenRelationSuggestion,
   type QualityIssue,
   type QualityRejection,
+  type OrchestrationManifest,
   type RagCardStatus,
   type RelatedRagCard,
   type ResourceManifestItem,
@@ -26,14 +31,30 @@ import {
 } from './editor'
 
 export default function ForgeEditor() {
-  const [editorMode, setEditorMode] = useState<'live' | 'read'>('live')
+  const rightPanelView = useAppStore((state) => state.rightPanelView)
+  const setRightPanelView = useAppStore((state) => state.setRightPanelView)
+  const editorMode: 'live' | 'read' = rightPanelView === 'read' ? 'read' : 'live'
+  const setEditorMode = useCallback((mode: 'live' | 'read') => {
+    setRightPanelView(mode === 'read' ? 'read' : 'editor')
+  }, [setRightPanelView])
   const [cardContent, setCardContent] = useState('')
   const [cardTitle, setCardTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
   const [relatedOpen, setRelatedOpen] = useState(false)
+  const [hiddenRelations, setHiddenRelations] = useState<HiddenRelationSuggestion[]>([])
+  const [hiddenRelationsLoading, setHiddenRelationsLoading] = useState(false)
+  const [hiddenRelationsError, setHiddenRelationsError] = useState<string | null>(null)
+  const [hiddenRelationsMeta, setHiddenRelationsMeta] = useState<{
+    vectorCandidates: number
+    indexedCards: number
+    scannedCards: number
+  } | null>(null)
+  const [applyingHiddenRelationId, setApplyingHiddenRelationId] = useState<string | null>(null)
   const [qualityRejection, setQualityRejection] = useState<QualityRejection | null>(null)
 
   // Video detection: if card content has axiom-video marker, fetch and render video HTML
@@ -117,6 +138,13 @@ export default function ForgeEditor() {
     }
   }, [selectedNode?.id, cardContent, cardTitle, currentVaultId, dirty])
 
+  useEffect(() => {
+    setHiddenRelations([])
+    setHiddenRelationsError(null)
+    setHiddenRelationsMeta(null)
+    setApplyingHiddenRelationId(null)
+  }, [selectedNode?.id])
+
   const parseResourceManifest = useCallback((content: string): ResourceManifestItem[] => {
     const match = content.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
     if (!match?.[1]) return []
@@ -130,6 +158,24 @@ export default function ForgeEditor() {
       return []
     }
   }, [])
+
+  const parseOrchestrationManifest = useCallback((content: string): OrchestrationManifest | null => {
+    const match = content.match(/<!--\s*axiom-orchestration:([\s\S]*?)\s*-->/)
+    if (!match?.[1]) return null
+    try {
+      const parsed = JSON.parse(match[1]) as OrchestrationManifest | null
+      if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.agents)) return null
+      return parsed
+    } catch (err) {
+      console.warn('[ForgeEditor] failed to parse orchestration manifest:', err)
+      return null
+    }
+  }, [])
+
+  const orchestrationManifest = useMemo(
+    () => parseOrchestrationManifest(cardContent),
+    [cardContent, parseOrchestrationManifest],
+  )
 
   // Detect axiom-video marker in card content and fetch video HTML
   useEffect(() => {
@@ -254,7 +300,9 @@ export default function ForgeEditor() {
   // Fetch card content when selected node changes
   useEffect(() => {
     setQualityRejection(null)
+    setLoadError(null)
     if (!selectedNodeId) {
+      setLoading(false)
       setCardContent('')
       setCardTitle(null)
       setDirty(false)
@@ -268,6 +316,7 @@ export default function ForgeEditor() {
 
     // Use prefetched content if available (instant, no API call)
     if (prefetchedCard?.id === selectedNodeId) {
+      setLoading(false)
       setCardContent(prefetchedCard.content)
       setCardTitle(prefetchedCard.title)
       setDirty(false)
@@ -291,15 +340,23 @@ export default function ForgeEditor() {
           setCardContent((data.card?.content || ''))
           setCardTitle((data.card?.title || selectedNodeTitle))
           setDirty(false)
+        } else {
+          setLoadError(data.error || '卡片内容加载失败')
+          setCardContent('')
         }
       } catch (err) {
-        if (!cancelled) console.warn('[ForgeEditor] failed to fetch card:', err)
+        if (!cancelled) {
+          const message = err instanceof Error ? err.message : '卡片内容加载失败'
+          setLoadError(message)
+          setCardContent('')
+          console.warn('[ForgeEditor] failed to fetch card:', err)
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
     return () => { cancelled = true }
-  }, [selectedNodeId, selectedNodeTitle, prefetchedCard, currentVaultId])
+  }, [selectedNodeId, selectedNodeTitle, prefetchedCard, currentVaultId, reloadNonce])
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value
@@ -570,6 +627,116 @@ export default function ForgeEditor() {
     }
   }, [selectedNode, currentVaultId, queryClient])
 
+  const handleDiscoverHiddenRelations = useCallback(async () => {
+    if (!selectedNode?.id || !currentVaultId) return
+    setHiddenRelationsLoading(true)
+    setHiddenRelationsError(null)
+    try {
+      const saved = await saveCurrentCard({ silent: true, force: true })
+      if (!saved) {
+        setHiddenRelationsError('当前卡片保存失败，无法进行向量发现。')
+        return
+      }
+      const res = await (client.api.rag['hidden-links'].$post as (args: {
+        query: { vid?: string }
+        json: {
+          cardId: string
+          limit?: number
+          topK?: number
+          threshold?: number
+          autoSync?: boolean
+        }
+      }) => Promise<Response>)({
+        query: { vid: currentVaultId },
+        json: {
+          cardId: selectedNode.id,
+          limit: 8,
+          topK: 12,
+          threshold: 0.58,
+          autoSync: true,
+        },
+      })
+      const data = await res.json() as {
+        success: boolean
+        suggestions?: HiddenRelationSuggestion[]
+        vectorCandidates?: number
+        indexedCards?: number
+        scannedCards?: number
+        errors?: string[]
+        error?: string
+      }
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `隐藏关联发现失败 (${res.status})`)
+      }
+      setHiddenRelations(data.suggestions ?? [])
+      setHiddenRelationsMeta({
+        vectorCandidates: data.vectorCandidates ?? 0,
+        indexedCards: data.indexedCards ?? 0,
+        scannedCards: data.scannedCards ?? 0,
+      })
+      setHiddenRelationsError(data.errors?.[0] ?? null)
+      if ((data.suggestions ?? []).length === 0) {
+        toast('暂时没有发现可写入的隐藏关联', { duration: 2200 })
+      } else {
+        toast.success(`发现 ${(data.suggestions ?? []).length} 条隐藏关联候选`, { duration: 2200 })
+      }
+      queryClient.invalidateQueries({ queryKey: ['rag-card-status', currentVaultId, selectedNode.id] })
+      queryClient.invalidateQueries({ queryKey: ['rag-related-cards', currentVaultId, selectedNode.id] })
+    } catch (err) {
+      const message = (err as Error)?.message || '网络异常'
+      setHiddenRelationsError(message)
+      toast.error(message)
+    } finally {
+      setHiddenRelationsLoading(false)
+    }
+  }, [selectedNode?.id, currentVaultId, saveCurrentCard, queryClient])
+
+  const handleApplyHiddenRelation = useCallback(async (suggestion: HiddenRelationSuggestion) => {
+    if (!currentVaultId) return
+    setApplyingHiddenRelationId(suggestion.id)
+    try {
+      const res = await (client.api.rag['hidden-links'].apply.$post as (args: {
+        query: { vid?: string }
+        json: {
+          sourceCardId: string
+          targetCardId: string
+          relationType?: string
+          strength?: number
+          appendWikiLink?: boolean
+        }
+      }) => Promise<Response>)({
+        query: { vid: currentVaultId },
+        json: {
+          sourceCardId: suggestion.sourceCardId,
+          targetCardId: suggestion.targetCardId,
+          relationType: suggestion.relationType,
+          strength: suggestion.strength,
+          appendWikiLink: true,
+        },
+      })
+      const data = await res.json() as {
+        success: boolean
+        result?: { alreadyExists?: boolean; wikiLinkAppended?: boolean }
+        error?: string
+      }
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || `写入关系失败 (${res.status})`)
+      }
+      setHiddenRelations((items) => items.filter((item) => item.id !== suggestion.id))
+      toast.success(data.result?.alreadyExists ? '关系已存在，已更新权重' : '隐藏关联已写入图谱')
+      queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['rag-related-cards', currentVaultId, suggestion.sourceCardId] })
+      queryClient.invalidateQueries({ queryKey: ['rag-card-status', currentVaultId, suggestion.sourceCardId] })
+      if (selectedNode?.id === suggestion.sourceCardId) {
+        await reloadCardContent(suggestion.sourceCardId)
+      }
+    } catch (err) {
+      toast.error((err as Error)?.message || '写入关系失败')
+    } finally {
+      setApplyingHiddenRelationId(null)
+    }
+  }, [currentVaultId, queryClient, reloadCardContent, selectedNode?.id])
+
   // Ctrl+S triggers the same auto-save path immediately.
   const handleSaveRef = useRef(saveCurrentCard)
   handleSaveRef.current = saveCurrentCard
@@ -620,6 +787,14 @@ export default function ForgeEditor() {
             issues: data.qualityIssues ?? [],
           })
           toast.warning('升级被驳回：需要先补齐清晰、准确、必要')
+        } else if (data.error === 'PROMOTION_EVIDENCE_REQUIRED') {
+          setQualityRejection({
+            title: cardTitle || selectedNode.title || '当前卡片',
+            error: '这张卡片还没有学习证据。请先在学习路径中完成对应任务评估，或记录一次被接受的费曼解释。',
+            missingElements: data.missingElements ?? ['assessmentEvidence'],
+            issues: [],
+          })
+          toast.warning('升级被驳回：缺少学习评估证据')
         } else {
           toast.error(`升级失败: ${data.error || `HTTP ${res.status}`}${missing}`)
         }
@@ -759,13 +934,22 @@ export default function ForgeEditor() {
   }
 
   const handleModeChange = async (mode: 'live' | 'read') => {
-    await saveCurrentCard({ silent: true })
     setEditorMode(mode)
+    await saveCurrentCard({ silent: true })
   }
 
   const handleOpenRelatedCard = async (card: RelatedRagCard) => {
     await saveCurrentCard({ silent: true })
     useAppStore.getState().setSelectedNode({ id: card.id, title: card.title, type: card.type })
+  }
+
+  const handleOpenHiddenRelationTarget = async (suggestion: HiddenRelationSuggestion) => {
+    await saveCurrentCard({ silent: true })
+    useAppStore.getState().setSelectedNode({
+      id: suggestion.targetCardId,
+      title: suggestion.targetTitle,
+      type: suggestion.targetType,
+    })
   }
 
   const handleWikiSelectIndex = (index: number) => {
@@ -841,6 +1025,27 @@ export default function ForgeEditor() {
           <EditorEmptyState />
         ) : loading ? (
           <EditorLoadingState />
+        ) : loadError ? (
+          <div className="flex-1 flex items-center justify-center px-6">
+            <HudPanel as="div" className="max-w-md rounded-xl border-red-300/15 bg-red-300/[0.035] p-5 text-center">
+              <div className="mono uppercase text-red-200/65" style={{ fontSize: 'var(--f8)' }}>
+                Card_Load_Failed
+              </div>
+              <p className="mt-2 text-white/68" style={{ fontSize: 'var(--f9)' }}>
+                {loadError}
+              </p>
+              <button
+                className="mt-4 rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-white/70 transition-colors hover:bg-white/[0.08]"
+                style={{ fontSize: 'var(--f9)' }}
+                onClick={() => {
+                  setLoadError(null)
+                  setReloadNonce((value) => value + 1)
+                }}
+              >
+                重新加载
+              </button>
+            </HudPanel>
+          </div>
         ) : (
           <>
             <EditorStatusBar
@@ -861,6 +1066,17 @@ export default function ForgeEditor() {
               onToggle={() => setRelatedOpen((open) => !open)}
               onOpenCard={handleOpenRelatedCard}
               onInsertLink={insertWikiLink}
+            />
+            <HiddenRelationsPanel
+              suggestions={hiddenRelations}
+              loading={hiddenRelationsLoading}
+              applyingId={applyingHiddenRelationId}
+              disabled={!selectedNode?.id || !currentVaultId}
+              error={hiddenRelationsError}
+              meta={hiddenRelationsMeta}
+              onDiscover={handleDiscoverHiddenRelations}
+              onApply={handleApplyHiddenRelation}
+              onOpenTarget={handleOpenHiddenRelationTarget}
             />
             {editorMode === 'live' ? (
               <div className="flex-1 p-0 overflow-hidden relative">
@@ -907,9 +1123,9 @@ export default function ForgeEditor() {
 
                   {/* 教学视频播放器 */}
                   {videoLoading && (
-                    <div className="mt-6 p-6 glass-panel rounded-xl border border-white/10 text-center">
+                    <HudPanel as="div" className="mt-6 p-6 rounded-xl text-center">
                       <div className="animate-pulse text-gray-400">加载教学视频...</div>
-                    </div>
+                    </HudPanel>
                   )}
                   {(videoHtml || videoUrl) && !videoLoading && (
                     <div className="mt-6">
@@ -927,6 +1143,7 @@ export default function ForgeEditor() {
                     resources={resourceItems}
                     loading={resourceLoading}
                   />
+                  <AgentOrchestrationPanel orchestration={orchestrationManifest} resources={resourceItems} />
                 </div>
               </div>
             )}

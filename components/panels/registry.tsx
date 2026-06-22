@@ -16,8 +16,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import type { ComponentType } from 'react'
-import type { Mode, PanelId, PanelZone } from '@/stores/mode-store'
-import type { ForgeResourceView } from '@/components/forge/forge-resource-panel'
+import type { ForgeResourceView, Mode, PanelId, PanelZone } from '@/stores/mode-store'
 
 export type PanelSurface =
   | 'activity'

@@ -304,6 +304,7 @@ export class PushSuggestionEngine {
     const cardById = new Map(cards.map((card) => [card.id, card]));
 
     if (profile) this.findProfileGapCandidates(params, profile, cards, existingEdges, candidates);
+    if (profile) this.findEvidenceDrivenNextStepCandidates(params, profile, cards, existingEdges, candidates);
     this.findWikiLinkCandidates(params, cards, titleToCard, existingEdges, candidates);
     this.findPathCandidates(params, paths, cardById, existingEdges, candidates);
     this.findThinCardCandidates(params, cards, edges, candidates);
@@ -337,14 +338,18 @@ export class PushSuggestionEngine {
       profile.teachingPolicy.shouldUseExamples ? '例子' : '',
       profile.teachingPolicy.shouldPreferPractice ? '练习' : '',
     ]).slice(0, 5);
-    const recentEvidence = profile.profileLoop.recentEvidence.slice(0, 3);
+    const recentEvidence = collectPushEvidence(profile).slice(0, 6);
     const masteredCards = matchCardsByTitles(cards, profile.knowledgeProfile.masteredConcepts);
 
     for (const gap of remainingGaps) {
-      const gapCards = matchCardsByTitles(cards, [gap]);
+      const refinedGap = refineGapTarget(gap, cards, recentEvidence);
+      const targetGap = refinedGap?.title || gap;
+      const gapCards = refinedGap ? [refinedGap] : matchCardsByTitles(cards, [gap]);
       const evidence = uniqueStrings([
-        `画像字段：剩余缺口 = ${gap}`,
+        `画像字段：剩余缺口 = ${targetGap}`,
+        targetGap !== gap ? `由宽泛缺口「${gap}」细化到当前可执行下一步` : '',
         recentEvidence[0] ? `触发证据：${recentEvidence[0]}` : '',
+        refinedGap ? `资料证据：${extractCardEvidence(refinedGap)}` : '',
         resourcePreference.length ? `资源偏好：${resourcePreference.join('、')}` : '',
         profile.profileSummary.goals[0] ? `当前目标：${profile.profileSummary.goals[0]}` : '',
       ]);
@@ -354,22 +359,24 @@ export class PushSuggestionEngine {
         trigger: params.trigger,
         boxType: 'resource',
         itemType: 'task_group',
-        title: `补齐画像缺口：${gap}`,
-        reason: `画像字段「剩余缺口」显示用户下一步需要补「${gap}」，因此推送一组可执行任务，而不是继续泛泛学习。`,
+        title: `建议任务组：${targetGap}`,
+        reason: `画像字段「剩余缺口」指向「${gap}」，系统进一步定位到「${targetGap}」作为当前可执行下一步，因此推送一组任务而不是继续泛泛学习。`,
         evidence,
-        confidence: recentEvidence.length > 0 ? 0.84 : 0.68,
+        confidence: refinedGap ? 0.9 : recentEvidence.length > 0 ? 0.84 : 0.68,
         payload: {
           missingType: 'profile_remaining_gap',
           suggestedFormat: 'task_group',
-          targetArea: gap,
-          goal: `补齐画像剩余缺口：${gap}`,
-          profileGap: gap,
+          targetArea: targetGap,
+          goal: `补齐画像剩余缺口：${targetGap}`,
+          profileGap: targetGap,
+          originalProfileGap: gap,
           profileDriven: true,
           resourcePreference,
+          displayLocked: refinedGap ? true : undefined,
           tasks: [
-            { title: `说清「${gap}」的定义和边界` },
-            { title: `用一个例子解释「${gap}」` },
-            { title: `完成一题「${gap}」小练习` },
+            { title: `说清「${targetGap}」的定义和边界` },
+            { title: `用一个例子解释「${targetGap}」` },
+            { title: `完成一题「${targetGap}」小练习` },
           ],
         },
       }));
@@ -398,30 +405,35 @@ export class PushSuggestionEngine {
       }
 
       const source = masteredCards[0];
+      const evidenceSource = matchCardsByEvidence(cards, recentEvidence)[0];
+      const linkSource = evidenceSource || source;
       const target = gapCards[0];
-      if (source && target && source.id !== target.id && !hasAnyEdge(existingEdges, source.id, target.id)) {
+      if (linkSource && target && linkSource.id !== target.id && !hasAnyEdge(existingEdges, linkSource.id, target.id)) {
         candidates.push(makeCandidate({
           vaultId: params.vaultId,
           trigger: params.trigger,
           boxType: 'link',
           itemType: 'link',
-          title: `连接已会概念和剩余缺口：${source.title || source.path} -> ${target.title || target.path}`,
-          reason: `画像显示用户已掌握「${source.title || source.path}」，剩余缺口是「${gap}」，两者需要建立支持关系，方便下一步学习追溯。`,
+          title: `建议连接：${linkSource.title || linkSource.path} -> ${target.title || target.path}`,
+          reason: `学生已经能用自己的表达说明「${linkSource.title || linkSource.path}」相关证据，下一步缺口是「${targetGap}」，两者需要建立支持关系，方便学习路径继续推进。`,
           evidence: uniqueStrings([
-            `已掌握概念：${source.title || source.path}`,
-            `画像字段：剩余缺口 = ${gap}`,
+            `已掌握概念：${linkSource.title || linkSource.path}`,
+            `画像字段：剩余缺口 = ${targetGap}`,
+            `卡片证据：${extractCardEvidence(linkSource)}`,
             ...recentEvidence.map((item) => `触发证据：${item}`),
           ]),
-          confidence: 0.72,
+          confidence: evidenceSource ? 0.88 : 0.72,
           payload: {
-            sourceCardId: source.id,
-            sourceTitle: source.title,
+            sourceCardId: linkSource.id,
+            sourceTitle: linkSource.title,
             targetCardId: target.id,
             targetTitle: target.title,
             relationType: 'supports',
             direction: 'source_to_target',
-            profileGap: gap,
+            profileGap: targetGap,
+            originalProfileGap: gap,
             profileDriven: true,
+            displayLocked: evidenceSource ? true : undefined,
           },
         }));
       }
@@ -461,6 +473,80 @@ export class PushSuggestionEngine {
         }));
       }
     }
+  }
+
+  private findEvidenceDrivenNextStepCandidates(
+    params: { vaultId: string; trigger: string },
+    profile: LearningProfileContext,
+    cards: CardSnapshot[],
+    existingEdges: Set<string>,
+    candidates: Candidate[],
+  ) {
+    const recentEvidence = collectPushEvidence(profile).slice(0, 8);
+    if (recentEvidence.length === 0) return;
+    const source = matchCardsByEvidence(cards, recentEvidence)[0];
+    if (!source) return;
+    const target = findBoundaryNextStepCard(cards, source, recentEvidence);
+    if (!target || target.id === source.id) return;
+
+    const remainingGaps = getProfileRemainingGaps(profile);
+    const profileGap = target.title || remainingGaps[0] || target.path;
+    const evidence = uniqueStrings([
+      `已掌握概念：${source.title || source.path}`,
+      `画像字段：剩余缺口 = ${profileGap}`,
+      `卡片证据：${extractCardEvidence(source)}`,
+      `资料证据：${extractCardEvidence(target)}`,
+      ...recentEvidence.slice(0, 2).map((item) => `触发证据：${item}`),
+    ]);
+
+    if (!hasAnyEdge(existingEdges, source.id, target.id)) {
+      candidates.push(makeCandidate({
+        vaultId: params.vaultId,
+        trigger: params.trigger,
+        boxType: 'link',
+        itemType: 'link',
+        title: `建议连接：${source.title || source.path} -> ${target.title || target.path}`,
+        reason: `学生已经能说出「${source.title || source.path}」相关理解，下一步应连接到「${target.title || target.path}」这类前提、适用条件或边界问题。`,
+        evidence,
+        confidence: 0.92,
+        payload: {
+          sourceCardId: source.id,
+          sourceTitle: source.title,
+          targetCardId: target.id,
+          targetTitle: target.title,
+          relationType: 'supports',
+          direction: 'source_to_target',
+          profileGap,
+          evidenceDriven: true,
+          displayLocked: true,
+        },
+      }));
+    }
+
+    candidates.push(makeCandidate({
+      vaultId: params.vaultId,
+      trigger: params.trigger,
+      boxType: 'resource',
+      itemType: 'task_group',
+      title: `建议任务组：${target.title || target.path}`,
+      reason: `当前卡片证据说明用户已经修正基础理解，下一步需要处理「${target.title || target.path}」的适用条件、边界或局限。`,
+      evidence,
+      confidence: 0.91,
+      payload: {
+        missingType: 'evidence_driven_next_step',
+        suggestedFormat: 'task_group',
+        targetArea: target.title || target.path,
+        goal: `补齐下一步边界问题：${target.title || target.path}`,
+        profileGap,
+        evidenceDriven: true,
+        displayLocked: true,
+        tasks: [
+          { title: `说明「${target.title || target.path}」什么时候适用` },
+          { title: `找出一个会破坏该方法前提的反例` },
+          { title: `用当前资料证据写出判断标准` },
+        ],
+      },
+    }));
   }
 
   private findPathCandidates(
@@ -726,10 +812,15 @@ export class PushSuggestionEngine {
           ...(suggestion.payloadPatch && typeof suggestion.payloadPatch === 'object' ? suggestion.payloadPatch : {}),
           aiReviewed: true,
         };
+        const preserveDisplay = candidate.payload.displayLocked === true;
         judged.push({
           ...candidate,
-          title: typeof suggestion.title === 'string' && suggestion.title.trim() ? suggestion.title.trim().slice(0, 160) : candidate.title,
-          reason: typeof suggestion.reason === 'string' && suggestion.reason.trim() ? suggestion.reason.trim().slice(0, 500) : candidate.reason,
+          title: preserveDisplay
+            ? candidate.title
+            : typeof suggestion.title === 'string' && suggestion.title.trim() ? suggestion.title.trim().slice(0, 160) : candidate.title,
+          reason: preserveDisplay
+            ? candidate.reason
+            : typeof suggestion.reason === 'string' && suggestion.reason.trim() ? suggestion.reason.trim().slice(0, 500) : candidate.reason,
           confidence: clampConfidence(typeof suggestion.confidence === 'number' ? suggestion.confidence : candidate.confidence),
           payload,
         });
@@ -1100,6 +1191,118 @@ function getProfileRemainingGaps(profile: LearningProfileContext): string[] {
     ...profile.knowledgeProfile.isolatedNodes.map((node) => node.title),
     ...profile.knowledgeProfile.weakDomains,
   ]);
+}
+
+function collectPushEvidence(profile: LearningProfileContext): string[] {
+  return uniqueStrings([
+    ...profile.profileLoop.recentEvidence,
+    ...profile.profileLoop.contextInjection,
+    ...profile.knowledgeProfile.masteredConcepts.map((item) => `已掌握概念：${item}`),
+    ...profile.knowledgeProfile.weakConcepts.map((item) => `薄弱概念：${item}`),
+    ...profile.dimensionInsights.flatMap((dimension) => [
+      ...dimension.evidence,
+      ...dimension.observations.slice(0, 2).map((observation) => observation.evidence || observation.text),
+    ]),
+  ]).slice(0, 24);
+}
+
+function refineGapTarget(gap: string, cards: CardSnapshot[], recentEvidence: string[]): CardSnapshot | null {
+  const gapKeywords = tokenizeConcept(gap);
+  const evidenceKeywords = tokenizeConcept(recentEvidence.join(' '));
+  const isBroadGap = gapKeywords.length <= 3 || cards.some((card) => normalizeConceptLookup(card.title || card.path) === normalizeConceptLookup(gap));
+  if (!isBroadGap) return matchCardsByTitles(cards, [gap])[0] ?? null;
+
+  const boundaryTerms = ['前提', '条件', '适用', '边界', '局限', '限制', '下一步', '进阶', '依赖', '假设', 'why', 'when', 'limit'];
+  const candidates = cards
+    .filter((card) => card.type !== 'literature')
+    .map((card) => {
+      const text = `${card.title || ''}\n${card.content || ''}`.toLowerCase();
+      let score = 0;
+      for (const keyword of gapKeywords) {
+        if (keyword && text.includes(keyword.toLowerCase())) score += 2;
+      }
+      for (const keyword of evidenceKeywords) {
+        if (keyword && text.includes(keyword.toLowerCase())) score += 1;
+      }
+      for (const term of boundaryTerms) {
+        if (text.includes(term.toLowerCase())) score += 3;
+      }
+      if (/暂无稳定误区证据/.test(card.content)) score += 0.4;
+      if (normalizeConceptLookup(card.title || '') === normalizeConceptLookup(gap)) score -= 5;
+      return { card, score };
+    })
+    .filter((item) => item.score >= 5)
+    .sort((a, b) => b.score - a.score);
+
+  return candidates[0]?.card ?? null;
+}
+
+function matchCardsByEvidence(cards: CardSnapshot[], recentEvidence: string[]): CardSnapshot[] {
+  const evidenceKeywords = tokenizeConcept(recentEvidence.join(' '));
+  if (evidenceKeywords.length === 0) return [];
+  return cards
+    .filter((card) => card.type !== 'literature')
+    .map((card) => {
+      const title = (card.title || card.path || '').toLowerCase();
+      const text = `${card.title || ''}\n${card.content || ''}`.toLowerCase();
+      let score = 0;
+      for (const keyword of evidenceKeywords) {
+        const lowered = keyword.toLowerCase();
+        if (title.includes(lowered)) score += 3;
+        if (text.includes(lowered)) score += 1;
+      }
+      return { card, score };
+    })
+    .filter((item) => item.score >= 3)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.card);
+}
+
+function findBoundaryNextStepCard(cards: CardSnapshot[], source: CardSnapshot, recentEvidence: string[]): CardSnapshot | null {
+  const sourceKeywords = uniqueStrings([
+    ...tokenizeConcept(source.title || source.path),
+    ...tokenizeConcept(source.content).slice(0, 8),
+    ...tokenizeConcept(recentEvidence.join(' ')),
+  ]);
+  const boundaryTerms = ['前提', '条件', '适用', '边界', '局限', '限制', '依赖', '假设', '非负', '负权', '反例', '正确性', 'when', 'limit'];
+  const candidates = cards
+    .filter((card) => card.type !== 'literature' && card.id !== source.id)
+    .map((card) => {
+      const text = `${card.title || ''}\n${card.content || ''}`.toLowerCase();
+      let score = 0;
+      for (const term of boundaryTerms) {
+        if (text.includes(term.toLowerCase())) score += 4;
+      }
+      for (const keyword of sourceKeywords) {
+        const lowered = keyword.toLowerCase();
+        if (lowered && text.includes(lowered)) score += 1;
+      }
+      if (/暂无稳定误区证据/.test(card.content)) score += 0.5;
+      return { card, score };
+    })
+    .filter((item) => item.score >= 6)
+    .sort((a, b) => b.score - a.score);
+
+  return candidates[0]?.card ?? null;
+}
+
+function extractCardEvidence(card: CardSnapshot): string {
+  const text = stripMarkdown(card.content)
+    .replace(/^#+\s*/gm, '')
+    .split(/[。！？\n]/)
+    .map((line) => line.trim())
+    .find((line) => line.length >= 12 && !line.includes('暂无稳定误区证据'));
+  return (text || card.title || card.path).slice(0, 120);
+}
+
+function tokenizeConcept(text: string): string[] {
+  const raw = text
+    .replace(/[“”‘’"'`()[\]{}<>《》]/g, ' ')
+    .split(/[\s,.;:!?，。！？、；：/\\|-]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && token.length <= 28)
+    .filter((token) => !['用户', '已经', '能够', '正确', '区分', '因此', '需要', '当前', '学习', '概念', '路径', '触发证据', '画像字段'].includes(token));
+  return uniqueStrings(raw).slice(0, 16);
 }
 
 function extractWikiLinks(content: string): string[] {

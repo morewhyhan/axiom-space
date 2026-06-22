@@ -14,7 +14,7 @@ import {
   Presentation,
   X,
 } from 'lucide-react'
-import { Button } from '@/components/ui'
+import { Button, HudPanel } from '@/components/ui'
 import { ResourcePreview } from './resource-preview'
 import { downloadResource, shortHash, statusLabel } from './resource-utils'
 import type { GeneratedResourceItem } from './types'
@@ -43,9 +43,9 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
 
   if (loading) {
     return (
-      <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.03] p-5 text-center text-sm text-white/40">
+      <HudPanel as="div" className="mt-6 p-5 text-center text-sm text-white/40">
         加载资源面板...
-      </div>
+      </HudPanel>
     )
   }
 
@@ -65,7 +65,7 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
           {visibleResources.map((item) => {
             const Icon = RESOURCE_ICON[item.type] || FileText
             return (
-              <div key={`${item.type}:${item.path}`} className="rounded-xl border border-white/10 bg-white/[0.035] p-4">
+              <HudPanel key={`${item.type}:${item.path}`} as="div" className="rounded-xl p-4">
                 <div className="mb-3 flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/8 text-white/60">
                     <Icon className="h-4 w-4" />
@@ -103,7 +103,7 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
                 <div className="max-h-96 overflow-auto rounded-lg border border-white/5 bg-black/15 p-4">
                   <ResourcePreview item={item} />
                 </div>
-              </div>
+              </HudPanel>
             )
           })}
         </div>
@@ -111,7 +111,7 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
 
       {active && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6">
-          <div className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-white/10 bg-[#0b0b10] shadow-2xl">
+          <HudPanel as="div" className="flex h-full w-full max-w-6xl flex-col overflow-hidden rounded-xl bg-[#0b0b10] p-0 shadow-2xl">
             <div className="flex items-center gap-3 border-b border-white/10 px-5 py-3">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-white/85">{active.title}</div>
@@ -135,7 +135,7 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
             <div className="flex-1 overflow-auto p-6">
               <ResourcePreview item={active} expanded />
             </div>
-          </div>
+          </HudPanel>
         </div>
       )}
     </>

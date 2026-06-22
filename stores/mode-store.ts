@@ -4,6 +4,9 @@ import { persist } from 'zustand/middleware'
 export type Mode = 'dashboard' | 'forge' | 'galaxy' | 'cognition' | 'learn'
 export type PanelId = 'fileTree' | 'sessionList' | 'editor'
 export type PanelZone = 'left' | 'right'
+export type ForgeResourceView = 'context' | 'cards'
+export type ForgeContextTab = 'tasks' | 'talks'
+export type ForgeCardFilter = 'all' | 'permanent' | 'literature' | 'fleeting'
 
 export interface PanelLayout {
   left: PanelId[]
@@ -56,6 +59,7 @@ interface AppStore {
   selectedNode: SelectedNode | null
   setSelectedNode: (node: SelectedNode | null) => void
   clearSelectedNode: () => void
+  openForgeCardPreview: (node: SelectedNode) => void
   prefetchedCard: { id: string; content: string; title: string } | null
   setPrefetchedCard: (card: { id: string; content: string; title: string } | null) => void
   /* ── Vault management ── */
@@ -79,6 +83,12 @@ interface AppStore {
   setRightPanelOpen: (open: boolean) => void
   rightPanelView: 'editor' | 'read'
   setRightPanelView: (view: 'editor' | 'read') => void
+  forgeResourceView: ForgeResourceView
+  setForgeResourceView: (view: ForgeResourceView) => void
+  forgeContextTab: ForgeContextTab
+  setForgeContextTab: (tab: ForgeContextTab) => void
+  forgeCardFilter: ForgeCardFilter
+  setForgeCardFilter: (filter: ForgeCardFilter) => void
 
   /* ── Panel layout (drag & drop + resize) ── */
   panelLayout: PanelLayout
@@ -99,6 +109,10 @@ interface AppStore {
   setGraphLayoutMode: (mode: GraphLayoutMode) => void
   graphHoverAttention: boolean
   setGraphHoverAttention: (enabled: boolean) => void
+  graphSemanticClusterLens: boolean
+  setGraphSemanticClusterLens: (enabled: boolean) => void
+  graphForceMotion: boolean
+  setGraphForceMotion: (enabled: boolean) => void
   /* ── Onboarding ── */
   hasCompletedOnboarding: boolean
   setHasCompletedOnboarding: (v: boolean) => void
@@ -117,6 +131,16 @@ export const useAppStore = create<AppStore>()(
       selectedNode: null,
       setSelectedNode: (node) => set({ selectedNode: node }),
       clearSelectedNode: () => set({ selectedNode: null, prefetchedCard: null }),
+      openForgeCardPreview: (node) => set({
+        selectedNode: node,
+        mode: 'forge',
+        panelLayout: { left: [], right: ['editor'] },
+        chatPanelOpen: false,
+        filePanelOpen: false,
+        sessionsPanelOpen: false,
+        rightPanelOpen: true,
+        rightPanelView: 'read',
+      }),
       prefetchedCard: null,
       setPrefetchedCard: (card) => set({ prefetchedCard: card }),
       currentVaultId: null,
@@ -138,6 +162,12 @@ export const useAppStore = create<AppStore>()(
       setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
       rightPanelView: 'editor',
       setRightPanelView: (view) => set({ rightPanelView: view }),
+      forgeResourceView: 'context',
+      setForgeResourceView: (view) => set({ forgeResourceView: view }),
+      forgeContextTab: 'tasks',
+      setForgeContextTab: (tab) => set({ forgeContextTab: tab }),
+      forgeCardFilter: 'all',
+      setForgeCardFilter: (filter) => set({ forgeCardFilter: filter }),
 
       /* ── Panel layout (drag & drop + resize) ── */
       panelLayout: { ...DEFAULT_PANEL_LAYOUT, left: [...DEFAULT_PANEL_LAYOUT.left], right: [...DEFAULT_PANEL_LAYOUT.right] },
@@ -185,13 +215,17 @@ export const useAppStore = create<AppStore>()(
       setGraphLayoutMode: (mode) => set({ graphLayoutMode: mode }),
       graphHoverAttention: true,
       setGraphHoverAttention: (enabled) => set({ graphHoverAttention: enabled }),
+      graphSemanticClusterLens: false,
+      setGraphSemanticClusterLens: (enabled) => set({ graphSemanticClusterLens: enabled }),
+      graphForceMotion: true,
+      setGraphForceMotion: (enabled) => set({ graphForceMotion: enabled }),
       /* ── Onboarding ── */
       hasCompletedOnboarding: false,
       setHasCompletedOnboarding: (v) => set({ hasCompletedOnboarding: v }),
     }),
     {
       name: 'axiom-store',
-      version: 9,
+      version: 10,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== 'object') return persistedState
         const state = persistedState as Partial<AppStore> & {
@@ -248,6 +282,20 @@ export const useAppStore = create<AppStore>()(
         }
         const existingLeft = next.panelLayout?.left?.filter((panel): panel is PanelId => panel === 'fileTree' || panel === 'sessionList') ?? []
         const existingRight = next.panelLayout?.right?.filter((panel): panel is PanelId => panel === 'editor') ?? []
+        if (next.forgeResourceView !== 'context' && next.forgeResourceView !== 'cards') {
+          next.forgeResourceView = existingLeft.includes('fileTree') ? 'cards' : 'context'
+        }
+        if (next.forgeContextTab !== 'tasks' && next.forgeContextTab !== 'talks') {
+          next.forgeContextTab = 'tasks'
+        }
+        if (
+          next.forgeCardFilter !== 'all'
+          && next.forgeCardFilter !== 'permanent'
+          && next.forgeCardFilter !== 'literature'
+          && next.forgeCardFilter !== 'fleeting'
+        ) {
+          next.forgeCardFilter = 'all'
+        }
         next.panelLayout = {
           left: existingLeft,
           right: existingRight.length > 0 ? existingRight : ['editor'],
@@ -262,8 +310,13 @@ export const useAppStore = create<AppStore>()(
         panelLayout: state.panelLayout,
         panelSizes: state.panelSizes,
         chatPanelOpen: state.chatPanelOpen,
+        forgeResourceView: state.forgeResourceView,
+        forgeContextTab: state.forgeContextTab,
+        forgeCardFilter: state.forgeCardFilter,
         graphLayoutMode: state.graphLayoutMode,
         graphHoverAttention: state.graphHoverAttention,
+        graphSemanticClusterLens: state.graphSemanticClusterLens,
+        graphForceMotion: state.graphForceMotion,
       }),
     }
   )

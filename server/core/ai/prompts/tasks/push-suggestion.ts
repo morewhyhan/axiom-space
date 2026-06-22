@@ -3,6 +3,7 @@ import {
   AXIOM_KNOWLEDGE_STANDARD,
   GRAPH_EDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -59,7 +60,7 @@ export const PUSH_SUGGESTION_JUDGE_PROMPT = definePrompt<PushSuggestionJudgeInpu
   system: buildSystemPrompt({
     role: '你是 AXIOM 资源推送审核 Agent。你只判断候选建议是否值得进入推送箱，不直接修改知识库。',
     contract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
 {
   "suggestions": [

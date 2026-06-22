@@ -55,10 +55,18 @@ export function AuthModal({ mode, onClose }: { mode: 'login' | 'register'; onClo
       }}
     >
       <div className="landing-modal">
-        <button className="landing-modal-close" onClick={onClose}>✕</button>
+        <button
+          type="button"
+          className="landing-modal-close"
+          aria-label="关闭登录注册窗口"
+          disabled={isSubmitting}
+          onClick={onClose}
+        >
+          ✕
+        </button>
         <div className="landing-modal-tabs">
-          <button className={`landing-modal-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>登录</button>
-          <button className={`landing-modal-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>注册</button>
+          <button type="button" className={`landing-modal-tab ${tab === 'login' ? 'active' : ''}`} onClick={() => setTab('login')}>登录</button>
+          <button type="button" className={`landing-modal-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>注册</button>
         </div>
         <form className="landing-auth-form" onSubmit={handleSubmit}>
           {tab === 'register' && (

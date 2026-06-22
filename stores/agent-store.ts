@@ -3,6 +3,7 @@
 import { create } from 'zustand'
 import { client } from '@/lib/api-client'
 import { useAppStore } from '@/stores/mode-store'
+import type { PanelId } from '@/stores/mode-store'
 
 export interface AgentMessage {
   role: 'user' | 'assistant'
@@ -117,6 +118,19 @@ async function readApiResult<T extends { success: boolean; error?: string }>(
   return data
 }
 
+async function requestCardThreadFlush(sessionId: string | null | undefined, reason: string): Promise<void> {
+  if (!sessionId) return
+  const vid = useAppStore.getState().currentVaultId
+  if (!vid) return
+  const route = (client.api.agent.sessions[':id'] as any)?.['flush-card-thread']
+  if (!route?.$post) return
+  await route.$post({
+    param: { id: sessionId },
+    query: { vid },
+    json: { reason },
+  }).catch(() => {})
+}
+
 function clearWorkspaceFocus() {
   const appStore = useAppStore.getState()
   appStore.clearSelectedNode()
@@ -167,7 +181,7 @@ interface AgentStore {
   createTalkSession: (options?: CreateTalkSessionOptions) => Promise<SessionSummary | null>
   renameSession: (id: string, title: string) => Promise<boolean>
   autoTitleSession: (id: string) => Promise<boolean>
-  openCardThread: (card: { id: string; title: string; type: string }) => Promise<void>
+  openCardThread: (card: { id: string; title: string; type: string }, options?: { openChat?: boolean }) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   clearMessages: () => Promise<void>
 }
@@ -275,6 +289,14 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
   },
 
   switchSession: async (id: string) => {
+    const previousSessionId = get().sessionId
+    const previousSession = previousSessionId
+      ? get().sessions.find((item) => item.id === previousSessionId)
+      : null
+    if (previousSessionId && previousSessionId !== id && previousSession?.cardId) {
+      void requestCardThreadFlush(previousSessionId, 'session_switch')
+    }
+
     const session = get().sessions.find((item) => item.id === id) ?? null
     if (!session) {
       set({ error: '会话不存在' })
@@ -313,17 +335,41 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     set({ sessionId: id, messages: [], error: null })
 
     if (session) {
+      const appStore = useAppStore.getState()
       if (session.cardId) {
-        useAppStore.getState().setSelectedNode({
+        appStore.setSelectedNode({
           id: session.cardId,
           title: session.cardTitle || session.title,
           type: session.cardType || 'fleeting',
         })
+        const hadLeftPanel = appStore.panelLayout.left.length > 0
+        const leftPanel: PanelId[] = !hadLeftPanel
+          ? ['fileTree']
+          : appStore.forgeResourceView === 'cards'
+            ? ['fileTree']
+            : appStore.panelLayout.left
+        if (!hadLeftPanel) appStore.setForgeResourceView('cards')
+        appStore.setPanelLayout({
+          left: leftPanel,
+          right: ['editor'],
+        })
+        if (appStore.rightPanelView !== 'read') {
+          appStore.setRightPanelView('editor')
+        }
       } else {
-        useAppStore.getState().setSelectedNode(null)
+        const hadLeftPanel = appStore.panelLayout.left.length > 0
+        const leftPanel: PanelId[] = !hadLeftPanel || appStore.forgeResourceView === 'context'
+          ? ['sessionList']
+          : appStore.panelLayout.left
+        if (!hadLeftPanel) appStore.setForgeResourceView('context')
+        appStore.setPanelLayout({
+          left: leftPanel,
+          right: appStore.panelLayout.right,
+        })
       }
-      useAppStore.getState().setSelectedPathId(session.pathId ?? null)
-      useAppStore.getState().setActiveLearningStepId(session.stepId ?? null)
+      appStore.setChatPanelOpen(true)
+      appStore.setSelectedPathId(session.pathId ?? null)
+      appStore.setActiveLearningStepId(session.stepId ?? null)
     }
 
     try {
@@ -351,6 +397,10 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 
   createTalkSession: async (options) => {
     try {
+      const previousSessionId = get().sessionId
+      const previousSession = previousSessionId
+        ? get().sessions.find((item) => item.id === previousSessionId)
+        : null
       const vid = useAppStore.getState().currentVaultId
       if (!vid) return null
       const res = await client.api.agent.sessions.new.$post({
@@ -362,9 +412,16 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
       })
       const data = await readApiResult<{ success: boolean; session?: SessionSummary; error?: string }>(res, '创建会话失败')
       if (data.session) {
-        useAppStore.getState().setSelectedNode(null)
-        useAppStore.getState().setSelectedPathId(null)
-        useAppStore.getState().setActiveLearningStepId(null)
+        if (previousSessionId && previousSessionId !== data.session.id && previousSession?.cardId) {
+          void requestCardThreadFlush(previousSessionId, 'session_switch')
+        }
+        const appStore = useAppStore.getState()
+        appStore.setSelectedPathId(null)
+        appStore.setActiveLearningStepId(null)
+        appStore.setForgeResourceView('context')
+        appStore.setForgeContextTab('talks')
+        appStore.setPanelLayout({ left: ['sessionList'], right: appStore.panelLayout.right })
+        appStore.setChatPanelOpen(true)
         set((state) => ({
           sessionId: data.session!.id,
           messages: [],
@@ -420,8 +477,12 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     return false
   },
 
-  openCardThread: async (card) => {
+  openCardThread: async (card, options = {}) => {
     try {
+      const previousSessionId = get().sessionId
+      const previousSession = previousSessionId
+        ? get().sessions.find((item) => item.id === previousSessionId)
+        : null
       const vid = useAppStore.getState().currentVaultId
       const selectedPathId = useAppStore.getState().selectedPathId
       const activeLearningStepId = useAppStore.getState().activeLearningStepId
@@ -434,11 +495,59 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
         },
         json: { cardId: card.id },
       })
-      const data = await readApiResult<{ success: boolean; session?: { id: string }; error?: string }>(res, '打开卡片线程失败')
+      const data = await readApiResult<{
+        success: boolean
+        session?: {
+          id: string
+          title?: string | null
+          cardId?: string | null
+          cardType?: string | null
+          pathId?: string | null
+          pathTitle?: string | null
+          stepId?: string | null
+          stepTitle?: string | null
+          archived?: boolean
+          createdAt?: string
+        }
+        error?: string
+      }>(res, '打开卡片线程失败')
       if (data.session?.id) {
-        useAppStore.getState().setSelectedNode({ id: card.id, title: card.title, type: card.type })
-        set({ sessionId: data.session.id, messages: [], error: null })
-        await get().switchSession(data.session.id)
+        const openedSession: SessionSummary = {
+          id: data.session.id,
+          title: data.session.title || card.title || '卡片线程',
+          preview: card.title || '',
+          createdAt: data.session.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status: data.session.archived ? 'completed' : 'active',
+          cardId: data.session.cardId || card.id,
+          cardTitle: data.session.title || card.title,
+          cardType: data.session.cardType || card.type,
+          threadStatus: data.session.archived ? 'archived' : 'active',
+          pathId: data.session.pathId ?? null,
+          pathTitle: data.session.pathTitle ?? null,
+          stepId: data.session.stepId ?? null,
+          stepTitle: data.session.stepTitle ?? null,
+          sessionKind: data.session.pathId && data.session.stepId ? 'path-step-thread' : 'card-thread',
+        }
+        const appStore = useAppStore.getState()
+        if (previousSessionId && previousSessionId !== data.session.id && previousSession?.cardId) {
+          void requestCardThreadFlush(previousSessionId, 'session_switch')
+        }
+        appStore.setSelectedNode({ id: card.id, title: card.title, type: card.type })
+        if (appStore.rightPanelView !== 'read') {
+          appStore.setRightPanelView('editor')
+        }
+        if (options.openChat !== false) appStore.setChatPanelOpen(true)
+        set((state) => ({
+          sessionId: openedSession.id,
+          messages: [],
+          error: null,
+          sessions: [
+            openedSession,
+            ...state.sessions.filter((item) => item.id !== openedSession.id),
+          ],
+        }))
+        await get().switchSession(openedSession.id)
         await get().loadSessions()
       }
     } catch (err) {

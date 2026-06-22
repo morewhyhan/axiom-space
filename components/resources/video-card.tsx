@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { Download, Maximize2, Play } from 'lucide-react'
-import { Button } from '@/components/ui'
+import { Button, HudPanel } from '@/components/ui'
 
 type VideoCardProps = {
   title: string
@@ -36,7 +36,7 @@ export function VideoCard({
 
   return (
     <>
-      <div className="glass-panel rounded-xl p-4 mb-4 border border-white/10">
+      <HudPanel as="div" className="mb-4 rounded-xl p-4">
         <div className="flex gap-4">
           <div
             className="flex-shrink-0 w-48 h-32 bg-black rounded-lg relative group cursor-pointer"
@@ -121,7 +121,7 @@ export function VideoCard({
             </div>
           </div>
         </div>
-      </div>
+      </HudPanel>
 
       {isPlaying && (
         <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center">

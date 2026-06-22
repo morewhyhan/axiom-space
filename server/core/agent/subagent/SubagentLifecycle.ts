@@ -571,11 +571,11 @@ export class SubagentLifecycle {
         usePrismaFallback = true;
       }
 
+      const sourceRole = record.config.role || record.config.label || 'profile';
       if (usePrismaFallback) {
         try {
           const { prisma } = await import('@/lib/db');
           const sourceObjectId = record.id;
-          const sourceRole = record.config.role || record.config.label || 'profile';
           // Store profile update as vaultMemory entry
           await prisma.vaultMemory.upsert({
             where: { vaultId_key: { vaultId: vaultPath, key: 'profile_cache' } },
@@ -614,7 +614,17 @@ export class SubagentLifecycle {
           console.log('[Event] axiom:profile-updated');
           const fallbackVaultId = getCurrentVaultId();
           if (fallbackVaultId) {
-            emitNotification(fallbackVaultId, { type: 'profile', message: '用户画像已更新 (prisma fallback)' });
+            emitNotification(fallbackVaultId, {
+              type: 'profile',
+              message: '画像 Agent 已写入画像线索',
+              detail: [
+                '触发来源：Profile Subagent 数据库兜底写入',
+                `来源角色：${sourceRole}`,
+                `内容摘要：${JSON.stringify(profileUpdate).slice(0, 220)}`,
+              ].join('\n'),
+              action: 'profile_subagent_write',
+              severity: 'info',
+            });
           }
           console.log('[SubagentSystem] Profile Agent output applied to user profile (prisma fallback)');
         } catch (dbErr) {
@@ -686,7 +696,17 @@ export class SubagentLifecycle {
       console.log('[Event] axiom:profile-updated');
       const subVaultId = getCurrentVaultId();
       if (subVaultId) {
-        emitNotification(subVaultId, { type: 'profile', message: '用户画像已更新 (profile agent)' });
+        emitNotification(subVaultId, {
+          type: 'profile',
+          message: '画像 Agent 已同步画像线索',
+          detail: [
+            '触发来源：Profile Subagent',
+            `来源角色：${sourceRole}`,
+            Object.keys(updates).length > 0 ? `更新字段：${Object.keys(updates).join('、')}` : '更新字段：profile',
+          ].join('\n'),
+          action: 'profile_subagent_write',
+          severity: 'info',
+        });
       }
       console.log(
         '[SubagentSystem] Profile Agent output applied to user profile',

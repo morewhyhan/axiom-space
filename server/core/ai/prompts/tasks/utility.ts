@@ -2,6 +2,7 @@ import { definePrompt } from '../types';
 import {
   AXIOM_KNOWLEDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -115,6 +116,7 @@ const memoryContract = {
   process: [
     'Preserve user preferences, repeated behavior patterns, key decisions, corrections, and feedback.',
     'Distinguish confirmed facts from tentative observations.',
+    'Keep only memory that is sufficient-and-necessary for future learning effect or learning efficiency.',
     'Discard task-specific details that are not useful later.',
   ],
   output: [
@@ -136,7 +138,7 @@ export const MEMORY_SUMMARY_PROMPT = definePrompt<MemorySummaryInput>({
   system: buildSystemPrompt({
     role: 'You are a memory compression assistant.',
     contract: memoryContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD],
   }),
   buildUserMessage: (input) => `Memory entries:
 ${input.combinedContent}
@@ -233,7 +235,7 @@ export const SKILL_DUPLICATE_PROMPT = definePrompt<SkillDuplicateInput>({
   system: buildSystemPrompt({
     role: '你是用户能力去重判断器，只输出严格 JSON。',
     contract: skillDuplicateContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, JSON_OUTPUT_STANDARD],
   }),
   buildUserMessage: (input) => `待判断技能：
 ${input.incomingName}: ${input.incomingDescription}
@@ -262,6 +264,7 @@ const sessionSummaryContract = {
     'Identify the actual session topic and discussed concepts.',
     'Separate what the user clearly said from what the AI explained.',
     'Record unresolved questions and next clarification points.',
+    'Keep only points that are sufficient-and-necessary for future learning retrieval or teaching decisions.',
     'Keep the summary concise and useful for future retrieval.',
   ],
   output: [
@@ -283,7 +286,7 @@ export const SESSION_SUMMARY_PROMPT = definePrompt<SessionSummaryInput>({
   system: buildSystemPrompt({
     role: '你是学习会话摘要生成专家，输出客观、结构化的中文 Markdown 摘要。',
     contract: sessionSummaryContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD],
   }),
   buildUserMessage: (input) => `以下是一次学习对话的记录（共 ${input.messageCount} 条消息），请生成摘要：
 
@@ -308,6 +311,7 @@ const backgroundReviewContract = {
   process: [
     'Save memory only for durable preferences, corrections, personal facts, expectations, or repeated patterns.',
     'Save or update a skill only when a reusable method or workflow is demonstrated.',
+    'Save only items that are sufficient-and-necessary for future learning effect or learning efficiency.',
     'If nothing meets the threshold, say exactly: Nothing to save.',
   ],
   output: [
@@ -329,7 +333,7 @@ export const BACKGROUND_REVIEW_PROMPT = definePrompt({
   system: buildSystemPrompt({
     role: 'You are a silent background reviewer for AXIOM memory and skill updates.',
     contract: backgroundReviewContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD],
   }),
 });
 
@@ -352,6 +356,7 @@ const memoryFlushContract = {
   process: [
     'Prioritize durable user preferences, corrections, explicit expectations, and recurring patterns.',
     'Use the memory tool only when a fact is worth remembering.',
+    'Preserve only sufficient-and-necessary facts for future learning effect or learning efficiency.',
     'If nothing is worth saving, do not call a tool.',
   ],
   output: [
@@ -370,7 +375,7 @@ const memoryFlushContract = {
 const memoryFlushSystem = buildSystemPrompt({
   role: 'You are a memory preservation assistant running before context compression.',
   contract: memoryFlushContract,
-  standards: [AXIOM_KNOWLEDGE_STANDARD],
+  standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD],
 });
 
 export const MEMORY_FLUSH_PROMPT = definePrompt<MemoryFlushInput>({

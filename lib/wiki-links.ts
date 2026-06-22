@@ -15,11 +15,41 @@
 import type { Prisma, PrismaClient } from '@prisma/client'
 
 const WIKILINK_RE = /\[\[([^\]]+)\]\]/g
+const AUTO_BACKLINK_START = '<!-- axiom:auto-backlinks:start -->'
+const AUTO_BACKLINK_END = '<!-- axiom:auto-backlinks:end -->'
+const AUTO_BACKLINK_TITLE = '## 自动反向链接'
+const AUTO_BACKLINK_BLOCK_RE = new RegExp(
+  `${escapeRegExp(AUTO_BACKLINK_START)}[\\s\\S]*?${escapeRegExp(AUTO_BACKLINK_END)}`,
+)
+
+export interface SyncEdgesFromContentOptions {
+  ensureReciprocalLinks?: boolean
+}
+
+export interface SyncEdgesFromContentResult {
+  outgoingTargetIds: string[]
+  autoBacklinkedCardIds: string[]
+}
 
 function hasTransaction(
   prisma: PrismaClient | Prisma.TransactionClient,
 ): prisma is PrismaClient {
   return '$transaction' in prisma
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function titleFromPath(path: string): string {
+  return path.replace(/\.md$/, '').split('/').pop()?.trim() || ''
+}
+
+function normalizeWikiLinkTarget(raw: string): string {
+  return raw
+    .split('|')[0]
+    .split('#')[0]
+    .trim()
 }
 
 /**
@@ -30,9 +60,44 @@ export function parseWikiLinks(content: string): string[] {
   const titles = new Set<string>()
   let match: RegExpExecArray | null
   while ((match = WIKILINK_RE.exec(content)) !== null) {
-    titles.add(match[1].trim())
+    const title = normalizeWikiLinkTarget(match[1])
+    if (title) titles.add(title)
   }
   return Array.from(titles)
+}
+
+export function hasWikiLinkToTitle(content: string, title: string): boolean {
+  const expected = title.trim()
+  if (!expected) return false
+  return parseWikiLinks(content).some((linkTitle) => linkTitle === expected)
+}
+
+function buildAutoBacklinkBlock(titles: string[]): string {
+  const lines = Array.from(new Set(titles.map((title) => title.trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+    .map((title) => `- [[${title}]]`)
+  return [
+    AUTO_BACKLINK_START,
+    AUTO_BACKLINK_TITLE,
+    ...lines,
+    AUTO_BACKLINK_END,
+  ].join('\n')
+}
+
+function ensureAutoBacklink(content: string, sourceTitle: string): string {
+  const title = sourceTitle.trim()
+  if (!title || hasWikiLinkToTitle(content, title)) return content
+
+  const blockMatch = content.match(AUTO_BACKLINK_BLOCK_RE)
+  if (!blockMatch) {
+    const separator = content.trim().length > 0 ? '\n\n' : ''
+    return `${content}${separator}${buildAutoBacklinkBlock([title])}\n`
+  }
+
+  const block = blockMatch[0]
+  const existingTitles = parseWikiLinks(block)
+  const nextBlock = buildAutoBacklinkBlock([...existingTitles, title])
+  return content.replace(block, nextBlock)
 }
 
 /**
@@ -86,7 +151,9 @@ export async function syncEdgesFromContent(
   cardId: string,
   vaultId: string,
   content: string,
-): Promise<void> {
+  options: SyncEdgesFromContentOptions = {},
+): Promise<SyncEdgesFromContentResult> {
+  const ensureReciprocalLinks = options.ensureReciprocalLinks ?? true
   const titles = parseWikiLinks(content)
 
   // 解析所有标题
@@ -97,9 +164,9 @@ export async function syncEdgesFromContent(
   // 过滤掉未解析的（dangling）
   const targets = Array.from(
     new Map((resolved.filter(Boolean) as { id: string }[]).map((target) => [target.id, target])).values(),
-  )
+  ).filter((target) => target.id !== cardId)
 
-  const replaceEdges = async (tx: PrismaClient | Prisma.TransactionClient) => {
+  const replaceEdges = async (tx: PrismaClient | Prisma.TransactionClient): Promise<SyncEdgesFromContentResult> => {
     // 删除所有由本卡片发出的 wikilink 类型 edge
     await tx.edge.deleteMany({
       where: { sourceId: cardId, type: 'wikilink' },
@@ -117,12 +184,79 @@ export async function syncEdgesFromContent(
         })),
       })
     }
+
+    const autoBacklinkedCardIds = ensureReciprocalLinks
+      ? await ensureReciprocalWikiLinks(tx, vaultId, cardId, targets)
+      : []
+
+    return {
+      outgoingTargetIds: targets.map((target) => target.id),
+      autoBacklinkedCardIds,
+    }
   }
 
   if (hasTransaction(prisma)) {
-    await prisma.$transaction(async (tx) => replaceEdges(tx))
-    return
+    return prisma.$transaction(async (tx) => replaceEdges(tx))
   }
 
-  await replaceEdges(prisma)
+  return replaceEdges(prisma)
+}
+
+async function ensureReciprocalWikiLinks(
+  prisma: PrismaClient | Prisma.TransactionClient,
+  vaultId: string,
+  sourceId: string,
+  targets: Array<{ id: string }>,
+): Promise<string[]> {
+  if (targets.length === 0) return []
+
+  const source = await prisma.card.findFirst({
+    where: { id: sourceId, vaultId },
+    select: { id: true, title: true, path: true },
+  })
+  if (!source) return []
+
+  const sourceTitle = (source.title || titleFromPath(source.path)).trim()
+  if (!sourceTitle) return []
+
+  const targetIds = Array.from(new Set(targets.map((target) => target.id).filter((id) => id !== sourceId)))
+  if (targetIds.length === 0) return []
+
+  const targetCards = await prisma.card.findMany({
+    where: { id: { in: targetIds }, vaultId },
+    select: { id: true, content: true },
+  })
+
+  const changedCardIds: string[] = []
+  for (const target of targetCards) {
+    const nextContent = ensureAutoBacklink(target.content || '', sourceTitle)
+    if (nextContent !== target.content) {
+      await prisma.card.update({
+        where: { id: target.id },
+        data: { content: nextContent, updatedAt: new Date() },
+      })
+      changedCardIds.push(target.id)
+    }
+
+    await prisma.edge.upsert({
+      where: {
+        vaultId_sourceId_targetId_type: {
+          vaultId,
+          sourceId: target.id,
+          targetId: sourceId,
+          type: 'wikilink',
+        },
+      },
+      update: { weight: 1.0 },
+      create: {
+        vaultId,
+        sourceId: target.id,
+        targetId: sourceId,
+        type: 'wikilink',
+        weight: 1.0,
+      },
+    })
+  }
+
+  return changedCardIds
 }

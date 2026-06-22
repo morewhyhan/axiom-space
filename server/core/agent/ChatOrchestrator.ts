@@ -433,7 +433,17 @@ export class ChatOrchestrator {
         console.log('[Event] axiom:profile-updated');
         const coVaultId = getCurrentVaultId();
         if (coVaultId) {
-          emitNotification(coVaultId, { type: 'profile', message: '用户画像已更新' });
+          emitNotification(coVaultId, {
+            type: 'profile',
+            message: '学习画像资料已同步',
+            detail: [
+              `触发来源：文件操作 ${toolName}`,
+              `关联文件：${filename}`,
+              `系统提示：${message}`,
+            ].join('\n'),
+            action: 'profile_file_synced',
+            severity: 'info',
+          });
         }
         break;
       }

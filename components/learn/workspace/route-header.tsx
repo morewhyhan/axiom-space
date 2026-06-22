@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from 'react'
 import { Route, Target } from 'lucide-react'
+import { HudPanel } from '@/components/ui'
 import type { LearningPath, LearningStep } from '@/hooks/use-learning'
 import { isArchivedPath, isUnassignedTaskPath } from './helpers'
 
@@ -25,8 +26,8 @@ export function RouteHeader({
   onDeletePath,
 }: RouteHeaderProps) {
   return (
-    <section
-      className="learn-route-header glass-panel"
+    <HudPanel
+      className="learn-route-header"
       style={{ '--path-progress': `${totalProgress}%` } as CSSProperties}
     >
       <div>
@@ -77,6 +78,6 @@ export function RouteHeader({
           <span>{totalProgress}%</span>
         </div>
       </div>
-    </section>
+    </HudPanel>
   )
 }

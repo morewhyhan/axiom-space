@@ -26,7 +26,7 @@ export function EditorHeader({
     <div className="forge-paper-header flex justify-between items-center px-5 py-3 border-b border-white/10">
       <div className="flex items-center gap-4 min-w-0">
         <span className="mono opacity-40 uppercase shrink-0" style={{ fontSize: 'var(--f9)' }}>
-          Editing
+          {editorMode === 'read' ? 'Reading' : 'Editing'}
         </span>
         <span
           className="text-white/70 truncate"

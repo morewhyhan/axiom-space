@@ -3,6 +3,7 @@ import {
   AXIOM_KNOWLEDGE_STANDARD,
   GRAPH_EDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -60,7 +61,7 @@ export const GRAPH_LINK_SUGGESTION_PROMPT = definePrompt<GraphLinkSuggestionInpu
   system: buildSystemPrompt({
     role: '你是知识图谱关系审核专家。你只保留清晰、准确、必要的关系边。',
     contract: suggestContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
 {
   "suggestions": [
@@ -116,7 +117,7 @@ export const GRAPH_RELATION_ANALYSIS_PROMPT = definePrompt<GraphRelationAnalysis
   system: buildSystemPrompt({
     role: '你是知识图谱和语义分析专家。',
     contract: analysisContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
 {
   "relationship_quality": "strong|moderate|weak",

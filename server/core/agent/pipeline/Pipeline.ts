@@ -27,6 +27,7 @@ import { getVaultPath } from '@/lib/platform';
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context';
 import { prisma } from '@/lib/db';
 import { getProfileCacheEntry, setProfileCacheEntry } from '@/server/api/profile-cache';
+import { emitNotification } from '@/server/core/agent/notification-bus';
 // (Capability tracking integrated via MemoryManager)
 import { MessageRole } from '@/types/learning';
 
@@ -45,6 +46,8 @@ export interface PipelineContext {
 
 const INTENT_THRESHOLD = 0.5;
 const LEARNING_CONTEXTS = new Set(['learn', 'create', 'analyze', 'profile']);
+const EDUCATION_PROFILE_SCORE_DELTA = 4;
+const EDUCATION_PROFILE_CONFIDENCE_DELTA = 0.08;
 
 // ── Pipeline ──
 
@@ -805,7 +808,7 @@ export class AgentPipeline {
     });
     if (!vault) return;
 
-    const { EducationProfileAnalyzer } = await import('@/server/core/learning/education-profile');
+    const { EducationProfileAnalyzer, mergeEducationProfileUpdate } = await import('@/server/core/learning/education-profile');
     const analyzer = new EducationProfileAnalyzer();
     const messages = this.services.agent.state.messages
       .slice(-20)
@@ -826,14 +829,15 @@ export class AgentPipeline {
       messages,
       metadata: { source: 'agent-post-turn' },
     }, currentProfile as any, messages);
-    const mergedProfile = {
-      ...currentProfile,
-      ...updates,
+    const mergedProfile = mergeEducationProfileUpdate(currentProfile, updates, {
       userId,
       evidence,
-      sessionCount: Number((currentProfile as { sessionCount?: unknown }).sessionCount || 0) + 1,
-      lastUpdated: new Date().toISOString(),
-    };
+      sessionCountIncrement: 1,
+      trigger: 'session_end',
+    });
+    const changes = describeEducationProfileChanges(currentProfile, mergedProfile);
+    if (changes.length === 0) return;
+    const profileForSave = withEducationProfileHistory(currentProfile, mergedProfile, changes);
 
     const latestVault = await prisma.vault.findUnique({
       where: { id: vaultId },
@@ -843,21 +847,35 @@ export class AgentPipeline {
       prisma.vault.update({
         where: { id: vaultId },
         data: {
-          profileCache: setProfileCacheEntry(latestVault?.profileCache ?? vault.profileCache, 'educationProfile', mergedProfile),
+          profileCache: setProfileCacheEntry(latestVault?.profileCache ?? vault.profileCache, 'educationProfile', profileForSave),
         },
       }),
       prisma.educationProfileHistory.create({
         data: {
           vaultId,
-          profile: JSON.stringify(mergedProfile),
+          profile: JSON.stringify(profileForSave),
           snapshot: JSON.stringify({
             sessionId: this.services.sessionId,
             evidence,
-            lastUpdated: mergedProfile.lastUpdated,
+            changes,
+            updatedAt: profileForSave.updatedAt,
+            lastUpdated: profileForSave.lastUpdated,
           }),
         },
       }),
     ]);
+    void emitNotification(vaultId, {
+      type: 'profile',
+      message: `学习画像更新：${changes.map((change) => formatEducationDimensionLabel(change.key)).join('、')}`,
+      detail: [
+        `变化：${changes.map(formatEducationProfileChange).join('；')}`,
+        `证据：${evidence.slice(0, 3).join(' / ') || '本轮对话与学习行为'}`,
+        '触发条件：本轮对话让画像分数或置信度产生了有意义变化。',
+        `更新时间：${formatProfileUpdatedAt(profileForSave.updatedAt)}`,
+      ].join('\n'),
+      action: 'education_profile_updated',
+      severity: 'info',
+    });
   }
 
   /**
@@ -1074,6 +1092,126 @@ export class AgentPipeline {
     callbacks?.onError?.(error as Error);
     throw error;
   }
+}
+
+function formatProfileUpdatedAt(value: unknown): string {
+  const date = typeof value === 'string' || typeof value === 'number' || value instanceof Date
+    ? new Date(value)
+    : new Date()
+  return Number.isNaN(date.getTime())
+    ? new Date().toLocaleString('zh-CN', { hour12: false })
+    : date.toLocaleString('zh-CN', { hour12: false })
+}
+
+type EducationProfileChange = {
+  key: string;
+  beforeScore: number;
+  afterScore: number;
+  beforeConfidence: number;
+  afterConfidence: number;
+}
+
+const EDUCATION_DIMENSION_LABELS: Record<string, string> = {
+  depth: '理解深度',
+  breadth: '知识广度',
+  connection: '关联能力',
+  expression: '表达能力',
+  application: '应用能力',
+  learning_pace: '学习节奏',
+};
+
+function describeEducationProfileChanges(
+  currentProfile: Record<string, unknown>,
+  mergedProfile: Record<string, unknown>,
+): EducationProfileChange[] {
+  const before = readEducationDimensions(currentProfile);
+  const after = readEducationDimensions(mergedProfile);
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const changes: EducationProfileChange[] = [];
+
+  for (const key of keys) {
+    const previous = before[key];
+    const next = after[key];
+    if (!next) continue;
+
+    const beforeScore = Math.round(previous?.score ?? 0);
+    const afterScore = Math.round(next.score ?? 0);
+    const beforeConfidence = previous?.confidence ?? 0;
+    const afterConfidence = next.confidence ?? 0;
+    const scoreDelta = Math.abs(afterScore - beforeScore);
+    const confidenceDelta = afterConfidence - beforeConfidence;
+    const isNewSignal = !previous && (afterScore > 0 || afterConfidence >= 0.25);
+
+    if (
+      isNewSignal ||
+      scoreDelta >= EDUCATION_PROFILE_SCORE_DELTA ||
+      confidenceDelta >= EDUCATION_PROFILE_CONFIDENCE_DELTA
+    ) {
+      changes.push({
+        key,
+        beforeScore,
+        afterScore,
+        beforeConfidence,
+        afterConfidence,
+      });
+    }
+  }
+
+  return changes;
+}
+
+function withEducationProfileHistory(
+  currentProfile: Record<string, unknown>,
+  mergedProfile: Record<string, unknown>,
+  changes: EducationProfileChange[],
+): Record<string, unknown> {
+  const history = Array.isArray(currentProfile.updateHistory)
+    ? currentProfile.updateHistory.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object' && !Array.isArray(item))
+    : [];
+  const changeRecord = changes.reduce<Record<string, { before: number; after: number }>>((acc, change) => {
+    acc[change.key] = { before: change.beforeScore, after: change.afterScore };
+    return acc;
+  }, {});
+  return {
+    ...mergedProfile,
+    updateHistory: [
+      ...history,
+      {
+        timestamp: Date.now(),
+        trigger: 'session_end',
+        dimensionsUpdated: changes.map((change) => change.key),
+        changes: changeRecord,
+      },
+    ].slice(-40),
+  };
+}
+
+function readEducationDimensions(profile: Record<string, unknown>): Record<string, { score: number; confidence: number }> {
+  const raw = profile.dimensions;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const dimensions = raw as Record<string, unknown>;
+  const result: Record<string, { score: number; confidence: number }> = {};
+  for (const [key, value] of Object.entries(dimensions)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const record = value as Record<string, unknown>;
+    const score = typeof record.score === 'number' && Number.isFinite(record.score) ? record.score : 0;
+    const confidence = typeof record.confidence === 'number' && Number.isFinite(record.confidence) ? record.confidence : 0;
+    result[key] = { score, confidence };
+  }
+  return result;
+}
+
+function formatEducationDimensionLabel(key: string): string {
+  return EDUCATION_DIMENSION_LABELS[key] ?? key;
+}
+
+function formatEducationProfileChange(change: EducationProfileChange): string {
+  const scorePart = `${formatEducationDimensionLabel(change.key)} ${change.beforeScore}->${change.afterScore}`;
+  const confidenceDelta = change.afterConfidence - change.beforeConfidence;
+  if (confidenceDelta >= EDUCATION_PROFILE_CONFIDENCE_DELTA) {
+    return `${scorePart}，置信度 ${Math.round(change.beforeConfidence * 100)}%->${Math.round(change.afterConfidence * 100)}%`;
+  }
+  return scorePart;
 }
 
 function selectToolsForTurn(tools: AgentTool<any>[], intentRoute: IntentRoute | null): AgentTool<any>[] {

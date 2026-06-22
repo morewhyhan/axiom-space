@@ -8,7 +8,10 @@ export interface NotificationEvent {
   timestamp: number
   id?: string
   targetId?: string
+  targetTitle?: string
+  targetType?: string
   action?: string
+  detail?: string
   severity?: 'info' | 'success' | 'warning' | 'error'
 }
 

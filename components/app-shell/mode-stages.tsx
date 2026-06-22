@@ -3,7 +3,7 @@
 import type { CSSProperties } from 'react'
 import ResizablePanel from '@/components/layout/ResizablePanel'
 import BottomBar from '@/components/layout/bottom-bar'
-import type { ForgeResourceView } from '@/components/forge/forge-resource-panel'
+import type { ForgeResourceView } from '@/stores/mode-store'
 import { Button } from '@/components/ui'
 import {
   DashboardLeftPanel as DashboardLeft,
@@ -57,14 +57,13 @@ type ForgeStageProps = {
   resourcePanelOpen: boolean
   editorPanelOpen: boolean
   chatPanelOpen: boolean
+  rightPanelView: 'editor' | 'read'
   forgeLeftWidth: number
   forgeRightWidth: number
   forgeResourceView: ForgeResourceView
   onToggleResource: (view: ForgeResourceView) => void
-  onChangeResourceView: (view: ForgeResourceView) => void
   onToggleEditor: () => void
   onChatPanelOpenChange: (open: boolean) => void
-  onOpenNewCard: () => void
 }
 
 export function ForgeStage({
@@ -72,19 +71,20 @@ export function ForgeStage({
   resourcePanelOpen,
   editorPanelOpen,
   chatPanelOpen,
+  rightPanelView,
   forgeLeftWidth,
   forgeRightWidth,
   forgeResourceView,
   onToggleResource,
-  onChangeResourceView,
   onToggleEditor,
   onChatPanelOpenChange,
-  onOpenNewCard,
 }: ForgeStageProps) {
+  const previewOnly = rightPanelView === 'read' && !resourcePanelOpen && !chatPanelOpen && editorPanelOpen
+
   return (
     <div className={`mode-stage forge-stage ${active ? 'active' : ''}`} aria-hidden={!active}>
       <section
-        className={`forge-ide pointer-events-auto ${resourcePanelOpen ? 'has-left' : 'no-left'} ${editorPanelOpen ? 'has-right' : 'no-right'}`}
+        className={`forge-ide pointer-events-auto ${resourcePanelOpen ? 'has-left' : 'no-left'} ${editorPanelOpen ? 'has-right' : 'no-right'} ${chatPanelOpen ? 'has-chat' : 'no-chat'} ${previewOnly ? 'preview-only' : ''}`}
         style={{
           '--forge-left-live': `${Math.max(240, Math.min(420, forgeLeftWidth || 300))}px`,
           '--forge-right-live': `${Math.max(340, Math.min(720, forgeRightWidth || 460))}px`,
@@ -93,12 +93,21 @@ export function ForgeStage({
         <nav className="forge-activity glass-panel" aria-label="AI 工作台面板">
           {FORGE_ACTIVITY_ITEMS.map((item) => {
             const Icon = item.icon
+            const active = item.kind === 'resource'
+              ? resourcePanelOpen && forgeResourceView === item.resourceView
+              : item.id === 'forge.chat'
+                ? chatPanelOpen
+                : editorPanelOpen
             if (item.kind === 'resource') {
               return (
                 <Button
                   variant="icon"
                   key={item.id}
-                  active={resourcePanelOpen && forgeResourceView === item.resourceView}
+                  active={active}
+                  aria-label={`${active ? '关闭' : '打开'}${item.title}`}
+                  aria-pressed={active}
+                  data-testid={`forge-activity-${item.resourceView}`}
+                  data-panel-id={item.id}
                   onClick={() => onToggleResource(item.resourceView)}
                   title={item.title}
                 >
@@ -110,7 +119,11 @@ export function ForgeStage({
               <Button
                 variant="icon"
                 key={item.id}
-                active={item.id === 'forge.chat' ? chatPanelOpen : editorPanelOpen}
+                active={active}
+                aria-label={`${active ? '关闭' : '打开'}${item.title}`}
+                aria-pressed={active}
+                data-testid={item.id === 'forge.chat' ? 'forge-activity-chat' : 'forge-activity-editor'}
+                data-panel-id={item.id}
                 onClick={item.id === 'forge.chat' ? () => onChatPanelOpenChange(!chatPanelOpen) : onToggleEditor}
                 title={item.title}
               >
@@ -123,13 +136,12 @@ export function ForgeStage({
         <aside className={`forge-ide-rail ${resourcePanelOpen ? '' : 'empty'}`}>
           {resourcePanelOpen && (
             <ResizablePanel
-              key={forgeResourceView}
               id={forgeResourceView === 'cards' ? 'fileTree' : 'sessionList'}
               zone="left"
               minWidth={240}
               maxWidth={420}
             >
-              <ForgeResourcePanel view={forgeResourceView} onViewChange={onChangeResourceView} />
+              <ForgeResourcePanel view={forgeResourceView} />
             </ResizablePanel>
           )}
         </aside>
@@ -138,14 +150,7 @@ export function ForgeStage({
           {chatPanelOpen ? (
             <ForgeChat />
           ) : (
-            <div className="forge-ide-empty">
-              <span className="mono">AI WORKSPACE</span>
-              <p>打开对话区，围绕当前任务、会话或卡片继续工作。</p>
-              <div>
-                <Button onClick={() => onChatPanelOpenChange(true)}>打开对话</Button>
-                <Button onClick={onOpenNewCard}>新建卡片</Button>
-              </div>
-            </div>
+            null
           )}
         </main>
 

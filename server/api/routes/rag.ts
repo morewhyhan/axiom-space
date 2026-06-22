@@ -11,10 +11,29 @@ import {
   syncCardToLightRAG,
   syncVaultToLightRAG,
 } from '@/server/core/rag/lightrag-service'
+import {
+  applyHiddenRelationSuggestion,
+  discoverHiddenRelationsWithRag,
+} from '@/server/core/rag/hidden-relations-service'
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
 const relatedQuerySchema = vaultQuerySchema.extend({
   limit: z.coerce.number().int().positive().max(12).optional(),
+})
+const hiddenLinksSchema = z.object({
+  cardId: z.string().optional(),
+  limit: z.number().int().positive().max(12).optional(),
+  topK: z.number().int().positive().max(24).optional(),
+  threshold: z.number().min(0).max(1).optional(),
+  sourceLimit: z.number().int().positive().max(20).optional(),
+  autoSync: z.boolean().optional(),
+})
+const applyHiddenLinkSchema = z.object({
+  sourceCardId: z.string().min(1),
+  targetCardId: z.string().min(1),
+  relationType: z.string().optional(),
+  strength: z.number().min(0).max(1).optional(),
+  appendWikiLink: z.boolean().optional(),
 })
 
 const app = new Hono<{ Variables: { userId: string } }>()
@@ -91,6 +110,53 @@ const app = new Hono<{ Variables: { userId: string } }>()
       limit: limit ?? 6,
     })
     return c.json({ success: true, cards })
+  })
+  .post('/hidden-links', zValidator('query', vaultQuerySchema), zValidator('json', hiddenLinksSchema), async (c) => {
+    const userId = c.get('userId') as string
+    if (!c.req.query('vid')) {
+      return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
+    }
+    const vault = await resolveVault(userId, c.req.query('vid'))
+    if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
+
+    const body = c.req.valid('json')
+    if (body.cardId) {
+      const card = await prisma.card.findFirst({
+        where: { id: body.cardId, vaultId: vault.id },
+        select: { id: true },
+      })
+      if (!card) return c.json({ success: false, error: 'Card not found' }, 404)
+    }
+
+    const result = await discoverHiddenRelationsWithRag({
+      vaultId: vault.id,
+      cardId: body.cardId,
+      limit: body.limit,
+      topK: body.topK,
+      threshold: body.threshold,
+      sourceLimit: body.sourceLimit,
+      autoSync: body.autoSync,
+    })
+    return c.json({ success: true, ...result })
+  })
+  .post('/hidden-links/apply', zValidator('query', vaultQuerySchema), zValidator('json', applyHiddenLinkSchema), async (c) => {
+    const userId = c.get('userId') as string
+    if (!c.req.query('vid')) {
+      return c.json({ success: false, error: 'VID_REQUIRED' }, 400)
+    }
+    const vault = await resolveVault(userId, c.req.query('vid'))
+    if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
+
+    const body = c.req.valid('json')
+    const result = await applyHiddenRelationSuggestion({
+      vaultId: vault.id,
+      sourceCardId: body.sourceCardId,
+      targetCardId: body.targetCardId,
+      relationType: body.relationType,
+      strength: body.strength,
+      appendWikiLink: body.appendWikiLink,
+    })
+    return c.json({ success: true, result })
   })
   .post('/query', zValidator('query', z.object({
     vid: z.string().optional(),

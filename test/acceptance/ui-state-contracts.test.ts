@@ -43,6 +43,21 @@ test('UI state contracts keep page state separate from domain objects', async (t
     assert.equal(useAppStore.getState().panelSizes.editor, DEFAULT_PANEL_SIZES.editor)
   })
 
+  await t.test('forge left panel selection stays independent from panel layout mutations', () => {
+    useAppStore.getState().setForgeResourceView('cards')
+    useAppStore.getState().setForgeCardFilter('literature')
+    useAppStore.getState().setForgeContextTab('talks')
+
+    useAppStore.getState().setPanelLayout({ left: ['sessionList'], right: [] })
+
+    assert.equal(useAppStore.getState().forgeResourceView, 'cards')
+    assert.equal(useAppStore.getState().forgeCardFilter, 'literature')
+    assert.equal(useAppStore.getState().forgeContextTab, 'talks')
+
+    useAppStore.getState().setForgeResourceView('context')
+    assert.deepEqual(useAppStore.getState().panelLayout.left, ['sessionList'])
+  })
+
   await t.test('learn selection and graph layout are UI-only references', () => {
     useAppStore.getState().setSelectedPathId('path-a')
     useAppStore.getState().setActiveLearningStepId('step-a')
@@ -67,6 +82,9 @@ test('UI state contracts keep page state separate from domain objects', async (t
       panelLayout: useAppStore.getState().panelLayout,
       panelSizes: useAppStore.getState().panelSizes,
       chatPanelOpen: useAppStore.getState().chatPanelOpen,
+      forgeResourceView: useAppStore.getState().forgeResourceView,
+      forgeContextTab: useAppStore.getState().forgeContextTab,
+      forgeCardFilter: useAppStore.getState().forgeCardFilter,
       graphLayoutMode: useAppStore.getState().graphLayoutMode,
       graphHoverAttention: useAppStore.getState().graphHoverAttention,
     })

@@ -67,10 +67,20 @@ export default function ForgeChat() {
   const queryClient = useQueryClient()
   const currentVaultId = useAppStore((s) => s.currentVaultId)
 
+  const focusTextarea = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus({ preventScroll: true })
+    })
+  }, [])
+
   // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
+
+  useEffect(() => {
+    if (!streaming && canChat) focusTextarea()
+  }, [canChat, focusTextarea, sessionId, streaming])
 
   // Cycle progress steps during streaming
   useEffect(() => {
@@ -140,18 +150,25 @@ export default function ForgeChat() {
 
     setShowPalette(false)
     setInputValue('')
+    focusTextarea()
     return true
-  }, [autoTitleSession, clearMessages, createTalkSession, currentSession, selectedNode?.title, sendMessage])
+  }, [autoTitleSession, clearMessages, createTalkSession, currentSession, focusTextarea, selectedNode?.title, sendMessage])
 
   const handleSend = async (text?: string) => {
     const msg = (text ?? inputValue).trim()
-    if (!msg || streaming) return
+    if (!msg || streaming) {
+      focusTextarea()
+      return
+    }
     if (msg.startsWith('/') && await executeCommand(msg)) {
+      focusTextarea()
       return
     }
     setInputValue('')
     setShowPalette(false)
+    focusTextarea()
     await sendMessage(msg)
+    focusTextarea()
     // After agent response, refresh all views (Agent B may have updated profile/cards/skills)
     if (currentVaultId) {
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
@@ -231,12 +248,12 @@ export default function ForgeChat() {
           <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 flex-shrink-0"></span>
           <span className="mono opacity-30 uppercase tracking-widest flex-shrink-0" style={{ fontSize: 'var(--f8)' }}>Working_On:</span>
           <span className="text-white/70 font-medium truncate" style={{ fontSize: 'var(--f9)' }}>
-            {currentPath
-              ? (currentStep ? currentStep.name : currentPath.name)
-              : isConversationSession
-                ? (currentSession?.title || '新对话')
-                : selectedNode
-                  ? selectedNode.title
+            {selectedNode
+              ? selectedNode.title
+              : currentPath
+                ? (currentStep ? currentStep.name : currentPath.name)
+                : isConversationSession
+                  ? (currentSession?.title || '新对话')
                   : '选择任务或灵感卡'}
           </span>
           {selectedNode && (
@@ -358,7 +375,7 @@ export default function ForgeChat() {
               onChange={handleInputChange}
               onKeyDown={handleTextareaKeyDown}
               style={{ maxHeight: '120px' }}
-              disabled={streaming || !canChat}
+              disabled={!canChat}
             />
             {streaming ? (
               /* Stop button during streaming */

@@ -79,6 +79,38 @@ const app = new Hono<{ Variables: { userId: string } }>()
     return stream
   })
 
+  // GET /api/events/history — 获取最近通知明细，用作右上角活动日志
+  .get('/history', async (c) => {
+    const userId = c.get('userId')
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: true, notifications: [] })
+
+    const memories = await prisma.vaultMemory.findMany({
+      where: {
+        vaultId: vault.id,
+        category: 'notification',
+        createdAt: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+    })
+
+    const notifications = memories.flatMap((memory) => {
+      try {
+        const parsed = JSON.parse(memory.value) as Record<string, unknown>
+        return [{
+          ...parsed,
+          id: memory.id,
+          timestamp: typeof parsed.timestamp === 'number' ? parsed.timestamp : memory.createdAt.getTime(),
+        }]
+      } catch {
+        return []
+      }
+    })
+
+    return c.json({ success: true, notifications })
+  })
+
   // GET /api/events/unread — 获取未读通知数量
   .get('/unread', async (c) => {
     const userId = c.get('userId')

@@ -1,6 +1,7 @@
 'use client'
 
 import type { ResourceProgressItem } from '@/stores/agent-store'
+import { HudPanel } from '@/components/ui'
 
 const RESOURCE_STATUS_LABEL: Record<string, string> = {
   queued: '等待',
@@ -21,7 +22,7 @@ export function ResourceProgressPanel({ items }: { items: ResourceProgressItem[]
   const overall = Math.round(items.reduce((sum, item) => sum + Math.max(0, Math.min(100, item.progress || 0)), 0) / items.length)
 
   return (
-    <div className="mt-3 overflow-hidden rounded-xl border border-cyan-500/15 bg-cyan-500/[0.04]">
+    <HudPanel as="div" className="mt-3 overflow-hidden rounded-xl border-cyan-500/15 bg-cyan-500/[0.04] p-0">
       <div className="border-b border-white/5 px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -67,6 +68,6 @@ export function ResourceProgressPanel({ items }: { items: ResourceProgressItem[]
           )
         })}
       </div>
-    </div>
+    </HudPanel>
   )
 }

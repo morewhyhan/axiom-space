@@ -4,12 +4,12 @@ import dynamic from 'next/dynamic'
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore, useGalaxyActions } from '@/stores/mode-store'
-import type { Mode, PanelId } from '@/stores/mode-store'
-import type { ForgeResourceView } from '@/components/forge/forge-resource-panel'
+import type { ForgeResourceView, Mode, PanelId } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { useAuthSession } from '@/hooks/use-auth'
 import { useGalaxyData } from '@/hooks/use-galaxy'
-import { useLearningPaths, useLearningProfile, useMemorySearch } from '@/hooks/use-learning'
+import { useImportDocument, useLearningPaths, useLearningProfile, useMemorySearch } from '@/hooks/use-learning'
+import type { ImportFilePayload } from '@/lib/import-files'
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { client } from '@/lib/api-client'
 import { toast } from 'sonner'
@@ -41,6 +41,13 @@ function isCreateCardType(type: string): type is CreateCardType {
   return (createCardTypes as readonly string[]).includes(type)
 }
 
+function shouldIgnoreGlobalShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return !!target.closest(
+    'input, textarea, select, button, a, [contenteditable="true"], [role="textbox"], [role="button"], [data-no-global-shortcuts]',
+  )
+}
+
 export default function Home() {
   const mode = useAppStore((s) => s.mode)
   const graphLayoutMode = useAppStore((s) => s.graphLayoutMode)
@@ -53,6 +60,7 @@ export default function Home() {
     setNewCardTitle('')
     setNewCardContent('')
     setNewCardType('fleeting')
+    setImportFile(null)
   }, [])
   const immersive = useAppStore(s => s.immersive)
   const setImmersive = useAppStore(s => s.setImmersive)
@@ -61,6 +69,9 @@ export default function Home() {
   const panelSizes = useAppStore((s) => s.panelSizes)
   const chatPanelOpen = useAppStore((s) => s.chatPanelOpen)
   const setChatPanelOpen = useAppStore((s) => s.setChatPanelOpen)
+  const rightPanelView = useAppStore((s) => s.rightPanelView)
+  const forgeResourceView = useAppStore((s) => s.forgeResourceView)
+  const setForgeResourceView = useAppStore((s) => s.setForgeResourceView)
   const { data: session, isPending: authPending } = useAuthSession()
   const isLoggedIn = !!session?.session
   const [showApp, setShowApp] = useState(false)
@@ -81,6 +92,7 @@ export default function Home() {
   const { data: galaxyData } = useGalaxyData({ enabled: workspaceQueriesEnabled })
   const { data: learningData } = useLearningPaths(undefined, { enabled: workspaceQueriesEnabled })
   const { profile: learningProfile } = useLearningProfile({ enabled: workspaceQueriesEnabled })
+  const importDocument = useImportDocument()
   const memorySearch = useMemorySearch()
   const { stats: dashStats } = useDashboardStats({ enabled: workspaceQueriesEnabled })
 
@@ -94,6 +106,7 @@ export default function Home() {
   const [newCardContent, setNewCardContent] = useState('')
   const [newCardType, setNewCardType] = useState<CreateCardType>('fleeting')
   const [creating, setCreating] = useState(false)
+  const [importFile, setImportFile] = useState<ImportFilePayload | null>(null)
   const cardTypeOptions = useMemo(() => {
     const labels: Record<CreateCardType, string> = { fleeting: '灵感草稿', literature: '文献资料', permanent: '永久知识' }
     return createCardTypes.map((type) => ({ id: type, label: labels[type] }))
@@ -109,32 +122,18 @@ export default function Home() {
   const forgeRightWidth = panelLayout.right.length > 0
     ? Math.max(...panelLayout.right.map((panel) => panelSizes[panel] ?? 420))
     : 0
-  const [forgeResourceView, setForgeResourceView] = useState<ForgeResourceView>(() => (
-    panelLayout.left.includes('fileTree') ? 'cards' : 'context'
-  ))
   const resourcePanelOpen = panelLayout.left.includes('sessionList') || panelLayout.left.includes('fileTree')
   const editorPanelOpen = panelLayout.right.includes('editor')
   const setPanelLayout = useAppStore((s) => s.setPanelLayout)
 
-  const changeForgeResourceView = useCallback((view: ForgeResourceView) => {
+  const toggleForgeResource = useCallback((view: ForgeResourceView) => {
     const targetPanel: PanelId = view === 'cards' ? 'fileTree' : 'sessionList'
     setForgeResourceView(view)
-    if (!resourcePanelOpen || panelLayout.left.includes(targetPanel)) return
     setPanelLayout({
       left: [targetPanel],
       right: panelLayout.right.filter((panel) => panel === 'editor'),
     })
-  }, [panelLayout.left, panelLayout.right, resourcePanelOpen, setPanelLayout])
-
-  const toggleForgeResource = useCallback((view: ForgeResourceView) => {
-    const targetPanel: PanelId = view === 'cards' ? 'fileTree' : 'sessionList'
-    const currentlyOpen = panelLayout.left.includes(targetPanel)
-    setForgeResourceView(view)
-    setPanelLayout({
-      left: currentlyOpen && resourcePanelOpen ? [] : [targetPanel],
-      right: panelLayout.right.filter((panel) => panel === 'editor'),
-    })
-  }, [panelLayout.left, panelLayout.right, resourcePanelOpen, setPanelLayout])
+  }, [panelLayout.right, setForgeResourceView, setPanelLayout])
 
   const toggleForgeEditor = useCallback(() => {
     setPanelLayout({
@@ -142,11 +141,6 @@ export default function Home() {
       right: editorPanelOpen ? [] : ['editor'],
     })
   }, [editorPanelOpen, panelLayout.left, setPanelLayout])
-
-  useEffect(() => {
-    if (panelLayout.left.includes('fileTree')) setForgeResourceView('cards')
-    else if (panelLayout.left.includes('sessionList')) setForgeResourceView('context')
-  }, [panelLayout.left])
 
   // Show onboarding after app loads for first-time users
   useEffect(() => {
@@ -180,7 +174,7 @@ export default function Home() {
     appStore.setActiveLearningStepId(null)
     appStore.setMode('forge')
     appStore.setChatPanelOpen(true)
-    appStore.setPanelLayout({ left: ['sessionList'], right: ['editor'] })
+    appStore.setPanelLayout({ left: ['sessionList'], right: [] })
 
     const agentStore = useAgentStore.getState()
     agentStore._abortStream()
@@ -478,36 +472,31 @@ export default function Home() {
       })
     }
     if (node) {
-      setSelectedNode({ id: node.id, title: node.title, type: node.type })
-      useAppStore.getState().setMode('forge')
+      useAppStore.getState().openForgeCardPreview({ id: node.id, title: node.title, type: node.type })
       const focusFn = useGalaxyActions.getState().actions.focusNodeById
       if (typeof focusFn === 'function') focusFn(node.id)
     } else {
-      useAppStore.getState().setSelectedNode({ id: result.path, title: result.title, type: '' })
-      useAppStore.getState().setMode('forge')
+      useAppStore.getState().openForgeCardPreview({ id: result.path, title: result.title, type: 'fleeting' })
     }
     closeModal()
-  }, [closeModal, galaxyData?.nodes, setSelectedNode])
+  }, [closeModal, galaxyData?.nodes])
 
   // ── Keyboard shortcuts ──
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       const isMeta = e.metaKey || e.ctrlKey
-      if (!isMeta && e.key !== 'Escape' && e.key !== '/') return
+      if (!isMeta && e.key !== 'Escape') return
       if (e.key === 'Escape') { if (modal) closeModal(); return }
-      if (!isMeta) {
-        if (e.key === '/') { e.preventDefault(); openModal('search'); return }
-        return
-      }
-      e.preventDefault()
+      if (shouldIgnoreGlobalShortcutTarget(e.target)) return
+      if (!isMeta) return
       switch (e.key.toLowerCase()) {
-        case 'k': openModal('search'); break
-        case 'n': openModal('newcard'); break
-        case '1': useAppStore.getState().setMode('dashboard'); break
-        case '2': useAppStore.getState().setMode('forge'); break
-        case '3': useAppStore.getState().setMode('galaxy'); break
-        case '4': useAppStore.getState().setMode('cognition'); break
-        case '5': useAppStore.getState().setMode('learn'); break
+        case 'k': e.preventDefault(); openModal('search'); break
+        case 'n': e.preventDefault(); openModal('newcard'); break
+        case '1': e.preventDefault(); useAppStore.getState().setMode('dashboard'); break
+        case '2': e.preventDefault(); useAppStore.getState().setMode('forge'); break
+        case '3': e.preventDefault(); useAppStore.getState().setMode('galaxy'); break
+        case '4': e.preventDefault(); useAppStore.getState().setMode('cognition'); break
+        case '5': e.preventDefault(); useAppStore.getState().setMode('learn'); break
       }
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -584,6 +573,41 @@ export default function Home() {
     } catch (err) {
       console.warn('[Home] failed to create card:', err)
       toast.error(err instanceof Error ? err.message : '创建卡片失败')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const handleImportDocument = async () => {
+    if (!newCardTitle.trim() || !currentVaultId) return
+    if (!newCardContent.trim() && !importFile) return
+    setCreating(true)
+    try {
+      const topic = newCardTitle.trim()
+      const result = await importDocument.mutateAsync({
+        ...(newCardContent.trim() ? { document: newCardContent.trim() } : {}),
+        ...(importFile?.fileText ? { fileText: importFile.fileText } : {}),
+        ...(importFile?.fileBase64 ? { fileBase64: importFile.fileBase64 } : {}),
+        topic,
+        sourceTitle: topic,
+        source: importFile?.originalFileName || topic,
+        originalFileName: importFile?.originalFileName,
+        sourceMimeType: importFile?.sourceMimeType,
+        conversionKind: importFile?.conversionKind,
+      })
+      setNewCardTitle('')
+      setNewCardContent('')
+      setImportFile(null)
+      closeModal()
+      if (result.pathId) {
+        useAppStore.getState().setSelectedPathId(result.pathId)
+        useAppStore.getState().setActiveLearningStepId(null)
+      }
+      useAppStore.getState().setMode('learn')
+      toast.success('资料已导入并生成学习路径')
+    } catch (err) {
+      console.warn('[Home] failed to import document:', err)
+      toast.error(err instanceof Error ? err.message : '导入资料失败')
     } finally {
       setCreating(false)
     }
@@ -712,14 +736,13 @@ export default function Home() {
                   resourcePanelOpen={resourcePanelOpen}
                   editorPanelOpen={editorPanelOpen}
                   chatPanelOpen={chatPanelOpen}
+                  rightPanelView={rightPanelView}
                   forgeLeftWidth={forgeLeftWidth}
                   forgeRightWidth={forgeRightWidth}
                   forgeResourceView={forgeResourceView}
                   onToggleResource={toggleForgeResource}
-                  onChangeResourceView={changeForgeResourceView}
                   onToggleEditor={toggleForgeEditor}
                   onChatPanelOpenChange={setChatPanelOpen}
-                  onOpenNewCard={() => openModal('newcard')}
                 />
               )}
 
@@ -751,6 +774,8 @@ export default function Home() {
             newCardType={newCardType}
             cardTypeOptions={cardTypeOptions}
             creating={creating}
+            importPending={importDocument.isPending}
+            importFileName={importFile?.originalFileName ?? null}
             oracleColors={oracleColors}
             userName={session?.user?.name}
             nodeCount={galaxyData?.nodes.length ?? 0}
@@ -765,6 +790,9 @@ export default function Home() {
             onNewCardContentChange={setNewCardContent}
             onNewCardTypeChange={setNewCardType}
             onCreateCard={handleCreateCard}
+            onImportFileLoaded={setImportFile}
+            onClearImportFile={() => setImportFile(null)}
+            onImportDocument={handleImportDocument}
             onSetOracle={(oracle) => useAppStore.getState().setOracle(oracle)}
             onStartInitialProfile={handleStartInitialProfile}
             onCompleteOnboarding={handleCompleteOnboarding}
@@ -783,18 +811,20 @@ export default function Home() {
       {immersive && <ImmersiveExitButton onExit={() => setImmersive(false)} />}
 
       {/* ── Landing Page ── */}
-      <div className={`landing-stage ${showApp ? 'landing-stage-exit' : ''}`}>
-        <LandingPage
-          showLoadingHint={false}
-          isLoggedIn={authPending ? undefined : isLoggedIn}
-          vaultPickerOpen={vaultPickerOpen}
-          vaultsLoaded={vaultsLoaded}
-          vaultLoadError={vaultLoadError}
-          onRetryVaults={() => setVaultLoadNonce((n) => n + 1)}
-          onOpenVaultPicker={() => setVaultPickerOpen(true)}
-          onEnterApp={handleEnterApp}
-        />
-      </div>
+      {!showApp && (
+        <div className="landing-stage">
+          <LandingPage
+            showLoadingHint={false}
+            isLoggedIn={authPending ? undefined : isLoggedIn}
+            vaultPickerOpen={vaultPickerOpen}
+            vaultsLoaded={vaultsLoaded}
+            vaultLoadError={vaultLoadError}
+            onRetryVaults={() => setVaultLoadNonce((n) => n + 1)}
+            onOpenVaultPicker={() => setVaultPickerOpen(true)}
+            onEnterApp={handleEnterApp}
+          />
+        </div>
+      )}
     </>
   )
 }

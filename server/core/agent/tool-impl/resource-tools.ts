@@ -22,11 +22,11 @@ import { buildLearningProfileContext, type LearningProfileContext } from '@/serv
 import { scheduleRagIndexCard, scheduleRagIndexCards } from '@/server/core/rag/auto-index';
 
 const RESOURCE_LABELS: Record<string, string> = {
-  document: '学习文档',
+  document: '讲解文档',
   mindmap: '思维导图',
   quiz: '练习题',
   code: '代码实操',
-  video: '教学视频',
+  video: '视频/动画脚本',
   svg: 'SVG 图解',
   diagram: 'Mermaid 图表',
   docx: 'Word 文档',
@@ -176,7 +176,7 @@ function inferDefaultResourceTypes(
   userLevel: string,
 ): ResourceType[] {
   const text = `${topic} ${literatureContent || ''}`.toLowerCase();
-  const types = new Set<ResourceType>(['document', 'mindmap', 'quiz', 'code', 'diagram']);
+  const types = new Set<ResourceType>(['document', 'mindmap', 'quiz', 'code', 'video', 'diagram']);
 
   if (/(图|流程|关系|结构|架构|路径|系统|网络|状态|sequence|flow|diagram|map)/i.test(text)) {
     types.add(/(关系|结构|体系|知识|章节|地图|mindmap|map)/i.test(text) ? 'mindmap' : 'diagram');
@@ -542,6 +542,16 @@ const pushResourceTool = createTool(
       await getFileStorage().ensureDir(litDir);
       const litFileName = `lit-${Date.now()}.md`;
       const litPath = `${litDir}/${litFileName}`;
+      const resourcePackTitle = `${params.topic} - 个性化资源包`;
+      const evidenceLines = [
+        `- 当前主题：${params.topic}`,
+        `- 当前资料/卡片：${litTitle}`,
+        profileEvidence?.remainingGaps.length ? `- 剩余缺口：${profileEvidence.remainingGaps.join('、')}` : '- 剩余缺口：暂无稳定缺口',
+        profileEvidence?.resourcePreference.length ? `- 资源偏好：${profileEvidence.resourcePreference.join('、')}` : '- 资源偏好：暂无稳定偏好',
+        profileEvidence?.masteredConcepts.length ? `- 已掌握概念：${profileEvidence.masteredConcepts.join('、')}` : '',
+        ragContext.references.length ? `- 资料来源：${ragContext.references.slice(0, 5).join('、')}` : '',
+        `- 目标：围绕当前误区/薄弱点生成可预览学习资源，并回应画像里的下一步缺口。`,
+      ].filter(Boolean).join('\n');
       const fullContent = `---
 title: "${params.topic}"
 source_type: ai
@@ -562,6 +572,10 @@ tags: [ai-generated, ${params.topic}]
 
 ## 画像驱动依据
 
+${evidenceLines}
+
+## 生成依据明细
+
 ${formatResourceProfileEvidence(profileEvidence)}
 
 ${orchestrationEvidence ? [
@@ -578,6 +592,7 @@ ${sections.join('\n\n---\n\n')}
       await getFileStorage().writeFile(litPath, fullContent);
 
       // Also create a DB Card record for the literature so it appears in galaxy/knowledge graph
+      let createdResourceCard: { id: string; title: string | null; type: string; path: string } | null = null;
       try {
         const { prisma: litDb } = await import('@/lib/db');
         const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
@@ -588,16 +603,24 @@ ${sections.join('\n\n---\n\n')}
             create: {
               vaultId: litVid,
               path: `literature/${litFileName}`,
-              title: params.topic,
+              title: resourcePackTitle,
               content: fullContent.slice(0, 10000),
               type: 'literature',
               tags: JSON.stringify(['ai-generated', params.topic]),
             },
             update: {
+              title: resourcePackTitle,
               content: fullContent.slice(0, 10000),
+              tags: JSON.stringify(['ai-generated', params.topic]),
               updatedAt: new Date(),
             },
           });
+          createdResourceCard = {
+            id: resourceCard.id,
+            title: resourceCard.title,
+            type: resourceCard.type,
+            path: resourceCard.path,
+          };
           scheduleRagIndexCard(resourceCard.id, 'resource-generation');
         }
 
@@ -694,6 +717,19 @@ ${sections.join('\n\n---\n\n')}
           userLevel,
           types_generated: generatedCount,
           cardPath: litPath,
+          resourcePackCard: createdResourceCard,
+          workspaceActions: createdResourceCard ? [
+            {
+              type: 'select_card',
+              card: {
+                id: createdResourceCard.id,
+                title: createdResourceCard.title || params.topic,
+                type: createdResourceCard.type || 'literature',
+              },
+            },
+            { type: 'set_right_panel_view', view: 'read' },
+            { type: 'set_panel', panel: 'editor', zone: 'right', open: true },
+          ] : [],
           resources: generatedResources,
           orchestration: orchestrationEvidence,
           generationResults,

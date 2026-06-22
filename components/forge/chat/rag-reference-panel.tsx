@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { HudPanel } from '@/components/ui'
 import { useAppStore } from '@/stores/mode-store'
 import type { RagReference } from '@/stores/agent-store'
 
@@ -18,7 +19,7 @@ export function RagReferencePanel({ references }: { references: RagReference[] }
   if (uniqueReferences.length === 0) return null
 
   return (
-    <div className="mt-3 rounded-lg border border-emerald-400/10 bg-emerald-400/[0.035] px-3 py-2">
+    <HudPanel as="div" className="mt-3 rounded-lg border-emerald-400/10 bg-emerald-400/[0.035] px-3 py-2">
       <div className="mono mb-1.5 text-emerald-300/70 uppercase" style={{ fontSize: 'var(--f8)' }}>
         Knowledge References
       </div>
@@ -58,6 +59,6 @@ export function RagReferencePanel({ references }: { references: RagReference[] }
           )
         })}
       </div>
-    </div>
+    </HudPanel>
   )
 }

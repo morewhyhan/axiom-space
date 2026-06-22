@@ -14,13 +14,14 @@ type SearchFieldProps = InputHTMLAttributes<HTMLInputElement> & {
 }
 
 export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(
-  ({ icon, wrapperClassName, inputClassName, className, ...props }, ref) => {
+  ({ icon, wrapperClassName, inputClassName, className, type = 'search', ...props }, ref) => {
     return (
-      <label className={cn(wrapperClassName, className)}>
+      <label className={cn(wrapperClassName, className)} data-no-global-shortcuts>
         {icon}
         <input
           ref={ref}
           className={inputClassName}
+          type={type}
           {...props}
         />
       </label>

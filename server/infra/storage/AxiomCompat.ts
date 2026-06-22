@@ -120,7 +120,10 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
     },
 
     async updateCard(_vp: string, cardPath: string, card: any, content: string) {
-      let nextContent = content || card?.content || ''
+      let nextContent = normalizeAgentCardContent(
+        content || card?.content || '',
+        card?.title || cardPath.split('/').pop()?.replace(/\.md$/, '') || '未命名卡片',
+      )
       const outgoing = Array.isArray(card?.links?.to) ? card.links.to : []
       for (const target of outgoing) {
         const cleanTarget = String(target || '').trim()
@@ -136,9 +139,10 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
     // ── 卡片操作（DB 直查，不写 YAML frontmatter）──
     async createFleeing(_vp: string, item: any, content: string, oldTitle?: string) {
       const title = item.title || item.id || `fleeing-${Date.now()}`
+      const safeContent = normalizeAgentCardContent(content, title)
       const filePath = `fleeting/${title}.md`
       if (oldTitle) await storage.deleteFile(`fleeting/${oldTitle}.md`)
-      await storage.writeFile(filePath, content, 'fleeting')
+      await storage.writeFile(filePath, safeContent, 'fleeting')
       // 同步写入 Prisma DB
       const { prisma } = await import('@/lib/db')
       const { getCurrentUserId, getCurrentVaultId } = await import('@/server/core/agent/agent-context')
@@ -148,8 +152,8 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
         const tags = item.tags ? (Array.isArray(item.tags) ? JSON.stringify(item.tags) : item.tags) : null
         const card = await prisma.card.upsert({
           where: { vaultId_path: { vaultId: vid, path: filePath } },
-          update: { title, content, type: 'fleeting', tags, updatedAt: new Date() },
-          create: { vaultId: vid, path: filePath, title, content, type: 'fleeting', tags },
+          update: { title, content: safeContent, type: 'fleeting', tags, updatedAt: new Date() },
+          create: { vaultId: vid, path: filePath, title, content: safeContent, type: 'fleeting', tags },
         })
         void emitDomainEvent({
           userId: getCurrentUserId(),
@@ -167,7 +171,9 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
     },
 
     async createPermanent(_vp: string, item: any, content: string, oldTitle?: string) {
-      const quality = validatePermanentCardContent(content)
+      const title = item.title || `perm-${Date.now()}`
+      const safeContent = normalizeAgentCardContent(content, title)
+      const quality = validatePermanentCardContent(safeContent)
       if (!quality.passed) {
         const { getCurrentUserId, getCurrentVaultId } = await import('@/server/core/agent/agent-context')
         const { recordPromotionAttempt } = await import('@/server/core/domain/events')
@@ -190,7 +196,6 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
           qualityIssues: quality.issues,
         }
       }
-      const title = item.title || `perm-${Date.now()}`
       const filePath = `permanent/${title}.md`
       if (oldTitle) {
         const { prisma } = await import('@/lib/db')
@@ -202,7 +207,7 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
         await storage.deleteFile(`permanent/${oldTitle}.md`)
       }
       // 写入文件存储
-      await storage.writeFile(filePath, content, 'permanent')
+      await storage.writeFile(filePath, safeContent, 'permanent')
       // 同步写入 Prisma DB
       const { prisma } = await import('@/lib/db')
       const { getCurrentUserId, getCurrentVaultId } = await import('@/server/core/agent/agent-context')
@@ -212,8 +217,8 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
         const tags = item.tags ? (Array.isArray(item.tags) ? JSON.stringify(item.tags) : item.tags) : null
         const card = await prisma.card.upsert({
           where: { vaultId_path: { vaultId: vid, path: filePath } },
-          update: { title, content, type: 'permanent', tags, updatedAt: new Date() },
-          create: { vaultId: vid, path: filePath, title, content, type: 'permanent', tags },
+          update: { title, content: safeContent, type: 'permanent', tags, updatedAt: new Date() },
+          create: { vaultId: vid, path: filePath, title, content: safeContent, type: 'permanent', tags },
         })
         void emitDomainEvent({
           userId: getCurrentUserId(),
@@ -302,4 +307,38 @@ export function createAxiomCompat(storage: IFileStorage, vaultPath?: string): Ax
     getCwd() { return process.cwd() },
     getCurrentVaultPath() { return vp },
   }
+}
+
+function normalizeAgentCardContent(content: string, title: string): string {
+  const trimmed = (content || '').trim()
+  if (!trimmed) return `围绕「${title}」的理解仍待补充。`
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return trimmed
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    const extracted = extractMarkdownLikeText(parsed)
+    if (extracted.trim()) return extracted.trim()
+  } catch {
+    return trimmed
+  }
+  return trimmed
+}
+
+function extractMarkdownLikeText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.map(extractMarkdownLikeText).filter(Boolean).join('\n\n')
+  }
+  if (!value || typeof value !== 'object') return ''
+
+  const record = value as Record<string, unknown>
+  for (const key of ['markdown', 'content', 'body', 'text', 'summary', 'claim', 'definition', 'note']) {
+    const candidate = extractMarkdownLikeText(record[key])
+    if (candidate.trim()) return candidate
+  }
+
+  return Object.entries(record)
+    .filter(([, item]) => typeof item === 'string' || Array.isArray(item))
+    .map(([key, item]) => `- ${key}: ${extractMarkdownLikeText(item).replace(/\n+/g, ' ')}`)
+    .join('\n')
 }

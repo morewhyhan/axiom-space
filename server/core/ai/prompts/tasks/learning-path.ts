@@ -4,6 +4,7 @@ import {
   CARD_WORKFLOW_STANDARD,
   GRAPH_EDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -85,7 +86,7 @@ export const LEARNING_BATCH_CONCEPTS_PROMPT = definePrompt<LearningBatchConcepts
   system: buildSystemPrompt({
     role: 'You are an expert knowledge graph builder. Generate concept task cards for the current Vault.',
     contract: batchContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Respond only with this JSON shape:
 {
   "concepts": [
@@ -162,7 +163,7 @@ export const LEARNING_PATH_PLANNER_PROMPT = definePrompt<LearningPathPlannerInpu
   system: buildSystemPrompt({
     role: 'You are an expert curriculum designer and knowledge graph planner.',
     contract: plannerContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return only this JSON shape:
 {
   "name": "overall title (max 30 chars)",

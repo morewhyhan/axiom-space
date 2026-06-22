@@ -1,6 +1,9 @@
 'use client'
 
-import { AxiomInput, AxiomTextarea, Button, FieldLabel, ListItemShell, MetricTile, Modal } from '@/components/ui'
+import type { ChangeEvent } from 'react'
+import { toast } from 'sonner'
+import { AxiomInput, AxiomTextarea, Button, FieldLabel, HudPanel, ListItemShell, MetricTile, Modal } from '@/components/ui'
+import { readImportFilePayload, type ImportFilePayload } from '@/lib/import-files'
 
 type SearchResult = {
   path: string
@@ -49,6 +52,11 @@ type AppModalsProps<TCardType extends string> = {
   onNewCardContentChange: (value: string) => void
   onNewCardTypeChange: (type: TCardType) => void
   onCreateCard: (typeOverride?: string) => void | Promise<void>
+  importFileName?: string | null
+  importPending?: boolean
+  onImportFileLoaded?: (payload: ImportFilePayload) => void
+  onClearImportFile?: () => void
+  onImportDocument?: () => void | Promise<void>
   onSetOracle: (oracle: string) => void
   onStartInitialProfile: () => void | Promise<void>
   onCompleteOnboarding: () => void
@@ -78,11 +86,33 @@ export function AppModals<TCardType extends string>({
   onNewCardContentChange,
   onNewCardTypeChange,
   onCreateCard,
+  importFileName,
+  importPending,
+  onImportFileLoaded,
+  onClearImportFile,
+  onImportDocument,
   onSetOracle,
   onStartInitialProfile,
   onCompleteOnboarding,
 }: AppModalsProps<TCardType>) {
   if (!modal) return null
+
+  const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !onImportFileLoaded) return
+    try {
+      const payload = await readImportFilePayload(file)
+      onImportFileLoaded(payload)
+      if (!newCardTitle.trim()) {
+        onNewCardTitleChange(file.name.replace(/\.[^.]+$/, ''))
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '读取文件失败')
+    }
+  }
+
+  const importing = creating || !!importPending
 
   return (
     <div className="modal-overlay" onClick={(event) => { if (event.target === event.currentTarget) onClose() }}>
@@ -180,30 +210,57 @@ export function AppModals<TCardType extends string>({
         <Modal title="Import_Text" titleClassName="text-cyan-400" onClose={onClose}>
           <div className="p-5 space-y-4">
             <div>
-              <FieldLabel>TITLE</FieldLabel>
+              <FieldLabel>TOPIC / TITLE</FieldLabel>
               <AxiomInput
                 type="text"
-                placeholder="文献/材料标题..."
+                placeholder="匹配星团主题或资料标题..."
                 value={newCardTitle}
+                aria-label="资料主题"
+                data-testid="import-topic"
                 onChange={(event) => onNewCardTitleChange(event.target.value)}
               />
             </div>
             <div>
-              <FieldLabel>CONTENT</FieldLabel>
+              <FieldLabel>FILE</FieldLabel>
+              <div className="flex items-center gap-2">
+                <label className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-white/45 transition-colors hover:border-cyan-200/18 hover:text-cyan-100/80" style={{ fontSize: 'var(--f9)' }}>
+                  选择资料文件
+                  <input
+                    type="file"
+                    className="hidden"
+                    aria-label="选择导入资料文件"
+                    data-testid="import-file"
+                    onChange={(event) => { void handleImportFileChange(event) }}
+                  />
+                </label>
+                {importFileName && (
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-lg border border-cyan-300/12 bg-cyan-300/[0.04] px-3 py-2">
+                    <span className="truncate text-cyan-100/65" style={{ fontSize: 'var(--f9)' }}>{importFileName}</span>
+                    <Button className="text-white/35 hover:text-white/70" onClick={onClearImportFile}>清除</Button>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
+              <FieldLabel>{importFileName ? 'NOTES' : 'CONTENT'}</FieldLabel>
               <AxiomTextarea
                 rows={8}
-                placeholder="粘贴文献内容、学习笔记、或任何文本..."
+                placeholder={importFileName ? '可补充资料来源、学习目标或重点问题...' : '粘贴文献内容、学习笔记、或任何文本...'}
                 value={newCardContent}
+                aria-label="粘贴文献内容"
+                data-testid="import-content"
                 onChange={(event) => onNewCardContentChange(event.target.value)}
               />
             </div>
             <Button
               variant="axiom-primary"
               className="w-full text-center"
-              disabled={!newCardTitle.trim() || creating}
-              onClick={() => { void onCreateCard('literature') }}
+              aria-label="导入资料并生成学习路径"
+              data-testid="import-submit"
+              disabled={!newCardTitle.trim() || importing || (!newCardContent.trim() && !importFileName)}
+              onClick={() => { void (onImportDocument ? onImportDocument() : onCreateCard('literature')) }}
             >
-              {creating ? '导入中...' : '导入为文献资料'}
+              {importing ? '导入中...' : '导入并生成学习路径'}
             </Button>
           </div>
         </Modal>
@@ -221,16 +278,16 @@ export function AppModals<TCardType extends string>({
             ].map((agent, index) => {
               const color = oracleColors[agent.color] ?? oracleColors.purple
               return (
-                <ListItemShell
+                <HudPanel
+                  as="button"
                   key={agent.id}
-                  interactive
-                  className={`p-4 bg-white/5 rounded-xl border cursor-pointer hover:bg-white/8 transition-colors text-left ${index === 0 ? 'border-purple-500/20' : 'border-white/5'}`}
+                  className={`p-4 cursor-pointer transition-colors text-left hover:bg-white/8 ${index === 0 ? 'border-purple-500/20' : 'border-white/10'}`}
                   onClick={() => { onSetOracle(agent.id); onClose() }}
                 >
                   <div className={`oracle-avatar ${color.bg} ${color.text} ${color.border} mb-2`}>{agent.letter}</div>
                   <div className="text-white/70 font-medium" style={{ fontSize: 'var(--t-label)' }}>{agent.name}</div>
                   <div className="mono opacity-35 mt-1" style={{ fontSize: 'var(--f8)' }}>{agent.desc}</div>
-                </ListItemShell>
+                </HudPanel>
               )
             })}
           </div>
@@ -241,9 +298,9 @@ export function AppModals<TCardType extends string>({
         <Modal title="User_Profile" onClose={onClose}>
           <div className="p-6">
             <div className="flex items-center gap-5 mb-6">
-              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500/40 to-cyan-500/40 border border-white/10 flex items-center justify-center">
+              <HudPanel as="div" className="w-16 h-16 rounded-full bg-gradient-to-br from-purple-500/40 to-cyan-500/40 p-0 flex items-center justify-center">
                 <span className="serif text-2xl">{(userName ?? 'A').charAt(0).toUpperCase()}</span>
-              </div>
+              </HudPanel>
               <div>
                 <div className="text-lg font-medium">{userName ?? '学习者'}</div>
                 <div className="mono opacity-35 mt-1" style={{ fontSize: 'var(--f9)' }}>Nodes: {nodeCount} · Links: {edgeCount}</div>
@@ -267,9 +324,9 @@ export function AppModals<TCardType extends string>({
                 {learningProfile.domains.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
                     {learningProfile.domains.map((domain) => (
-                      <span key={domain.id} className="px-2 py-0.5 rounded mono text-[10px] border border-white/10" style={{ color: domain.color || '#a855f7' }}>
+                      <HudPanel key={domain.id} as="span" className="px-2 py-0.5 rounded mono text-[10px]" style={{ color: domain.color || '#a855f7' }}>
                         {domain.name} ({domain.cardCount})
-                      </span>
+                      </HudPanel>
                     ))}
                   </div>
                 )}
@@ -284,7 +341,7 @@ export function AppModals<TCardType extends string>({
         <Modal title="Shortcuts" onClose={onClose}>
           <div className="p-5 space-y-2">
             {[
-              ['⌘K', '搜索节点'], ['⌘N', '新建节点'], ['⌘1/2/3/4/5', '切换页面（仪表板/AI工作台/知识图谱/认知洞察/路径规划）'], ['/', '命令面板'], ['Esc', '关闭面板'], ['Ctrl+S', '保存卡片（编辑器中）'], ['Ctrl+Z', '撤销编辑（编辑器中）'],
+              ['⌘K', '搜索节点'], ['⌘N', '新建节点'], ['⌘1/2/3/4/5', '切换页面（仪表板/AI工作台/知识图谱/认知洞察/路径规划）'], ['Esc', '关闭面板'], ['Ctrl+S', '保存卡片（编辑器中）'], ['Ctrl+Z', '撤销编辑（编辑器中）'],
             ].map(([key, desc]) => (
               <div key={key as string} className="flex justify-between items-center py-2 border-b border-white/5">
                 <span className="mono text-white/50" style={{ fontSize: 'var(--f9)' }}>{key as string}</span>

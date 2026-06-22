@@ -48,6 +48,10 @@ export default function GalaxyControls() {
   const setLayoutMode = useAppStore((s) => s.setGraphLayoutMode)
   const hoverAttention = useAppStore((s) => s.graphHoverAttention)
   const setHoverAttention = useAppStore((s) => s.setGraphHoverAttention)
+  const semanticClusterLens = useAppStore((s) => s.graphSemanticClusterLens)
+  const setSemanticClusterLens = useAppStore((s) => s.setGraphSemanticClusterLens)
+  const forceMotion = useAppStore((s) => s.graphForceMotion)
+  const setForceMotion = useAppStore((s) => s.setGraphForceMotion)
 
   const [autoRotate, setAutoRotate] = useState(true)
   const [bloom, setBloom] = useState(0.8)
@@ -67,11 +71,15 @@ export default function GalaxyControls() {
       const bl = actions.getBloom?.() as number | undefined
       const ha = actions.getHoverAttention?.() as boolean | undefined
       const lm = actions.getLayoutMode?.() as GraphLayoutMode | undefined
+      const semanticLens = actions.getSemanticClusterLens?.() as boolean | undefined
+      const force = actions.getForceMotion?.() as boolean | undefined
       if (ar !== undefined) setAutoRotate(ar)
       if (bl !== undefined) setBloom(bl)
       if (ha !== undefined) setHoverAttention(ha)
       if (lm !== undefined) setLayoutMode(lm)
-      if (ar !== undefined || bl !== undefined || ha !== undefined || lm !== undefined) return
+      if (semanticLens !== undefined) setSemanticClusterLens(semanticLens)
+      if (force !== undefined) setForceMotion(force)
+      if (ar !== undefined || bl !== undefined || ha !== undefined || lm !== undefined || semanticLens !== undefined || force !== undefined) return
       attempts += 1
       if (attempts < maxAttempts) timerId = setTimeout(poll, 200)
     }
@@ -79,7 +87,7 @@ export default function GalaxyControls() {
     return () => {
       if (timerId) clearTimeout(timerId)
     }
-  }, [setHoverAttention, setLayoutMode])
+  }, [setForceMotion, setHoverAttention, setLayoutMode, setSemanticClusterLens])
 
   const resetView = () => callCanvas('__resetCameraView')
   const fitSelection = () => callCanvas('__fitSelection')
@@ -93,6 +101,18 @@ export default function GalaxyControls() {
     const value = !hoverAttention
     setHoverAttention(value)
     callCanvas('__setHoverAttention', [value])
+  }
+
+  const toggleSemanticClusterLens = () => {
+    const value = !semanticClusterLens
+    setSemanticClusterLens(value)
+    callCanvas('__setSemanticClusterLens', [value])
+  }
+
+  const toggleForceMotion = () => {
+    const value = !forceMotion
+    setForceMotion(value)
+    callCanvas('__setForceMotion', [value])
   }
 
   const toggleInternalEdges = () => {
@@ -109,6 +129,10 @@ export default function GalaxyControls() {
     const value = Number(event.target.value)
     if (callCanvas('__setBloom', [value])) setBloom(value)
   }
+
+  const focusRecent = () => callCanvas('__focusRecent')
+  const showOrphans = () => callCanvas('__showOrphansOnly')
+  const showAllNodes = () => callCanvas('__showAllNodes')
 
   const toggleType = (type: string, current: boolean, setCurrent: (value: boolean) => void) => {
     const value = !current
@@ -163,6 +187,9 @@ export default function GalaxyControls() {
         <div className="mt-3 grid grid-cols-2 gap-2">
           <GalaxyHudAction icon={<RotateCw className="h-3.5 w-3.5" />} label="重置" onClick={resetView} />
           <GalaxyHudAction icon={<Maximize2 className="h-3.5 w-3.5" />} label="适配" onClick={fitSelection} />
+          <GalaxyHudAction icon={<Focus className="h-3.5 w-3.5" />} label="最近" onClick={focusRecent} />
+          <GalaxyHudAction icon={<Eye className="h-3.5 w-3.5" />} label="孤立" onClick={showOrphans} />
+          <GalaxyHudAction icon={<Eye className="h-3.5 w-3.5" />} label="全部" onClick={showAllNodes} />
         </div>
       </GalaxyHudCard>
 
@@ -171,6 +198,8 @@ export default function GalaxyControls() {
         <div className="mt-3 space-y-3">
           <GalaxySwitchRow label="自动旋转" active={autoRotate} onClick={toggleAutoRotate} />
           <GalaxySwitchRow label="悬停聚焦" active={hoverAttention} onClick={toggleHoverAttention} />
+          <GalaxySwitchRow label="自然布局" active={forceMotion} onClick={toggleForceMotion} />
+          <GalaxySwitchRow label="语义成团" active={semanticClusterLens} onClick={toggleSemanticClusterLens} />
           <GalaxySwitchRow label="内部连线" active={internalEdges} onClick={toggleInternalEdges} />
           <GalaxySwitchRow label="跨域连线" active={externalEdges} onClick={toggleExternalEdges} />
           <div>

@@ -14,6 +14,7 @@ out/
 
 # deps
 node_modules/
+.venv-browser-use/
 
 # env
 .env
@@ -47,6 +48,8 @@ lerna-debug.log*
 tsconfig.tsbuildinfo
 playwright-report/
 test-results/
+test/artifacts/a3-agentic-browser/
+test/artifacts/a3-browser-use/
 
 # generated
 /generated/prisma

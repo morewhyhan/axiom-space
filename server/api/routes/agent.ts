@@ -11,7 +11,7 @@ import { createAgent, AxiomAgent } from '@/server/core/agent/agent';
 import { aiManager } from '@/server/core/ai/AIManager';
 import { resolveAiConfig } from '@/lib/ai-config';
 import { runWithAgentContext } from '@/server/core/agent/agent-context';
-import { subscribeResourceProgress } from '@/server/core/agent/notification-bus';
+import { emitNotification, subscribeResourceProgress } from '@/server/core/agent/notification-bus';
 import type { StreamCallbacks } from '@/types/agent';
 import { prisma } from '@/lib/db';
 import { queryLightRAGContext } from '@/server/core/rag/lightrag-service';
@@ -21,8 +21,17 @@ import { hydrateConfirmationToken, revokeConfirmationToken } from '@/server/core
 import { requiresConfirmation } from '@/server/core/agent/ToolContracts';
 import { AGENT_TOOL_PROMPTS, ORACLE_CHAT_PROMPT } from '@/server/core/ai/prompts';
 import { maybeCaptureFeynmanExplanation } from '@/server/core/learning/feynman-card-capture';
+import {
+  flushCardThreadInsights,
+  maybeFlushCardThreadEveryThreeTurns,
+  type CardThreadFlushReason,
+} from '@/server/core/learning/card-thread-flush';
 import { maybeCreateProfileQuestion } from '@/server/core/agent/profile-questioner';
 import { getProfileCacheEntry, setProfileCacheEntry } from '@/server/api/profile-cache';
+import {
+  formatProfileRevisionRules,
+  formatSingleProfileDimensionExtractionGuide,
+} from '@/server/core/learning/profile-protocol';
 
 const INITIAL_PROFILE_INTRO = '我会按六个教学决策维度建立初始画像：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。每轮只问一个问题，你可以一句话回答。'
 const INITIAL_PROFILE_STEPS = [
@@ -58,6 +67,16 @@ const INITIAL_PROFILE_STEPS = [
   },
 ] as const
 type InitialProfileStep = typeof INITIAL_PROFILE_STEPS[number]
+const CARD_THREAD_FLUSH_REASONS = [
+  'three_turns',
+  'visibility_hidden',
+  'window_blur',
+  'pagehide',
+  'mode_leave',
+  'chat_closed',
+  'session_switch',
+  'manual',
+] as const
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .post('/chat', requireAuth, zValidator('json', z.object({
@@ -107,6 +126,69 @@ const app = new Hono<{ Variables: { userId: string } }>()
         return
       }
 
+      if (resolvedVaultId && requestedMeta.cardId && isResourceGenerationRequest(message)) {
+        const card = await prisma.card.findFirst({
+          where: { id: requestedMeta.cardId, vaultId: resolvedVaultId },
+          select: { title: true, content: true, path: true },
+        })
+        if (card) {
+          await persistMessage(dbSessionId, 'user', message)
+          registerBuiltinTools()
+          const tool = toolRegistry.get('push_resource')
+          if (!tool?.execute) {
+            await stream.writeSSE({
+              event: 'error',
+              data: JSON.stringify({ error: '资源生成工具不可用。' }),
+            })
+            return
+          }
+          await stream.writeSSE({
+            event: 'tool_start',
+            data: JSON.stringify({ type: 'tool_start', tool: 'push_resource' }),
+          })
+          const result = await tool.execute('direct-resource-generation', {
+            topic: card.title || message.slice(0, 60),
+            literatureTitle: card.title || card.path || '当前卡片',
+            literatureContent: [
+              `用户请求：${message}`,
+              `当前卡片路径：${card.path || ''}`,
+              card.content || '',
+            ].filter(Boolean).join('\n\n').slice(0, 8000),
+          })
+          const toolText = extractToolResultText(result).trim()
+          const details = (result as { details?: unknown } | null)?.details
+          const workspaceActions = extractWorkspaceActions(details)
+          if (workspaceActions.length > 0) {
+            await stream.writeSSE({
+              event: 'workspace_action',
+              data: JSON.stringify({
+                type: 'workspace_action',
+                tool: 'push_resource',
+                actions: workspaceActions,
+              }),
+            })
+          }
+          await stream.writeSSE({
+            event: 'tool_end',
+            data: JSON.stringify({
+              type: 'tool_end',
+              tool: 'push_resource',
+              text: toolText,
+              details,
+              requiresUserInput: false,
+            }),
+          })
+          if (toolText) {
+            await persistMessage(dbSessionId, 'assistant', toolText)
+            await stream.writeSSE({
+              event: 'done',
+              data: JSON.stringify({ text: toolText }),
+            })
+          }
+          return
+        }
+      }
+
       const initialProfileReply = await maybeHandleInitialProfileTurn({
         userId,
         vaultId: resolvedVaultId,
@@ -128,6 +210,15 @@ const app = new Hono<{ Variables: { userId: string } }>()
         })
         return
       }
+
+      await maybeRecordProfileQuestionAnswer({
+        vaultId: resolvedVaultId,
+        sessionId: dbSessionId,
+        sessionMetadata: requestedMeta,
+        message,
+      }).catch((err) => {
+        console.debug('[Agent API] Profile question answer capture skipped:', err)
+      })
 
       const agent = await getAgentForUser(userId, oracleId, resolvedVaultId)
       const unsubscribeProgress = resolvedVaultId
@@ -188,7 +279,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
         // Persist user message to DB
         if (dbSessionId) await persistMessage(dbSessionId, 'user', message)
         if (dbSessionId && resolvedVaultId && requestedMeta.cardId && requestedKind !== 'conversation') {
-          void maybeCaptureFeynmanExplanation({
+          await maybeCaptureFeynmanExplanation({
             userId,
             vaultId: resolvedVaultId,
             sessionId: dbSessionId,
@@ -206,9 +297,20 @@ const app = new Hono<{ Variables: { userId: string } }>()
             data: JSON.stringify({ type: 'rag_context', references: ragEnhanced.references }),
           })
         }
+        const sessionContext = await buildAgentSessionContext({
+          vaultId: resolvedVaultId,
+          kind: requestedKind,
+          metadata: requestedMeta,
+        }).catch((err) => {
+          console.debug('[Agent API] Session context skipped:', err)
+          return ''
+        })
+        const agentInput = sessionContext
+          ? `${sessionContext}\n\n<user-message>\n${ragEnhanced.message}\n</user-message>`
+          : ragEnhanced.message
 
         let fullText = ''
-        for await (const chunk of agent.runStream(ragEnhanced.message, callbacks)) {
+        for await (const chunk of agent.runStream(agentInput, callbacks)) {
           fullText += chunk
           await stream.writeSSE({
             event: 'text',
@@ -255,6 +357,16 @@ const app = new Hono<{ Variables: { userId: string } }>()
           ? [fullText.trim(), ...toolSummaries].filter(Boolean).join('\n\n')
           : fullText
         if (dbSessionId) await persistMessage(dbSessionId, 'assistant', persistedAssistantText)
+        if (dbSessionId && resolvedVaultId && requestedMeta.cardId && requestedKind !== 'conversation') {
+          void maybeFlushCardThreadEveryThreeTurns({
+            userId,
+            vaultId: resolvedVaultId,
+            sessionId: dbSessionId,
+            cardId: requestedMeta.cardId,
+          }).catch((err) => {
+            console.debug('[Agent API] Card thread periodic flush failed:', err)
+          })
+        }
 
         // Send completion event with full text
         await stream.writeSSE({
@@ -671,6 +783,43 @@ const app = new Hono<{ Variables: { userId: string } }>()
       },
     })
   })
+  // POST /api/agent/sessions/:id/flush-card-thread — Agent2 safety pass for current card thread
+  .post('/sessions/:id/flush-card-thread', requireAuth, zValidator('query', z.object({
+    vid: z.string().optional(),
+  })), zValidator('json', z.object({
+    reason: z.enum(CARD_THREAD_FLUSH_REASONS).optional(),
+  })), async (c) => {
+    const userId = c.get('userId') as string
+    const sessionId = c.req.param('id')
+    const vaultId = await resolveAgentVaultId(userId, c.req.query('vid'))
+    if (!vaultId) return c.json({ success: false, error: 'Vault not found' }, 404)
+
+    const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
+    const metadata = parseSessionMetadata(session?.metadata)
+    if (!session || !isOwnedAgentSession(session, userId, vaultId) || !isUsableAgentSession(session, metadata)) {
+      return c.json({ success: false, error: 'Not found' }, 404)
+    }
+
+    const kind = resolveSessionKind(session, metadata)
+    if (kind === 'conversation' || !metadata.cardId) {
+      return c.json({
+        success: true,
+        result: { status: 'skipped', reason: 'not_card_thread', sessionId },
+      })
+    }
+
+    const body = c.req.valid('json')
+    const result = await flushCardThreadInsights({
+      userId,
+      vaultId,
+      sessionId,
+      cardId: metadata.cardId,
+      reason: (body.reason || 'manual') as CardThreadFlushReason,
+      requireNewTurn: true,
+    })
+
+    return c.json({ success: true, result })
+  })
   // POST /api/agent/sessions/:id/activate — Make a session the active workspace thread
   .post('/sessions/:id/activate', requireAuth, zValidator('query', z.object({
     vid: z.string().optional(),
@@ -1067,6 +1216,12 @@ type DirectChatMessage = {
   content: string
 }
 
+type ProfileObservationAnalysis = {
+  claim: string
+  evidence: string
+  confidence: number
+}
+
 async function callOpenAiCompatibleChat(input: {
   messages: DirectChatMessage[]
   temperature?: number
@@ -1193,6 +1348,7 @@ async function generateInitialProfileQuestion(input: {
           '你是 AXIOM 的学习画像访谈员。',
           '目标：基于六维教学画像标准，生成下一轮只问一个问题的中文提问。',
           '六维标准：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。',
+          '首次画像只建立低成本初始假设，不追求一次填满；剩余细节会在真实使用中逐步提取。',
           '硬性要求：只输出一个问题；不要编号；不要列多个问题；不要寒暄；不要解释标准；不超过 60 个汉字。',
           '问题要自然，结合已有回答，避免生硬模板。',
         ].join('\n'),
@@ -1217,6 +1373,169 @@ async function generateInitialProfileQuestion(input: {
     .map((line) => line.trim())
     .find(Boolean)
   return question || fallback
+}
+
+async function analyzeProfileObservation(input: {
+  step: InitialProfileStep
+  answers: Record<string, string>
+  rawAnswer: string
+  conversationText: string
+  mode: 'initial_profile' | 'profile_question'
+}): Promise<ProfileObservationAnalysis | null> {
+  const rawAnswer = input.rawAnswer.trim().slice(0, 1200)
+  if (!rawAnswer) return null
+
+  const answeredLines = INITIAL_PROFILE_STEPS
+    .map((step) => {
+      const answer = input.answers[step.key]
+      return answer ? `- ${step.label}(${step.key}): ${answer}` : ''
+    })
+    .filter(Boolean)
+    .join('\n')
+
+  const raw = await callOpenAiCompatibleChat({
+    temperature: 0.2,
+    maxTokens: 260,
+    messages: [
+      {
+        role: 'system',
+        content: [
+          '你是 AXIOM 的学习画像分析 Agent，只负责把对话证据转成可用于后续教学决策的画像观察。',
+          '核心原则：所有提取必须面向学习效果、学习效率的充分必要条件。',
+          '充分：判断必须能在给定上下文中找到证据；证据不足就返回空 claim。',
+          '必要：判断必须会影响讲解范围、前置校验、解释入口、卡点处理、信息负荷或掌握判据。',
+          '禁止把用户原话、问题标题或“维度：回答”直接当作画像；要综合上下文后写成分析结论。',
+          '禁止人格化、情绪化、过度诊断；不要把一次回答写成高确定性长期标签。',
+          '只分析当前维度，不要扩写到其他维度。',
+          '首次画像只建立低成本初始画像：用户明确自述的目标、基础、偏好、卡点和掌握方式可以给中等置信；需要由后续真实学习行为验证的能力判断必须低置信。',
+          '只输出严格 JSON，不要 Markdown，不要解释。',
+        ].join('\n'),
+      },
+      {
+        role: 'user',
+        content: [
+          `写入模式：${input.mode === 'initial_profile' ? '首次画像六问' : '后续画像补问'}`,
+          `当前维度：${input.step.label}(${input.step.key})`,
+          `这个维度原始问题：${input.step.question}`,
+          `当前维度提取边界：\n${formatSingleProfileDimensionExtractionGuide(input.step.key, input.mode === 'initial_profile' ? 'initial' : 'runtime')}`,
+          `修正规则：\n${formatProfileRevisionRules()}`,
+          answeredLines ? `已知六维回答：\n${answeredLines}` : '已知六维回答：暂无',
+          input.conversationText.trim() ? `会话上下文：\n${input.conversationText.trim().slice(0, 5000)}` : '会话上下文：暂无',
+          `本轮原始回答：${rawAnswer}`,
+          '',
+          '请输出 JSON：',
+          '{"claim":"20-90字，分析后的画像判断；证据不足则为空字符串","evidence":"一句话说明依据，不能照抄原文","confidence":0.35}',
+          input.mode === 'initial_profile'
+            ? 'confidence 规则：用户明确自述且会影响教学策略 0.52-0.68；弱推断或需要行为验证的能力判断 0.22-0.42；首次画像不要超过 0.68。'
+            : 'confidence 规则：单轮弱推断 0.28-0.45；用户明确自述且会影响教学策略 0.55-0.78；多轮上下文一致或用户反复确认可到 0.82；不要超过 0.82。',
+        ].join('\n'),
+      },
+    ],
+  })
+
+  const parsed = parseProfileObservationAnalysis(raw, rawAnswer)
+  if (!parsed) return null
+  return input.mode === 'initial_profile'
+    ? { ...parsed, confidence: Math.min(parsed.confidence, 0.68) }
+    : parsed
+}
+
+function parseProfileObservationAnalysis(raw: string, rawAnswer: string): ProfileObservationAnalysis | null {
+  const jsonText = extractJsonObjectText(raw)
+  if (!jsonText) return null
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(jsonText)
+  } catch {
+    return null
+  }
+  if (!isRecord(parsed)) return null
+
+  const claim = normalizeProfileAnalysisText(typeof parsed.claim === 'string' ? parsed.claim : '', 180)
+  const evidence = normalizeProfileAnalysisText(typeof parsed.evidence === 'string' ? parsed.evidence : '', 180)
+  const confidence = typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence)
+    ? clampNumber(parsed.confidence, 0, 0.82)
+    : 0
+
+  if (!claim || confidence <= 0) return null
+  if (isLikelyRawAnswerEcho(claim, rawAnswer)) return null
+
+  return {
+    claim,
+    evidence: evidence || '来自本轮画像访谈，需要后续学习行为继续校验。',
+    confidence: Math.max(0.2, confidence),
+  }
+}
+
+function extractJsonObjectText(raw: string): string | null {
+  const cleaned = cleanModelText(raw)
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/i, '')
+    .trim()
+  const start = cleaned.indexOf('{')
+  const end = cleaned.lastIndexOf('}')
+  if (start < 0 || end <= start) return null
+  return cleaned.slice(start, end + 1)
+}
+
+function normalizeProfileAnalysisText(value: string, maxLength: number): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/^["“”'`]+|["“”'`]+$/g, '')
+    .trim()
+    .slice(0, maxLength)
+}
+
+function isLikelyRawAnswerEcho(claim: string, rawAnswer: string): boolean {
+  const normalizedClaim = normalizeComparableText(claim)
+  const normalizedAnswer = normalizeComparableText(rawAnswer)
+  if (!normalizedClaim || !normalizedAnswer) return false
+  if (normalizedClaim === normalizedAnswer) return true
+  const dimensionPrefixRe = /^(学什么|会什么|怎么讲|哪里会卡|一次讲多少|怎么算学会)[:：]/
+  if (dimensionPrefixRe.test(claim.trim())) return true
+  return normalizedAnswer.length <= 160 &&
+    normalizedClaim.length / Math.max(normalizedAnswer.length, 1) > 0.72 &&
+    (normalizedAnswer.includes(normalizedClaim) || normalizedClaim.includes(normalizedAnswer))
+}
+
+function normalizeComparableText(value: string): string {
+  return value.replace(/[\s"'“”‘’`，。！？、；：:;,.!?-]/g, '').toLowerCase()
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value))
+}
+
+async function buildProfileConversationText(input: {
+  sessionId: string
+  currentUserMessage?: string
+  take?: number
+}): Promise<string> {
+  const messages = await prisma.learningMessage.findMany({
+    where: { sessionId: input.sessionId, role: { in: ['user', 'assistant'] } },
+    orderBy: { timestamp: 'desc' },
+    take: input.take ?? 18,
+    select: { role: true, content: true },
+  })
+
+  const visible = messages.reverse()
+    .filter((message) => isVisibleAgentMessage(message.role, message.content))
+    .map((message) => ({
+      role: message.role,
+      content: message.content.trim().slice(0, 1200),
+    }))
+
+  const current = input.currentUserMessage?.trim()
+  const last = visible[visible.length - 1]
+  if (current && !(last?.role === 'user' && last.content.trim() === current)) {
+    visible.push({ role: 'user', content: current.slice(0, 1200) })
+  }
+
+  return visible
+    .map((message) => `[${message.role === 'user' ? '用户' : 'AI'}] ${message.content}`)
+    .join('\n\n')
+    .slice(0, 6000)
 }
 
 async function maybeHandleInitialProfileTurn(input: {
@@ -1252,12 +1571,6 @@ async function maybeHandleInitialProfileTurn(input: {
       }),
     },
   })
-  await writeInitialProfileObservation({
-    vaultId: input.vaultId,
-    rawMemoryId: rawMemory.id,
-    step: answeredStep,
-    answer: input.message.trim(),
-  })
 
   const current = await prisma.learningSession.findUnique({
     where: { id: input.sessionId },
@@ -1269,6 +1582,15 @@ async function maybeHandleInitialProfileTurn(input: {
     : {}
   answers[answeredStep.key] = input.message.trim().slice(0, 1200)
   const normalizedAnswers = normalizeInitialProfileAnswers(answers)
+  await writeInitialProfileObservation({
+    vaultId: input.vaultId,
+    sessionId: input.sessionId,
+    rawMemoryId: rawMemory.id,
+    step: answeredStep,
+    answer: input.message.trim(),
+    answers: normalizedAnswers,
+  })
+
   const assistantText = nextStep
     ? await generateInitialProfileQuestion({
       userId: input.userId,
@@ -1289,6 +1611,19 @@ async function maybeHandleInitialProfileTurn(input: {
     answeredAt,
     completed: !nextStep,
   })
+  if (!nextStep) {
+    void emitNotification(input.vaultId, {
+      type: 'profile',
+      message: '初始学习画像已完成',
+      detail: [
+        '六个教学决策维度已经写入：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。',
+        '这些内容会作为低置信初始假设注入后续教学，后续会由真实对话、卡片打磨、测评和用户校准继续修正。',
+      ].join('\n'),
+      targetId: input.sessionId,
+      action: 'initial_profile_completed',
+      severity: 'info',
+    })
+  }
 
   await prisma.learningSession.update({
     where: { id: input.sessionId },
@@ -1309,28 +1644,176 @@ async function maybeHandleInitialProfileTurn(input: {
   return { text: assistantText }
 }
 
+const PROFILE_QUESTION_ANSWER_SKIP_RE = /(跳过|先跳过|不用|不回答|以后再说|别问|不要问|无需|直接做|先做)/
+
+async function maybeRecordProfileQuestionAnswer(input: {
+  vaultId: string | null
+  sessionId: string
+  sessionMetadata: ReturnType<typeof parseSessionMetadata>
+  message: string
+}): Promise<void> {
+  if (!input.vaultId) return
+  const dimensions = (input.sessionMetadata.lastProfileQuestionDimensions ?? [])
+    .map(normalizeProfileDimensionKey)
+    .filter((item): item is InitialProfileStep['key'] => !!item)
+  if (dimensions.length === 0) return
+
+  const answer = input.message.trim().slice(0, 1200)
+  const now = new Date()
+  const session = await prisma.learningSession.findUnique({
+    where: { id: input.sessionId },
+    select: { metadata: true },
+  })
+  const metadata = parseMetadataRecord(session?.metadata)
+
+  if (!answer || PROFILE_QUESTION_ANSWER_SKIP_RE.test(answer)) {
+    await prisma.learningSession.update({
+      where: { id: input.sessionId },
+      data: {
+        metadata: JSON.stringify({
+          ...metadata,
+          lastProfileQuestionDimensions: [],
+          lastProfileQuestionSkippedAt: now.toISOString(),
+        }),
+      },
+    })
+    return
+  }
+
+  const baseAnswers = normalizeInitialProfileAnswers(
+    isRecord(metadata.initialProfileAnswers) ? metadata.initialProfileAnswers : {},
+  )
+  const conversationText = await buildProfileConversationText({
+    sessionId: input.sessionId,
+    currentUserMessage: answer,
+    take: 20,
+  }).catch((err) => {
+    console.debug('[Agent API] Profile question conversation context skipped:', err)
+    return ''
+  })
+  const observations: Array<{ key: string; value: string }> = []
+  const notificationDetails: string[] = []
+  for (const dimension of dimensions.slice(0, 2)) {
+    const step = INITIAL_PROFILE_STEPS.find((item) => item.key === dimension)
+    if (!step) continue
+    const answers = { ...baseAnswers, [dimension]: answer }
+    const analysis = await analyzeProfileObservation({
+      step,
+      answers,
+      rawAnswer: answer,
+      conversationText,
+      mode: 'profile_question',
+    }).catch((err) => {
+      console.debug('[Agent API] Profile question observation analysis failed:', err)
+      return null
+    })
+    const text = analysis?.claim || `用户在「${step.label}」维度补充了画像线索，需要后续学习行为继续确认。`
+    const confidence = analysis?.confidence ?? 0.3
+    const evidenceSummary = analysis?.evidence || `来自画像补全问题的「${step.label}」回答，尚未形成强结论。`
+    notificationDetails.push(`- ${step.label}: ${text.slice(0, 120)}（置信度 ${Math.round(confidence * 100)}%）`)
+    observations.push({
+      key: `profile_question_answer_${input.sessionId}_${dimension}_${hashString(answer)}`,
+      value: JSON.stringify({
+        text,
+        category: `profile_${dimension}`,
+        confidence,
+        analysisMode: analysis ? 'llm_context' : 'fallback_needs_confirmation',
+        rawAnswer: answer,
+        sourceObjectType: 'learningSession',
+        sourceObjectId: input.sessionId,
+        evidence: [{
+          sourceObjectType: 'learningSession',
+          sourceObjectId: input.sessionId,
+          summary: evidenceSummary,
+        }],
+      }),
+    })
+  }
+
+  await prisma.$transaction(async (tx) => {
+    for (const observation of observations) {
+      await tx.vaultMemory.upsert({
+        where: { vaultId_key: { vaultId: input.vaultId!, key: observation.key } },
+        create: {
+          vaultId: input.vaultId!,
+          key: observation.key,
+          category: 'observation',
+          value: observation.value,
+        },
+        update: { value: observation.value },
+      })
+    }
+
+    await tx.learningSession.update({
+      where: { id: input.sessionId },
+      data: {
+        metadata: JSON.stringify({
+          ...metadata,
+          lastProfileQuestionDimensions: [],
+          lastProfileQuestionAnsweredAt: now.toISOString(),
+        }),
+      },
+    })
+  })
+
+  void emitNotification(input.vaultId, {
+    type: 'profile',
+    message: '画像补全回答已写入',
+    detail: notificationDetails.join('\n') || '用户回答已作为低成本画像线索保存，后续会用真实学习行为继续校准。',
+    targetId: input.sessionId,
+    action: 'profile_question_answered',
+    severity: 'info',
+  })
+}
+
 async function writeInitialProfileObservation(input: {
   vaultId: string
+  sessionId: string
   rawMemoryId: string
   step: InitialProfileStep
   answer: string
+  answers: Record<string, string>
 }): Promise<void> {
   const answer = input.answer.slice(0, 1200)
   if (!answer) return
+  const conversationText = await buildProfileConversationText({
+    sessionId: input.sessionId,
+    currentUserMessage: answer,
+  }).catch((err) => {
+    console.debug('[Agent API] Initial profile conversation context skipped:', err)
+    return ''
+  })
+  const analysis = await analyzeProfileObservation({
+    step: input.step,
+    answers: input.answers,
+    rawAnswer: answer,
+    conversationText,
+    mode: 'initial_profile',
+  }).catch((err) => {
+    console.debug('[Agent API] Initial profile observation analysis failed:', err)
+    return null
+  })
+  const text = analysis?.claim || `用户在「${input.step.label}」维度提供了初始画像线索，需要后续对话继续确认。`
+  const confidence = analysis?.confidence ?? 0.28
+  const evidenceSummary = analysis?.evidence || `来自首次画像访谈的「${input.step.label}」回答，尚未形成强结论。`
+
   await prisma.vaultMemory.create({
     data: {
       vaultId: input.vaultId,
       key: `observation_initial_profile_${input.step.key}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       category: 'observation',
       value: JSON.stringify({
-        text: `${input.step.label}：${answer}`,
+        text,
         category: `profile_${input.step.key}`,
+        confidence,
+        analysisMode: analysis ? 'llm_context' : 'fallback_needs_confirmation',
+        rawAnswer: answer,
         sourceObjectType: 'vaultMemory',
         sourceObjectId: input.rawMemoryId,
         evidence: [{
           sourceObjectType: 'vaultMemory',
           sourceObjectId: input.rawMemoryId,
-          summary: `初始画像回答：${input.step.label}`,
+          summary: evidenceSummary,
         }],
       }),
     },
@@ -1495,6 +1978,7 @@ function mergeInitialDimension(current: unknown, answer: string | undefined, evi
   evidence: string[]
 } {
   const record = isRecord(current) ? current : {}
+  const currentScore = typeof record.score === 'number' && Number.isFinite(record.score) ? record.score : 0
   const evidence = Array.isArray(record.evidence)
     ? record.evidence.map(String)
     : []
@@ -1502,8 +1986,8 @@ function mergeInitialDimension(current: unknown, answer: string | undefined, evi
     ? uniqueStrings([...evidence, `${evidenceLabel}：${answer.slice(0, 120)}`])
     : evidence
   return {
-    score: typeof record.score === 'number' ? record.score : (answer ? 10 : 0),
-    confidence: Math.max(typeof record.confidence === 'number' ? record.confidence : 0, answer ? 0.22 : 0),
+    score: answer ? Math.max(currentScore, 10) : currentScore,
+    confidence: Math.max(typeof record.confidence === 'number' ? record.confidence : 0, answer ? 0.56 : 0),
     evidence: nextEvidence.slice(-8),
   }
 }
@@ -1514,6 +1998,21 @@ function normalizeInitialProfileAnswers(answers: Record<string, unknown>): Recor
       .map((step) => [step.key, typeof answers[step.key] === 'string' ? String(answers[step.key]).trim().slice(0, 1200) : ''])
       .filter(([, value]) => value),
   )
+}
+
+function normalizeProfileDimensionKey(value: string | undefined): InitialProfileStep['key'] | null {
+  if (!value) return null
+  const normalized = value.trim().toLowerCase()
+  const step = INITIAL_PROFILE_STEPS.find((item) => item.key.toLowerCase() === normalized)
+  return step?.key ?? null
+}
+
+function hashString(value: string): string {
+  let hash = 5381
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ value.charCodeAt(i)
+  }
+  return (hash >>> 0).toString(36)
 }
 
 function uniqueStrings(items: string[]): string[] {
@@ -1576,6 +2075,7 @@ function parseSessionMetadata(metadata?: string | null): {
   purpose?: string
   initialProfileStep?: number
   initialProfileCompleted?: boolean
+  lastProfileQuestionDimensions?: string[]
 } {
   if (!metadata) return {}
   try {
@@ -1593,7 +2093,11 @@ function parseSessionMetadata(metadata?: string | null): {
       purpose?: unknown
       initialProfileStep?: unknown
       initialProfileCompleted?: unknown
+      lastProfileQuestionDimensions?: unknown
     }
+    const lastProfileQuestionDimensions = Array.isArray(parsed.lastProfileQuestionDimensions)
+      ? parsed.lastProfileQuestionDimensions.filter((item): item is string => typeof item === 'string')
+      : undefined
     return {
       cardId: typeof parsed.cardId === 'string' ? parsed.cardId : undefined,
       cardType: typeof parsed.cardType === 'string' ? parsed.cardType : undefined,
@@ -1608,6 +2112,7 @@ function parseSessionMetadata(metadata?: string | null): {
       purpose: typeof parsed.purpose === 'string' ? parsed.purpose : undefined,
       initialProfileStep: typeof parsed.initialProfileStep === 'number' ? parsed.initialProfileStep : undefined,
       initialProfileCompleted: parsed.initialProfileCompleted === true,
+      lastProfileQuestionDimensions,
     }
   } catch {
     return {}
@@ -1734,6 +2239,81 @@ async function hydrateAgentFromDb(agent: AxiomAgent, sessionId: string): Promise
     select: { role: true, content: true, timestamp: true },
   })
   agent.hydrateMessages(messages.reverse().filter((message) => isVisibleAgentMessage(message.role, message.content)))
+}
+
+async function buildAgentSessionContext(input: {
+  vaultId: string | null
+  kind: 'conversation' | 'card-thread' | 'path-step-thread' | 'unknown'
+  metadata: ReturnType<typeof parseSessionMetadata>
+}): Promise<string> {
+  if (!input.vaultId) return ''
+  const vault = await prisma.vault.findUnique({
+    where: { id: input.vaultId },
+    select: { name: true },
+  })
+  const vaultName = vault?.name || '当前知识库'
+
+  if (input.kind === 'conversation' || !input.metadata.cardId) {
+    return [
+      '<session-boundary>',
+      `会话类型：普通对话`,
+      `讨论边界：以知识库「${vaultName}」为最大边界，可以跨卡片讨论，但不要假装正在打磨某一张卡片。`,
+      `协作方式：如果对话中出现可沉淀的新概念，先说明它适合沉淀到哪类卡片；需要写入时使用工具创建或更新卡片，并给出可读正文，不要把 JSON 当作卡片正文。`,
+      '</session-boundary>',
+    ].join('\n')
+  }
+
+  const card = await prisma.card.findFirst({
+    where: { id: input.metadata.cardId, vaultId: input.vaultId },
+    select: { id: true, title: true, type: true, path: true, content: true },
+  })
+  if (!card) return ''
+
+  const isPathThread = input.kind === 'path-step-thread'
+  const coachingMode = inferCardCoachingMode(card.title || card.path, card.content || '')
+  return [
+    '<session-boundary>',
+    `会话类型：${isPathThread ? '学习路径任务卡片线程' : '卡片打磨线程'}`,
+    `知识库：${vaultName}`,
+    input.metadata.pathTitle ? `任务组：${input.metadata.pathTitle}` : '',
+    input.metadata.stepTitle ? `当前任务：${input.metadata.stepTitle}` : '',
+    `当前卡片：${card.title || card.path}`,
+    `卡片 ID：${card.id}`,
+    `卡片类型：${card.type}`,
+    `卡片路径：${card.path}`,
+    `讨论边界：本轮对话默认围绕这张卡片展开。回答、追问、例子和工具写入都应服务于澄清这张卡片的概念、边界、例证、关联和可沉淀表达。`,
+    `越界处理：如果用户明显转向另一个概念或新任务，先建议新建卡片、切换卡片或开启普通对话，不要把无关内容强行写进当前卡片。`,
+    `完成信号：当当前卡片在边界内已经足够清晰、准确、必要，可以建议用户尝试“提炼为永久卡片”；最终审核仍由提炼按钮完成。`,
+    `写入要求：如果根据对话更新卡片，写入自然语言 Markdown 正文；禁止把分析 JSON、工具参数或内部结构直接作为卡片正文。`,
+    coachingMode,
+    '<current-card-content>',
+    truncateForAgentContext(card.content || '(当前卡片暂无正文)', 3600),
+    '</current-card-content>',
+    '</session-boundary>',
+  ].filter(Boolean).join('\n')
+}
+
+function inferCardCoachingMode(title: string, content: string): string {
+  const text = `${title}\n${content}`
+  const isClarificationCard = /学生当前误区|当前要解决的问题|understanding-card|misconception|clarification|profile-gap|误区|澄清|待补全/.test(text)
+  if (!isClarificationCard) {
+    return '互动要求：默认优先通过追问、反例、边界比较来推动用户表达；不要一上来输出长篇标准答案。'
+  }
+
+  return [
+    '互动要求：这是澄清误区/理解检查型卡片。',
+    '如果用户让你“解释”、说“为什么”、或询问当前概念，不要直接把标准答案完整说完。',
+    '先要求用户用自己的话解释一次，或先给一个自己的例子/反例。',
+    '如果用户只说了一个简短原则但没有具体例子或反例，继续追问这个例子或反例，不要替用户补完。',
+    '只有在用户已经尝试回答、明确表示答不出来、或明确要求你直接讲解时，你才补充解释。',
+    '在用户尝试之后，先判断他说得对不对、哪里对、哪里还缺，再给必要的纠偏和最小充分解释。',
+  ].join('')
+}
+
+function truncateForAgentContext(text: string, maxChars: number): string {
+  const cleaned = text.trim()
+  if (cleaned.length <= maxChars) return cleaned
+  return `${cleaned.slice(0, maxChars)}\n\n...[内容已截断，请在需要时读取完整卡片]`
 }
 
 function resolveSessionKind(
@@ -1903,6 +2483,15 @@ function extractWorkspaceActions(details: unknown): unknown[] {
   if (!details || typeof details !== 'object') return []
   const value = details as Record<string, unknown>
   return Array.isArray(value.workspaceActions) ? value.workspaceActions : []
+}
+
+function isResourceGenerationRequest(message: string): boolean {
+  const text = message.trim()
+  if (!text) return false
+  const asksGeneration = /(生成|整理|做|创建|产出|准备|推送|补充).{0,12}(学习资源|学习资料|资料|资源|练习|讲解|文档|思维导图|代码实操|视频|动画|resource)/i.test(text)
+    || /(学习资源|学习资料|资源包|五类资源|多模态资料)/i.test(text)
+  const contextBound = /(这张卡|当前卡|这个误区|这个问题|刚导入|讲义|资料|文献|画像|缺口|薄弱点|基于)/i.test(text)
+  return asksGeneration && contextBound
 }
 
 function buildConfirmedToolParams(tool: string, target: string, confirmationToken: string): Record<string, unknown> | null {

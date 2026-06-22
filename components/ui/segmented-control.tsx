@@ -18,6 +18,8 @@ type SegmentedControlProps<TValue extends string> = {
   className?: string
   itemClassName?: string
   activeClassName?: string
+  'aria-label'?: string
+  testIdPrefix?: string
 }
 
 export function SegmentedControl<TValue extends string>({
@@ -27,9 +29,11 @@ export function SegmentedControl<TValue extends string>({
   className,
   itemClassName,
   activeClassName = 'active',
+  'aria-label': ariaLabel,
+  testIdPrefix,
 }: SegmentedControlProps<TValue>) {
   return (
-    <div className={className}>
+    <div className={className} role="group" aria-label={ariaLabel}>
       {items.map((item) => {
         const active = item.value === value
         return (
@@ -39,6 +43,10 @@ export function SegmentedControl<TValue extends string>({
             title={item.title}
             disabled={item.disabled}
             className={cn(itemClassName, active && activeClassName)}
+            aria-pressed={active}
+            aria-label={typeof item.label === 'string' ? item.label : item.title}
+            data-testid={testIdPrefix ? `${testIdPrefix}-${item.value}` : undefined}
+            data-value={item.value}
             onClick={() => onValueChange(item.value)}
           >
             {item.icon}

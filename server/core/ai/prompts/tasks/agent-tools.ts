@@ -4,6 +4,7 @@ import {
   CARD_WORKFLOW_STANDARD,
   GRAPH_EDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -51,10 +52,11 @@ function createAgentToolPrompt(spec: AgentToolPromptSpec): PromptContract<Record
     system: buildSystemPrompt({
       role: spec.role,
       contract,
-      standards: [
+      standards: Array.from(new Set([
         ...(spec.standards ?? [AXIOM_KNOWLEDGE_STANDARD]),
+        SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
         ...(spec.json ? [JSON_OUTPUT_STANDARD] : []),
-      ],
+      ])),
     }),
   });
 }

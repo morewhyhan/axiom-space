@@ -45,6 +45,17 @@ export interface LearningPath {
   progress: number
 }
 
+export interface AssessmentEvaluation {
+  passed: boolean
+  feedback: string
+  mastery: number
+  question?: string
+  standard?: string
+  answerPreview?: string
+  evidence?: string[]
+  nextStep?: string
+}
+
 export interface GeneratePathResult extends LearningPath {
   paths?: LearningPath[]
   createdPathCount?: number
@@ -188,8 +199,8 @@ export function useUpdateStepProgress() {
         query: { vid: currentVaultId },
         json: { status: params.status, mastery: params.mastery, sessionId: params.sessionId, evidence: params.evidence },
       })
-      const data = await res.json() as ApiResult<{ doneCount: number; totalSteps: number; evaluation: { passed: boolean; feedback: string; mastery: number } | null; cardUpgraded: boolean; promotionRequired?: boolean }> & {
-        evaluation?: { passed: boolean; feedback: string; mastery: number }
+      const data = await res.json() as ApiResult<{ doneCount: number; totalSteps: number; evaluation: AssessmentEvaluation | null; cardUpgraded: boolean; promotionRequired?: boolean }> & {
+        evaluation?: AssessmentEvaluation
       }
       if (!data.success) {
         if (data.error === 'ASSESSMENT_FAILED' && data.evaluation) {
@@ -316,7 +327,7 @@ export function useImportDocument() {
 
   return useMutation({
     mutationFn: async (params: {
-      document: string
+      document?: string
       topic: string
       sourceTitle?: string
       source?: string
@@ -324,6 +335,8 @@ export function useImportDocument() {
       sourceMimeType?: string
       conversionKind?: string
       skipAiExtraction?: boolean
+      fileText?: string
+      fileBase64?: string
     }) => {
       if (!currentVaultId) throw new Error('No vault selected')
       const res = await client.api.learning['import-document'].$post({
@@ -432,6 +445,29 @@ export interface EducationProfile {
   updatedAt: number
 }
 
+export interface EducationProfileHistoryItem {
+  id: string
+  createdAt: string
+  profile: EducationProfile | null
+  snapshot: Record<string, unknown> | null
+  summary: {
+    avgScore: number
+    sessionCount: number
+    evidence: string[]
+    updatedAt: number | null
+    sourceLabel?: string
+    metricText?: string
+    isDimensionProfile?: boolean
+    changedDimensions: Array<{
+      key: string
+      label: string
+      before: number
+      after: number
+      delta: number
+    }>
+  }
+}
+
 export function useEducationProfile() {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const query = useQuery({
@@ -456,6 +492,33 @@ export function useEducationProfile() {
   }
 }
 
+export function useEducationProfileHistory(options: { limit?: number; enabled?: boolean } = {}) {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const enabled = options.enabled ?? true
+  const limit = options.limit ?? 8
+  const query = useQuery({
+    queryKey: ['education-profile-history', currentVaultId, limit],
+    queryFn: async () => {
+      const res = await client.api.learning['education-profile'].history.$get({
+        query: { vid: currentVaultId ?? undefined, limit: String(limit) },
+      })
+      const data = await res.json() as ApiResult<{ items: EducationProfileHistoryItem[] }>
+      if (!res.ok || !data.success) throw new Error(data.success ? `Failed to fetch education profile history (${res.status})` : data.error || `Failed to fetch education profile history (${res.status})`)
+      return data.items
+    },
+    enabled: enabled && !!currentVaultId,
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
+  })
+  return {
+    items: query.data ?? [],
+    loading: query.isLoading,
+    error: query.error?.message ?? null,
+    refetch: query.refetch,
+  }
+}
+
 export function useUpdateEducationProfile() {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const queryClient = useQueryClient()
@@ -473,6 +536,7 @@ export function useUpdateEducationProfile() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['education-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['education-profile-history', currentVaultId] })
     },
   })
 }

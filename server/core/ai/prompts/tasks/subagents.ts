@@ -4,6 +4,7 @@ import {
   CARD_WORKFLOW_STANDARD,
   GRAPH_EDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -53,10 +54,11 @@ function createSubagentPrompt(spec: SubagentPromptSpec): PromptContract<Record<s
     system: buildSystemPrompt({
       role: spec.role,
       contract,
-      standards: [
+      standards: Array.from(new Set([
         ...(spec.standards ?? [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD]),
+        SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
         ...(spec.json ? [JSON_OUTPUT_STANDARD] : []),
-      ],
+      ])),
       extra: spec.extra,
     }),
   });
@@ -87,7 +89,8 @@ export const SUBAGENT_PROMPTS: Record<SubagentPromptKey, PromptContract<Record<s
     standards: [AXIOM_KNOWLEDGE_STANDARD],
     process: [
       'Update only fields supported by supplied evidence.',
-      'Separate goals, progress, difficulties, behavior patterns, and interests.',
+      'Separate only goals, progress, difficulties, behavior patterns, and interests that are sufficient-and-necessary for learning effect or learning efficiency.',
+      'Map learning-profile observations into the six top-level teaching decisions; do not invent new profile capsules.',
       'Attach confidence to inferred profile updates.',
     ],
     output: ['Structured JSON profile update suggestions.'],

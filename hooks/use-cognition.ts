@@ -120,6 +120,8 @@ export interface ProfileDimensionInsight {
     text: string
     entryPoint: string
     evidence: string
+    confidence?: number
+    analysisMode?: string
     sourceType: 'vaultMemory' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
     sourceId: string
   }>
@@ -151,6 +153,8 @@ export interface Observation {
   text: string
   category: string
   evidence?: EvidenceRef[]
+  confidence?: number
+  analysisMode?: string
   sourceObjectType?: string
   sourceObjectId?: string
   createdAt: string

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import { FileText } from 'lucide-react'
+import { HudPanel } from '@/components/ui'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
 import { VideoCard } from './video-card'
 import type { GeneratedResourceItem } from './types'
@@ -56,11 +57,11 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
 
   if (item.type === 'docx' || item.type === 'ppt') {
     return (
-      <div className="flex min-h-44 flex-col items-center justify-center rounded-lg border border-white/10 bg-white/[0.03] text-center">
+      <HudPanel as="div" className="flex min-h-44 flex-col items-center justify-center rounded-lg text-center">
         <FileText className="mb-3 h-10 w-10 text-white/35" />
         <div className="text-white/70">{item.title}</div>
         <div className="mt-1 text-xs text-white/35">此格式需要下载后用本地应用打开</div>
-      </div>
+      </HudPanel>
     )
   }
 
@@ -70,7 +71,7 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
       return (
         <div className="space-y-3">
           {questions.map((question, index) => (
-            <div key={index} className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+            <HudPanel key={index} as="div" className="rounded-lg p-4">
               <div className="mb-2 text-sm font-medium text-white/80">{index + 1}. {question.question || '未命名题目'}</div>
               {Array.isArray(question.options) && (
                 <div className="mb-3 grid gap-2">
@@ -81,7 +82,7 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
               )}
               <div className="text-xs text-emerald-300/80">答案：{question.answer || '未提供'}</div>
               {question.explanation && <div className="mt-1 text-xs text-white/45">解析：{question.explanation}</div>}
-            </div>
+            </HudPanel>
           ))}
         </div>
       )

@@ -205,10 +205,20 @@ const writeMemoryTool = createTool(
 
           const isProfileUpdate = params.target === 'user' && params.content.length > 20;
           if (isProfileUpdate) {
-            console.log('[Event] axiom:toast — profile: 已更新用户画像');
+            console.log('[Event] axiom:profile-memory-write');
             const vaultId = getCurrentVaultId();
             if (vaultId) {
-              emitNotification(vaultId, { type: 'toast', message: 'profile: 已更新用户画像' });
+              emitNotification(vaultId, {
+                type: 'profile',
+                message: 'Agent 记忆已写入画像线索',
+                detail: [
+                  '触发来源：write_memory 工具',
+                  `写入目标：${params.target}`,
+                  `内容摘要：${params.content.slice(0, 220)}`,
+                ].join('\n'),
+                action: 'agent_memory_profile_write',
+                severity: 'info',
+              });
             }
           }
 
@@ -256,8 +266,18 @@ const writeMemoryTool = createTool(
 
       const isProfileUpdate = params.target === 'user' && params.content.length > 20;
       if (isProfileUpdate) {
-        console.log('[Event] axiom:toast — profile: 已更新用户画像');
-        emitNotification(vaultId, { type: 'toast', message: 'profile: 已更新用户画像' });
+        console.log('[Event] axiom:profile-memory-write');
+        emitNotification(vaultId, {
+          type: 'profile',
+          message: 'Agent 记忆已写入画像线索',
+          detail: [
+            '触发来源：write_memory 数据库兜底写入',
+            `写入目标：${params.target}`,
+            `内容摘要：${params.content.slice(0, 220)}`,
+          ].join('\n'),
+          action: 'agent_memory_profile_write',
+          severity: 'info',
+        });
       }
 
       return {

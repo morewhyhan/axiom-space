@@ -4,6 +4,7 @@ import {
   CARD_WORKFLOW_STANDARD,
   GRAPH_EDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -14,17 +15,20 @@ export interface DocumentChunkExtractionInput {
   headingPath?: string;
   overlapBefore?: string;
   main: string;
+  learnerContext?: string;
 }
 
 export interface DocumentParseInput {
   topic: string;
   sourceTitle: string;
   document: string;
+  learnerContext?: string;
 }
 
 export interface ImportedPathInput {
   topic: string;
   conceptNames: string[];
+  draftCardTitles?: string[];
   ragContext?: string;
 }
 
@@ -60,6 +64,7 @@ const extractionContract = {
   process: [
     'Keep the imported document as literature.',
     'Extract core concepts and concrete knowledge points as fleeting drafts.',
+    'If learner context contains stable misconceptions or gaps that are relevant to the document, create 1-3 source-backed misconception-clarification fleeting cards.',
     'Use contains for section/part hierarchy and prerequisite for true learning dependencies.',
     'Omit weak relations that cannot be supported by the text.',
     'Write enough digest to preserve context across chunks.',
@@ -68,10 +73,12 @@ const extractionContract = {
     'Strict JSON with title, concepts, fleetingCards, relations, and optional digest for chunks.',
     'concepts[].description gives a short definition.',
     'fleetingCards[].content is a task or explanation draft, not final permanent knowledge.',
+    'Misconception-clarification cards use Markdown sections: ## 学生当前误区, ## 来自资料的依据, ## 当前要解决的问题.',
     'relations[].type is contains, prerequisite, derived, supports, contradicts, or wikilink when possible.',
   ],
   correct: [
     'Extracts source-backed concepts with clear boundaries.',
+    'Turns relevant learner misconceptions into editable understanding-card drafts grounded in imported evidence.',
     'Creates enough fleeting cards to cover the material without duplicates.',
     'Uses relations only when evidence or hierarchy is clear.',
   ],
@@ -91,7 +98,7 @@ export const DOCUMENT_CHUNK_EXTRACTION_PROMPT = definePrompt<DocumentChunkExtrac
   system: buildSystemPrompt({
     role: '你是知识萃取专家。你正在处理长文档片段，并把它转化为 AXIOM 的文献、灵感草稿和图谱关系。',
     contract: { ...extractionContract, id: 'document.import-chunk-extraction', name: 'Document Chunk Extraction' },
-    standards: [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
 {
   "concepts": [{"name": "核心概念名", "description": "定义（50-100字）"}],
@@ -102,6 +109,9 @@ export const DOCUMENT_CHUNK_EXTRACTION_PROMPT = definePrompt<DocumentChunkExtrac
   }),
   buildUserMessage: (input) => `## Chunk
 ${input.index}/${input.total}
+
+## Learner Context
+${input.learnerContext || '(无稳定画像证据；只按资料抽取。)'}
 
 ## Global Digest
 ${input.globalDigest || '(这是第一个片段)'}
@@ -124,7 +134,7 @@ export const DOCUMENT_PARSE_PROMPT = definePrompt<DocumentParseInput>({
   system: buildSystemPrompt({
     role: '你是知识萃取专家。将完整文档解析为 AXIOM 的结构化知识卡片体系。',
     contract: { ...extractionContract, id: 'document.import-full-parse', name: 'Document Full Parse' },
-    standards: [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
 {
   "title": "文档标题",
@@ -142,10 +152,22 @@ export const DOCUMENT_PARSE_PROMPT = definePrompt<DocumentParseInput>({
 数量要求：
 - concepts 5-15 个。
 - fleetingCards 15-40 条，覆盖主要内容。
-- 每条 fleetingCard 的 linksTo 1-3 个核心概念。`,
+- 每条 fleetingCard 的 linksTo 1-3 个核心概念。
+- 如果“学习画像上下文”里有和资料直接相关的误区、薄弱点或待解决问题，必须生成误区澄清型 fleetingCard。
+- 误区澄清型卡片的标题要表达“需要纠正的理解”，不要泛泛使用资料章节名。
+- 误区澄清型卡片内容必须包含：
+  ## 学生当前误区
+  用户自己的误解或薄弱表达
+  ## 来自资料的依据
+  从导入资料中能支撑纠正的定义、规则、反例或边界
+  ## 当前要解决的问题
+  一个能推动用户解释清楚的具体问题`,
   }),
   buildUserMessage: (input) => `主题：${input.topic}
 ${input.sourceTitle !== input.topic ? `标题：${input.sourceTitle}` : ''}
+
+学习画像上下文：
+${input.learnerContext || '(无稳定画像证据；只按资料抽取。)'}
 
 ---
 
@@ -204,7 +226,7 @@ export const DOCUMENT_STRUCTURE_PLAN_PROMPT = definePrompt<DocumentStructurePlan
   system: buildSystemPrompt({
     role: '你是 AXIOM 的知识结构规划专家。你负责把导入资料放进根节点/父节点下面的充分必要条件结构，而不是做普通摘要。',
     contract: structurePlanContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
 {
   "conditions": [
@@ -268,24 +290,24 @@ const pathContract = {
   ],
   input: [
     'Topic.',
-    'Extracted concept names.',
+    'Extracted concept names and imported draft card titles.',
     'Optional LightRAG context from the current Vault.',
   ],
   process: [
-    'Order concepts from prerequisite/foundation to application.',
+    'Order imported learning targets from profile-relevant clarification cards and foundations to application.',
     'Group related steps into chapters.',
     'Keep the path beginner-friendly unless evidence suggests otherwise.',
-    'Use LightRAG context only to understand existing Vault structure and dependencies; do not add concepts outside the extracted list.',
+    'Use LightRAG context only to understand existing Vault structure and dependencies; do not add concepts outside the imported target list.',
   ],
   output: [
     'Strict JSON with name, description, difficulty, and steps[].',
   ],
   correct: [
-    'Uses only extracted concepts.',
+    'Uses only imported concepts or imported draft card titles.',
     'Creates a clear learning order.',
   ],
   incorrect: [
-    'Adds unrelated concepts not present in the import.',
+    'Adds unrelated concepts not present in the imported target list.',
     'Creates a path with no dependency logic.',
   ],
 };
@@ -296,7 +318,7 @@ export const DOCUMENT_IMPORT_PATH_PROMPT = definePrompt<ImportedPathInput>({
   system: buildSystemPrompt({
     role: '你是课程设计专家。基于导入文档提取出的概念，生成一个结构化学习路径。',
     contract: pathContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, CARD_WORKFLOW_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, CARD_WORKFLOW_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
 {
   "name": "路径名称（限30字）",
@@ -315,6 +337,8 @@ export const DOCUMENT_IMPORT_PATH_PROMPT = definePrompt<ImportedPathInput>({
 }`,
   }),
   buildUserMessage: (input) => `概念列表：${input.conceptNames.join('、')}
+导入草稿卡：
+${input.draftCardTitles?.length ? input.draftCardTitles.map((title) => `- ${title}`).join('\n') : '(无)'}
 主题：${input.topic}
 ${input.ragContext || 'LightRAG 检索上下文：无。只使用导入文档中抽取出的概念排序。'}
 难度：beginner`,

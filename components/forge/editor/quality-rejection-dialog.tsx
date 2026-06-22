@@ -1,6 +1,6 @@
 'use client'
 
-import { Button } from '@/components/ui'
+import { Button, HudPanel } from '@/components/ui'
 import { qualityDimensionLabel } from './labels'
 import type { QualityRejection } from './types'
 
@@ -12,7 +12,7 @@ type QualityRejectionDialogProps = {
 export function QualityRejectionDialog({ rejection, onClose }: QualityRejectionDialogProps) {
   return (
     <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg rounded-xl border border-amber-300/20 bg-[rgba(15,12,20,0.96)] p-5 shadow-2xl">
+      <HudPanel as="div" className="w-full max-w-lg rounded-xl border-amber-300/20 bg-[rgba(15,12,20,0.96)] p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="mono text-amber-300/70 uppercase" style={{ fontSize: 'var(--f8)' }}>
@@ -36,7 +36,7 @@ export function QualityRejectionDialog({ rejection, onClose }: QualityRejectionD
 
         <div className="mt-4 space-y-2">
           {rejection.issues.length > 0 ? rejection.issues.map((issue) => (
-            <div key={`${issue.dimension}:${issue.code}`} className="rounded-lg border border-white/8 bg-white/[0.035] p-3">
+            <HudPanel key={`${issue.dimension}:${issue.code}`} as="div" className="rounded-lg p-3">
               <div className="flex items-center gap-2">
                 <span className="mono rounded border border-amber-300/15 px-1.5 py-0.5 text-amber-200/65" style={{ fontSize: 'var(--f7)' }}>
                   {qualityDimensionLabel(issue.dimension)}
@@ -47,11 +47,11 @@ export function QualityRejectionDialog({ rejection, onClose }: QualityRejectionD
               </div>
               <p className="mt-2 text-white/45" style={{ fontSize: 'var(--f9)' }}>{issue.message}</p>
               <p className="mt-1 text-cyan-100/55" style={{ fontSize: 'var(--f9)' }}>{issue.fix}</p>
-            </div>
+            </HudPanel>
           )) : (
-            <div className="rounded-lg border border-white/8 bg-white/[0.035] p-3 text-white/55" style={{ fontSize: 'var(--f9)' }}>
+            <HudPanel as="div" className="rounded-lg p-3 text-white/55" style={{ fontSize: 'var(--f9)' }}>
               缺少：{rejection.missingElements.join('、') || '清晰、准确、必要的必要信息'}
-            </div>
+            </HudPanel>
           )}
         </div>
 
@@ -64,7 +64,7 @@ export function QualityRejectionDialog({ rejection, onClose }: QualityRejectionD
             回到卡片补全
           </Button>
         </div>
-      </div>
+      </HudPanel>
     </div>
   )
 }

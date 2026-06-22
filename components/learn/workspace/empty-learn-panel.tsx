@@ -1,7 +1,7 @@
 'use client'
 
 import { FileText, Route, Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui'
+import { Button, HudPanel } from '@/components/ui'
 
 type EmptyLearnPanelProps = {
   title: string
@@ -12,7 +12,7 @@ type EmptyLearnPanelProps = {
 
 export function EmptyLearnPanel({ title, desc, onCreate, onImport }: EmptyLearnPanelProps) {
   return (
-    <div className="learn-empty-panel glass-panel">
+    <HudPanel as="div" className="learn-empty-panel">
       <div className="learn-empty-orbit" aria-hidden="true">
         <span />
         <span />
@@ -40,6 +40,6 @@ export function EmptyLearnPanel({ title, desc, onCreate, onImport }: EmptyLearnP
           )}
         </div>
       )}
-    </div>
+    </HudPanel>
   )
 }

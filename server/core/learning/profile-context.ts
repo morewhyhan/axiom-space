@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { getProfileDimensionTeachingImpact } from '@/server/core/learning/profile-protocol'
 
 export type UserLevel = 'beginner' | 'intermediate' | 'advanced'
 
@@ -57,6 +58,8 @@ export interface ProfileDimensionInsight {
     text: string
     entryPoint: string
     evidence: string
+    confidence?: number
+    analysisMode?: string
     sourceType: 'vaultMemory' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
     sourceId: string
   }>
@@ -99,7 +102,9 @@ export const PROFILE_PROMPT_SUMMARY_INSTRUCTION = `你是 AXIOM 的画像提示�
 5. 输出必须是给 Agent1 使用的教学控制提示词，不是给用户看的报告。
 6. 保留“你”的直接画像语义，但不要写人格标签，不要写隐私无关信息。
 7. 必须覆盖六类教学决策：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。
-8. 必须输出中文，并只输出下面 XML 块：
+8. 必须说明每类画像对后续教学的具体影响：范围、前置、入口、卡点、负荷或验证动作。
+9. 修正规则：用户否认的画像不能注入为事实；用户部分认可的画像只能注入为条件策略；低置信画像只能用于追问确认；有新证据时优先相信近期证据。
+10. 必须输出中文，并只输出下面 XML 块：
 
 <learning-profile-context>
 ...
@@ -140,7 +145,7 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
     prisma.vaultMemory.findMany({
       where: { vaultId: input.vaultId, category: 'observation' },
       orderBy: { createdAt: 'desc' },
-      take: 12,
+      take: 120,
       select: { id: true, value: true, createdAt: true },
     }),
     prisma.vaultMemory.findMany({
@@ -177,12 +182,6 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
   const richCards = cards.filter((card) => card.content.length > 100)
   const avgContentLen = cardCount > 0 ? cards.reduce((sum, card) => sum + card.content.length, 0) / cardCount : 0
 
-  const degree = new Map<string, number>()
-  edges.forEach((edge) => {
-    degree.set(edge.sourceId, (degree.get(edge.sourceId) ?? 0) + 1)
-    degree.set(edge.targetId, (degree.get(edge.targetId) ?? 0) + 1)
-  })
-  const isolatedCards = cards.filter((card) => (degree.get(card.id) ?? 0) === 0).slice(0, 8)
   const maxEdges = cardCount * (cardCount - 1) / 2
   const edgeDensity = maxEdges > 0 ? edges.length / maxEdges : 0
   const crossClusterEdges = edges.filter((edge) => {
@@ -232,7 +231,6 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
   const weakConcepts = uniqueStrings([
     ...capabilities.filter((capability) => capability.masteryLevel < 55 || capability.status !== 'mastered').sort((a, b) => a.masteryLevel - b.masteryLevel).map((capability) => capability.concept),
     ...assessments.filter((assessment) => !assessment.passed || assessment.mastery < 60).map((assessment) => assessment.concept),
-    ...isolatedCards.map((card) => card.title || card.path),
   ]).slice(0, 10)
   const cardById = new Map(cards.map((card) => [card.id, card]))
   const missingPrerequisites = uniqueStrings(edges.filter((edge) => edge.type === 'prerequisite').map((edge) => {
@@ -271,7 +269,7 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
     shouldUseExamples: preferences.needsExamples,
     shouldAskReflection: expression < 0.62 || reflection < 0.55,
     shouldRecommendResources: application < 0.6 || resourceTypes.length > 0,
-    shouldSuggestWikiLinks: connection < 0.5 || isolatedCards.length > 0,
+    shouldSuggestWikiLinks: connection < 0.5,
     shouldPreferPractice: preferences.prefersPractice,
     avoidPatterns: uniqueStrings([
       userLevel === 'beginner' ? '避免连续堆叠术语' : '',
@@ -299,14 +297,14 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
     masteredConcepts,
     weakConcepts,
     missingPrerequisites,
-    isolatedNodes: isolatedCards.map((card) => ({ id: card.id, title: card.title || card.path, type: card.type })),
+    isolatedNodes: [],
     strongDomains,
     weakDomains,
   }
 
   const profileLoop: ProfileLoop = {
     evidenceCount: observations.length + assessments.length + learningSessions.length,
-    gapCount: noPermanentClusters.length + isolatedCards.length,
+    gapCount: noPermanentClusters.length,
     lastObservationAt: observations[0]?.createdAt?.toISOString() ?? null,
     contextInjection: uniqueStrings([
       activeGoals[0] ? `学什么：${activeGoals[0]}` : '',
@@ -361,9 +359,15 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
         ...capabilities.filter((capability) => capability.masteryLevel < 55 || capability.status !== 'mastered').map((capability) => ({ id: capability.id, text: capability.concept, sourceType: 'vaultCapability' as const })),
         ...assessments.filter((assessment) => !assessment.passed || assessment.mastery < 60).map((assessment) => ({ id: assessment.id, text: assessment.concept, sourceType: 'assessmentResult' as const })),
       ],
-      isolatedCards: isolatedCards.map((card) => ({ id: card.id, text: card.title || card.path })),
       recentEvidence: profileLoop.recentEvidence,
-      observations: parsedObservations.map((item) => ({ id: item.id, text: item.text, category: item.category })),
+      observations: parsedObservations.map((item) => ({
+        id: item.id,
+        text: item.text,
+        category: item.category,
+        confidence: item.confidence,
+        analysisMode: item.analysisMode,
+        evidenceSummary: item.evidenceSummary,
+      })),
       assessments: assessments.map((item) => ({ id: item.id, concept: item.concept, passed: item.passed, mastery: item.mastery, feedback: item.feedback })),
       learningPaths: learningPaths.map((item) => ({ id: item.id, name: item.name, topic: item.topic, status: item.status, doneSteps: item.doneSteps, totalSteps: item.totalSteps })),
       resourceJobs: resourceJobs.map((item) => ({ id: item.id, resourceType: item.resourceType, label: item.label, topic: item.topic, status: item.status })),
@@ -410,9 +414,16 @@ export function buildPromptBlock(ctx: Omit<LearningProfileContext, 'promptBlock'
       ? ` 子维度校准: ${Object.values(dimension.nodeFeedback).slice(0, 4).map((item) => `${item.nodeLabel || '未命名节点'}=${item.verdict}/${Math.round(item.confidence * 100)}%`).join('; ')}`
       : ''
     const evidenceText = dimension.observations.length > 0
-      ? `证据: ${dimension.observations.map((item) => `${item.sourceType}:${item.sourceId}`).join('; ')}`
+      ? `证据: ${dimension.observations.slice(0, 6).map((item) => `${item.sourceType}:${item.sourceId}`).join('; ')}`
       : '证据: 暂无可追溯来源'
-    return `- ${dimension.label}: 画像强度 ${Math.round(dimension.score * 100)}%, 可信度 ${Math.round(dimension.confidence * 100)}%。${confidenceLabel} ${dimension.interpretation} ${feedbackText}${nodeFeedbackText} ${evidenceText}`
+    const observationText = dimension.observations.length > 0
+      ? dimension.observations.slice(0, 4).map(formatObservationForPrompt).join('；')
+      : '暂无可执行观察'
+    return [
+      `- ${dimension.label}: 画像强度 ${Math.round(dimension.score * 100)}%, 可信度 ${Math.round(dimension.confidence * 100)}%。${confidenceLabel} ${dimension.interpretation} ${feedbackText}${nodeFeedbackText} ${evidenceText}`,
+      `  画像观察: ${observationText}`,
+      `  教学影响: ${getProfileDimensionTeachingImpact(dimension.key)}`,
+    ].join('\n')
   }).join('\n')
 
   return `<learning-profile-context>
@@ -426,7 +437,6 @@ CurrentFacts:
 - 已掌握概念: ${knowledgeProfile.masteredConcepts.slice(0, 6).join('; ') || '暂无'}
 - 薄弱概念: ${knowledgeProfile.weakConcepts.slice(0, 6).join('; ') || '暂无'}
 - 缺失前置: ${knowledgeProfile.missingPrerequisites.slice(0, 5).join('; ') || '暂无'}
-- 孤立节点: ${knowledgeProfile.isolatedNodes.slice(0, 5).map((node) => node.title).join('; ') || '暂无'}
 
 RecentEvidence:
 ${profileLoop.recentEvidence.slice(0, 3).map((item) => `- ${item}`).join('\n') || '- 暂无最近观察'}
@@ -434,6 +444,8 @@ ${profileLoop.recentEvidence.slice(0, 3).map((item) => `- ${item}`).join('\n') |
 Instruction:
 - 只根据 TeachingProfile 中有真实证据或用户校准支持的维度调整教学。
 - 用户对画像维度的校准优先级高于系统推断；如果用户标记为错误，降低该维度在教学决策中的权重，并主动用后续对话重新收集证据。
+- 如果用户部分认可一条画像，只能把它改写成条件策略，不要作为稳定事实。
+- 低置信画像只能用于轻量追问或小测确认，不能直接改变整轮教学节奏。
 - 围绕“学什么、会什么、怎么讲最容易懂、哪里会卡住、一次讲多少、怎么算学会”制定下一轮对话方法。
 - 如果某个维度暂无可追溯证据，不要假设；通过追问或小测收集证据。
 </learning-profile-context>`
@@ -460,7 +472,6 @@ export function buildProfilePromptSummaryInput(ctx: Omit<LearningProfileContext,
       masteredConcepts: ctx.knowledgeProfile.masteredConcepts,
       weakConcepts: ctx.knowledgeProfile.weakConcepts,
       missingPrerequisites: ctx.knowledgeProfile.missingPrerequisites,
-      isolatedNodes: ctx.knowledgeProfile.isolatedNodes.slice(0, 6),
     },
     teachingPolicy: ctx.teachingPolicy,
     profileLoop: ctx.profileLoop,
@@ -476,11 +487,23 @@ export function buildProfilePromptSummaryInput(ctx: Omit<LearningProfileContext,
       observations: dimension.observations.slice(0, 5).map((observation) => ({
         text: observation.text,
         entryPoint: observation.entryPoint,
+        evidence: observation.evidence,
+        confidence: observation.confidence,
+        analysisMode: observation.analysisMode,
         sourceType: observation.sourceType,
         sourceId: observation.sourceId,
       })),
+      teachingImpact: getProfileDimensionTeachingImpact(dimension.key),
     })),
   }
+}
+
+function formatObservationForPrompt(observation: ProfileDimensionInsight['observations'][number]): string {
+  const confidence = typeof observation.confidence === 'number'
+    ? `, 置信度 ${Math.round(observation.confidence * 100)}%`
+    : ''
+  const evidence = observation.evidence ? `, 依据: ${observation.evidence}` : ''
+  return `「${observation.text}」${confidence}${evidence}`
 }
 
 function selectFreshGeneratedPrompt(
@@ -542,9 +565,8 @@ function buildDimensionInsights(input: {
     weakDomains: string[]
     masteredConcepts: Array<{ id: string; text: string }>
     weakConcepts: Array<{ id: string; text: string; sourceType: 'vaultCapability' | 'assessmentResult' }>
-    isolatedCards: Array<{ id: string; text: string }>
     recentEvidence: string[]
-    observations: Array<{ id: string; text: string; category: string }>
+    observations: Array<{ id: string; text: string; category: string; confidence?: number; analysisMode?: string; evidenceSummary?: string }>
     assessments: Array<{ id: string; concept: string; passed: boolean; mastery: number; feedback: string | null }>
     learningPaths: Array<{ id: string; name: string; topic: string | null; status: string; doneSteps: number; totalSteps: number }>
     resourceJobs: Array<{ id: string; resourceType: string; label: string | null; topic: string | null; status: string }>
@@ -603,8 +625,7 @@ function dimensionScore(key: string, input: {
   evidence: {
     masteredConcepts: Array<{ id: string; text: string }>
     weakConcepts: Array<{ id: string; text: string; sourceType: 'vaultCapability' | 'assessmentResult' }>
-    isolatedCards: Array<{ id: string; text: string }>
-    observations: Array<{ id: string; text: string; category: string }>
+    observations: Array<{ id: string; text: string; category: string; confidence?: number; analysisMode?: string; evidenceSummary?: string }>
     assessments: Array<{ id: string; concept: string; passed: boolean; mastery: number; feedback: string | null }>
     learningPaths: Array<{ id: string; name: string; topic: string | null; status: string; doneSteps: number; totalSteps: number }>
     resourceJobs: Array<{ id: string; resourceType: string; label: string | null; topic: string | null; status: string }>
@@ -634,17 +655,18 @@ function dimensionObservations(key: string, evidence: {
   weakDomains: string[]
   masteredConcepts: Array<{ id: string; text: string }>
   weakConcepts: Array<{ id: string; text: string; sourceType: 'vaultCapability' | 'assessmentResult' }>
-  isolatedCards: Array<{ id: string; text: string }>
   recentEvidence: string[]
-  observations: Array<{ id: string; text: string; category: string }>
+  observations: Array<{ id: string; text: string; category: string; confidence?: number; analysisMode?: string; evidenceSummary?: string }>
   assessments: Array<{ id: string; concept: string; passed: boolean; mastery: number; feedback: string | null }>
   learningPaths: Array<{ id: string; name: string; topic: string | null; status: string; doneSteps: number; totalSteps: number }>
   resourceJobs: Array<{ id: string; resourceType: string; label: string | null; topic: string | null; status: string }>
 }): ProfileDimensionInsight['observations'] {
-  const observed = evidence.observations.filter((item) => observationMatchesDimension(item.category, key)).slice(0, 2).map((item) => ({
+  const observed = evidence.observations.filter((item) => observationMatchesDimension(item.category, key)).map((item) => ({
     text: item.text,
     entryPoint: item.category || 'AI 观察',
-    evidence: 'vaultMemory.category=observation',
+    evidence: item.evidenceSummary || observationEvidenceLabel(item),
+    confidence: item.confidence,
+    analysisMode: item.analysisMode,
     sourceType: 'vaultMemory' as const,
     sourceId: item.id,
   }))
@@ -660,7 +682,6 @@ function dimensionObservations(key: string, evidence: {
       ...evidence.resourceJobs.slice(0, 3).map((item) => ({ text: `用户请求或生成过 ${item.resourceType} 资源：${item.label || item.topic || item.resourceType}。`, entryPoint: 'ResourceGenerationJob', evidence: item.resourceType, sourceType: 'resourceGenerationJob' as const, sourceId: item.id })),
     ],
     stuckPattern: [
-      ...evidence.isolatedCards.slice(0, 3).map((item) => ({ text: `孤立节点：${item.text}`, entryPoint: 'Card with degree=0', evidence: item.text, sourceType: 'card' as const, sourceId: item.id })),
       ...evidence.weakConcepts.slice(0, 2).map((item) => ({ text: `容易卡住的概念：${item.text}`, entryPoint: item.sourceType === 'assessmentResult' ? 'AssessmentResult.failed' : 'VaultCapability.weak', evidence: item.text, sourceType: item.sourceType, sourceId: item.id })),
     ],
     paceAndLoad: [],
@@ -668,12 +689,13 @@ function dimensionObservations(key: string, evidence: {
       ...evidence.assessments.slice(0, 3).map((item) => ({ text: `测评：${item.concept}，掌握度 ${item.mastery}，结果${item.passed ? '通过' : '未通过'}。${item.feedback || ''}`.trim(), entryPoint: 'AssessmentResult', evidence: item.concept, sourceType: 'assessmentResult' as const, sourceId: item.id })),
     ],
   }
-  return [...(mapped[key] ?? []), ...observed].slice(0, 4)
+  return [...(mapped[key] ?? []), ...observed]
 }
 
 function observationMatchesDimension(category: string, dimensionKey: string): boolean {
   const normalized = category.toLowerCase()
-  return normalized === dimensionKey || normalized === `profile_${dimensionKey}` || normalized === `dimension_${dimensionKey}`
+  const normalizedKey = dimensionKey.toLowerCase()
+  return normalized === normalizedKey || normalized === `profile_${normalizedKey}` || normalized === `dimension_${normalizedKey}`
 }
 
 function dimensionInterpretation(key: string, score: number, evidence: {
@@ -682,7 +704,6 @@ function dimensionInterpretation(key: string, score: number, evidence: {
   weakDomains: string[]
   masteredConcepts: Array<{ id: string; text: string }>
   weakConcepts: Array<{ id: string; text: string; sourceType: 'vaultCapability' | 'assessmentResult' }>
-  isolatedCards: Array<{ id: string; text: string }>
   recentEvidence: string[]
   observations: Array<{ id: string; text: string; category: string }>
   assessments: Array<{ id: string; concept: string; passed: boolean; mastery: number; feedback: string | null }>
@@ -694,7 +715,7 @@ function dimensionInterpretation(key: string, score: number, evidence: {
     learningGoal: `你的“学什么”画像${level}，主要来自学习路径、明确目标和近期反复出现的主题。`,
     currentFoundation: `你的“会什么”画像${level}，主要来自已掌握概念、薄弱概念和测评表现。`,
     bestExplanationPath: `你的“怎么讲最容易懂”画像${level}，主要来自解释方式反馈和真实资源选择。`,
-    stuckPattern: `你的“哪里会卡住”画像${level}，主要来自重复误解、失败测评、孤立节点和薄弱概念。`,
+    stuckPattern: `你的“哪里会卡住”画像${level}，主要来自重复误解、失败测评和薄弱概念。`,
     paceAndLoad: `你的“一次讲多少”画像${level}，主要来自节奏负荷观察和路径推进情况。`,
     masteryCheck: `你的“怎么算学会”画像${level}，主要来自测评、路径完成和掌握证据。`,
   }
@@ -738,20 +759,56 @@ function parseObservationText(raw: string): string {
   return parseObservationRecord(raw).text
 }
 
-function parseObservationRecord(raw: string): { text: string; category: string } {
+function parseObservationRecord(raw: string): {
+  text: string
+  category: string
+  confidence?: number
+  analysisMode?: string
+  evidenceSummary?: string
+} {
   try {
-    const parsed = JSON.parse(raw) as { text?: unknown; feedback?: unknown; concept?: unknown; category?: unknown }
+    const parsed = JSON.parse(raw) as {
+      text?: unknown
+      feedback?: unknown
+      concept?: unknown
+      category?: unknown
+      confidence?: unknown
+      analysisMode?: unknown
+      evidence?: unknown
+    }
     const text = typeof parsed.text === 'string'
       ? parsed.text
       : typeof parsed.feedback === 'string'
         ? parsed.feedback
         : typeof parsed.concept === 'string'
-          ? parsed.concept
-          : raw
-    return { text, category: typeof parsed.category === 'string' ? parsed.category : 'observation' }
+        ? parsed.concept
+        : raw
+    const evidenceItems = Array.isArray(parsed.evidence)
+      ? parsed.evidence.filter((item): item is { summary?: unknown } => !!item && typeof item === 'object')
+      : []
+    const evidenceSummary = evidenceItems
+      .map((item) => typeof item.summary === 'string' ? item.summary.trim() : '')
+      .filter(Boolean)
+      .slice(0, 2)
+      .join('；')
+    return {
+      text,
+      category: typeof parsed.category === 'string' ? parsed.category : 'observation',
+      confidence: typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence)
+        ? clamp01(parsed.confidence)
+        : undefined,
+      analysisMode: typeof parsed.analysisMode === 'string' ? parsed.analysisMode : undefined,
+      evidenceSummary: evidenceSummary || undefined,
+    }
   } catch {
     return { text: raw, category: 'observation' }
   }
+}
+
+function observationEvidenceLabel(observation: { analysisMode?: string; category: string }): string {
+  if (observation.analysisMode === 'llm_context') return '来自上下文画像分析'
+  if (observation.analysisMode === 'fallback_needs_confirmation') return '低置信初始线索，需要后续确认'
+  return observation.category || '画像观察'
 }
 
 function clamp01(value: number): number {

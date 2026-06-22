@@ -127,6 +127,11 @@ export async function maybeCreateProfileQuestion(input: ProfileQuestionInput): P
     message: askedInCurrentSession
       ? 'AI 补了一个画像问题，可回答也可跳过'
       : '画像补全问题已放入普通对话，可稍后回答或跳过',
+    detail: [
+      `触发原因：${INTENT_LABEL[intent]}需要更准确的画像线索。`,
+      `涉及维度：${dimensions.join('、')}`,
+      `问题：${question}`,
+    ].join('\n'),
     targetId: targetSessionId,
     action: 'profile_question',
     severity: 'info',

@@ -36,17 +36,28 @@ const createFleeingCardTool = createTool(
           details: { error: 'No vault open' },
         };
       }
-      const result = await (axiom as any).createFleeing?.(vaultPath, params, params.content);
+      const normalizedContent = normalizeGeneratedCardMarkdown(params.content, params.title || '未命名卡片');
+      const result = await (axiom as any).createFleeing?.(vaultPath, params, normalizedContent);
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
+        const createdCardId = typeof (result as any).id === 'string' ? (result as any).id : undefined;
         console.log(`[Event] axiom:toast — card: 创建灵感草稿: ${params.title}`);
         const cardVaultId = getCurrentVaultId();
         if (cardVaultId) {
-          emitNotification(cardVaultId, { type: 'toast', message: `card: 创建灵感草稿: ${params.title}` });
+          emitNotification(cardVaultId, {
+            type: 'card',
+            message: `已创建灵感草稿：${params.title || cardPath}`,
+            detail: `AI 已写入新卡片：${cardPath}`,
+            targetId: createdCardId,
+            targetTitle: params.title,
+            targetType: 'fleeting',
+            action: 'create_fleeting_card',
+            severity: 'info',
+          });
         }
         return {
           content: [{ type: 'text', text: `灵感草稿已创建，路径: ${cardPath}` }],
-          details: { id: cardPath, cardPath, content: params.content },
+          details: { id: createdCardId || cardPath, cardId: createdCardId, cardPath, content: normalizedContent },
         };
       }
       return {
@@ -97,7 +108,8 @@ const createPermanentCardTool = createTool(
           details: { error: 'No vault open' },
         };
       }
-      const quality = validatePermanentCardContent(params.content);
+      const normalizedContent = normalizeGeneratedCardMarkdown(params.content, params.title);
+      const quality = validatePermanentCardContent(normalizedContent);
       if (!quality.passed) {
         return {
           content: [{ type: 'text', text: `永久知识卡创建被拒绝：${quality.issues.map((issue) => issue.label).join('、')}。请补齐清晰、准确、必要三个标准后再创建。` }],
@@ -105,18 +117,28 @@ const createPermanentCardTool = createTool(
         };
       }
 
-      const result = await (axiom as any).createPermanent?.(vaultPath, params, params.content);
+      const result = await (axiom as any).createPermanent?.(vaultPath, params, normalizedContent);
       if (result?.success) {
         const cardPath = (result as any).cardPath || (result as any).id;
+        const createdCardId = typeof (result as any).id === 'string' ? (result as any).id : undefined;
         const contentParts = [`永久知识卡已创建: ${params.title} (${cardPath})`];
         console.log(`[Event] axiom:toast — card: 创建永久知识卡: ${params.title}`);
         const permVaultId = getCurrentVaultId();
         if (permVaultId) {
-          emitNotification(permVaultId, { type: 'toast', message: `card: 创建永久知识卡: ${params.title}` });
+          emitNotification(permVaultId, {
+            type: 'card',
+            message: `已创建永久知识卡：${params.title}`,
+            detail: `AI 已写入新永久卡片：${cardPath}`,
+            targetId: createdCardId,
+            targetTitle: params.title,
+            targetType: 'permanent',
+            action: 'create_permanent_card',
+            severity: 'info',
+          });
         }
         return {
           content: [{ type: 'text', text: contentParts.join('\n') }],
-          details: { title: params.title, id: cardPath, cardPath, quality_checks: quality.checks },
+          details: { title: params.title, id: createdCardId || cardPath, cardId: createdCardId, cardPath, quality_checks: quality.checks },
         };
       }
       return {
@@ -570,6 +592,20 @@ const axiom = createAxiomCompat(fileStorage);
         };
       }
 
+      const graphNodeVaultId = getCurrentVaultId()
+      if (graphNodeVaultId) {
+        emitNotification(graphNodeVaultId, {
+          type: 'card',
+          message: `已添加概念节点：${params.title}`,
+          detail: `新概念已作为灵感草稿写入：${(result as any).cardPath || params.title}`,
+          targetId: typeof (result as any).id === 'string' ? (result as any).id : undefined,
+          targetTitle: params.title,
+          targetType: 'fleeting',
+          action: 'add_graph_node',
+          severity: 'info',
+        })
+      }
+
       return {
         content: [{ type: 'text', text: `概念 "${params.title}" 已作为灵感草稿添加到知识图谱。` }],
         details: { title: params.title, cardId: (result as any).id || '', cardPath: (result as any).cardPath || '' },
@@ -696,4 +732,36 @@ export function registerCardTools(): void {
   toolRegistry.register(deleteCardTool);
   toolRegistry.register(addGraphNodeTool);
   toolRegistry.register(addGraphEdgeTool);
+}
+
+function normalizeGeneratedCardMarkdown(content: string, title: string): string {
+  const trimmed = (content || '').trim()
+  if (!trimmed) return `围绕「${title}」的理解仍待补充。`
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return trimmed
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    const extracted = extractMarkdownLikeText(parsed)
+    if (extracted.trim()) return extracted.trim()
+  } catch {
+    return trimmed
+  }
+  return trimmed
+}
+
+function extractMarkdownLikeText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) {
+    return value.map(extractMarkdownLikeText).filter(Boolean).join('\n\n')
+  }
+  if (!value || typeof value !== 'object') return ''
+  const record = value as Record<string, unknown>
+  for (const key of ['markdown', 'content', 'body', 'text', 'summary', 'claim', 'definition', 'note']) {
+    const candidate = extractMarkdownLikeText(record[key])
+    if (candidate.trim()) return candidate
+  }
+  return Object.entries(record)
+    .filter(([, item]) => typeof item === 'string' || Array.isArray(item))
+    .map(([key, item]) => `- ${key}: ${extractMarkdownLikeText(item).replace(/\n+/g, ' ')}`)
+    .join('\n')
 }

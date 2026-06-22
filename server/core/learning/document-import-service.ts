@@ -17,6 +17,7 @@ import {
 } from '@/server/core/ai/prompts'
 import { buildGenerationRagContext } from '@/server/core/rag/generation-context'
 import { scheduleRagIndexCards } from '@/server/core/rag/auto-index'
+import { buildLearningProfileContext, type LearningProfileContext } from '@/server/core/learning/profile-context'
 
 type AiManagerLike = {
   callAPI: (
@@ -195,10 +196,23 @@ export async function importDocumentToVault(input: {
 
   const stats: DocumentImportStats = { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: 0, errors: 0 }
   const errors: Array<{ item: string; error: string }> = []
+  const profileContext = await buildLearningProfileContext({
+    vaultId: input.vaultId,
+    userId: input.userId,
+  }).catch((err) => {
+    console.warn('[DocumentImportService] Failed to build learning profile context:', err instanceof Error ? err.message : String(err))
+    return null
+  })
   let parsed: StructuredDocument = { title: sourceTitle || topic, concepts: [], fleetingCards: [], relations: [] }
   if (!input.skipAiExtraction) {
     try {
-      parsed = await parseDocumentWithAi({ aiManager: ai, document, topic, sourceTitle })
+      parsed = await parseDocumentWithAi({
+        aiManager: ai,
+        document,
+        topic,
+        sourceTitle,
+        learnerContext: buildDocumentLearnerContext(profileContext),
+      })
     } catch (err) {
       stats.errors++
       errors.push({
@@ -209,6 +223,7 @@ export async function importDocumentToVault(input: {
   }
 
   const docTitle = parsed.title || sourceTitle || topic
+  const documentProfileNote = buildImportProfileNote({ profileContext, topic, cardTitle: docTitle })
   const conceptNames = dedupeStrings(parsed.concepts.map((concept) => concept.name).filter(Boolean))
   const cluster = await resolveClusterForImport({
     vaultId: input.vaultId,
@@ -236,6 +251,8 @@ ${input.originalFileName ? `**文件名：** ${input.originalFileName}\n` : ''}$
 **内容哈希：** ${contentHash}
 
 **核心概念：** ${conceptNames.length > 0 ? conceptNames.map((name) => `[[${name}]]`).join('、') : '等待后续抽取'}
+
+${documentProfileNote}
 
 ---
 
@@ -293,7 +310,7 @@ _自动生成文献记录_`
         'sufficient-condition',
         condition.coverage === 'ai_generated' ? 'ai-generated' : 'document-supported',
       ],
-      content: buildConditionContent({ condition, parentTitle: topicConcept.title || clusterName, docTitle, topic }),
+      content: buildConditionContent({ condition, parentTitle: topicConcept.title || clusterName, docTitle, topic, profileNote: buildImportProfileNote({ profileContext, topic, cardTitle: condition.title }) }),
     })
     conditionCardIds.push(conditionCard.id)
     conditionCards.set(normalizeImportText(condition.title), conditionCard)
@@ -324,6 +341,8 @@ _自动生成文献记录_`
 ${concept.description || ''}
 
 **归属条件：** [[${parentCondition.title || clusterName}]]
+
+${buildImportProfileNote({ profileContext, topic, cardTitle: title })}
 
 ---
 source: ${source}
@@ -375,7 +394,8 @@ _从「${docTitle}」自动生成_`
   }
 
   for (const [cardIndex, fc] of (parsed.fleetingCards || []).entries()) {
-    const title = fc.title?.trim()
+    const rawTitle = fc.title?.trim()
+    const title = rawTitle
     if (!title) continue
     const parentCondition = resolveConditionCard(title, cardIndex)
     const links = Array.isArray(fc.linksTo) ? fc.linksTo.filter(Boolean) : []
@@ -383,9 +403,12 @@ _从「${docTitle}」自动生成_`
     const linksSection = linkedTargets.length > 0
       ? '\n\n**关联概念：** ' + linkedTargets.map((target) => `[[${target}]]`).join('、')
       : ''
-    const content = `## ${title}
+    const body = `## ${title}
 
-${fc.content || ''}${linksSection}
+${fc.content || ''}${linksSection}`
+    const content = `${body}
+
+${buildImportProfileNote({ profileContext, topic, cardTitle: title })}
 
 ---
 source: ${source}
@@ -475,7 +498,9 @@ _从「${docTitle}」自动生成_`
       topic,
       conceptNames,
       allCards,
+      importedDraftCardIds,
       literatureCard: { id: literatureCard.id, title: docTitle },
+      profileContext,
     })
 
   void emitDomainEvent({
@@ -523,6 +548,7 @@ async function parseDocumentWithAi(params: {
   document: string
   topic: string
   sourceTitle: string
+  learnerContext?: string
 }): Promise<StructuredDocument> {
   const maxChunkChars = 20000
   const overlapChars = Math.floor(maxChunkChars * 0.08)
@@ -543,6 +569,7 @@ async function parseDocumentWithAi(params: {
         headingPath: chunk.headingPath,
         overlapBefore: chunk.overlapBefore,
         main: chunk.main,
+        learnerContext: params.learnerContext,
       })
 
       const response = await params.aiManager.callAPI(
@@ -569,6 +596,7 @@ async function parseDocumentWithAi(params: {
     topic: params.topic,
     sourceTitle: params.sourceTitle,
     document: params.document,
+    learnerContext: params.learnerContext,
   })
 
   const response = await params.aiManager.callAPI(
@@ -758,6 +786,7 @@ function buildConditionContent(input: {
   parentTitle: string
   docTitle: string
   topic: string
+  profileNote?: string
 }) {
   const evidence = input.condition.evidenceTitles?.length
     ? input.condition.evidenceTitles.map((title) => `[[${title}]]`).join('、')
@@ -774,11 +803,73 @@ ${input.condition.description}
 **证据覆盖：** ${input.condition.coverage}
 **资料依据：** ${evidence}
 
+${input.profileNote || ''}
+
 ---
 topic: ${input.topic}
 sourceTitle: ${input.docTitle}
 structure: sufficient-and-necessary
 _资料导入时自动生成的充分必要条件节点_`
+}
+
+function buildDocumentLearnerContext(profileContext: LearningProfileContext | null): string {
+  if (!profileContext) return ''
+  const sections = [
+    ['学习画像摘要', profileContext.profileSummary.summary],
+    ['当前教学重点', profileContext.profileSummary.teachingFocus],
+    ['薄弱概念或误区', profileContext.knowledgeProfile.weakConcepts.slice(0, 6).join('\n')],
+    ['缺失前置', profileContext.knowledgeProfile.missingPrerequisites.slice(0, 6).join('\n')],
+    ['最近证据', profileContext.profileLoop.recentEvidence.slice(0, 8).join('\n')],
+  ]
+  return sections
+    .map(([label, value]) => {
+      const text = value?.trim()
+      return text ? `## ${label}\n${text}` : ''
+    })
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+function buildImportProfileNote(input: {
+  profileContext: LearningProfileContext | null
+  topic: string
+  cardTitle: string
+}) {
+  const ctx = input.profileContext
+  const weak = ctx?.knowledgeProfile.weakConcepts.slice(0, 3) ?? []
+  const missing = ctx?.knowledgeProfile.missingPrerequisites.slice(0, 3) ?? []
+  const recentEvidence = ctx?.profileLoop.recentEvidence.slice(0, 3) ?? []
+  const focus = ctx?.profileSummary.teachingFocus?.trim()
+  const weakLines = weak.length > 0
+    ? weak.map((item) => `- ${item}`).join('\n')
+    : '- 暂无稳定误区证据，先在学习过程中收集表达、例子和反例。'
+  const missingLines = missing.length > 0
+    ? missing.map((item) => `- ${item}`).join('\n')
+    : `- 围绕「${input.cardTitle}」补清定义、边界、必要性和一个可检验例子。`
+  const evidenceLines = recentEvidence.length > 0
+    ? recentEvidence.map((item) => `- ${item}`).join('\n')
+    : '- 画像证据不足，本卡会作为后续评估和推送的证据入口。'
+
+  return `## 学生当前误区
+
+${weakLines}
+
+## 当前要解决的问题
+
+${focus ? `- ${focus}\n` : `- 用适合当前学习阶段的方式理解「${input.topic}」。\n`}
+${missingLines}
+
+## 画像依据
+
+${evidenceLines}`
+}
+
+function buildPathProfileQuery(profileContext?: LearningProfileContext | null) {
+  if (!profileContext) return ''
+  const weak = profileContext.knowledgeProfile.weakConcepts.slice(0, 4).join('、') || '暂无'
+  const missing = profileContext.knowledgeProfile.missingPrerequisites.slice(0, 4).join('、') || '暂无'
+  const focus = profileContext.profileSummary.teachingFocus || profileContext.profileSummary.summary || '暂无'
+  return `\n\n学习画像约束：教学重点=${focus}；薄弱概念=${weak}；缺失前置=${missing}。`
 }
 
 function findAssignedConditionTitle(plan: StructurePlan, cardTitle: string): string | null {
@@ -825,11 +916,21 @@ async function createLearningPathForImport(params: {
   topic: string
   conceptNames: string[]
   allCards: Array<{ id: string; title: string | null; type: string }>
+  importedDraftCardIds: string[]
   literatureCard: { id: string; title: string }
+  profileContext?: LearningProfileContext | null
 }): Promise<string | null> {
-  if (params.conceptNames.length === 0 && !params.literatureCard.id) return null
+  if (params.conceptNames.length === 0 && params.importedDraftCardIds.length === 0 && !params.literatureCard.id) return null
   let rawSteps: Array<{ order?: number; title?: string; description?: string; concept?: string; chapter?: string; estimatedMinutes?: number }> = []
   try {
+    const importedDraftIdSet = new Set(params.importedDraftCardIds)
+    const importedDraftCards = params.allCards
+      .filter((card) => card.type === 'fleeting' && importedDraftIdSet.has(card.id) && card.title)
+      .map((card) => ({ id: card.id, title: card.title as string, type: card.type }))
+    const importedTargets = dedupeStrings([
+      ...params.conceptNames,
+      ...importedDraftCards.map((card) => card.title),
+    ])
     let pathData: {
       name?: string
       description?: string
@@ -841,17 +942,18 @@ async function createLearningPathForImport(params: {
       difficulty: 'basic',
       steps: [],
     }
-    if (params.conceptNames.length > 0) {
+    if (importedTargets.length > 0) {
       try {
         const pathPrompt = DOCUMENT_IMPORT_PATH_PROMPT.buildUserMessage!({
           conceptNames: params.conceptNames,
+          draftCardTitles: importedDraftCards.map((card) => card.title),
           topic: params.topic,
           ragContext: (await buildGenerationRagContext({
             vaultId: params.vaultId,
-            query: `${params.topic}\n${params.conceptNames.join('、')}`,
+            query: `${params.topic}\n${importedTargets.join('、')}\n${buildPathProfileQuery(params.profileContext)}`,
             topK: 8,
             maxChars: 4500,
-          })).contextText,
+          })).contextText + buildPathProfileQuery(params.profileContext),
         })
 
         const response = await params.aiManager.callAPI(
@@ -865,7 +967,7 @@ async function createLearningPathForImport(params: {
         }
       } catch (err) {
         console.warn('[DocumentImportService] Failed to plan import path with AI, using fallback steps:', err)
-        pathData.steps = params.conceptNames.map((concept, index) => ({
+        pathData.steps = importedTargets.map((concept, index) => ({
           order: index + 1,
           title: `理解：${concept}`,
           description: `从导入资料中打磨「${concept}」这张理解卡。`,
@@ -890,7 +992,7 @@ async function createLearningPathForImport(params: {
         totalSteps: rawSteps.length + 1,
       },
     })
-    const literatureStep = await prisma.learningPathStep.create({
+    await prisma.learningPathStep.create({
       data: {
         pathId: learningPath.id,
         order: 1,
@@ -898,19 +1000,22 @@ async function createLearningPathForImport(params: {
         description: '这是本次导入的原始文献 MD 节点，后续概念卡都从它派生。',
         concept: params.literatureCard.title,
         chapter: '导入文献',
-        status: 'available',
+        status: 'completed',
+        mastery: 100,
         estimatedMinutes: 10,
         cardId: params.literatureCard.id,
       },
     })
     const usedOrders = new Set<number>([1])
+    let previousLearningStepId: string | null = null
     for (const [index, step] of rawSteps.entries()) {
-      const matchingCard = params.allCards.find((card) => card.type === 'fleeting' && card.title === step.concept)
+      const matchingCard = importedDraftCards.find((card) => sameImportTitle(card.title, step.concept) || sameImportTitle(card.title, step.title))
+        ?? importedDraftCards.find((card) => sameImportTitle(card.title, step.concept || step.title))
       let order = sanitizeOrder(step.order, index + 2)
       if (order <= 1) order = index + 2
       while (usedOrders.has(order)) order++
       usedOrders.add(order)
-      await prisma.learningPathStep.create({
+      const learningStep: { id: string } = await prisma.learningPathStep.create({
         data: {
           pathId: learningPath.id,
           order,
@@ -918,12 +1023,13 @@ async function createLearningPathForImport(params: {
           description: step.description || '',
           concept: step.concept || step.title || null,
           chapter: step.chapter || '基础',
-          status: 'locked',
+          status: index === 0 ? 'available' : 'locked',
           estimatedMinutes: step.estimatedMinutes || 15,
           cardId: matchingCard?.id || null,
-          prerequisites: JSON.stringify([literatureStep.id]),
+          prerequisites: previousLearningStepId ? JSON.stringify([previousLearningStepId]) : JSON.stringify([]),
         },
       })
+      previousLearningStepId = learningStep.id
     }
     return learningPath.id
   } catch (err) {
@@ -1117,6 +1223,11 @@ function splitIntoSemanticChunks(content: string, targetChars: number, overlapCh
 
 function normalizeImportText(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, '')
+}
+
+function sameImportTitle(left?: string | null, right?: string | null) {
+  if (!left || !right) return false
+  return normalizeImportText(left) === normalizeImportText(right)
 }
 
 function deterministicClusterColor(seed: string) {

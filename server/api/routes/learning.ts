@@ -59,6 +59,17 @@ type NormalizedImportPayload = {
   skipAiExtraction?: boolean
 }
 
+type StepEvaluation = {
+  passed: boolean
+  feedback: string
+  mastery: number
+  question: string
+  standard: string
+  answerPreview: string
+  evidence: string[]
+  nextStep: string
+}
+
 async function getAiManager() {
   const mod = await import('@/server/core/ai/AIManager')
   return mod.aiManager
@@ -68,7 +79,8 @@ function normalizeImportPayload(body: Record<string, unknown>): NormalizedImport
   const directDocument = typeof body.document === 'string' ? body.document : ''
   const originalFileName = stringValue(body.originalFileName) || stringValue(body.fileName)
   const sourceMimeType = stringValue(body.sourceMimeType) || stringValue(body.mimeType) || stringValue(body.fileType)
-  if (directDocument.trim()) {
+  const hasFilePayload = !!(stringValue(body.fileText) || stringValue(body.fileBase64) || stringValue(body.fileDataBase64))
+  if (directDocument.trim() && !hasFilePayload) {
     return {
       document: directDocument,
       sourceTitle: stringValue(body.sourceTitle) || originalFileName,
@@ -82,13 +94,14 @@ function normalizeImportPayload(body: Record<string, unknown>): NormalizedImport
 
   const fileText = stringValue(body.fileText) || ''
   if (fileText.trim()) {
+    const fileMarkdown = convertTextFileToMarkdown(fileText, originalFileName || '导入资料.md', sourceMimeType)
     return {
-      document: convertTextFileToMarkdown(fileText, originalFileName || '导入资料.md', sourceMimeType),
+      document: mergeImportDocumentAndFile(directDocument, fileMarkdown),
       sourceTitle: stringValue(body.sourceTitle) || originalFileName,
       source: stringValue(body.source) || originalFileName,
       originalFileName,
       sourceMimeType,
-      conversionKind: 'server-text-file',
+      conversionKind: directDocument.trim() ? 'server-text-file-with-notes' : 'server-text-file',
     }
   }
 
@@ -98,32 +111,40 @@ function normalizeImportPayload(body: Record<string, unknown>): NormalizedImport
     const bytes = Buffer.from(base64, 'base64')
     if (isTextLikeFile(originalFileName, sourceMimeType)) {
       const text = bytes.toString('utf8')
+      const fileMarkdown = convertTextFileToMarkdown(text, originalFileName || '导入资料.txt', sourceMimeType)
       return {
-        document: convertTextFileToMarkdown(text, originalFileName || '导入资料.txt', sourceMimeType),
+        document: mergeImportDocumentAndFile(directDocument, fileMarkdown),
         sourceTitle: stringValue(body.sourceTitle) || originalFileName,
         source: stringValue(body.source) || originalFileName,
         originalFileName,
         sourceMimeType,
-        conversionKind: 'server-base64-text',
+        conversionKind: directDocument.trim() ? 'server-base64-text-with-notes' : 'server-base64-text',
       }
     }
+    const embedded = embedBinaryFileAsMarkdown({
+      fileName: originalFileName || 'imported-file',
+      mimeType: sourceMimeType || 'application/octet-stream',
+      base64,
+      byteLength: bytes.byteLength,
+    })
     return {
-      document: embedBinaryFileAsMarkdown({
-        fileName: originalFileName || 'imported-file',
-        mimeType: sourceMimeType || 'application/octet-stream',
-        base64,
-        byteLength: bytes.byteLength,
-      }),
+      document: mergeImportDocumentAndFile(directDocument, embedded),
       sourceTitle: stringValue(body.sourceTitle) || originalFileName,
       source: stringValue(body.source) || originalFileName,
       originalFileName,
       sourceMimeType,
-      conversionKind: 'embedded-file',
+      conversionKind: directDocument.trim() ? 'embedded-file-with-notes' : 'embedded-file',
       skipAiExtraction: true,
     }
   }
 
   return { document: '' }
+}
+
+function mergeImportDocumentAndFile(notes: string, fileMarkdown: string): string {
+  const cleanNotes = notes.trim()
+  if (!cleanNotes) return fileMarkdown
+  return `${cleanNotes}\n\n---\n\n${fileMarkdown}`
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -1025,7 +1046,7 @@ ${context.answer.slice(0, 2400)}
     }
 
     // ── AI Evaluation when marking as completed ──
-    let evaluation: { passed: boolean; feedback: string; mastery: number } | null = null
+    let evaluation: StepEvaluation | null = null
 
     if (requestedStatus === 'completed' || requestedStatus === 'mastered') {
       if (!step.cardId) return c.json({ success: false, error: 'CARD_REQUIRED' }, 409)
@@ -1073,11 +1094,18 @@ ${context.answer.slice(0, 2400)}
           let cleaned = rawEval.trim()
           if (cleaned.startsWith('```')) cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
           const parsed = JSON.parse(cleaned)
-          evaluation = {
-            passed: !!parsed.passed,
-            mastery: Math.min(100, Math.max(0, parsed.mastery || 50)),
-            feedback: String(parsed.feedback || '').slice(0, 300),
-          }
+          const masteryScore = Math.min(100, Math.max(0, parsed.mastery || 50))
+          evaluation = buildStepEvaluationView({
+            stepTitle: step.title,
+            concept: step.concept,
+            parsed: {
+              passed: !!parsed.passed,
+              mastery: masteryScore,
+              feedback: String(parsed.feedback || '').slice(0, 300),
+            },
+            sessionEvidence,
+            clientEvidence,
+          })
           void recordAssessmentResult({
             userId,
             vaultId: path.vaultId,
@@ -1357,6 +1385,39 @@ ${context.answer.slice(0, 2400)}
   // P1: 6 维学习画像 + 路径调整 + 资源推送
   // ═══════════════════════════════════════════════════════════════
 
+  // GET /api/learning/education-profile/history — 获取画像前后变化历史
+  .get('/education-profile/history', zValidator('query', vaultQuerySchema.extend({
+    limit: z.string().optional(),
+  })), async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: true, items: [] })
+
+    const limit = Math.min(20, Math.max(1, Number(c.req.valid('query').limit) || 8))
+    const rows = await prisma.educationProfileHistory.findMany({
+      where: { vaultId: vault.id },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    })
+    const parsedRows = rows.map((row) => ({
+      row,
+      profile: repairInitialEducationProfile(safeParseJsonObject(row.profile)),
+      snapshot: safeParseJsonObject(row.snapshot),
+    }))
+    const items = parsedRows.map((item, index) => {
+      const previous = parsedRows[index + 1]?.profile ?? null
+      return {
+        id: item.row.id,
+        createdAt: item.row.createdAt.toISOString(),
+        profile: item.profile,
+        snapshot: item.snapshot,
+        summary: summarizeEducationProfileHistory(item.profile, item.snapshot, previous),
+      }
+    })
+
+    return c.json({ success: true, items })
+  })
+
   // GET /api/learning/education-profile — 获取 6 维学习画像
   .get('/education-profile', async (c) => {
     const userId = c.get('userId') as string
@@ -1366,7 +1427,7 @@ ${context.answer.slice(0, 2400)}
     try {
       const cachedProfile = getProfileCacheEntry<Record<string, unknown>>(vault.profileCache, 'educationProfile')
       if (cachedProfile?.data?.dimensions) {
-        return c.json({ success: true, profile: cachedProfile.data })
+        return c.json({ success: true, profile: repairInitialEducationProfile(cachedProfile.data) })
       }
     } catch {
       // profileCache 无效，返回初始值
@@ -1402,7 +1463,7 @@ ${context.answer.slice(0, 2400)}
     }
 
     try {
-      const { EducationProfileAnalyzer } = await import('@/server/core/learning/education-profile')
+      const { EducationProfileAnalyzer, mergeEducationProfileUpdate } = await import('@/server/core/learning/education-profile')
       const analyzer = new EducationProfileAnalyzer()
 
       // 读取当前学习画像分区
@@ -1420,13 +1481,12 @@ ${context.answer.slice(0, 2400)}
       const updates = await analyzer.analyzeSession(sessionData, currentProfile, userHistory)
 
       // 合并更新
-      const mergedProfile = {
-        ...currentProfile,
-        ...updates,
+      const mergedProfile = mergeEducationProfileUpdate(currentProfile, updates, {
+        userId,
         evidence: sessionEvidence,
-        sessionCount: (typeof currentProfile?.sessionCount === 'number' ? currentProfile.sessionCount : 0) + 1,
-        updatedAt: Date.now(),
-      }
+        sessionCountIncrement: 1,
+        trigger: 'session_end',
+      })
 
       // 保存到数据库
       const vaultWithLatestCache = await prisma.vault.findUnique({
@@ -2706,6 +2766,215 @@ function safeParseJsonArray(raw: string | null | undefined): string[] {
   } catch {
     return []
   }
+}
+
+function buildStepEvaluationView(input: {
+  stepTitle: string
+  concept: string | null
+  parsed: { passed: boolean; feedback: string; mastery: number }
+  sessionEvidence: string[]
+  clientEvidence: string[]
+}): StepEvaluation {
+  const concept = input.concept || input.stepTitle
+  const evidence = [...input.sessionEvidence, ...input.clientEvidence]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+  const answerPreview = evidence[0]?.slice(0, 320) || '没有捕捉到可展示的回答片段'
+  const nextStep = input.parsed.passed
+    ? '可以把这张灵感草稿继续打磨，并尝试升级为永久知识卡。'
+    : '回到 AI 工作台，用自己的话重新解释概念，并补一个边界例子或反例。'
+
+  return {
+    passed: input.parsed.passed,
+    mastery: input.parsed.mastery,
+    feedback: input.parsed.feedback,
+    question: `请用自己的话解释「${concept}」为什么成立，并给出一个例子、边界或反例。`,
+    standard: '通过标准：表达清晰，概念边界准确，能说明必要性，并能用例子或反例证明自己不是只背结论。',
+    answerPreview,
+    evidence,
+    nextStep,
+  }
+}
+
+function safeParseJsonObject(raw: string | null | undefined): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function repairInitialEducationProfile(profile: Record<string, unknown> | null): Record<string, unknown> | null {
+  if (!profile) return null
+  const initialEvidence = toRecord(profile.initialProfileEvidence)
+  const answers = toRecord(initialEvidence?.answers)
+  if (!answers) return profile
+
+  const dimensions = toRecord(profile.dimensions) ?? {}
+  const nextDimensions: Record<string, unknown> = { ...dimensions }
+  let changed = false
+
+  const applyAnswer = (dimensionKey: string, answerKey: string, evidenceLabel: string) => {
+    const answer = stringValue(answers[answerKey])
+    if (!answer) return
+
+    const current = toRecord(dimensions[dimensionKey]) ?? {}
+    const currentScore = numberValue(current.score)
+    const currentConfidence = numberValue(current.confidence)
+    const evidence = Array.isArray(current.evidence)
+      ? current.evidence.map(String).filter(Boolean)
+      : []
+    const evidenceEntry = `${evidenceLabel}：${answer.slice(0, 120)}`
+    const nextEvidence = uniqueStringList([...evidence, evidenceEntry]).slice(-8)
+    const nextScore = Math.max(currentScore, 10)
+    const nextConfidence = Math.max(currentConfidence, 0.22)
+
+    if (nextScore !== currentScore || nextConfidence !== currentConfidence || nextEvidence.length !== evidence.length) {
+      changed = true
+      nextDimensions[dimensionKey] = {
+        ...current,
+        score: nextScore,
+        confidence: nextConfidence,
+        evidence: nextEvidence,
+      }
+    }
+  }
+
+  applyAnswer('depth', 'currentFoundation', '初始画像：当前基础')
+  applyAnswer('breadth', 'learningGoal', '初始画像：学习目标')
+  applyAnswer('connection', 'stuckPattern', '初始画像：常见卡点')
+  applyAnswer('expression', stringValue(answers.bestExplanationPath) ? 'bestExplanationPath' : 'masteryCheck', '初始画像：讲法/掌握标准')
+  applyAnswer('application', 'masteryCheck', '初始画像：掌握标准')
+  applyAnswer('learning_pace', 'paceAndLoad', '初始画像：节奏负荷')
+
+  return changed ? { ...profile, dimensions: nextDimensions } : profile
+}
+
+function toRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function numberValue(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function uniqueStringList(items: string[]): string[] {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)))
+}
+
+const EDUCATION_DIMENSION_LABELS: Record<string, string> = {
+  depth: '深度',
+  breadth: '广度',
+  connection: '联接',
+  expression: '表达',
+  application: '应用',
+  learning_pace: '节奏',
+}
+
+function summarizeEducationProfileHistory(
+  profile: Record<string, unknown> | null,
+  snapshot: Record<string, unknown> | null,
+  previousProfile: Record<string, unknown> | null,
+) {
+  const scores = extractEducationDimensionScores(profile)
+  const previousScores = extractEducationDimensionScores(previousProfile)
+  const profileKey = typeof snapshot?.profileKey === 'string' ? snapshot.profileKey : null
+  const evidence = Array.isArray(snapshot?.evidence)
+    ? snapshot.evidence.map((item) => String(item)).slice(0, 6)
+    : Array.isArray(profile?.evidence)
+      ? profile.evidence.map((item) => String(item)).slice(0, 6)
+      : []
+  const updatedAt = readProfileUpdatedAt(profile, snapshot)
+
+  if (Object.keys(scores).length === 0) {
+    const sourceLabel = profileKey === 'agentProfile' ? 'Agent画像' : '画像记录'
+    return {
+      avgScore: 0,
+      sessionCount: typeof profile?.sessionCount === 'number'
+        ? profile.sessionCount
+        : typeof snapshot?.sessionCount === 'number'
+          ? snapshot.sessionCount
+          : 0,
+      evidence,
+      updatedAt,
+      changedDimensions: [],
+      sourceLabel,
+      metricText: evidence.length > 0 ? `证据 ${evidence.length} 条` : '已更新',
+      isDimensionProfile: false,
+    }
+  }
+
+  const changedDimensions = Object.entries(scores)
+    .map(([key, after]) => {
+      const before = previousScores[key] ?? 0
+      return {
+        key,
+        label: EDUCATION_DIMENSION_LABELS[key] ?? key,
+        before,
+        after,
+        delta: after - before,
+      }
+    })
+    .filter((item) => Math.abs(item.delta) >= 1)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+    .slice(0, 4)
+
+  const scoreValues = Object.values(scores)
+  const avgScore = scoreValues.length > 0
+    ? Math.round(scoreValues.reduce((sum, value) => sum + value, 0) / scoreValues.length)
+    : 0
+  const sessionCount = typeof profile?.sessionCount === 'number'
+    ? profile.sessionCount
+    : typeof snapshot?.sessionCount === 'number'
+      ? snapshot.sessionCount
+      : 0
+
+  return {
+    avgScore,
+    sessionCount,
+    evidence,
+    updatedAt,
+    changedDimensions,
+    sourceLabel: '学习画像',
+    metricText: `平均 ${avgScore}，会话 ${sessionCount}`,
+    isDimensionProfile: true,
+  }
+}
+
+function readProfileUpdatedAt(
+  profile: Record<string, unknown> | null,
+  snapshot: Record<string, unknown> | null,
+): number | null {
+  if (typeof profile?.updatedAt === 'number') return profile.updatedAt
+  if (typeof snapshot?.updatedAt === 'number') return snapshot.updatedAt
+  if (typeof profile?.lastUpdated === 'string') {
+    const parsed = Date.parse(profile.lastUpdated)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  if (typeof snapshot?.lastUpdated === 'string') {
+    const parsed = Date.parse(snapshot.lastUpdated)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  return null
+}
+
+function extractEducationDimensionScores(profile: Record<string, unknown> | null): Record<string, number> {
+  const dimensions = profile?.dimensions
+  if (!dimensions || typeof dimensions !== 'object' || Array.isArray(dimensions)) return {}
+  const scores: Record<string, number> = {}
+  for (const [key, value] of Object.entries(dimensions as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    const score = (value as Record<string, unknown>).score
+    if (typeof score === 'number' && Number.isFinite(score)) scores[key] = Math.round(score)
+  }
+  return scores
 }
 
 function describeLockedReason(status: string | null | undefined, prerequisites: string[]): string | null {

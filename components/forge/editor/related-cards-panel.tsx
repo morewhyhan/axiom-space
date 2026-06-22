@@ -1,6 +1,6 @@
 'use client'
 
-import { Button } from '@/components/ui'
+import { Button, HudPanel } from '@/components/ui'
 import type { RelatedRagCard } from './types'
 
 type RelatedCardsPanelProps = {
@@ -36,7 +36,7 @@ export function RelatedCardsPanel({
       {open && (
         <div className="grid grid-cols-2 gap-2 px-5 pb-3">
           {cards.map((card) => (
-            <div key={card.id} className="rounded-lg border border-white/8 bg-black/20 p-2">
+            <HudPanel key={card.id} as="div" className="rounded-lg p-2">
               <div className="flex min-w-0 items-center gap-2">
                 <span className={`h-2 w-2 shrink-0 rounded-full ${card.type === 'permanent' ? 'bg-purple-400' : card.type === 'literature' ? 'bg-pink-400' : 'bg-cyan-400'}`} />
                 <Button
@@ -58,7 +58,7 @@ export function RelatedCardsPanel({
               >
                 建立链接
               </Button>
-            </div>
+            </HudPanel>
           ))}
         </div>
       )}

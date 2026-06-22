@@ -22,7 +22,13 @@ export function Modal({
   style,
 }: ModalProps) {
   return (
-    <div className={cn('modal-panel', className)} style={style}>
+    <div
+      className={cn('modal-panel', className)}
+      data-no-global-shortcuts
+      style={style}
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => event.stopPropagation()}
+    >
       <div className="modal-header">
         <span
           className={cn('mono uppercase tracking-widest', titleClassName ?? 'text-purple-400')}

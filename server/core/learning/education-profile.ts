@@ -46,6 +46,155 @@ export interface EducationProfile {
   updatedAt: number;
 }
 
+const EDUCATION_DIMENSION_KEYS = [
+  'depth',
+  'breadth',
+  'connection',
+  'expression',
+  'application',
+  'learning_pace',
+] as const;
+
+type EducationDimensionKey = typeof EDUCATION_DIMENSION_KEYS[number];
+
+interface MergeOptions {
+  userId?: string;
+  evidence?: string[];
+  sessionCountIncrement?: number;
+  timestamp?: number;
+  trigger?: 'session_end' | 'assessment' | 'manual';
+}
+
+/**
+ * Merge a fresh analyzer result into the stored profile without letting a
+ * low-evidence turn erase existing dimensions.
+ */
+export function mergeEducationProfileUpdate(
+  currentProfile: Record<string, unknown> | null,
+  updates: Partial<EducationProfile>,
+  options: MergeOptions = {},
+): Record<string, unknown> {
+  const now = options.timestamp ?? Date.now();
+  const current = currentProfile ?? {};
+  const currentDimensions = toDimensionMap(current.dimensions);
+  const updateDimensions = toDimensionMap(updates.dimensions);
+  const dimensions: Record<string, DimensionScore> = {};
+  const changes: Record<string, { before: number; after: number }> = {};
+
+  for (const key of EDUCATION_DIMENSION_KEYS) {
+    const previous = currentDimensions[key];
+    const incoming = updateDimensions[key];
+    const merged = mergeDimensionScore(previous, incoming);
+    if (merged) dimensions[key] = merged;
+    if (previous && merged && Math.round(previous.score) !== Math.round(merged.score)) {
+      changes[key] = { before: Math.round(previous.score), after: Math.round(merged.score) };
+    } else if (!previous && merged && Math.round(merged.score) !== 0) {
+      changes[key] = { before: 0, after: Math.round(merged.score) };
+    }
+  }
+
+  const updateHistory = Array.isArray(current.updateHistory)
+    ? [...current.updateHistory]
+    : [];
+  if (Object.keys(changes).length > 0) {
+    updateHistory.push({
+      timestamp: now,
+      trigger: options.trigger ?? 'session_end',
+      dimensionsUpdated: Object.keys(changes),
+      changes,
+    });
+  }
+
+  const evidence = options.evidence
+    ?? (Array.isArray((updates as Record<string, unknown>).evidence)
+      ? ((updates as Record<string, unknown>).evidence as unknown[]).map(String)
+      : Array.isArray(current.evidence)
+        ? current.evidence.map(String)
+        : []);
+  const sessionCount = Number(current.sessionCount || 0) + (options.sessionCountIncrement ?? 0);
+  const createdAt = typeof current.createdAt === 'number' ? current.createdAt : now;
+
+  return {
+    ...current,
+    ...updates,
+    ...(options.userId ? { userId: options.userId } : {}),
+    dimensions,
+    updateHistory: updateHistory.slice(-40),
+    evidence: uniqueStrings(evidence).slice(0, 10),
+    sessionCount,
+    totalLearningMinutes: typeof (updates as Record<string, unknown>).totalLearningMinutes === 'number'
+      ? (updates as Record<string, unknown>).totalLearningMinutes
+      : typeof current.totalLearningMinutes === 'number'
+        ? current.totalLearningMinutes
+        : 0,
+    createdAt,
+    updatedAt: now,
+    lastUpdated: new Date(now).toISOString(),
+  };
+}
+
+function mergeDimensionScore(
+  previous: DimensionScore | undefined,
+  incoming: DimensionScore | undefined,
+): DimensionScore | undefined {
+  if (!incoming) return previous;
+
+  const incomingEvidence = meaningfulEvidence(incoming.evidence);
+  const hasIncomingSignal = incomingEvidence.length > 0 || incoming.confidence > 0.25 || incoming.score > 0;
+  if (!hasIncomingSignal) return previous;
+  if (!previous) {
+    return {
+      score: Math.round(clamp(incoming.score, 0, 100)),
+      confidence: clamp(incoming.confidence, 0, 1),
+      evidence: incomingEvidence.slice(-8),
+    };
+  }
+
+  if (incomingEvidence.length === 0 && incoming.score === 0 && incoming.confidence <= 0.25) {
+    return previous;
+  }
+
+  const weight = clamp(0.25 + incoming.confidence * 0.35, 0.25, 0.6);
+  const score = Math.round(previous.score * (1 - weight) + incoming.score * weight);
+  const confidence = clamp(Math.max(previous.confidence * 0.96, incoming.confidence, previous.confidence + incomingEvidence.length * 0.03), 0, 1);
+  return {
+    score,
+    confidence,
+    evidence: uniqueStrings([...(previous.evidence ?? []), ...incomingEvidence]).slice(-8),
+  };
+}
+
+function toDimensionMap(value: unknown): Partial<Record<EducationDimensionKey, DimensionScore>> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const record = value as Record<string, unknown>;
+  const dimensions: Partial<Record<EducationDimensionKey, DimensionScore>> = {};
+  for (const key of EDUCATION_DIMENSION_KEYS) {
+    const item = record[key];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    const dimension = item as Partial<DimensionScore>;
+    dimensions[key] = {
+      score: typeof dimension.score === 'number' && Number.isFinite(dimension.score) ? clamp(dimension.score, 0, 100) : 0,
+      confidence: typeof dimension.confidence === 'number' && Number.isFinite(dimension.confidence) ? clamp(dimension.confidence, 0, 1) : 0,
+      evidence: Array.isArray(dimension.evidence) ? dimension.evidence.map(String).filter(Boolean) : [],
+    };
+  }
+  return dimensions;
+}
+
+function meaningfulEvidence(evidence: string[] | undefined): string[] {
+  return uniqueStrings((evidence ?? [])
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0 && !/(\b0\s*次|出现 0 次|进行了 0 次)/u.test(item)));
+}
+
+function uniqueStrings(items: string[]): string[] {
+  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)));
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
 /**
  * 6维学习画像分析器
  */

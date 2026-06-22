@@ -79,9 +79,61 @@ async function nextAvailableCardPath(vaultId: string, basePath: string) {
   return `${stem}-${Date.now()}${ext}`
 }
 
+type PromotionEvidence =
+  | { ok: true; source: 'assessmentResult' | 'feynmanObservation'; id: string; mastery?: number }
+  | { ok: false }
+
+async function findPromotionEvidence(params: {
+  userId: string
+  vaultId: string
+  cardId: string
+}): Promise<PromotionEvidence> {
+  const assessment = await prisma.assessmentResult.findFirst({
+    where: {
+      userId: params.userId,
+      vaultId: params.vaultId,
+      cardId: params.cardId,
+      passed: true,
+      mastery: { gte: 60 },
+    },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, mastery: true },
+  })
+  if (assessment) {
+    return { ok: true, source: 'assessmentResult', id: assessment.id, mastery: assessment.mastery }
+  }
+
+  const memories = await prisma.vaultMemory.findMany({
+    where: {
+      vaultId: params.vaultId,
+      category: 'observation',
+      value: { contains: params.cardId },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 20,
+    select: { id: true, value: true },
+  })
+  for (const memory of memories) {
+    try {
+      const parsed = JSON.parse(memory.value) as Record<string, unknown>
+      if (
+        parsed.sourceObjectId === params.cardId &&
+        parsed.sourceObjectType === 'card' &&
+        parsed.feynmanStatus === 'accepted'
+      ) {
+        return { ok: true, source: 'feynmanObservation', id: memory.id }
+      }
+    } catch {
+      // Ignore corrupt observation rows.
+    }
+  }
+
+  return { ok: false }
+}
+
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
-  // GET /api/vault/list?dir= — 列出目录内容（FileTree 文件浏览器调用）
+  // GET /api/vault/list?dir= — 列出目录内容
   .get('/list', async (c) => {
   const userId = c.get('userId') as string
   const dir = c.req.query('dir') || ''
@@ -299,6 +351,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   if (expectedVaultId && card.vaultId !== expectedVaultId) {
     return c.json({ success: false, error: 'Card not found in current vault' }, 404)
   }
+  let acceptedPromotionEvidence: PromotionEvidence | null = null
   if (type === 'permanent' && card.type !== 'permanent') {
     const quality = validatePermanentCardContent(content)
     if (!quality.passed) {
@@ -321,10 +374,37 @@ const app = new Hono<{ Variables: { userId: string } }>()
         qualityIssues: quality.issues,
       }, 422)
     }
+    const promotionEvidence = await findPromotionEvidence({
+      userId,
+      vaultId: card.vaultId,
+      cardId: card.id,
+    })
+    if (!promotionEvidence.ok) {
+      void recordPromotionAttempt({
+        userId,
+        vaultId: card.vaultId,
+        cardId: card.id,
+        fromCardId: card.id,
+        fromType: card.type,
+        toType: 'permanent',
+        status: 'rejected',
+        missingElements: ['assessmentEvidence'],
+        qualityChecks: quality.checks,
+      })
+      return c.json({
+        success: false,
+        error: 'PROMOTION_EVIDENCE_REQUIRED',
+        detail: '永久知识卡升级需要先通过学习步骤测评，或记录一次被接受的费曼解释。',
+        missingElements: ['assessmentEvidence'],
+        qualityChecks: quality.checks,
+        qualityIssues: [],
+      }, 422)
+    }
+    acceptedPromotionEvidence = promotionEvidence
   }
 
   // Update card content and sync wiki-link edges atomically
-  const updated = await prisma.$transaction(async (tx) => {
+  const { updated, wikiSync } = await prisma.$transaction(async (tx) => {
     const card = await tx.card.update({
       where: { id },
       data: {
@@ -334,29 +414,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
       },
     })
 
-    // Sync [[WikiLink]] edges within the same transaction
-    const titles = parseWikiLinks(content)
-    const resolved = await Promise.all(
-      titles.map((t) => resolveWikiLinkTitle(tx, card.vaultId, t)),
-    )
-    const targets = Array.from(
-      new Map((resolved.filter(Boolean) as { id: string }[]).map((target) => [target.id, target])).values(),
-    )
+    const wikiSync = await syncEdgesFromContent(tx, id, card.vaultId, content, { ensureReciprocalLinks: true })
 
-    await tx.edge.deleteMany({ where: { sourceId: id, type: 'wikilink' } })
-    if (targets.length > 0) {
-      await tx.edge.createMany({
-        data: targets.map((target) => ({
-          vaultId: card.vaultId,
-          sourceId: id,
-          targetId: target.id,
-          type: 'wikilink' as const,
-          weight: 1.0,
-        })),
-      })
-    }
-
-    return card
+    return { updated: card, wikiSync }
   })
 
   if (type === 'permanent' && card.type !== 'permanent') {
@@ -410,6 +470,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
       title: updated.title,
       previousType: card.type,
       nextType: updated.type,
+      promotionEvidence: acceptedPromotionEvidence?.ok ? {
+        source: acceptedPromotionEvidence.source,
+        id: acceptedPromotionEvidence.id,
+        mastery: acceptedPromotionEvidence.mastery ?? null,
+      } : null,
     },
   })
   if (type === 'permanent' && card.type !== 'permanent') {
@@ -422,10 +487,20 @@ const app = new Hono<{ Variables: { userId: string } }>()
       fromType: card.type,
       toType: 'permanent',
       status: 'accepted',
+      qualityChecks: acceptedPromotionEvidence?.ok ? {
+        promotionEvidence: {
+          source: acceptedPromotionEvidence.source,
+          id: acceptedPromotionEvidence.id,
+          mastery: acceptedPromotionEvidence.mastery ?? null,
+        },
+      } : undefined,
     })
   }
 
   scheduleRagIndexCard(updated.id, type === 'permanent' && card.type !== 'permanent' ? 'card-promoted' : 'card-updated')
+  wikiSync.autoBacklinkedCardIds.forEach((cardId: string) => {
+    scheduleRagIndexCard(cardId, 'auto-backlink')
+  })
 
   return c.json({
     success: true,
@@ -494,8 +569,11 @@ ${content?.trim() || ''}
       tags: JSON.stringify([...new Set([...safeParseTags(literature.tags), 'extracted-from-literature'])]),
     },
   })
-  await syncEdgesFromContent(prisma, created.id, created.vaultId, created.content)
+  const wikiSync = await syncEdgesFromContent(prisma, created.id, created.vaultId, created.content, { ensureReciprocalLinks: true })
   scheduleRagIndexCard(created.id, 'extract-fleeting')
+  wikiSync.autoBacklinkedCardIds.forEach((cardId) => {
+    scheduleRagIndexCard(cardId, 'auto-backlink')
+  })
 
   void emitDomainEvent({
     userId,

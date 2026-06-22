@@ -65,6 +65,8 @@ function parseObservationValue(raw: string): {
   text: string
   category: string
   evidence: EvidenceRef[]
+  confidence?: number
+  analysisMode?: string
   sourceObjectType?: string
   sourceObjectId?: string
 } {
@@ -75,6 +77,8 @@ function parseObservationValue(raw: string): {
       concept?: unknown
       category?: unknown
       evidence?: unknown
+      confidence?: unknown
+      analysisMode?: unknown
       sourceObjectType?: unknown
       sourceObjectId?: unknown
     }
@@ -92,6 +96,10 @@ function parseObservationValue(raw: string): {
       text,
       category: typeof parsed.category === 'string' ? parsed.category : 'general',
       evidence,
+      confidence: typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence)
+        ? Math.max(0, Math.min(1, parsed.confidence))
+        : undefined,
+      analysisMode: typeof parsed.analysisMode === 'string' ? parsed.analysisMode : undefined,
       sourceObjectType: typeof parsed.sourceObjectType === 'string' ? parsed.sourceObjectType : undefined,
       sourceObjectId: typeof parsed.sourceObjectId === 'string' ? parsed.sourceObjectId : undefined,
     }
@@ -249,12 +257,6 @@ const app = new Hono<{ Variables: { userId: string } }>()
   }))
 
   const cardById = new Map(totalCards.map((card) => [card.id, card]))
-  const degree = new Map<string, number>()
-  edges.forEach((edge) => {
-    degree.set(edge.sourceId, (degree.get(edge.sourceId) ?? 0) + 1)
-    degree.set(edge.targetId, (degree.get(edge.targetId) ?? 0) + 1)
-  })
-  const isolatedCards = totalCards.filter((card) => (degree.get(card.id) ?? 0) === 0).slice(0, 8)
   const noPermanentClusters = clusters.filter((cluster) => cluster.cards.length >= 2 && cluster.cards.every((card) => card.type !== 'permanent'))
   const lowMasteryConcepts = capabilities
     .filter((capability) => capability.masteryLevel < 55 || capability.status !== 'mastered')
@@ -270,7 +272,6 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const weakConcepts = [
     ...lowMasteryConcepts,
     ...assessments.filter((assessment) => !assessment.passed || assessment.mastery < 60).map((assessment) => assessment.concept),
-    ...isolatedCards.map((card) => card.title || card.path),
   ].filter(Boolean).slice(0, 10)
   const missingPrerequisites = edges
     .filter((edge) => edge.type === 'prerequisite')
@@ -329,7 +330,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     shouldUseExamples: preferences.needsExamples,
     shouldAskReflection: expression < 0.62 || reflection < 0.55,
     shouldRecommendResources: application < 0.6 || preferredResourceTypes.length > 0,
-    shouldSuggestWikiLinks: connection < 0.5 || isolatedCards.length > 0,
+    shouldSuggestWikiLinks: connection < 0.5,
     shouldPreferPractice: preferences.prefersPractice,
     avoidPatterns: [
       userLevel === 'beginner' ? '避免连续堆叠术语' : null,
@@ -354,14 +355,14 @@ const app = new Hono<{ Variables: { userId: string } }>()
     masteredConcepts: uniqueStrings(masteredConcepts),
     weakConcepts: uniqueStrings(weakConcepts),
     missingPrerequisites: uniqueStrings(missingPrerequisites),
-    isolatedNodes: isolatedCards.map((card) => ({ id: card.id, title: card.title || card.path, type: card.type })),
+    isolatedNodes: [],
     strongDomains,
     weakDomains,
   }
   const parsedObservations = observationMemories.map((memory) => ({ ...parseObservationValue(memory.value), createdAt: memory.createdAt }))
   const profileLoop = {
     evidenceCount: observationMemories.length + assessments.length + learningSessions.length,
-    gapCount: noPermanentClusters.length + isolatedCards.length,
+    gapCount: noPermanentClusters.length,
     lastObservationAt: observationMemories[0]?.createdAt?.toISOString() ?? null,
     contextInjection: [
       `用户水平：${userLevel}`,
@@ -518,7 +519,7 @@ const routes = app
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: true, gaps: [] })
 
-    const [clusters, isolatedCards, unindexed] = await Promise.all([
+    const [clusters, unindexed] = await Promise.all([
       prisma.cluster.findMany({
         where: { vaultId: vault.id },
         select: {
@@ -528,16 +529,6 @@ const routes = app
           cards: { select: { id: true, title: true, type: true } },
         },
         orderBy: { position: 'asc' },
-      }),
-      prisma.card.findMany({
-        where: {
-          vaultId: vault.id,
-          edgesFrom: { none: {} },
-          edgesTo: { none: {} },
-        },
-        select: { id: true, title: true, type: true },
-        take: 8,
-        orderBy: { updatedAt: 'desc' },
       }),
       prisma.ragDocumentIndex.findMany({
         where: { vaultId: vault.id, provider: 'lightrag', status: { in: ['failed', 'indexing', 'pending'] } },
@@ -549,7 +540,7 @@ const routes = app
 
     const gaps: Array<{
       id: string
-      type: 'no_permanent' | 'isolated' | 'rag_pending'
+      type: 'no_permanent' | 'rag_pending'
       title: string
       detail: string
       severity: 'high' | 'medium' | 'low'
@@ -576,20 +567,6 @@ const routes = app
           evidence: [evidenceRef('cluster', cluster.id, `${cluster.name} 有 ${draft} 张非永久卡且 permanent=0`)],
         })
       }
-    }
-
-    for (const card of isolatedCards) {
-      gaps.push({
-        id: `card:${card.id}:isolated`,
-        type: 'isolated',
-        title: `${card.title || '未命名卡片'} 仍是孤立节点`,
-        detail: '这张卡没有显式连接，建议在 Forge 中补充 WikiLink 或用相关卡片推荐建立关联。',
-        severity: card.type === 'permanent' ? 'high' : 'medium',
-        cardId: card.id,
-        sourceObjectType: 'card',
-        sourceObjectId: card.id,
-        evidence: [evidenceRef('card', card.id, `卡片 ${card.title || card.id} 没有入边或出边`)],
-      })
     }
 
     for (const item of unindexed) {
@@ -631,6 +608,8 @@ const routes = app
           text: parsed.text,
           category: parsed.category,
           evidence: parsed.evidence.length > 0 ? parsed.evidence : [evidenceRef('vaultMemory', m.id, '用户或系统记录的观察')],
+          confidence: parsed.confidence,
+          analysisMode: parsed.analysisMode,
           sourceObjectType: parsed.sourceObjectType ?? 'vaultMemory',
           sourceObjectId: parsed.sourceObjectId ?? m.id,
           createdAt: m.createdAt.toISOString(),

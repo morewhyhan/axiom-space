@@ -2,6 +2,7 @@ import { definePrompt } from '../types';
 import {
   AXIOM_KNOWLEDGE_STANDARD,
   JSON_OUTPUT_STANDARD,
+  SUFFICIENT_NECESSARY_EXTRACTION_STANDARD,
   buildSystemPrompt,
 } from '../standards';
 
@@ -52,7 +53,7 @@ export const ORCHESTRATION_PLANNER_PROMPT = definePrompt<OrchestrationPlannerInp
   system: buildSystemPrompt({
     role: '你是学习资源协同编排中的规划 Agent，只输出严格 JSON。',
     contract: plannerContract,
-    standards: [AXIOM_KNOWLEDGE_STANDARD, JSON_OUTPUT_STANDARD],
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `JSON 字段：
 {
   "recommendedResourceTypes": ["document", "code", "diagram", "video"],

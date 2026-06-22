@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db'
 import { recordCardRevision } from '@/server/core/domain/events'
 import { emitNotification } from '@/server/core/agent/notification-bus'
+import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
 
 export type FeynmanCaptureStatus = 'accepted' | 'needs_revision' | 'ignored'
 
@@ -33,12 +34,12 @@ type Assessment = {
 }
 
 const SELF_EXPLANATION_RE = /我的理解|我理解|我觉得|我会这样讲|用自己的话|简单说|也就是说|换句话说|费曼|我试着解释|我来解释|我认为|在我看来/
-const EXPLANATION_SIGNAL_RE = /是|指|意思|用来|解决|用于|因为|所以|比如|例如|不等于|不是|区别|关系|作用|场景|导致|依赖|前置/
+const EXPLANATION_SIGNAL_RE = /是|指|意思|用来|解决|用于|因为|所以|比如|例如|不等于|不是|区别|关系|作用|场景|导致|依赖|前置|权重|总代价|总权重|边数|更短/
 const QUESTION_RE = /^(为什么|怎么|如何|什么是|请问|能不能|可不可以|帮我|你来|给我|生成|创建|打开|保存|升级|删除)/
 const UNCERTAINTY_RE = /不知道|不确定|不太懂|没懂|乱说|瞎说|可能吧|大概吧|我猜/
 
 export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promise<FeynmanCaptureResult> {
-  const explanation = normalizeText(input.message)
+  let explanation = normalizeText(input.message)
   if (!explanation) return { status: 'ignored', reason: 'empty' }
 
   const card = await prisma.card.findFirst({
@@ -47,11 +48,25 @@ export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promi
   })
   if (!card) return { status: 'ignored', reason: 'card_not_found' }
 
-  const assessment = assessFeynmanExplanation({
+  let assessment = assessFeynmanExplanation({
     cardTitle: card.title || '当前卡片',
     cardContent: card.content || '',
     explanation,
   })
+  if (assessment.status === 'ignored' && assessment.reason === 'not_a_feynman_explanation') {
+    const combined = await buildRecentUserExplanation(input.sessionId)
+    if (combined && combined !== explanation) {
+      const combinedAssessment = assessFeynmanExplanation({
+        cardTitle: card.title || '当前卡片',
+        cardContent: card.content || '',
+        explanation: combined,
+      })
+      if (combinedAssessment.status !== 'ignored') {
+        explanation = combined
+        assessment = combinedAssessment
+      }
+    }
+  }
   if (assessment.status === 'ignored') return assessment
 
   const marker = `axiom-feynman:${hashString(`${input.sessionId}:${explanation}`)}`
@@ -119,7 +134,12 @@ export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promi
       : `费曼解释已记录为待修正：${assessment.issues[0] || '需要补全'}`,
     targetId: card.id,
     action: assessment.status === 'accepted' ? 'feynman_recorded' : 'feynman_needs_revision',
+    detail: assessment.status === 'accepted'
+      ? '自动保存成功；观察记录已更新；画像证据已新增。'
+      : `自动保存成功；观察记录已更新；画像证据已新增。待修正：${assessment.issues.join('；')}`,
+    severity: assessment.status === 'accepted' ? 'success' : 'warning',
   })
+  scheduleRagIndexCard(card.id, 'feynman-capture')
 
   return {
     status: assessment.status,
@@ -139,9 +159,9 @@ function assessFeynmanExplanation(input: {
   const startsAsQuestion = QUESTION_RE.test(text.trim())
   const hasSelfCue = SELF_EXPLANATION_RE.test(text)
   const signalCount = countMatches(text, EXPLANATION_SIGNAL_RE)
-  const ownWords = hasSelfCue || signalCount >= 3
-  const enoughSubstance = compact.length >= 45
-  const hasConceptUse = /是|指|意思|用来|解决|用于|因为|所以/.test(text)
+  const ownWords = hasSelfCue || signalCount >= 2
+  const enoughSubstance = compact.length >= 30
+  const hasConceptUse = /是|指|意思|用来|解决|用于|因为|所以|如果|应该|代表|说明/.test(text)
   const hasUncertainty = UNCERTAINTY_RE.test(text)
   const hasContextMatch = matchesCardContext(input.cardTitle, input.cardContent, text)
 
@@ -176,6 +196,22 @@ function assessFeynmanExplanation(input: {
   }
 }
 
+async function buildRecentUserExplanation(sessionId: string): Promise<string | null> {
+  const messages = await prisma.learningMessage.findMany({
+    where: { sessionId, role: 'user' },
+    orderBy: { timestamp: 'desc' },
+    take: 4,
+    select: { content: true },
+  })
+  const combined = messages
+    .reverse()
+    .map((message) => normalizeText(message.content))
+    .filter(Boolean)
+    .join('\n')
+    .trim()
+  return combined || null
+}
+
 function buildFeynmanEntry(input: {
   marker: string
   title: string
@@ -202,7 +238,8 @@ function buildFeynmanEntry(input: {
 
 ${quote}
 
-- 校验：${input.assessment.status === 'accepted' ? '表达清晰，能对应当前卡片，可作为用户自己的理解记录。' : '先保留为待补全，不作为正确知识。'}${issueText}`
+- 校验：${input.assessment.status === 'accepted' ? '表达清晰，能对应当前卡片，可作为用户自己的理解记录。' : '先保留为待补全，不作为正确知识。'}${issueText}
+- 记录状态：自动保存成功；观察记录已更新；画像证据已新增。`
 }
 
 function appendToMarkdownSection(content: string, heading: string, entry: string) {
@@ -223,15 +260,31 @@ function appendToMarkdownSection(content: string, heading: string, entry: string
 
 function matchesCardContext(title: string, content: string, explanation: string) {
   if (title && explanation.includes(title)) return true
-  const keywords = extractKeywords(`${title}\n${content}`).slice(0, 12)
+  const keywords = extractKeywords(`${title}\n${content}`).slice(0, 36)
   if (keywords.length === 0) return true
-  return keywords.some((keyword) => keyword.length >= 2 && explanation.includes(keyword))
+  const explanationKeywords = new Set(extractKeywords(explanation))
+  const overlap = keywords.filter((keyword) => explanation.includes(keyword) || explanationKeywords.has(keyword))
+  return overlap.length >= 1
 }
 
 function extractKeywords(text: string): string[] {
   const cjk = text.match(/[\u4e00-\u9fffA-Za-z0-9]{2,}/g) ?? []
   const stop = new Set(['这个', '一种', '因为', '所以', '例如', '比如', '定义', '概念', '关系', '应用', '用途', '当前', '知识'])
-  return [...new Set(cjk.map((item) => item.trim()).filter((item) => item.length >= 2 && !stop.has(item)))].slice(0, 24)
+  const phrases: string[] = []
+  for (const raw of cjk) {
+    const item = raw.trim()
+    if (item.length < 2 || stop.has(item)) continue
+    phrases.push(item)
+    if (/^[\u4e00-\u9fff]+$/.test(item) && item.length > 4) {
+      for (let size = 2; size <= 4; size += 1) {
+        for (let index = 0; index <= item.length - size; index += 1) {
+          const phrase = item.slice(index, index + size)
+          if (!stop.has(phrase)) phrases.push(phrase)
+        }
+      }
+    }
+  }
+  return [...new Set(phrases)].slice(0, 80)
 }
 
 function normalizeText(value: string) {

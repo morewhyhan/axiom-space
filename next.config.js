@@ -12,6 +12,11 @@ const nextConfig = {
     ],
   },
   webpack: (config, { isServer }) => {
+    config.watchOptions = {
+      ...(config.watchOptions || {}),
+      ignored: '**/test/artifacts/**',
+    }
+
     config.resolve = config.resolve || {}
     config.resolve.fallback = {
       ...(config.resolve.fallback || {}),

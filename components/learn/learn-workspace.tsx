@@ -4,11 +4,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 import {
   AI_GENERATION_STAGES,
+  AssessmentPanel,
   ChapterStack,
   CreatePathPanel,
   DOCUMENT_IMPORT_STAGES,
   EmptyLearnPanel,
   PathSidebar,
+  PushSuggestionBox,
   RouteHeader,
   canOpenStep,
   getNextStep,
@@ -27,9 +29,10 @@ import {
   useLearningPaths,
   useUpdateStepProgress,
 } from '@/hooks/use-learning'
-import type { LearningPath, LearningStep } from '@/hooks/use-learning'
+import type { AssessmentEvaluation, LearningPath, LearningStep } from '@/hooks/use-learning'
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
+import type { ImportFilePayload } from '@/lib/import-files'
 
 export default function LearnWorkspace() {
   const { data, loading, refetch } = useLearningPaths()
@@ -54,8 +57,14 @@ export default function LearnWorkspace() {
   const [topic, setTopic] = useState('')
   const [level, setLevel] = useState<'beginner' | 'intermediate' | 'advanced'>('beginner')
   const [documentText, setDocumentText] = useState('')
+  const [documentFile, setDocumentFile] = useState<ImportFilePayload | null>(null)
   const [pathMaterial, setPathMaterial] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [lastAssessment, setLastAssessment] = useState<{
+    stepId: string
+    stepName: string
+    evaluation: AssessmentEvaluation
+  } | null>(null)
   const [pathFilter, setPathFilter] = useState<PathFilter>('active')
   const [stepSessionIds, setStepSessionIds] = useState<Record<string, string>>({})
   const isGenerating = generatePath.isPending || importDocument.isPending
@@ -207,6 +216,11 @@ export default function LearnWorkspace() {
         sessionId: stepSessionIds[step.id] ?? agentSessionId ?? undefined,
       })
       if (result.evaluation) {
+        setLastAssessment({
+          stepId: step.id,
+          stepName: step.name,
+          evaluation: result.evaluation,
+        })
         if (result.evaluation.passed) {
           toast.success(`「${step.name}」已掌握，可继续发起卡片升级`)
         } else {
@@ -248,7 +262,7 @@ export default function LearnWorkspace() {
   }
 
   const handleImportDocument = async () => {
-    if (!documentText.trim()) return
+    if (!documentText.trim() && !documentFile) return
     if (!topic.trim()) {
       toast.error('请先填写资料所属主题，系统会据此匹配已有星团')
       return
@@ -256,11 +270,18 @@ export default function LearnWorkspace() {
     setError(null)
     try {
       const result = await importDocument.mutateAsync({
-        document: documentText,
+        ...(documentText.trim() ? { document: documentText.trim() } : {}),
+        ...(documentFile?.fileText ? { fileText: documentFile.fileText } : {}),
+        ...(documentFile?.fileBase64 ? { fileBase64: documentFile.fileBase64 } : {}),
         topic: topic.trim(),
         sourceTitle: topic.trim(),
+        source: documentFile?.originalFileName || topic.trim(),
+        originalFileName: documentFile?.originalFileName,
+        sourceMimeType: documentFile?.sourceMimeType,
+        conversionKind: documentFile?.conversionKind,
       })
       setDocumentText('')
+      setDocumentFile(null)
       if (result.pathId) {
         setSelectedPathId(result.pathId)
       }
@@ -323,17 +344,19 @@ export default function LearnWorkspace() {
               topic={topic}
               level={level}
               documentText={documentText}
+              documentFileName={documentFile?.originalFileName ?? null}
               pathMaterial={pathMaterial}
               error={error}
               currentGenerationStage={currentGenerationStage}
               generatePending={generatePath.isPending}
               importPending={importDocument.isPending}
               onOpen={() => setCreatePanelOpen(true)}
-              onClose={() => { setCreatePanelOpen(false); setError(null) }}
-              onCreateModeChange={setCreateMode}
+              onClose={() => { setCreatePanelOpen(false); setError(null); setDocumentFile(null) }}
+              onCreateModeChange={(mode) => { setCreateMode(mode); setError(null) }}
               onTopicChange={setTopic}
               onLevelChange={setLevel}
               onDocumentTextChange={setDocumentText}
+              onDocumentFileLoaded={setDocumentFile}
               onPathMaterialChange={setPathMaterial}
               onGeneratePath={handleGeneratePath}
               onImportDocument={handleImportDocument}
@@ -343,15 +366,27 @@ export default function LearnWorkspace() {
 
         <section className={`learn-detail${!currentPath ? ' empty' : ''}${sparsePath ? ' sparse' : ''}`}>
           {currentPath && (
-            <RouteHeader
-              path={currentPath}
-              steps={currentSteps}
-              totalDone={totalDone}
-              totalProgress={totalProgress}
-              allDone={allDone}
-              onArchivePath={handleArchivePath}
-              onDeletePath={handleDeletePath}
-            />
+            <>
+              <RouteHeader
+                path={currentPath}
+                steps={currentSteps}
+                totalDone={totalDone}
+                totalProgress={totalProgress}
+                allDone={allDone}
+                onArchivePath={handleArchivePath}
+                onDeletePath={handleDeletePath}
+              />
+              <PushSuggestionBox pathId={currentPath.id} />
+              {lastAssessment && (
+                <AssessmentPanel
+                  stepName={lastAssessment.stepName}
+                  evaluation={lastAssessment.evaluation}
+                  step={currentSteps.find((step) => step.id === lastAssessment.stepId) ?? null}
+                  onClose={() => setLastAssessment(null)}
+                  onOpenStep={openStepInForge}
+                />
+              )}
+            </>
           )}
 
           <div className={`learn-step-scroll no-scrollbar${sparsePath ? ' sparse' : ''}${emptyStepArea ? ' empty' : ''}`}>

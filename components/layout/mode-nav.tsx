@@ -60,7 +60,14 @@ export function ModeNav({ mode, onModeChange }: ModeNavProps) {
           key={item.mode}
           className={`mode-btn ${item.className ?? ''}`}
           active={mode === item.mode}
-          onClick={() => onModeChange(item.mode)}
+          aria-current={mode === item.mode ? 'page' : undefined}
+          aria-label={`切换到${item.caption}`}
+          data-testid={`mode-nav-${item.mode}`}
+          data-mode={item.mode}
+          onClick={(event) => {
+            event.stopPropagation()
+            onModeChange(item.mode)
+          }}
           title={item.title}
         >
           <span className="block opacity-60 mb-0.5" style={{ fontSize: 'var(--f8)' }}>

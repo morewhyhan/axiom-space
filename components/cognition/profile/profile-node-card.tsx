@@ -1,7 +1,8 @@
 'use client'
 
-import type { CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { Check, CircleHelp, Edit3, X } from 'lucide-react'
+import { HudPanel } from '@/components/ui'
 import type { ProfileNode, Verdict } from './model'
 
 type ProfileFeedbackInput = {
@@ -34,6 +35,8 @@ export function ProfileNodeCard({
   onCancelEdit,
   onSubmitFeedback,
 }: ProfileNodeCardProps) {
+  const [evidenceOpen, setEvidenceOpen] = useState(false)
+
   const submit = (verdict: Verdict, confidence: number, summary: string) => {
     onSubmitFeedback({
       dimensionKey: node.dimensionKey,
@@ -46,8 +49,8 @@ export function ProfileNodeCard({
   }
 
   return (
-    <section
-      className="profile-node-card glass-panel rounded-2xl border-white/10 bg-black/[0.38] px-4 py-3 shadow-[0_18px_58px_rgba(0,0,0,0.22)]"
+    <HudPanel
+      className="profile-node-card px-4 py-3"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -63,13 +66,25 @@ export function ProfileNodeCard({
         }}>
           {node.caption}
         </span>
-        <span style={{
-          fontFamily: 'var(--font-jetbrains-mono), monospace',
-          fontSize: '12px',
-          color: 'rgba(255,255,255,0.3)',
-        }}>
-          {Math.round(node.confidence * 100)}%
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{
+            fontFamily: 'var(--font-jetbrains-mono), monospace',
+            fontSize: '12px',
+            color: 'rgba(255,255,255,0.3)',
+          }}>
+            {Math.round(node.confidence * 100)}%
+          </span>
+          {node.evidenceDetail && (
+            <button
+              type="button"
+              className="profile-verdict-btn"
+              onClick={() => setEvidenceOpen(true)}
+              title="查看这条画像的证据"
+            >
+              <CircleHelp className="h-3 w-3" />
+            </button>
+          )}
+        </div>
       </div>
 
       {node.freshness !== '待观察' && (
@@ -82,9 +97,13 @@ export function ProfileNodeCard({
           border: '1px solid rgba(255,255,255,0.08)',
           background: node.freshness === '有新证据'
             ? 'rgba(103,232,249,0.08)'
+            : node.freshness === '待确认'
+              ? 'rgba(253,224,71,0.08)'
             : 'rgba(110,231,183,0.08)',
           color: node.freshness === '有新证据'
             ? 'rgba(103,232,249,0.65)'
+            : node.freshness === '待确认'
+              ? 'rgba(253,224,71,0.72)'
             : 'rgba(110,231,183,0.65)',
           fontSize: '9px',
           fontFamily: 'var(--font-jetbrains-mono), monospace',
@@ -185,6 +204,78 @@ export function ProfileNodeCard({
           <Edit3 className="h-3 w-3" /> 编辑
         </button>
       </div>
-    </section>
+
+      {evidenceOpen && node.evidenceDetail && (
+        <div
+          role="dialog"
+          aria-modal="false"
+          aria-label="画像证据"
+          style={{
+            position: 'fixed',
+            right: 28,
+            top: 96,
+            width: 'min(420px, calc(100vw - 40px))',
+            maxHeight: 'min(620px, calc(100vh - 128px))',
+            zIndex: 260,
+            overflow: 'hidden',
+            borderRadius: 16,
+            border: '1px solid rgba(103,232,249,0.18)',
+            background: 'rgba(7,11,23,0.96)',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.42)',
+            backdropFilter: 'blur(18px)',
+          }}
+        >
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '14px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+          }}>
+            <div>
+              <div style={{
+                fontFamily: 'var(--font-jetbrains-mono), monospace',
+                fontSize: 9,
+                letterSpacing: '0.16em',
+                textTransform: 'uppercase',
+                color: 'rgba(103,232,249,0.55)',
+              }}>
+                Evidence Trace
+              </div>
+              <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.82)', fontSize: 14, lineHeight: 1.35 }}>
+                {node.caption}
+              </div>
+              <div style={{ marginTop: 3, color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>
+                置信度 {Math.round(node.confidence * 100)}% · {node.freshness}
+              </div>
+            </div>
+            <button
+              type="button"
+              className="profile-verdict-btn"
+              onClick={() => setEvidenceOpen(false)}
+              title="关闭证据面板"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+          <div style={{
+            maxHeight: 'calc(min(620px, calc(100vh - 128px)) - 76px)',
+            overflowY: 'auto',
+            padding: '14px 16px 16px',
+          }}>
+            <div style={{
+              whiteSpace: 'pre-wrap',
+              fontFamily: 'var(--font-jetbrains-mono), monospace',
+              fontSize: 11,
+              lineHeight: 1.65,
+              color: 'rgba(207,250,254,0.72)',
+            }}>
+              {node.evidenceDetail}
+            </div>
+          </div>
+        </div>
+      )}
+    </HudPanel>
   )
 }

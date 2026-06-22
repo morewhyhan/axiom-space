@@ -8,7 +8,7 @@
  * because Hono RPC doesn't expose the raw Response body for streaming.
  */
 
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAgentStore } from '@/stores/agent-store'
 import { useAppStore, type GraphLayoutMode, type Mode, type PanelId, type PanelZone } from '@/stores/mode-store'
@@ -21,9 +21,11 @@ import type { ResourceProgressStatus } from '@/stores/agent-store'
 // Re-export for callers that import the types from this file
 export type { AgentMessage, SessionSummary }
 
-// Module-level guard: prevent double auto-init when ChatSessionList and
-// ForgeChat both mount in the same render cycle for the same vault.
+// Module-level guard: prevent double auto-init when multiple Forge panels
+// mount in the same render cycle for the same vault.
 let autoInitVaultId: string | null = null
+const CARD_THREAD_FLUSH_THROTTLE_MS = 20_000
+const recentCardThreadFlushRequests = new Map<string, number>()
 
 type WorkspaceAction =
   | { type: 'set_mode'; mode?: unknown }
@@ -67,6 +69,10 @@ function setPanelVisibility(panel: PanelId, open: boolean, zone?: PanelZone) {
   if (open) {
     const targetZone = zone ?? (panel === 'editor' ? 'right' : 'left')
     next[targetZone] = [...next[targetZone], panel]
+    if (targetZone === 'left') {
+      if (panel === 'fileTree') app.setForgeResourceView('cards')
+      if (panel === 'sessionList') app.setForgeResourceView('context')
+    }
   }
 
   app.setPanelLayout(next)
@@ -225,6 +231,8 @@ function invalidateWorkspaceQueries(queryClient: ReturnType<typeof useQueryClien
   queryClient.invalidateQueries({ queryKey: ['dashboard-stats', vaultId] })
   queryClient.invalidateQueries({ queryKey: ['learning-paths', vaultId] })
   queryClient.invalidateQueries({ queryKey: ['learning-profile', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['education-profile', vaultId] })
+  queryClient.invalidateQueries({ queryKey: ['education-profile-history', vaultId] })
   queryClient.invalidateQueries({ queryKey: ['cognition', vaultId] })
   queryClient.invalidateQueries({ queryKey: ['observations', vaultId] })
   queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', vaultId] })
@@ -270,6 +278,33 @@ async function restoreResourceProgress(vaultId: string) {
   }
 }
 
+async function requestCurrentCardThreadFlush(reason: string): Promise<void> {
+  const currentVaultId = useAppStore.getState().currentVaultId
+  if (!currentVaultId) return
+  const store = useAgentStore.getState()
+  if (store.streaming) return
+  const currentSession = store.sessions.find((session) => session.id === store.sessionId)
+  if (!currentSession?.cardId) return
+  if (currentSession.status === 'completed' || currentSession.threadStatus === 'archived') return
+
+  const userTurnCount = store.messages.filter((message) => message.role === 'user').length
+  if (userTurnCount <= 0) return
+
+  const throttleKey = `${currentVaultId}:${currentSession.id}:${userTurnCount}`
+  const now = Date.now()
+  const last = recentCardThreadFlushRequests.get(throttleKey) ?? 0
+  if (now - last < CARD_THREAD_FLUSH_THROTTLE_MS) return
+  recentCardThreadFlushRequests.set(throttleKey, now)
+
+  const route = (client.api.agent.sessions[':id'] as any)?.['flush-card-thread']
+  if (!route?.$post) return
+  await route.$post({
+    param: { id: currentSession.id },
+    query: { vid: currentVaultId },
+    json: { reason },
+  }).catch(() => {})
+}
+
 export function useAgent() {
   /* ── Read state from the shared store ── */
   const messages = useAgentStore((s) => s.messages)
@@ -280,10 +315,14 @@ export function useAgent() {
   const error = useAgentStore((s) => s.error)
   const currentProgress = useAgentStore((s) => s.currentProgress)
   const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const mode = useAppStore((s) => s.mode)
+  const chatPanelOpen = useAppStore((s) => s.chatPanelOpen)
   const { data: sessionData } = useAuthSession()
   const queryClient = useQueryClient()
   const isLoggedIn = !!sessionData?.session
   const isUsableSession = (session: SessionSummary) => session.status !== 'completed' && session.threadStatus !== 'archived'
+  const previousModeRef = useRef(mode)
+  const previousChatPanelOpenRef = useRef(chatPanelOpen)
 
   /* ── Load when the active vault changes (once across all hook instances) ── */
   useEffect(() => {
@@ -326,15 +365,52 @@ export function useAgent() {
         restoreResourceProgress(currentVaultId).catch(() => {})
       }
     }
+    const flushOnHidden = () => {
+      if (document.visibilityState === 'hidden') {
+        requestCurrentCardThreadFlush('visibility_hidden').catch(() => {})
+      }
+    }
+    const flushOnBlur = () => {
+      requestCurrentCardThreadFlush('window_blur').catch(() => {})
+    }
+    const flushOnPageHide = () => {
+      requestCurrentCardThreadFlush('pagehide').catch(() => {})
+    }
     window.addEventListener('focus', refreshSessions)
+    window.addEventListener('blur', flushOnBlur)
+    window.addEventListener('pagehide', flushOnPageHide)
     document.addEventListener('visibilitychange', refreshSessions)
+    document.addEventListener('visibilitychange', flushOnHidden)
     const timer = window.setInterval(refreshSessions, 60_000)
     return () => {
       window.removeEventListener('focus', refreshSessions)
+      window.removeEventListener('blur', flushOnBlur)
+      window.removeEventListener('pagehide', flushOnPageHide)
       document.removeEventListener('visibilitychange', refreshSessions)
+      document.removeEventListener('visibilitychange', flushOnHidden)
       window.clearInterval(timer)
     }
   }, [currentVaultId, isLoggedIn])
+
+  useEffect(() => {
+    if (!isLoggedIn || !currentVaultId) {
+      previousModeRef.current = mode
+      previousChatPanelOpenRef.current = chatPanelOpen
+      return
+    }
+
+    const previousMode = previousModeRef.current
+    const previousChatOpen = previousChatPanelOpenRef.current
+    if (previousMode === 'forge' && mode !== 'forge') {
+      requestCurrentCardThreadFlush('mode_leave').catch(() => {})
+    }
+    if (previousChatOpen && !chatPanelOpen) {
+      requestCurrentCardThreadFlush('chat_closed').catch(() => {})
+    }
+
+    previousModeRef.current = mode
+    previousChatPanelOpenRef.current = chatPanelOpen
+  }, [chatPanelOpen, currentVaultId, isLoggedIn, mode])
 
   /* ── Reset didAutoInit on sign-out so re-login re-triggers auto-load ── */
   useEffect(() => {
@@ -371,14 +447,13 @@ export function useAgent() {
       }
     }
 
-    if (selectedNode?.type === 'permanent') {
+    if (selectedNode?.type === 'permanent' && !isConversationSession) {
       store._setError('这张卡片已沉淀为永久知识卡，旧对话已归档。需要继续讨论时请创建新的灵感草稿。')
       return
     }
 
     const currentSessionAfterInit = useAgentStore.getState().sessions.find((session) => session.id === useAgentStore.getState().sessionId)
-    const isConversationSessionAfterInit = !!currentSessionAfterInit && !currentSessionAfterInit.cardId && !currentSessionAfterInit.pathId
-    if (selectedNode && (!currentSessionAfterInit || (!isConversationSessionAfterInit && currentSessionAfterInit.cardId !== selectedNode.id))) {
+    if (selectedNode && currentSessionAfterInit?.cardId !== selectedNode.id) {
       await store.openCardThread(selectedNode)
     }
 
@@ -604,8 +679,8 @@ export function useAgent() {
   }, [])
   const renameSession = useCallback((id: string, title: string) => useAgentStore.getState().renameSession(id, title), [])
   const autoTitleSession = useCallback((id: string) => useAgentStore.getState().autoTitleSession(id), [])
-  const openCardThread = useCallback((card: { id: string; title: string; type: string }) => {
-    return useAgentStore.getState().openCardThread(card)
+  const openCardThread = useCallback((card: { id: string; title: string; type: string }, options?: { openChat?: boolean }) => {
+    return useAgentStore.getState().openCardThread(card, options)
   }, [])
   const deleteSession = useCallback((id: string) => useAgentStore.getState().deleteSession(id), [])
   const clearMessages = useCallback(() => useAgentStore.getState().clearMessages(), [])

@@ -133,11 +133,6 @@ export default function LandingPage({
         <div className="landing-bg" />
         <nav className="landing-nav">
           <span className="landing-logo">AXIOM</span>
-          {isLoggedIn && (
-            <button className="landing-btn landing-btn-ghost" onClick={() => signOut.mutate()} style={{ fontSize: '11px' }}>
-              退出
-            </button>
-          )}
         </nav>
 
         <div className="landing-hero-content">
@@ -153,7 +148,14 @@ export default function LandingPage({
               <p className="landing-loading-hint">{vaultLoadError}</p>
               <div className="landing-cta mt-4 transition-all">
                 <button className="landing-btn landing-btn-primary" onClick={onRetryVaults}>重试</button>
-                <button className="landing-btn landing-btn-secondary" onClick={() => signOut.mutate()}>退出登录</button>
+                <button
+                  className="landing-btn landing-btn-secondary"
+                  aria-label="退出登录"
+                  data-testid="logout-button-error"
+                  onClick={() => signOut.mutate()}
+                >
+                  退出登录
+                </button>
               </div>
             </>
           ) : !vaultsLoaded ? (

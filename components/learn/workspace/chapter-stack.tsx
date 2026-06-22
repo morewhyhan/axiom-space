@@ -1,6 +1,7 @@
 'use client'
 
 import type { CSSProperties } from 'react'
+import { HudPanel } from '@/components/ui'
 import type { LearningStep } from '@/hooks/use-learning'
 import { getNextStep } from './helpers'
 import { StepCard } from './step-card'
@@ -30,9 +31,9 @@ export function ChapterStack({
         const chapterDone = steps.filter((step) => step.status === 'completed' || step.status === 'mastered').length
         const chapterNext = getNextStep(steps)
         return (
-          <section
+          <HudPanel
             key={chapter}
-            className="learn-chapter-card glass-panel"
+            className="learn-chapter-card"
             style={{ '--chapter-delay': `${chapterIndex * 46}ms` } as CSSProperties}
           >
             <div className="learn-chapter-head">
@@ -56,7 +57,7 @@ export function ChapterStack({
                 />
               ))}
             </div>
-          </section>
+          </HudPanel>
         )
       })}
     </div>

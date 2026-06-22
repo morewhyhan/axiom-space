@@ -35,7 +35,7 @@ const PROFILE_CLAIM_TEMPLATES: Record<string, Array<{
   ],
   stuckPattern: [
     { key: 'recurring-block', caption: '重复卡点', fallbackClaim: '你的重复卡点还没有稳定显现。', explanation: '不是一次错误，而是多次出现的理解阻塞方式。', promptEffect: '下一轮教学应继续观察，不要急着形成固定标签。' },
-    { key: 'isolated-knowledge', caption: '孤立知识', fallbackClaim: '你的孤立知识问题暂时不明显。', explanation: '单点知道但没有和其他概念建立关系。', promptEffect: '下一轮教学可在解释后主动补概念连接。' },
+    { key: 'boundary-drift', caption: '边界漂移', fallbackClaim: '你的讨论边界漂移暂时不明显。', explanation: '观察你是否容易从当前概念跳到无关问题，导致上下文变散。', promptEffect: '下一轮教学应在跑题前提示是否新建对话或卡片。' },
     { key: 'conflict-pattern', caption: '冲突画像', fallbackClaim: '你的部分画像还可能互相冲突，需要继续观察。', explanation: '比如有时希望详细解释，有时又觉得啰嗦，不能过早写死。', promptEffect: '下一轮教学应把冲突判断作为条件策略。' },
   ],
   paceAndLoad: [
@@ -50,6 +50,25 @@ const PROFILE_CLAIM_TEMPLATES: Record<string, Array<{
   ],
 }
 
+const DYNAMIC_PROMPT_EFFECTS: Record<string, string> = {
+  learningGoal: '下一轮教学应围绕这个目标决定讲解范围、输出形态和推进顺序。',
+  currentFoundation: '下一轮教学应据此决定哪些前提可以跳过，哪些概念需要先校验。',
+  bestExplanationPath: '下一轮教学应据此选择例子、图解、代码、框架或练习的进入顺序。',
+  stuckPattern: '下一轮教学应提前处理这个卡点，避免继续堆叠新概念。',
+  paceAndLoad: '下一轮教学应据此控制信息块大小、术语密度和确认频率。',
+  masteryCheck: '下一轮教学应据此选择复述、变式题、改错、卡片产出或迁移任务。',
+}
+
+const SOURCE_LABELS: Record<string, string> = {
+  vaultMemory: '画像观察',
+  assessmentResult: '测评证据',
+  card: '卡片证据',
+  edge: '图谱证据',
+  vaultCapability: '能力证据',
+  learningPath: '路径证据',
+  resourceGenerationJob: '资源证据',
+}
+
 export type ProfileNode = {
   id: string
   key: string
@@ -61,12 +80,20 @@ export type ProfileNode = {
   promptEffect: string
   confidence: number
   freshness: string
+  evidenceDetail?: string
   feedback?: NonNullable<ProfileDimensionInsight['userFeedback']>
 }
 
 export type DimensionView = ProfileDimensionInsight & {
   nodes: ProfileNode[]
   tone: (typeof DIMENSION_TONES)[number]
+}
+
+export type ProfileTransitionSummary = {
+  before: string
+  current: string
+  next: string
+  evidenceCount: number
 }
 
 export function buildDimensions(data: CognitionData | null): ProfileDimensionInsight[] {
@@ -82,7 +109,8 @@ export function buildProfileTree(
   return dimensions.map((dimension, dimensionIndex) => {
     const tone = DIMENSION_TONES[dimensionIndex % DIMENSION_TONES.length]
     const templates = PROFILE_CLAIM_TEMPLATES[dimension.key] ?? []
-    const nodes = templates.map((template, nodeIndex) => {
+    const dynamicNodes = buildDynamicProfileNodes(dimension)
+    const fallbackNodes = templates.map((template, nodeIndex) => {
       const nodeId = `${dimension.key}:${template.key}`
       const feedback = dimension.nodeFeedback?.[nodeId]
       const directObservation = dimension.observations[nodeIndex]
@@ -108,12 +136,192 @@ export function buildProfileTree(
         promptEffect: template.promptEffect,
         confidence,
         freshness: feedback ? '已校验' : directObservation ? '有新证据' : '待观察',
+        evidenceDetail: directObservation ? buildObservationEvidenceDetail(directObservation) : undefined,
         feedback,
       }
     })
+    const nodes = dynamicNodes.length > 0 ? dynamicNodes : fallbackNodes
 
     return { ...dimension, tone, nodes }
   })
+}
+
+export function buildProfileTransitionSummary(
+  data: CognitionData | null,
+  dimensions: ProfileDimensionInsight[],
+): ProfileTransitionSummary | null {
+  if (!data || dimensions.length === 0) return null
+  const observations = dimensions.flatMap((dimension) =>
+    dimension.observations.map((observation) => ({
+      dimensionKey: dimension.key,
+      dimensionLabel: dimension.label,
+      text: normalizeClaim(observation.text),
+      evidence: observation.evidence?.trim() || '',
+      sourceType: observation.sourceType,
+      confidence: observation.confidence ?? dimension.confidence,
+    })),
+  ).filter((item) => item.text)
+  const dimensionEvidence = dimensions.flatMap((dimension) =>
+    dimension.evidence.map((item, index) => ({
+      dimensionKey: dimension.key,
+      dimensionLabel: dimension.label,
+      text: normalizeClaim(item),
+      evidence: '',
+      sourceType: 'dimensionEvidence',
+      confidence: Math.max(0.35, dimension.confidence - index * 0.04),
+    })),
+  ).filter((item) => item.text)
+  const recentEvidence = (data.profileLoop?.recentEvidence ?? []).map((item, index) => ({
+    dimensionKey: 'profileLoop',
+    dimensionLabel: '最近证据',
+    text: normalizeClaim(item),
+    evidence: '',
+    sourceType: 'profileLoop',
+    confidence: Math.max(0.35, 0.82 - index * 0.05),
+  })).filter((item) => item.text)
+  const weakSignals = [
+    ...(data.knowledgeProfile?.weakConcepts ?? []),
+    ...(data.knowledgeProfile?.missingPrerequisites ?? []),
+  ].map((item, index) => ({
+    dimensionKey: 'currentFoundation',
+    dimensionLabel: '薄弱点',
+    text: normalizeClaim(item),
+    evidence: '',
+    sourceType: 'knowledgeProfile',
+    confidence: Math.max(0.35, 0.72 - index * 0.04),
+  })).filter((item) => item.text)
+  const masteredSignals = (data.knowledgeProfile?.masteredConcepts ?? []).map((item, index) => ({
+    dimensionKey: 'currentFoundation',
+    dimensionLabel: '已掌握',
+    text: normalizeClaim(item),
+    evidence: '',
+    sourceType: 'knowledgeProfile',
+    confidence: Math.max(0.35, 0.74 - index * 0.04),
+  })).filter((item) => item.text)
+  const allSignals = [
+    ...observations,
+    ...dimensionEvidence,
+    ...recentEvidence,
+    ...weakSignals,
+    ...masteredSignals,
+  ]
+  if (allSignals.length === 0) return null
+
+  const before = pickObservation(allSignals, [
+    /误以为|混淆|薄弱|卡住|缺口|不清楚|分不清|容易|待修正|不足|问题|边界/i,
+    /stuck|weak|gap|confus|misunderstand|missing/i,
+  ])
+  const current = pickObservation(allSignals, [
+    /能够|能用自己的话|正确|已掌握|通过|清楚|解释|给出|区分|掌握|稳定|反例|总代价/i,
+    /master|pass|correct|explain|understand/i,
+  ])
+  const next =
+    data.nextActions?.[0]
+    ?? data.knowledgeProfile?.missingPrerequisites?.[0]
+    ?? data.knowledgeProfile?.weakConcepts?.[0]
+    ?? observations.find((item) => item.dimensionKey === 'learningGoal')?.text
+    ?? '继续沿当前学习路径推进，并在下一轮对话中留下可评估的输出。'
+
+  return {
+    before: before
+      ? before.text
+      : weakSignals[0]?.text || data.profileSummary?.summary || '系统仍在收集你的初始学习状态。',
+    current: current
+      ? current.text
+      : masteredSignals[0]?.text || data.profileSummary?.teachingFocus || '系统已记录本轮学习证据，并据此调整下一轮教学策略。',
+    next,
+    evidenceCount: data.profileLoop?.evidenceCount ?? allSignals.length,
+  }
+}
+
+function buildDynamicProfileNodes(dimension: ProfileDimensionInsight): ProfileNode[] {
+  const seen = new Set<string>()
+  return dimension.observations.flatMap((observation, index) => {
+    const claim = normalizeClaim(observation.text)
+    const dedupeKey = claim.replace(/\s+/g, '').slice(0, 80)
+    if (!claim || seen.has(dedupeKey)) return []
+    seen.add(dedupeKey)
+
+    const sourceLabel = SOURCE_LABELS[observation.sourceType] ?? observation.entryPoint ?? '画像证据'
+    const nodeId = `${dimension.key}:obs:${observation.sourceType}:${observation.sourceId}:${index}`
+    const feedback = dimension.nodeFeedback?.[nodeId]
+    const feedbackShift =
+      feedback?.verdict === 'correct' ? 0.1
+        : feedback?.verdict === 'partial' ? 0.02
+          : feedback?.verdict === 'wrong' ? -0.18
+            : 0
+    const observationConfidence = typeof observation.confidence === 'number' ? observation.confidence : null
+    const confidence = clamp01(
+      (observationConfidence ?? dimension.confidence) * 0.84 +
+      0.08 +
+      feedbackShift +
+      (feedback ? feedback.confidence * 0.08 : 0),
+    )
+
+    return [{
+      id: nodeId,
+      key: `obs-${index}`,
+      caption: sourceLabel,
+      dimensionKey: dimension.key,
+      dimensionLabel: dimension.label,
+      claim: feedback?.summary?.trim() || claim,
+      explanation: buildObservationExplanation(observation),
+      promptEffect: DYNAMIC_PROMPT_EFFECTS[dimension.key] ?? '下一轮教学应只在证据支持时使用这条画像。',
+      confidence,
+      freshness: feedback ? '已校验' : confidence < 0.45 ? '待确认' : '有新证据',
+      evidenceDetail: buildObservationEvidenceDetail(observation),
+      feedback,
+    }]
+  })
+}
+
+function pickObservation(
+  observations: Array<{
+    text: string
+    evidence: string
+    sourceType: string
+    confidence: number
+  }>,
+  patterns: RegExp[],
+) {
+  return observations
+    .map((observation) => ({
+      observation,
+      score:
+        (patterns.some((pattern) => pattern.test(observation.text) || pattern.test(observation.evidence)) ? 2 : 0) +
+        (observation.sourceType === 'assessmentResult' ? 0.5 : 0) +
+        Math.max(0, Math.min(1, observation.confidence || 0)) * 0.25,
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)[0]?.observation
+}
+
+
+function normalizeClaim(text: string): string {
+  return text.trim().replace(/\s+/g, ' ').slice(0, 220)
+}
+
+function buildObservationExplanation(observation: ProfileDimensionInsight['observations'][number]): string {
+  const sourceLabel = SOURCE_LABELS[observation.sourceType] ?? observation.entryPoint
+  const evidence = observation.evidence?.trim()
+  if (evidence && evidence !== observation.entryPoint) {
+    return `${sourceLabel}：${evidence}`
+  }
+  return `来自 ${sourceLabel}，可回溯到 ${observation.sourceId}。`
+}
+
+function buildObservationEvidenceDetail(observation: ProfileDimensionInsight['observations'][number]): string {
+  const sourceLabel = SOURCE_LABELS[observation.sourceType] ?? observation.entryPoint
+  const lines = [
+    `观察结论：${normalizeClaim(observation.text)}`,
+    `证据来源：${sourceLabel}`,
+    `来源位置：${observation.entryPoint || '未标注'}`,
+    `来源 ID：${observation.sourceId}`,
+    observation.evidence?.trim() ? `证据摘要：${observation.evidence.trim()}` : '',
+    typeof observation.confidence === 'number' ? `观察置信度：${Math.round(observation.confidence * 100)}%` : '',
+    observation.analysisMode ? `分析模式：${observation.analysisMode}` : '',
+  ]
+  return lines.filter(Boolean).join('\n')
 }
 
 function buildDimensionClaims(data: CognitionData | null): Record<string, string[]> {
@@ -122,7 +330,6 @@ function buildDimensionClaims(data: CognitionData | null): Record<string, string
   const mastered = data?.knowledgeProfile?.masteredConcepts ?? []
   const weak = data?.knowledgeProfile?.weakConcepts ?? []
   const missing = data?.knowledgeProfile?.missingPrerequisites ?? []
-  const isolated = data?.knowledgeProfile?.isolatedNodes ?? []
   const styles = data?.teachingPolicy?.explainStyle ?? data?.preferences?.explanationStyle ?? []
   const pace = data?.teachingPolicy?.pace ?? data?.preferences?.pace
   const nextActions = data?.nextActions ?? []
@@ -146,7 +353,7 @@ function buildDimensionClaims(data: CognitionData | null): Record<string, string
     ],
     stuckPattern: [
       weak[0] ? `你反复卡住的地方可能来自「${weak[0]}」。` : '你的重复卡点还没有稳定显现。',
-      isolated[0] ? `你存在孤立知识点，例如「${isolated[0]?.title ?? isolated[0]}」。` : '你的孤立知识问题暂时不明显。',
+      '你的讨论边界漂移暂时不明显，需要继续观察。',
       '你的部分画像还可能互相冲突，需要继续观察，不能过早定型。',
     ],
     paceAndLoad: [

@@ -11,7 +11,7 @@
 import type { IFileStorage, ReadResult, WriteResult, ListResult, DeleteResult, SearchResult, FileEntry } from './IFileStorage'
 import { prisma } from '@/lib/db'
 import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-context'
-import { parseWikiLinks, resolveWikiLinkTitle } from '@/lib/wiki-links'
+import { syncEdgesFromContent } from '@/lib/wiki-links'
 import { assertCardType, inferCardTypeFromPath } from '@/server/core/domain/contracts'
 import { ensureVaultRootCard } from '@/server/core/domain/concept-graph'
 import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
@@ -127,6 +127,7 @@ export class DbAdapter implements IFileStorage {
       // 从路径提取 title
       const title = filePath.replace(/\.md$/, '').split('/').pop() || 'untitled'
 
+      let autoBacklinkedCardIds: string[] = []
       const card = await prisma.$transaction(async (tx) => {
         const upserted = await tx.card.upsert({
           where: { vaultId_path: { vaultId, path: filePath } },
@@ -134,32 +135,14 @@ export class DbAdapter implements IFileStorage {
           update: { content, type, title, updatedAt: new Date() },
         })
 
-        // Sync [[WikiLink]] edges atomically with the card write
-        const titles = parseWikiLinks(content)
-        const resolved = await Promise.all(
-          titles.map((t) => resolveWikiLinkTitle(tx, vaultId, t)),
-        )
-        const targets = Array.from(
-          new Map((resolved.filter(Boolean) as { id: string }[]).map((target) => [target.id, target])).values(),
-        )
-
-        await tx.edge.deleteMany({ where: { sourceId: upserted.id, type: 'wikilink' } })
-        if (targets.length > 0) {
-          await tx.edge.createMany({
-            data: targets.map((target) => ({
-              vaultId,
-              sourceId: upserted.id,
-              targetId: target.id,
-              type: 'wikilink' as const,
-              weight: 1.0,
-            })),
-          })
-        }
+        const wikiSync = await syncEdgesFromContent(tx, upserted.id, vaultId, content, { ensureReciprocalLinks: true })
+        autoBacklinkedCardIds = wikiSync.autoBacklinkedCardIds
 
         return upserted
       }, { timeout: 30_000 })
 
       scheduleRagIndexCard(card.id, 'db-adapter-write')
+      autoBacklinkedCardIds.forEach((cardId) => scheduleRagIndexCard(cardId, 'auto-backlink'))
       return { success: true }
     } catch (err: unknown) {
       return { success: false, error: err instanceof Error ? err.message : String(err) }
