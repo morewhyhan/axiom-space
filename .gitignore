@@ -46,15 +46,10 @@ lerna-debug.log*
 
 # build artifacts
 tsconfig.tsbuildinfo
+artifacts/
 playwright-report/
 test-results/
-test/artifacts/a3-agentic-browser/
-test/artifacts/a3-browser-use/
-
-# generated
-/generated/prisma
-playwright-report/
-test-results/
+test/artifacts/
 
 # generated
 /generated/prisma

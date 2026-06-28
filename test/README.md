@@ -8,11 +8,15 @@
 
 | 目录 | 内容 |
 |---|---|
+| `acceptance/` | 全量可执行验收测试（Node test / test runner） |
+| `e2e/` | Playwright 浏览器级用例 |
 | `fixtures/` | 公共用户、Vault、Card、Path、Session、Answer 等测试数据 |
 | `main-flows/` | Web MVP 的 6 条主链路闭环测试 |
 | `domain/` | 领域对象、细对象、聚合、服务、事件、Agent、异步对象测试 |
 | `scenarios/` | PRD / 验收标准中的场景级测试 |
 | `priorities/` | P0 / P1 / P2 必测范围 |
+
+> 说明：`test` 目录不再存放执行测试的历史产物或零散脚本，历史运行输出统一走 `.gitignore` 忽略；需要长期保留的环境脚本放到 `scripts/test/`。
 
 ## 用例字段
 

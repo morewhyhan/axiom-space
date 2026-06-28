@@ -6,7 +6,7 @@ import { resolve } from 'path'
 config({ path: resolve(process.cwd(), '.env.test') })
 
 export default defineConfig({
-  testDir: './e2e/tests',
+  testDir: './test/e2e',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

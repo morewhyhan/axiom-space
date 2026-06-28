@@ -13,7 +13,7 @@
     "test:acceptance:full": "pnpm test:acceptance && pnpm test:acceptance:db",
     "test:acceptance:deep": "pnpm test:acceptance:full && pnpm test:acceptance:api && pnpm test:acceptance:agent && pnpm test:acceptance:sidecar && pnpm test:acceptance:ui-state",
     "test:acceptance:list": "node --import tsx test/acceptance/list-cases.ts",
-    "test:e2e:sdd": "playwright test e2e/tests/sdd-ui.spec.ts",
+    "test:e2e:sdd": "playwright test test/e2e/sdd-ui.spec.ts",
     "test:e2e:a3-browser-use": "HOME=/tmp/axiom-browser-use-home BROWSER_USE_CONFIG_DIR=/tmp/axiom-browser-use-config /tmp/axiom-browser-use-venv/bin/python scripts/a3_browser_use.py",
     "jobs:worker": "node --import tsx scripts/jobs-worker.ts",
     "predev": "node scripts/bootstrap-dev.mjs && prisma generate",
@@ -31,7 +31,8 @@
     "db:seed:career": "node --import tsx scripts/seed-career.ts",
     "seed:career": "node --import tsx scripts/seed-career.ts",
     "db:verify:cs408": "node scripts/verify-cs408-seed.mjs",
-    "agent:eval": "tsx scripts/eval-agent-production.ts"
+    "agent:eval": "tsx scripts/eval-agent-production.ts",
+    "check:demo": "node --import tsx scripts/test/check-demo.ts"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.4.1",

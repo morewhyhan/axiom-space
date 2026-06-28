@@ -100,6 +100,15 @@ axiom-space/
 
 所有 API 调用走 Hono RPC 类型推导，禁止直接使用 fetch/axios。
 
+## 根目录边界
+
+根目录只保留产品源码入口、基础配置、项目文档和可重复执行脚本。运行产物和一次性验证文件禁止散落在根目录：
+
+- 测试产物放 `test/artifacts/`，并保持 git ignore。
+- Playwright 产物 `playwright-report/`、`test-results/` 不提交。
+- 旧版独立页面入口不要继续留在 `app/` 中伪装为主线功能；无引用时删除，并在 `docs/02-决策与开发过程记录/` 记录迁移方向。
+- `components/learn/` 是当前学习路径主线，`components/cognition/` 是当前认知洞察主线；不要恢复已废弃的 `components/learning/`。
+
 ## 状态管理
 
 当前使用 **Zustand**（stores/）作为统一状态管理方案。

@@ -2,7 +2,7 @@ import { chromium } from '../node_modules/.pnpm/playwright@1.60.0/node_modules/p
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-const outDir = path.resolve('artifacts/demo-verify')
+const outDir = path.resolve('test/artifacts/demo-verify')
 await fs.mkdir(outDir, { recursive: true })
 
 const browser = await chromium.launch({ headless: true })
@@ -62,15 +62,6 @@ for (const mode of modeButtons) {
     await shot(`${mode.toLowerCase()}.png`)
     await logVisible(mode)
   }
-}
-
-const learnInsights = page.getByRole('link', { name: /learn insights|insights/i }).first()
-if (await learnInsights.isVisible().catch(() => false)) {
-  await learnInsights.click()
-  await page.waitForTimeout(3000)
-  await page.waitForTimeout(1200)
-  await shot('learn-insights.png')
-  await logVisible('learn-insights')
 }
 
 await browser.close()
