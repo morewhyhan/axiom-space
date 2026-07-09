@@ -128,12 +128,21 @@ export default function Home() {
 
   const toggleForgeResource = useCallback((view: ForgeResourceView) => {
     const targetPanel: PanelId = view === 'cards' ? 'fileTree' : 'sessionList'
-    setForgeResourceView(view)
-    setPanelLayout({
-      left: [targetPanel],
-      right: panelLayout.right.filter((panel) => panel === 'editor'),
-    })
-  }, [panelLayout.right, setForgeResourceView, setPanelLayout])
+    const alreadyOpen = panelLayout.left.includes(targetPanel)
+    if (alreadyOpen) {
+      // Clicking the same resource button again closes the panel
+      setPanelLayout({
+        left: [],
+        right: panelLayout.right.filter((panel) => panel === 'editor'),
+      })
+    } else {
+      setForgeResourceView(view)
+      setPanelLayout({
+        left: [targetPanel],
+        right: panelLayout.right.filter((panel) => panel === 'editor'),
+      })
+    }
+  }, [panelLayout.left, panelLayout.right, setForgeResourceView, setPanelLayout])
 
   const toggleForgeEditor = useCallback(() => {
     setPanelLayout({

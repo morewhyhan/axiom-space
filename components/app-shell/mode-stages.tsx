@@ -35,14 +35,6 @@ export function DashboardStage({ active, graphLayoutHint, onOpenModal }: Dashboa
         <div className="graph-hint" id={active ? 'graph-hint' : undefined}>
           {graphLayoutHint}
         </div>
-        <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={active ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={active ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
-        <div className="flex items-center gap-3 bg-black/50 px-5 py-2.5 rounded-full border border-white/10 backdrop-blur-md pointer-events-auto">
-          <Button className="mono hover:text-purple-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => onOpenModal('newcard')}>+ 新建</Button>
-          <div className="w-px h-3 bg-white/10"></div>
-          <Button className="mono hover:text-cyan-400 transition-colors uppercase font-medium" style={{ fontSize: 'var(--f9)' }} onClick={() => onOpenModal('importtext')}>导入</Button>
-          <div className="w-px h-3 bg-white/10"></div>
-          <Button className="mono hover:text-white/60 transition-colors uppercase" style={{ fontSize: 'var(--f9)' }} onClick={() => onOpenModal('shortcuts')}>⌨ 快捷键</Button>
-        </div>
       </section>
       <div className="right-zone">
         <DashboardRight />
@@ -181,12 +173,11 @@ export function GalaxyStage({ active, graphLayoutHint }: GalaxyStageProps) {
         <div className="graph-hint" id={active ? 'graph-hint' : undefined}>
           {graphLayoutHint}
         </div>
-        <div className="mono text-white/20 mt-1 tracking-wider" style={{ fontSize: 'var(--f8)' }}>FPS <span id={active ? 'cluster-fps' : undefined}>—</span> &nbsp;│&nbsp; XYZ <span id={active ? 'cluster-coords' : undefined}>0 / 0 / 0</span></div>
       </section>
       <div className="right-zone">
         <GalaxyFilter />
       </div>
-      <GalaxyLayoutSwitcher />
+      {active && <GalaxyLayoutSwitcher />}
     </div>
   )
 }

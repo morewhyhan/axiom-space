@@ -15,6 +15,7 @@ type PathSidebarProps = {
   pathBuckets: PathBuckets
   currentPathId: string | null | undefined
   createPanel: ReactNode
+  pushBox?: ReactNode
   onPathFilterChange: (filter: PathFilter) => void
   onSelectPath: (path: LearningPath) => void
 }
@@ -26,6 +27,7 @@ export function PathSidebar({
   pathBuckets,
   currentPathId,
   createPanel,
+  pushBox,
   onPathFilterChange,
   onSelectPath,
 }: PathSidebarProps) {
@@ -90,6 +92,8 @@ export function PathSidebar({
             )}
           </div>
         )}
+
+        {pushBox}
       </div>
 
       <div className="learn-create-shell">

@@ -211,7 +211,7 @@ export const useAppStore = create<AppStore>()(
       activeLearningStepId: null,
       setActiveLearningStepId: (id) => set({ activeLearningStepId: id }),
       /* ── Knowledge graph view ── */
-      graphLayoutMode: 'galaxy',
+      graphLayoutMode: 'concentric',
       setGraphLayoutMode: (mode) => set({ graphLayoutMode: mode }),
       graphHoverAttention: true,
       setGraphHoverAttention: (enabled) => set({ graphHoverAttention: enabled }),
@@ -225,16 +225,17 @@ export const useAppStore = create<AppStore>()(
     }),
     {
       name: 'axiom-store',
-      version: 10,
+      version: 13,
       migrate: (persistedState, version) => {
         if (!persistedState || typeof persistedState !== 'object') return persistedState
         const state = persistedState as Partial<AppStore> & {
           graphProjectionMode?: '3d' | '2d'
           graphLayoutMode?: GraphLayoutMode
         }
+        const migratedLayoutMode = state.graphLayoutMode ?? 'concentric'
         const next = {
           ...state,
-          graphLayoutMode: state.graphLayoutMode ?? (state.graphProjectionMode === '2d' ? 'flat' : 'galaxy'),
+          graphLayoutMode: version < 13 && (migratedLayoutMode === 'galaxy' || migratedLayoutMode === 'radial') ? 'concentric' : migratedLayoutMode,
         }
         if (version < 4) {
           next.panelLayout = {

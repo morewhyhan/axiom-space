@@ -116,8 +116,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     const clusterNodes = new Map<number, THREE.Group[]>();
     const clusterSuns = new Map<number, THREE.Group>();
     const GALAXY_LAYOUT = {
-      clusterMinDistance: 330,
-      clusterDistanceJitter: 135,
+      clusterMinDistance: 420,
+      clusterDistanceJitter: 100,
       clusterInnerRadius: 78,
       clusterMiddleRadius: 150,
       clusterOuterRadius: 228,
@@ -146,6 +146,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     const CENTER_SPIN_LAYOUT_MODES = new Set<GraphLayoutMode>(['radial', 'concentric']);
     const STRUCTURED_LAYOUT_MODES = new Set<GraphLayoutMode>(['layered', 'matrix', 'mastery', 'evidence']);
     const GALAXY_VISIBLE_SEMANTIC_EDGE_TYPES = new Set(['prerequisite', 'related', 'wikilink', 'derived', 'supports', 'contradicts', 'evidence', 'citation']);
+    const DEFAULT_GRAPH_LAYOUT_MODE: GraphLayoutMode = 'concentric';
 
     let frames = 0;
     let lastTime = performance.now();
@@ -172,7 +173,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     } | null = null;
     let hoverAttentionEnabled = true;
     let lastHoverRaycastAt = 0;
-    let layoutMode: GraphLayoutMode = 'galaxy';
+    let layoutMode: GraphLayoutMode = DEFAULT_GRAPH_LAYOUT_MODE;
     let semanticClusterLensEnabled = false;
     let galaxyForceEnabled = true;
     let galaxyForceAlpha = 0;
@@ -216,6 +217,12 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     const { register, unregister } = useGalaxyActions.getState()
     const initialGraphPrefs = useAppStore.getState();
+    layoutMode = initialGraphPrefs.graphLayoutMode === 'galaxy' || initialGraphPrefs.graphLayoutMode === 'radial'
+      ? DEFAULT_GRAPH_LAYOUT_MODE
+      : (initialGraphPrefs.graphLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE);
+    if (initialGraphPrefs.graphLayoutMode === 'galaxy' || initialGraphPrefs.graphLayoutMode === 'radial') {
+      useAppStore.getState().setGraphLayoutMode(DEFAULT_GRAPH_LAYOUT_MODE);
+    }
     hoverAttentionEnabled = initialGraphPrefs.graphHoverAttention;
     semanticClusterLensEnabled = initialGraphPrefs.graphSemanticClusterLens;
     galaxyForceEnabled = initialGraphPrefs.graphForceMotion;
@@ -1599,9 +1606,53 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         || allNodes.find(n => n.userData.name === 'CENTRAL_INTELLIGENCE' && !n.userData.isSun && !n.userData.id);
     }
 
+    function getInitialGalaxyPosition(node: THREE.Group): THREE.Vector3 | undefined {
+      const initial = node.userData.initialPosition3D as THREE.Vector3 | undefined;
+      if (initial?.isVector3) return initial;
+      const position3D = node.userData.position3D as THREE.Vector3 | undefined;
+      if (position3D?.isVector3) return position3D;
+      return undefined;
+    }
+
+    function captureInitialGalaxyPositions(): void {
+      allNodes.forEach((node) => {
+        const initial = getInitialGalaxyPosition(node) || node.position;
+        node.userData.initialPosition3D = initial.clone();
+        node.userData.position3D = initial.clone();
+      });
+    }
+
+    function computeInitialGalaxyTargets(): Map<THREE.Group, THREE.Vector3> {
+      const targets = new Map<THREE.Group, THREE.Vector3>();
+      allNodes.forEach((node) => {
+        const initial = getInitialGalaxyPosition(node) || node.position;
+        targets.set(node, initial.clone());
+      });
+      return targets;
+    }
+
+    function restoreInitialGalaxyAnchors(): Map<THREE.Group, THREE.Vector3> {
+      const targets = computeInitialGalaxyTargets();
+      galaxyForceAnchors = new Map();
+      targets.forEach((target, node) => {
+        node.userData.position3D = target.clone();
+        galaxyForceAnchors.set(node, target.clone());
+        const velocity = node.userData.forceVelocity as THREE.Vector3 | undefined;
+        if (velocity?.isVector3) velocity.set(0, 0, 0);
+      });
+      galaxyForceAlpha = 0;
+      galaxyForceFrameBudget = 0;
+      invalidateGalaxyForceCache();
+      return targets;
+    }
+
     function capture3DPositions(): void {
       allNodes.forEach((node) => {
         if (!node.userData.position3D) node.userData.position3D = node.position.clone();
+        if (!node.userData.initialPosition3D) {
+          const position3D = node.userData.position3D as THREE.Vector3 | undefined;
+          node.userData.initialPosition3D = position3D?.isVector3 ? position3D.clone() : node.position.clone();
+        }
       });
     }
 
@@ -1673,7 +1724,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     function syncGalaxyForceAnchor(node: THREE.Group): void {
       const anchor = node.position.clone();
-      node.userData.position3D = anchor.clone();
+      if (!getInitialGalaxyPosition(node)) node.userData.initialPosition3D = anchor.clone();
       galaxyForceAnchors.set(node, anchor);
     }
 
@@ -1681,8 +1732,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       galaxyForceAnchors = semanticClusterLensEnabled ? computeSemanticCommunityTargets() : new Map();
       allNodes.forEach((node) => {
         if (galaxyForceAnchors.has(node)) return;
-        const position3D = node.userData.position3D as THREE.Vector3 | undefined;
-        galaxyForceAnchors.set(node, position3D ? position3D.clone() : node.position.clone());
+        const initialPosition = getInitialGalaxyPosition(node);
+        galaxyForceAnchors.set(node, initialPosition ? initialPosition.clone() : node.position.clone());
       });
       invalidateGalaxyForceCache();
     }
@@ -1696,8 +1747,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     function getGalaxyForceAnchor(node: THREE.Group): THREE.Vector3 {
       let anchor = galaxyForceAnchors.get(node);
       if (!anchor) {
-        const position3D = node.userData.position3D as THREE.Vector3 | undefined;
-        anchor = position3D ? position3D.clone() : node.position.clone();
+        const initialPosition = getInitialGalaxyPosition(node);
+        anchor = initialPosition ? initialPosition.clone() : node.position.clone();
         galaxyForceAnchors.set(node, anchor);
       }
       return anchor;
@@ -2063,14 +2114,16 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
 
     function disposeGuideObject(obj: THREE.Object3D): void {
-      const geometry = (obj as THREE.Mesh | THREE.Line).geometry as THREE.BufferGeometry | undefined;
-      if (geometry) geometry.dispose();
-      const material = (obj as THREE.Mesh | THREE.Line | THREE.Sprite).material as THREE.Material | THREE.Material[] | undefined;
-      const materials = Array.isArray(material) ? material : material ? [material] : [];
-      materials.forEach((mat) => {
-        const spriteMat = mat as THREE.SpriteMaterial;
-        if (spriteMat.map) spriteMat.map.dispose();
-        mat.dispose();
+      obj.traverse((child) => {
+        const geometry = (child as THREE.Mesh | THREE.Line | THREE.Points).geometry as THREE.BufferGeometry | undefined;
+        if (geometry) geometry.dispose();
+        const material = (child as THREE.Mesh | THREE.Line | THREE.Points | THREE.Sprite).material as THREE.Material | THREE.Material[] | undefined;
+        const materials = Array.isArray(material) ? material : material ? [material] : [];
+        materials.forEach((mat) => {
+          const spriteMat = mat as THREE.SpriteMaterial;
+          if (spriteMat.map) spriteMat.map.dispose();
+          mat.dispose();
+        });
       });
     }
 
@@ -2099,30 +2152,97 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       color: number,
       opacity: number,
       tiltX = 0,
-      tiltZ = 0
+      tiltZ = 0,
+      phase = 0
     ): void {
       if (!galaxyBoundaryGroup) return;
+      const ringGroup = new THREE.Group();
+      ringGroup.position.copy(center);
+      ringGroup.rotation.set(tiltX, 0, tiltZ);
+      ringGroup.userData.boundarySpin = tiltX === 0 ? 0.00028 : -0.00022;
+
       const points: THREE.Vector3[] = [];
-      const rotation = new THREE.Euler(tiltX, 0, tiltZ);
       const segments = 192;
-      for (let i = 0; i <= segments; i++) {
+      for (let i = 0; i < segments; i++) {
         const angle = (i / segments) * Math.PI * 2;
-        const point = new THREE.Vector3(Math.cos(angle) * radiusX, 0, Math.sin(angle) * radiusZ);
-        point.applyEuler(rotation).add(center);
-        points.push(point);
+        const depthWave = Math.sin(angle * 2 + phase) * 4.5;
+        points.push(new THREE.Vector3(Math.cos(angle) * radiusX, depthWave, Math.sin(angle) * radiusZ));
       }
-      const ring = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints(points),
+
+      const curve = new THREE.CatmullRomCurve3(points, true, 'centripetal', 0.5);
+      const tube = new THREE.Mesh(
+        new THREE.TubeGeometry(curve, segments, 2.4, 8, true),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: opacity * 0.42,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+        })
+      );
+      tube.frustumCulled = false;
+      ringGroup.add(tube);
+
+      const addOffsetLine = (offsetY: number, lineOpacity: number) => {
+        const linePoints = points.map((point) => point.clone().add(new THREE.Vector3(0, offsetY, 0)));
+        linePoints.push(linePoints[0].clone());
+        const line = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints(linePoints),
+          new THREE.LineBasicMaterial({
+            color,
+            transparent: true,
+            opacity: lineOpacity,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+          })
+        );
+        line.frustumCulled = false;
+        ringGroup.add(line);
+      };
+
+      addOffsetLine(0, opacity);
+      addOffsetLine(7, opacity * 0.34);
+      addOffsetLine(-7, opacity * 0.22);
+
+      const dotGeometry = new THREE.BufferGeometry();
+      const dotPositions: number[] = [];
+      const dotCount = 168;
+      for (let i = 0; i < dotCount; i++) {
+        const angle = (i / dotCount) * Math.PI * 2;
+        const beadDepth = Math.sin(angle * 2 + phase) * 7;
+        dotPositions.push(Math.cos(angle) * radiusX, beadDepth, Math.sin(angle) * radiusZ);
+      }
+      dotGeometry.setAttribute('position', new THREE.Float32BufferAttribute(dotPositions, 3));
+      const dots = new THREE.Points(
+        dotGeometry,
+        new THREE.PointsMaterial({
+          color,
+          size: 2.2,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          transparent: true,
+          opacity: 0.58,
+        })
+      );
+      dots.frustumCulled = false;
+      ringGroup.add(dots);
+
+      const innerGlow = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([...points, points[0].clone()].map((point) => point.clone().multiplyScalar(0.992))),
         new THREE.LineBasicMaterial({
           color,
           transparent: true,
-          opacity,
+          opacity: opacity * 0.72,
           blending: THREE.AdditiveBlending,
           depthWrite: false,
         })
       );
-      ring.frustumCulled = false;
-      galaxyBoundaryGroup.add(ring);
+      innerGlow.frustumCulled = false;
+      ringGroup.add(innerGlow);
+
+      ringGroup.frustumCulled = false;
+      galaxyBoundaryGroup.add(ringGroup);
     }
 
     function rebuildGalaxyBoundaryRings(): void {
@@ -2146,12 +2266,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
       const radiusX = Math.max(420, size.x * 0.5 + 180);
       const radiusZ = Math.max(420, size.z * 0.5 + 180);
-      const radiusY = Math.max(130, size.y * 0.5 + 90);
+      const ringRadius = Math.max(radiusX, radiusZ); // same size for both rings
       center.y += Math.min(50, Math.max(-50, size.y * 0.03));
 
-      addGalaxyBoundaryRing(center, radiusX, radiusZ, 0x8bd3ff, 0.13, 0, 0);
-      addGalaxyBoundaryRing(center, radiusX * 1.04, radiusZ * 0.92, 0xa78bfa, 0.075, 0.28, -0.12);
-      addGalaxyBoundaryRing(center, radiusX * 0.92, Math.max(radiusZ * 0.62, radiusY + 260), 0x22d3ee, 0.055, Math.PI / 2.7, 0.22);
+      // Two luminous, thickened rings at 90 degrees. Each ring carries a tube,
+      // offset ghost lines, and bead points so the boundary reads as volumetric.
+      addGalaxyBoundaryRing(center, ringRadius, ringRadius * 0.985, 0xffffff, 0.24, 0, 0, 0);
+      addGalaxyBoundaryRing(center, ringRadius * 0.985, ringRadius, 0xffffff, 0.24, Math.PI / 2, 0, Math.PI / 2.7);
     }
 
     function addGuideLine(from: THREE.Vector3, to: THREE.Vector3, color = 0x88ddff, opacity = 0.16): void {
@@ -2360,8 +2481,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (root) targets.set(root, new THREE.Vector3(0, 0, 0));
       if (cardNodes.length === 0) {
         allNodes.forEach((node) => {
-          const position3D = node.userData.position3D as THREE.Vector3 | undefined;
-          targets.set(node, position3D ? position3D.clone() : node.position.clone());
+          const initialPosition = getInitialGalaxyPosition(node);
+          targets.set(node, initialPosition ? initialPosition.clone() : node.position.clone());
         });
         return targets;
       }
@@ -2418,13 +2539,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         const phi = Math.acos(1 - (2 * (index + 0.5)) / Math.max(sortedGroups.length, 1));
         const theta = Math.PI * (1 + Math.sqrt(5)) * index;
         const labelSeed = hashId(label);
-        const distance = 300 + Math.min(180, Math.sqrt(members.length) * 42) + seededRandom(labelSeed) * 80;
+        const distance = 420 + Math.min(320, Math.sqrt(members.length) * 58) + seededRandom(labelSeed) * 110;
         const anchor = new THREE.Vector3(
           distance * Math.sin(phi) * Math.cos(theta),
           distance * Math.cos(phi) * 1.05,
           distance * Math.sin(phi) * Math.sin(theta),
         );
-        const radius = 44 + Math.min(150, Math.sqrt(members.length) * 24);
+        const radius = 84 + Math.min(360, Math.sqrt(members.length) * 34);
         const sortedMembers = [...members].sort((a, b) => (Number(b.userData.graphWeight) || 0) - (Number(a.userData.graphWeight) || 0));
 
         sortedMembers.forEach((node, memberIndex) => {
@@ -2433,11 +2554,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
           const ratio = (memberIndex + 0.5) / Math.max(1, sortedMembers.length);
           const angle = memberIndex * goldenAngle + seededRandom(seed) * 0.75;
           const r = radius * Math.sqrt(ratio) + (seededRandom(seed + 1) - 0.5) * 22;
-          targets.set(node, new THREE.Vector3(
+          const semanticTarget = new THREE.Vector3(
             anchor.x + Math.cos(angle) * r,
             anchor.y + ((seededRandom(seed + 2) * 2 - 1) * 0.48 + Math.sin(angle * 1.25) * 0.18) * r,
             anchor.z + Math.sin(angle) * r * 0.72,
-          ));
+          );
+          const initialPosition = getInitialGalaxyPosition(node);
+          targets.set(node, initialPosition ? semanticTarget.lerp(initialPosition, 0.28) : semanticTarget);
         });
       });
 
@@ -2451,8 +2574,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
       allNodes.forEach((node) => {
         if (!targets.has(node)) {
-          const position3D = node.userData.position3D as THREE.Vector3 | undefined;
-          targets.set(node, position3D ? position3D.clone() : node.position.clone());
+              const initialPosition = getInitialGalaxyPosition(node);
+              targets.set(node, initialPosition ? initialPosition.clone() : node.position.clone());
         }
       });
 
@@ -2803,7 +2926,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       return computeEvidenceTargets();
     }
 
-    function animateNodesTo(targets: Map<THREE.Group, THREE.Vector3>, duration: number): void {
+    function animateNodesTo(targets: Map<THREE.Group, THREE.Vector3>, duration: number, onComplete?: () => void): void {
       layoutAnimating = true;
       if (layoutTween) {
         layoutTween.kill();
@@ -2827,6 +2950,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (duration <= 0 || entries.length === 0) {
         applyProgress();
         layoutAnimating = false;
+        onComplete?.();
         return;
       }
 
@@ -2840,6 +2964,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
           applyProgress();
           layoutAnimating = false;
           layoutTween = null;
+          onComplete?.();
         },
       });
     }
@@ -2936,7 +3061,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     function frameLayoutCamera(mode: GraphLayoutMode, duration = 0.95): void {
       const cameraTargets: Record<GraphLayoutMode, THREE.Vector3> = {
-        galaxy: new THREE.Vector3(780, 560, 780),
+        galaxy: new THREE.Vector3(940, 520, 720),
         flat: new THREE.Vector3(0, 1680, 0.1),
         radial: new THREE.Vector3(0, 1480, 0.1),
         concentric: new THREE.Vector3(0, 1360, 0.1),
@@ -2949,7 +3074,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       };
       gsap.killTweensOf(controls.target);
       gsap.killTweensOf(camera.position);
-      gsap.to(controls.target, { x: 0, y: 0, z: 0, duration, ease: 'expo.inOut' });
+      // Offset target slightly left (negative X) in galaxy/dashboard modes to account for left panel
+      const targetX = mode === 'galaxy' ? -220 : 0;
+      gsap.to(controls.target, { x: targetX, y: 0, z: 0, duration, ease: 'expo.inOut' });
       const target = cameraTargets[mode];
       gsap.to(camera.position, { x: target.x, y: target.y, z: target.z, duration, ease: 'expo.inOut' });
     }
@@ -2960,7 +3087,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (mode !== 'galaxy') coolGalaxyForce();
       useAppStore.getState().setGraphLayoutMode(mode);
       const resetBtn = document.getElementById('reset-view-btn');
-      if (resetBtn) resetBtn.classList.toggle('visible', mode !== 'galaxy');
+      if (resetBtn) resetBtn.classList.toggle('visible', mode !== DEFAULT_GRAPH_LAYOUT_MODE);
       const previousFocusNode = lockedNode || pressedNode || hoveredNode;
       if (mode === 'concentric' && !concentricCenterNode) {
         concentricCenterNode = previousFocusNode;
@@ -2978,15 +3105,24 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       applyLayoutGuides(mode);
       if (mode === 'galaxy') rebuildGalaxyBoundaryRings();
       applyLayoutLinkVisibility(mode);
+      // Snap nodes directly to galaxy anchors before tween+force
+      if (mode === 'galaxy') {
+        rebuildGalaxyForceAnchors();
+        allNodes.forEach((node) => {
+          const anchor = galaxyForceAnchors.get(node);
+          if (anchor) node.position.copy(anchor);
+        });
+        refreshLinkGeometry();
+      }
       animateNodesTo(computeLayoutTargets(mode), duration);
-      if (mode === 'galaxy') reheatGalaxyForce(0.38, 110);
+      if (mode === 'galaxy') reheatGalaxyForce(0.55, 200);
       refreshLinksAndLabels();
       frameLayoutCamera(mode, duration);
     }
 
     function resetCameraView(): void {
       const mode = layoutMode;
-      setResetButtonVisible(mode !== 'galaxy');
+      setResetButtonVisible(mode !== DEFAULT_GRAPH_LAYOUT_MODE);
       if (autoRotateBeforeFocus !== null) {
         if (mode === 'galaxy') controls.autoRotate = autoRotateBeforeFocus;
         autoRotateBeforeFocus = null;
@@ -3008,8 +3144,32 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       applyLayoutMotion(mode);
       applyAtmosphereForLayout(mode);
       applyLayoutGuides(mode);
-      animateNodesTo(computeLayoutTargets(mode), 0.85);
-      if (mode === 'galaxy') reheatGalaxyForce(0.38, 100);
+
+      if (mode === 'galaxy') {
+        semanticClusterLensEnabled = false;
+        useAppStore.getState().setGraphSemanticClusterLens(false);
+        if (layoutTween) {
+          layoutTween.kill();
+          layoutTween = null;
+        }
+        gsap.killTweensOf(allNodes.map(node => node.position));
+        layoutAnimating = false;
+        const targets = restoreInitialGalaxyAnchors();
+        targets.forEach((target, node) => {
+          node.position.copy(target);
+        });
+        refreshLinkGeometry();
+        rebuildGalaxyBoundaryRings();
+        applyGraphAttention(null);
+        refreshLinksAndLabels();
+        frameLayoutCamera(mode, 1.2);
+        return;
+      }
+
+      const targets = mode === 'galaxy' ? restoreInitialGalaxyAnchors() : computeLayoutTargets(mode);
+      animateNodesTo(targets, 0.85, () => {
+        if (mode === 'galaxy') rebuildGalaxyBoundaryRings();
+      });
       applyGraphAttention(null);
       refreshLinksAndLabels();
       frameLayoutCamera(mode, mode === 'galaxy' ? 1.2 : 0.85);
@@ -3242,7 +3402,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       1,
       10000
     );
-    camera.position.set(780, 560, 780);
+    camera.position.set(940, 520, 720);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -3276,12 +3436,22 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     controls.zoomSpeed = 0.85;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.2;
-    layoutMode = 'galaxy';
-    useAppStore.getState().setGraphLayoutMode('galaxy');
+    controls.target.set(-220, 0, 0); // offset center left for left-panel balance
+    layoutMode = DEFAULT_GRAPH_LAYOUT_MODE;
+    useAppStore.getState().setGraphLayoutMode(DEFAULT_GRAPH_LAYOUT_MODE);
     applyNodeModeVisual(useAppStore.getState().mode, true);
     const unsubscribeModeVisual = useAppStore.subscribe((state, prevState) => {
       if (state.mode !== prevState.mode) {
         applyNodeModeVisual(state.mode);
+        // Offset camera target for modes with left panel
+        if (state.mode === 'dashboard' || state.mode === 'galaxy') {
+          gsap.to(controls.target, { x: -220, y: 0, z: 0, duration: 0.6, ease: 'expo.inOut' });
+        }
+        // Clear locked node when leaving galaxy/dashboard to prevent force simulation starvation
+        if (state.mode === 'forge' || state.mode === 'cognition' || state.mode === 'learn') {
+          lockedNode = null;
+          applyGraphAttention(null);
+        }
         requestAnimationFrame(() => {
           if (lockedNode) applyGraphAttention(lockedNode, true);
           else if (hoverAttentionEnabled && hoveredNode) applyHoverPreview(hoveredNode);
@@ -3521,6 +3691,22 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const vaultName = storeVaults.find(v => v.id === vid)?.name || vid || `CENTRAL_INTELLIGENCE`;
       if (!n.some(node => node.isRoot)) createCore(vaultName);
       createClustersFromData(c, n, e);
+      captureInitialGalaxyPositions();
+
+      if (layoutMode !== 'galaxy') {
+        coolGalaxyForce();
+        configureControlsForLayout(layoutMode);
+        applyLayoutMotion(layoutMode);
+        applyAtmosphereForLayout(layoutMode);
+        applyLayoutGuides(layoutMode);
+        const initialLayoutTargets = computeLayoutTargets(layoutMode);
+        initialLayoutTargets.forEach((target, node) => {
+          node.position.copy(target);
+        });
+        refreshLinkGeometry();
+        frameLayoutCamera(layoutMode, 0);
+      }
+
       clearLearningPath();
       buildDemoLearningPath(dataRef.current.learningPathSteps);
       createLearningPath();
@@ -3540,9 +3726,6 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         lastFocusSelection = getFocusSelection(selectedGroup);
         setResetButtonVisible(true);
         requestAnimationFrame(() => applyGraphAttention(selectedGroup, true));
-      }
-      if (layoutMode !== 'galaxy') {
-        requestAnimationFrame(() => applyGraphLayout(layoutMode, 0.85));
       }
     }
 
@@ -4059,6 +4242,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (nebulaGroup) {
         nebulaGroup.children.forEach(c => {
           c.rotation.z += (c.userData.rotationSpeed || 0.0002);
+        });
+      }
+
+      if (galaxyBoundaryGroup?.visible) {
+        galaxyBoundaryGroup.children.forEach((child) => {
+          const spin = Number(child.userData.boundarySpin) || 0;
+          if (spin) child.rotation.y += spin;
         });
       }
 

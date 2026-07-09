@@ -116,12 +116,9 @@ export default function Header() {
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>⌘K</span>
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>搜索节点...</span>
         </Button>
-        <Button
-          className="w-6 h-6 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 hover:border-white/20 transition-colors"
-          style={{ fontSize: 'var(--f9)' }}
-          onClick={() => openModal('shortcuts')}
-          title="快捷键帮助"
-        >?</Button>
+        <span className="mono text-white/20 tracking-wider" style={{ fontSize: 'var(--f8)' }}>
+          FPS <span id="cluster-fps">—</span> &nbsp;│&nbsp; XYZ <span id="cluster-coords">0 / 0 / 0</span>
+        </span>
         <div className="notif-bell relative" ref={notifRef}>
           <div onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen) }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
@@ -207,21 +204,6 @@ export default function Header() {
         </div>
         <Button className="w-7 h-7 rounded-full bg-gradient-to-br from-purple-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center hover:border-white/30 transition-colors" onClick={() => openModal('profile')}>
           <span className="serif" style={{ fontSize: 'var(--f10)' }}>{(session?.user?.name ?? 'A').charAt(0).toUpperCase()}</span>
-        </Button>
-        <Button
-          className="mono text-white/30 hover:text-white/60 transition-colors px-2"
-          style={{ fontSize: 'var(--f9)' }}
-          onClick={() => {
-            const vid = useAppStore.getState().currentVaultId
-            if (!vid) return
-            const a = document.createElement('a')
-            a.href = `/api/vault/export?vid=${vid}`
-            a.download = 'vault-export.zip'
-            a.click()
-          }}
-          title="导出知识库"
-        >
-          ⬇ EXPORT
         </Button>
         <div id="clock" className="opacity-50" style={{ fontSize: 'var(--f10)' }}>{time}</div>
       </div>

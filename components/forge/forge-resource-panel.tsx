@@ -281,10 +281,10 @@ export default function ForgeResourcePanel({ view }: Props) {
             ]}
             onChange={setContextTab}
           />
-          <Surface as="section" variant="glass" className="forge-left-scroll" aria-label={contextTab === 'tasks' ? '任务列表' : '对话列表'}>
+          <Surface as="section" variant="glass" className="forge-left-scroll" key={`context-${contextTab}`} aria-label={contextTab === 'tasks' ? '任务列表' : '对话列表'}>
             {contextTab === 'tasks' ? (
               paths.length ? (
-                paths.map((path) => (
+                paths.map((path, index) => (
                   <PathRow
                     key={path.id}
                     path={path}
@@ -292,6 +292,10 @@ export default function ForgeResourcePanel({ view }: Props) {
                     expanded={expandedPathId === path.id}
                     onToggle={() => handleTogglePath(path)}
                     onOpenStep={(step) => void handleOpenStep(path, step)}
+                    style={{
+                      animation: `modePanelLeftIn 320ms cubic-bezier(0.16, 1, 0.3, 1) both`,
+                      animationDelay: `${Math.min(index * 38, 700)}ms`,
+                    }}
                   />
                 ))
               ) : (
@@ -299,7 +303,7 @@ export default function ForgeResourcePanel({ view }: Props) {
               )
             ) : (
               talks.length ? (
-                talks.map((session) => (
+                talks.map((session, index) => (
                   <TalkRow
                     key={session.id}
                     session={session}
@@ -307,6 +311,10 @@ export default function ForgeResourcePanel({ view }: Props) {
                     deleting={deletingSessionId === session.id}
                     onOpen={() => void handleOpenTalk(session)}
                     onDelete={() => void handleDeleteTalk(session)}
+                    style={{
+                      animation: `modePanelLeftIn 320ms cubic-bezier(0.16, 1, 0.3, 1) both`,
+                      animationDelay: `${Math.min(index * 38, 700)}ms`,
+                    }}
                   />
                 ))
               ) : (
@@ -318,9 +326,9 @@ export default function ForgeResourcePanel({ view }: Props) {
       ) : (
         <>
           <PillTabs value={cardFilter} items={CARD_FILTERS} onChange={setCardFilter} />
-          <Surface as="section" variant="glass" className="forge-left-scroll" aria-label="卡片列表">
+          <Surface as="section" variant="glass" className="forge-left-scroll" key={`cards-${cardFilter}`} aria-label="卡片列表">
             {cards.length ? (
-              cards.map((node) => (
+              cards.map((node, index) => (
                 <button
                   key={node.id}
                   type="button"
@@ -329,6 +337,10 @@ export default function ForgeResourcePanel({ view }: Props) {
                   aria-pressed={selectedNode?.id === node.id}
                   data-testid="forge-left-card-row"
                   data-card-id={node.id}
+                  style={{
+                    animation: `modePanelLeftIn 320ms cubic-bezier(0.16, 1, 0.3, 1) both`,
+                    animationDelay: `${Math.min(index * 38, 700)}ms`,
+                  }}
                   onClick={() => void handleOpenCard(node)}
                 >
                   <span className={`forge-left-dot ${TYPE_TONE[node.type] ?? 'cyan'}`} />
@@ -392,18 +404,20 @@ function PathRow({
   expanded,
   onToggle,
   onOpenStep,
+  style,
 }: {
   path: LearningPath
   activeLearningStepId: string | null
   expanded: boolean
   onToggle: () => void
   onOpenStep: (step: LearningStep) => void
+  style?: React.CSSProperties
 }) {
   const step = resolveTaskStep(path, activeLearningStepId)
   const ToggleIcon = expanded ? ChevronDown : ChevronRight
 
   return (
-    <section className="forge-left-path-row">
+    <section className="forge-left-path-row" style={style}>
       <button
         type="button"
         className="forge-left-row forge-left-task-row"
@@ -455,15 +469,17 @@ function TalkRow({
   deleting,
   onOpen,
   onDelete,
+  style,
 }: {
   session: SessionSummary
   active: boolean
   deleting: boolean
   onOpen: () => void
   onDelete: () => void
+  style?: React.CSSProperties
 }) {
   return (
-    <section className={`forge-left-talk-row ${active ? 'active' : ''}`}>
+    <section className={`forge-left-talk-row ${active ? 'active' : ''}`} style={style}>
       <button
         type="button"
         className="forge-left-row"

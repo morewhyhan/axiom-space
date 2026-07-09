@@ -10,7 +10,6 @@ import {
   ProfilePillDock,
   buildDimensions,
   buildProfileTree,
-  buildProfileTransitionSummary,
   type ProfileNode,
 } from './profile'
 
@@ -19,7 +18,6 @@ export default function LearningProfile() {
   const submitFeedback = useSubmitProfileFeedback()
   const dimensions = useMemo(() => buildDimensions(data), [data])
   const profileTree = useMemo(() => buildProfileTree(data, dimensions), [data, dimensions])
-  const transitionSummary = useMemo(() => buildProfileTransitionSummary(data, dimensions), [data, dimensions])
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
@@ -61,42 +59,7 @@ export default function LearningProfile() {
 
   return (
     <aside className="cognition-workbench pointer-events-auto">
-      {transitionSummary && (
-        <section className="profile-transition-summary" aria-label="画像前后变化">
-          <div className="profile-transition-head">
-            <span className="mono uppercase text-cyan-100/70">画像前后变化</span>
-            <span className="mono text-white/28">证据 {transitionSummary.evidenceCount} 条</span>
-          </div>
-          <div className="profile-transition-grid">
-            <div className="profile-transition-cell">
-              <div className="mono profile-transition-label">
-                原始状态
-              </div>
-              <p>
-                {transitionSummary.before}
-              </p>
-            </div>
-            <div className="profile-transition-cell">
-              <div className="mono profile-transition-label">
-                当前状态
-              </div>
-              <p>
-                {transitionSummary.current}
-              </p>
-            </div>
-            <div className="profile-transition-cell">
-              <div className="mono profile-transition-label">
-                下一步
-              </div>
-              <p>
-                {transitionSummary.next}
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      <div className="profile-top-row">
+<div className="profile-top-row">
         <div className="profile-top-copy">
           {activeDimension && (
             <p className="profile-interpretation-inline">

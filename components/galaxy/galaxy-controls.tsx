@@ -55,7 +55,6 @@ export default function GalaxyControls() {
 
   const [autoRotate, setAutoRotate] = useState(true)
   const [bloom, setBloom] = useState(0.8)
-  const [internalEdges, setInternalEdges] = useState(false)
   const [externalEdges, setExternalEdges] = useState(false)
   const [filterPerm, setFilterPerm] = useState(true)
   const [filterFleet, setFilterFleet] = useState(true)
@@ -103,23 +102,6 @@ export default function GalaxyControls() {
     callCanvas('__setHoverAttention', [value])
   }
 
-  const toggleSemanticClusterLens = () => {
-    const value = !semanticClusterLens
-    setSemanticClusterLens(value)
-    callCanvas('__setSemanticClusterLens', [value])
-  }
-
-  const toggleForceMotion = () => {
-    const value = !forceMotion
-    setForceMotion(value)
-    callCanvas('__setForceMotion', [value])
-  }
-
-  const toggleInternalEdges = () => {
-    const value = !internalEdges
-    if (callCanvas('__setInternalEdgesVisible', [value])) setInternalEdges(value)
-  }
-
   const toggleExternalEdges = () => {
     const value = !externalEdges
     if (callCanvas('__setExternalEdgesVisible', [value])) setExternalEdges(value)
@@ -130,7 +112,6 @@ export default function GalaxyControls() {
     if (callCanvas('__setBloom', [value])) setBloom(value)
   }
 
-  const focusRecent = () => callCanvas('__focusRecent')
   const showOrphans = () => callCanvas('__showOrphansOnly')
   const showAllNodes = () => callCanvas('__showAllNodes')
 
@@ -169,7 +150,7 @@ export default function GalaxyControls() {
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <GalaxyHudAction icon={<Search className="h-3.5 w-3.5" />} label="搜索" onClick={() => openModal('search')} />
-          <GalaxyHudAction icon={<ArrowDownToLine className="h-3.5 w-3.5" />} label="导入" onClick={() => openModal('importtext')} />
+          <GalaxyHudAction icon={<ArrowDownToLine className="h-3.5 w-3.5" />} label="新建" onClick={() => openModal('newcard')} />
         </div>
       </GalaxyHudCard>
 
@@ -187,7 +168,6 @@ export default function GalaxyControls() {
         <div className="mt-3 grid grid-cols-2 gap-2">
           <GalaxyHudAction icon={<RotateCw className="h-3.5 w-3.5" />} label="重置" onClick={resetView} />
           <GalaxyHudAction icon={<Maximize2 className="h-3.5 w-3.5" />} label="适配" onClick={fitSelection} />
-          <GalaxyHudAction icon={<Focus className="h-3.5 w-3.5" />} label="最近" onClick={focusRecent} />
           <GalaxyHudAction icon={<Eye className="h-3.5 w-3.5" />} label="孤立" onClick={showOrphans} />
           <GalaxyHudAction icon={<Eye className="h-3.5 w-3.5" />} label="全部" onClick={showAllNodes} />
         </div>
@@ -198,9 +178,6 @@ export default function GalaxyControls() {
         <div className="mt-3 space-y-3">
           <GalaxySwitchRow label="自动旋转" active={autoRotate} onClick={toggleAutoRotate} />
           <GalaxySwitchRow label="悬停聚焦" active={hoverAttention} onClick={toggleHoverAttention} />
-          <GalaxySwitchRow label="自然布局" active={forceMotion} onClick={toggleForceMotion} />
-          <GalaxySwitchRow label="语义成团" active={semanticClusterLens} onClick={toggleSemanticClusterLens} />
-          <GalaxySwitchRow label="内部连线" active={internalEdges} onClick={toggleInternalEdges} />
           <GalaxySwitchRow label="跨域连线" active={externalEdges} onClick={toggleExternalEdges} />
           <div>
             <div className="mb-1.5 flex justify-between mono" style={{ fontSize: 'var(--f9)' }}>

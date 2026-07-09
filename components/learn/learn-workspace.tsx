@@ -337,6 +337,7 @@ export default function LearnWorkspace() {
           currentPathId={currentPath?.id}
           onPathFilterChange={setPathFilter}
           onSelectPath={handleSelectPath}
+          pushBox={currentPath ? <PushSuggestionBox pathId={currentPath.id} /> : null}
           createPanel={(
             <CreatePathPanel
               open={createPanelOpen}
@@ -376,7 +377,6 @@ export default function LearnWorkspace() {
                 onArchivePath={handleArchivePath}
                 onDeletePath={handleDeletePath}
               />
-              <PushSuggestionBox pathId={currentPath.id} />
               {lastAssessment && (
                 <AssessmentPanel
                   stepName={lastAssessment.stepName}
