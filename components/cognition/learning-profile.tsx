@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, type CSSProperties } from 'react'
-import { CheckCircle2, ChevronDown, ChevronUp, FlaskConical, XCircle } from 'lucide-react'
+import { CheckCircle2, ChevronDown, ChevronUp, FlaskConical, GitCompareArrows, XCircle } from 'lucide-react'
 import { HudPanel } from '@/components/ui'
 import { useCognition, useSubmitProfileFeedback } from '@/hooks/use-cognition'
 import PromptModal from './observations-panel'
@@ -26,6 +26,7 @@ export default function LearningProfile() {
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [assessmentOpen, setAssessmentOpen] = useState(false)
+  const [hypothesisOpen, setHypothesisOpen] = useState(false)
 
   const activeKey = selectedKey ?? profileTree[0]?.key ?? null
   const activeDimension = activeKey
@@ -64,6 +65,34 @@ export default function LearningProfile() {
   return (
     <aside className="cognition-workbench pointer-events-auto">
       <ProfileHistoryStrip />
+      {!!data?.hypothesisTimeline?.length && (
+        <HudPanel as="section" className="mb-3 rounded-xl p-3" data-testid="hypothesis-evidence-timeline">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-3 text-left"
+            onClick={() => setHypothesisOpen((value) => !value)}
+            data-testid="hypothesis-evidence-toggle"
+          >
+            <span className="flex items-center gap-2">
+              <GitCompareArrows className="h-4 w-4 text-amber-200/70" />
+              <span>
+                <span className="block mono uppercase text-white/32" style={{ fontSize: 'var(--f8)' }}>Competing_Hypotheses</span>
+                <span className="block text-white/58" style={{ fontSize: 'var(--f9)' }}>
+                  {data.hypothesisTimeline.length} 个解释并行验证 · {data.hypothesisTimeline.filter((item) => item.status === 'supported').length} 个保留
+                </span>
+              </span>
+            </span>
+            {hypothesisOpen ? <ChevronUp className="h-4 w-4 text-white/35" /> : <ChevronDown className="h-4 w-4 text-white/35" />}
+          </button>
+          {hypothesisOpen && (
+            <div className="mt-3 grid gap-2 border-t border-white/8 pt-3">
+              {data.hypothesisTimeline.map((item) => (
+                <HypothesisEvidenceRow key={item.id} item={item} />
+              ))}
+            </div>
+          )}
+        </HudPanel>
+      )}
       {!!data?.assessmentTimeline?.length && (
         <HudPanel as="section" className="mb-3 rounded-xl p-3" data-testid="assessment-evidence-timeline">
           <button
@@ -141,7 +170,34 @@ export default function LearningProfile() {
   )
 }
 
-function AssessmentEvidenceRow({ item }: { item: NonNullable<ReturnType<typeof useCognition>['data']>['assessmentTimeline'][number] }) {
+function HypothesisEvidenceRow({ item }: { item: NonNullable<NonNullable<ReturnType<typeof useCognition>['data']>['hypothesisTimeline']>[number] }) {
+  const supported = item.status === 'supported'
+  const before = item.confidenceBefore === null ? '未标注' : `${Math.round(item.confidenceBefore * 100)}%`
+  const after = item.confidenceAfter === null ? '未标注' : `${Math.round(item.confidenceAfter * 100)}%`
+  return (
+    <div className="rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2" data-testid={`hypothesis-${item.key}`}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex items-center gap-2 text-white/72" style={{ fontSize: 'var(--f9)' }}>
+          {supported ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-200/70" /> : <XCircle className="h-3.5 w-3.5 text-rose-200/70" />}
+          {item.title}
+        </span>
+        <span className={supported ? 'mono text-emerald-200/55' : 'mono text-rose-200/55'} style={{ fontSize: 'var(--f8)' }}>
+          {supported ? '保留' : '淘汰'} · {before} → {after}
+        </span>
+      </div>
+      <div className="mt-1 text-white/52" style={{ fontSize: 'var(--f8)' }}>解释：{item.claim}</div>
+      <div className="mt-1 text-white/38" style={{ fontSize: 'var(--f8)' }}>可证伪预测：{item.prediction}</div>
+      <div className="mt-1 text-cyan-100/48" style={{ fontSize: 'var(--f8)' }}>验证：{item.test}</div>
+      <div className="mt-1 text-white/45" style={{ fontSize: 'var(--f8)' }}>结果：{item.result}</div>
+      {item.evidenceIds.length > 0 && (
+        <div className="mt-1 mono text-white/24" style={{ fontSize: 'var(--f8)' }}>证据：{item.evidenceIds.join(' · ')}</div>
+      )}
+      <div className="mt-1 mono text-white/20" style={{ fontSize: 'var(--f8)' }}>假设记录 ID：{item.id}</div>
+    </div>
+  )
+}
+
+function AssessmentEvidenceRow({ item }: { item: NonNullable<NonNullable<ReturnType<typeof useCognition>['data']>['assessmentTimeline']>[number] }) {
   const rubricId = typeof item.verification?.rubricId === 'string' ? item.verification.rubricId : '未标注'
   const deterministicCheck = typeof item.verification?.deterministicCheck === 'string' ? item.verification.deterministicCheck : '未标注'
   return (

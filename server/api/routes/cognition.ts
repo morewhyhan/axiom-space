@@ -131,6 +131,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     capabilities,
     learningPaths,
     observationMemories,
+    hypothesisMemories,
     assessments,
     resourceJobs,
   ] = await Promise.all([
@@ -163,6 +164,12 @@ const app = new Hono<{ Variables: { userId: string } }>()
       orderBy: { createdAt: 'desc' },
       take: 12,
       select: { id: true, value: true, createdAt: true },
+    }),
+    prisma.vaultMemory.findMany({
+      where: { vaultId: vid, category: 'hypothesis' },
+      orderBy: { createdAt: 'asc' },
+      take: 12,
+      select: { id: true, key: true, value: true, createdAt: true },
     }),
     prisma.assessmentResult.findMany({
       where: { userId, vaultId: vid },
@@ -497,6 +504,24 @@ const app = new Hono<{ Variables: { userId: string } }>()
       verification: safeJsonRecord(assessment.clientContext),
       createdAt: assessment.createdAt.toISOString(),
     })),
+    hypothesisTimeline: hypothesisMemories.flatMap((memory) => {
+      const value = safeJsonRecord(memory.value)
+      if (!value || typeof value.title !== 'string' || typeof value.status !== 'string') return []
+      return [{
+        id: memory.id,
+        key: memory.key,
+        title: value.title,
+        claim: typeof value.claim === 'string' ? value.claim : '',
+        prediction: typeof value.prediction === 'string' ? value.prediction : '',
+        test: typeof value.test === 'string' ? value.test : '',
+        result: typeof value.result === 'string' ? value.result : '',
+        status: value.status,
+        confidenceBefore: typeof value.confidenceBefore === 'number' ? value.confidenceBefore : null,
+        confidenceAfter: typeof value.confidenceAfter === 'number' ? value.confidenceAfter : null,
+        evidenceIds: Array.isArray(value.evidenceIds) ? value.evidenceIds.map(String) : [],
+        createdAt: memory.createdAt.toISOString(),
+      }]
+    }),
   }
 
   return c.json(responseBody)

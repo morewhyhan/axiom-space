@@ -117,6 +117,20 @@ export interface CognitionData {
     verification: Record<string, unknown> | null
     createdAt: string
   }>
+  hypothesisTimeline?: Array<{
+    id: string
+    key: string
+    title: string
+    claim: string
+    prediction: string
+    test: string
+    result: string
+    status: string
+    confidenceBefore: number | null
+    confidenceAfter: number | null
+    evidenceIds: string[]
+    createdAt: string
+  }>
 }
 
 export interface ProfileDimensionInsight {
@@ -223,6 +237,7 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     dimensionInsights: data.dimensionInsights as ProfileDimensionInsight[] | undefined,
     promptBlock: data.promptBlock as string | undefined,
     assessmentTimeline: data.assessmentTimeline as CognitionData['assessmentTimeline'] ?? [],
+    hypothesisTimeline: data.hypothesisTimeline as CognitionData['hypothesisTimeline'] ?? [],
   }
 }
 
