@@ -5,12 +5,15 @@
  * - LLM 输出 HTML（它最擅长的格式）
  * - html-to-docx → .docx
  * - Puppeteer → .pdf
- * - pptxgenjs → .pptx
+ * - McKinsey PPTX 引擎 → .pptx（deep-navy 专业模板）
  *
  * SVG 和 Mermaid 是自描述格式，LLM 直接生成，无需额外转换。
  */
 
-import PptxGenJS from 'pptxgenjs';
+import { spawn } from 'node:child_process';
+import { writeFile, readFile, unlink, mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Browser } from 'puppeteer';
 import puppeteer from 'puppeteer';
 
@@ -107,67 +110,59 @@ export async function renderPdf(
 
 // ── PPT ───────────────────────────────────────────────────────────
 
+const MCKINSEY_BRIDGE = join(
+  process.cwd(), 'scripts', 'mckinsey-pptx', 'bridge.py',
+);
+const MCKINSEY_VENV_PYTHON = join(
+  process.cwd(), 'scripts', 'mckinsey-pptx', '.venv', 'bin', 'python3',
+);
+
+/**
+ * Build a McKinsey-style PPTX from structured slide specs.
+ *
+ * Each slide spec has a `type` and payload matching the McKinsey template registry.
+ * Types include: executive_summary, column_chart, assessment_table, trends,
+ * org_chart, timeline, process_flow, summary, structure, comparison, etc.
+ *
+ * Uses the cloned mckinsey-pptx engine (scripts/mckinsey-pptx) via a Python bridge.
+ */
 export async function renderPptx(
   title: string,
-  slidesHtml: string[],
+  slideSpecs: Record<string, unknown>[],
 ): Promise<Buffer> {
-  const pptx = new PptxGenJS();
-  pptx.defineLayout({ name: 'WIDE', width: 10, height: 5.625 });
-  pptx.layout = 'WIDE';
+  // Ensure every spec has a section marker so the McKinsey engine formats consistently
+  const specs = slideSpecs.map((spec, i) => ({
+    ...spec,
+    section_marker: (spec.section_marker as string) || title || `Slide ${i + 1}`,
+  }));
 
-  for (let i = 0; i < slidesHtml.length; i++) {
-    const slideHtml = slidesHtml[i];
-    const slide = pptx.addSlide();
+  const tmpDir = await mkdtemp(join(tmpdir(), 'axiom-pptx-'));
+  const jsonPath = join(tmpDir, 'spec.json');
+  const pptxPath = join(tmpDir, 'output.pptx');
 
-    // 解析标题（第一个 h1/h2）
-    const titleMatch = slideHtml.match(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/);
-    const slideTitle = titleMatch ? stripTags(titleMatch[1]) : `${title} (${i + 1})`;
+  try {
+    await writeFile(jsonPath, JSON.stringify(specs), 'utf-8');
 
-    // 解析正文段落
-    const items: string[] = [];
-    const liMatches = slideHtml.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/g);
-    for (const m of liMatches) items.push(stripTags(m[1]));
-    const pMatches = slideHtml.matchAll(/<p[^>]*>([\s\S]*?)<\/p>/g);
-    for (const m of pMatches) {
-      const txt = stripTags(m[1]).trim();
-      if (txt && !items.includes(txt)) items.push(txt);
-    }
-
-    // 背景
-    slide.background = { fill: i === 0 || i === slidesHtml.length - 1
-      ? '1a1a2e' : 'ffffff' };
-
-    // 标题
-    slide.addText(slideTitle, {
-      x: 1, y: 0.5, w: 8, h: 1,
-      fontSize: i === 0 || i === slidesHtml.length - 1 ? 36 : 28,
-      color: i === 0 || i === slidesHtml.length - 1 ? 'a855f7' : '6366f1',
-      fontFace: 'Segoe UI',
-      bold: true,
-    });
-
-    // 要点
-    if (items.length > 0) {
-      slide.addText(
-        items.map(txt => ({ text: txt, options: { bullet: true, fontSize: 16, color: '333333' } })),
-        { x: 1, y: 1.8, w: 8, h: 3.2, valign: 'top', lineSpacingMultiple: 1.5 },
-      );
-    } else {
-      slide.addText(stripTags(slideHtml).slice(0, 200), {
-        x: 1, y: 1.8, w: 8, h: 3.2,
-        fontSize: 14, color: '666666', valign: 'top',
+    await new Promise<void>((resolve, reject) => {
+      const proc = spawn(MCKINSEY_VENV_PYTHON, [MCKINSEY_BRIDGE, jsonPath, pptxPath], {
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
-    }
-
-    // 页码
-    slide.addText(`${i + 1} / ${slidesHtml.length}`, {
-      x: 8.5, y: 5.1, w: 1.2, h: 0.4,
-      fontSize: 9, color: '999999', align: 'right',
+      let stderr = '';
+      proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
+      proc.on('close', (code: number | null) => {
+        if (code === 0) resolve();
+        else reject(new Error(stderr.trim() || `mckinsey-pptx exited ${code}`));
+      });
+      proc.on('error', reject);
     });
-  }
 
-  const buf = await pptx.write({ outputType: 'nodebuffer' });
-  return buf as unknown as Buffer;
+    const buf = await readFile(pptxPath);
+    return buf;
+  } finally {
+    // Cleanup temp files
+    unlink(jsonPath).catch(() => {});
+    unlink(pptxPath).catch(() => {});
+  }
 }
 
 function stripTags(html: string): string {

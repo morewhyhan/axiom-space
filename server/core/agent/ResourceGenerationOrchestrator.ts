@@ -139,10 +139,17 @@ function validateResource(type: ResourceType, content: string): string | null {
       break;
     }
     case 'ppt': {
-      if (len < 300) return `Too short (${len} chars, min 300)`;
-      if (!text.includes('<!-- slide -->')) return 'Missing slide separators';
-      const slideCount = text.split(/<!--\s*slide\s*-->/).length;
-      if (slideCount < 6) return `Too few slides (${slideCount}, min 6)`;
+      if (len < 200) return `Too short (${len} chars, min 200)`;
+      // Accept new JSON slide-spec format or legacy HTML format
+      try {
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed) || parsed.length < 4) return `Need at least 4 slides in JSON array`;
+      } catch {
+        // Legacy HTML fallback
+        if (!text.includes('<!-- slide -->')) return 'Missing slide separators (legacy HTML)';
+        const slideCount = text.split(/<!--\s*slide\s*-->/).length;
+        if (slideCount < 4) return `Too few slides (${slideCount}, min 4)`;
+      }
       break;
     }
   }
@@ -292,9 +299,24 @@ export class ResourceGenerationOrchestrator {
             break;
           }
           case 'ppt': {
-            this.deps.onProgress?.({ type, status: 'rendering', progress: 70, message: '正在渲染 PPT 文件' });
-            const slides = cleaned.split(/<!--\s*slide\s*-->/).filter(s => s.trim());
-            const buf = await renderPptx(topic, slides);
+            this.deps.onProgress?.({ type, status: 'rendering', progress: 70, message: '正在渲染 McKinsey 风格 PPT' });
+            let slideSpecs: Record<string, unknown>[];
+            try {
+              // New format: JSON slide specs for McKinsey engine
+              const parsed = JSON.parse(cleaned);
+              slideSpecs = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              // Fallback: old HTML format → convert to basic spec
+              const slides = cleaned.split(/<!--\s*slide\s*-->/).filter((s: string) => s.trim());
+              slideSpecs = slides.map((html: string, i: number) => {
+                const titleMatch = html.match(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/);
+                const slideTitle = titleMatch ? titleMatch[1].replace(/<[^>]*>/g, '').trim() : `${topic} (${i + 1})`;
+                if (i === 0) return { type: 'cover_slide', title: slideTitle, subtitle: topic };
+                if (i === slides.length - 1) return { type: 'dark_navy_summary', key_points: [stripHtmlTags(html).slice(0, 200)] };
+                return { type: 'executive_summary_paragraph', title: slideTitle, paragraphs: [stripHtmlTags(html).slice(0, 400)] };
+              });
+            }
+            const buf = await renderPptx(topic, slideSpecs);
             cleaned = `data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,${buf.toString('base64')}`;
             break;
           }
@@ -551,4 +573,8 @@ function escapeXml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+function stripHtmlTags(html: string): string {
+  return html.replace(/<[^>]*>/g, '').trim();
 }

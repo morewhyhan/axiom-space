@@ -4512,7 +4512,7 @@ body {
 }
 
 .forge-ide.has-left.has-right.no-chat {
-  grid-template-columns: 52px minmax(240px, var(--forge-left-live, var(--forge-left-w))) minmax(340px, 1fr);
+  grid-template-columns: 52px minmax(240px, var(--forge-left-live, var(--forge-left-w))) 1fr minmax(340px, var(--forge-right-live, var(--forge-right-w)));
 }
 
 .forge-ide.no-left.has-right.no-chat {
@@ -4524,7 +4524,7 @@ body {
 }
 
 .forge-ide.has-left.has-right.no-chat .forge-ide-editor {
-  grid-column: 3;
+  grid-column: 4;
 }
 
 .forge-ide.no-left.has-right.no-chat .forge-ide-editor {
@@ -5783,11 +5783,11 @@ body {
   }
 
   .forge-ide.has-left.has-right.no-chat {
-    grid-template-columns: 52px minmax(240px, var(--forge-left-live, clamp(260px, 20vw, 320px))) minmax(330px, 1fr);
+    grid-template-columns: 52px minmax(240px, var(--forge-left-live, clamp(260px, 20vw, 320px))) 1fr minmax(330px, var(--forge-right-live, 28vw));
   }
 
   .forge-ide.no-left.has-right.no-chat {
-    grid-template-columns: 52px minmax(330px, 1fr);
+    grid-template-columns: 52px 1fr minmax(330px, var(--forge-right-live, 28vw));
   }
 
   .forge-ide.has-left.no-right {

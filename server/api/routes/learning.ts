@@ -1887,6 +1887,8 @@ ${context.answer.slice(0, 2400)}
         vaultId: vault.id,
         suggestionId,
       })
+      // Re-scan after push execution — new structure may reveal new gaps
+      void pushSuggestionEngine.scanAndPersist({ userId, vaultId: vault.id, trigger: 'auto' }).catch(() => {})
       return c.json({ success: true, ...result })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)

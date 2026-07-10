@@ -23,7 +23,6 @@ export interface ProfileQuestionResult {
 }
 
 const PROFILE_QUESTION_SESSION_TITLE = '画像补全问题'
-const PROFILE_QUESTION_RECENT_MS = 6 * 60 * 60 * 1000
 
 const INTENT_DIMENSIONS: Record<QuestionIntent, string[]> = {
   path: ['learningGoal', 'currentFoundation', 'paceAndLoad'],
@@ -61,8 +60,9 @@ export async function maybeCreateProfileQuestion(input: ProfileQuestionInput): P
   const candidates = chooseQuestionDimensions(intent, profile.dimensionInsights)
   if (candidates.length === 0) return null
 
-  const recentDimensions = await getRecentlyAskedDimensions(input.vaultId)
-  const dimensions = candidates.filter((dimension) => !recentDimensions.has(dimension)).slice(0, 1)
+  // Take up to 3 dimensions that need updating (no time-based dedup —
+  // rely solely on confidence and evidence to decide whether to ask)
+  const dimensions = candidates.slice(0, 3)
   if (dimensions.length === 0) return null
 
   const question = buildProfileQuestion(intent, dimensions)
@@ -179,32 +179,6 @@ function chooseQuestionDimensions(intent: QuestionIntent, insights: ProfileDimen
     const hasDirectEvidence = insight.observations.length > 0
     return insight.confidence < 0.45 || (!hasDirectEvidence && insight.score < 0.55)
   })
-}
-
-async function getRecentlyAskedDimensions(vaultId: string): Promise<Set<string>> {
-  const since = new Date(Date.now() - PROFILE_QUESTION_RECENT_MS)
-  const records = await prisma.vaultMemory.findMany({
-    where: {
-      vaultId,
-      category: 'profile_question',
-      createdAt: { gte: since },
-    },
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-    select: { value: true },
-  })
-  const dimensions = new Set<string>()
-  for (const record of records) {
-    try {
-      const parsed = JSON.parse(record.value) as { dimensions?: unknown }
-      if (Array.isArray(parsed.dimensions)) {
-        parsed.dimensions.forEach((item) => {
-          if (typeof item === 'string') dimensions.add(item)
-        })
-      }
-    } catch {}
-  }
-  return dimensions
 }
 
 function buildProfileQuestion(intent: QuestionIntent, dimensions: string[]): string {

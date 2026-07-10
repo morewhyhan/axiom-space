@@ -8,11 +8,19 @@ import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { getVaultPath, resolvePath } from "./helpers";
 import { prisma } from '@/lib/db';
-import { getCurrentVaultId } from '@/server/core/agent/agent-context';
+import { getCurrentVaultId, getCurrentUserId } from '@/server/core/agent/agent-context';
 import { emitNotification } from '../notification-bus';
 import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
 import { clampEdgeWeight, normalizeEdgeType, validatePermanentCardContent } from '@/server/core/domain/contracts';
+import { pushSuggestionEngine } from '@/server/core/push/push-suggestion-engine';
 const axiom = createAxiomCompat(getFileStorage());
+
+function triggerPushScan(): void {
+  const vaultId = getCurrentVaultId()
+  const userId = getCurrentUserId()
+  if (!vaultId || !userId) return
+  void pushSuggestionEngine.scanAndPersist({ userId, vaultId, trigger: 'auto' }).catch(() => {})
+}
 
 const createFleeingCardTool = createTool(
   'create_fleeing_card',
@@ -55,6 +63,7 @@ const createFleeingCardTool = createTool(
             severity: 'info',
           });
         }
+        triggerPushScan()
         return {
           content: [{ type: 'text', text: `灵感草稿已创建，路径: ${cardPath}` }],
           details: { id: createdCardId || cardPath, cardId: createdCardId, cardPath, content: normalizedContent },
@@ -136,6 +145,7 @@ const createPermanentCardTool = createTool(
             severity: 'info',
           });
         }
+        triggerPushScan()
         return {
           content: [{ type: 'text', text: contentParts.join('\n') }],
           details: { title: params.title, id: createdCardId || cardPath, cardId: createdCardId, cardPath, quality_checks: quality.checks },
@@ -707,6 +717,7 @@ const addGraphEdgeTool = createTool(
         );
       }
 
+      triggerPushScan()
       return {
         content: [{ type: 'text', text: `关系已添加: ${params.source} --[${edgeType}]--> ${params.target}` }],
         details: { source: params.source, target: params.target, type: edgeType, strength, edgeId: edge.id },

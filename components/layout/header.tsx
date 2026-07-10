@@ -117,7 +117,7 @@ export default function Header() {
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>搜索节点...</span>
         </Button>
         <span className="mono text-white/20 tracking-wider" style={{ fontSize: 'var(--f8)' }}>
-          FPS <span id="cluster-fps">—</span> &nbsp;│&nbsp; XYZ <span id="cluster-coords">0 / 0 / 0</span>
+          FPS <span id="cluster-fps">—</span> &nbsp;│&nbsp; CAM <span id="cluster-coords">0 / 0 / 0</span> &nbsp;│&nbsp; TGT <span id="cluster-target">0 / 0 / 0</span>
         </span>
         <div className="notif-bell relative" ref={notifRef}>
           <div onClick={(e) => { e.stopPropagation(); setNotifOpen(!notifOpen) }}>

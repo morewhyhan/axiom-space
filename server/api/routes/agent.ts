@@ -1122,6 +1122,48 @@ const app = new Hono<{ Variables: { userId: string } }>()
       })
     })
   })
+  // POST /api/agent/trigger-profile-analysis — Trigger full background profile analysis
+  // Called on session end or page switch to ensure profile is saved.
+  .post('/trigger-profile-analysis', requireAuth, zValidator('json', z.object({
+    vid: z.string().optional(),
+    reason: z.enum(['session_end', 'page_switch']).optional().default('session_end'),
+  })), async (c) => {
+    const userId = c.get('userId') as string
+    const body = c.req.valid('json')
+    const vaultId = await resolveAgentVaultId(userId, body.vid)
+    if (!vaultId) {
+      return c.json({ success: false, error: 'No vault found' }, 404)
+    }
+    return runWithAgentContext({ userId, vaultId }, async () => {
+      try {
+        const agent = await getAgentForUser(userId, undefined, vaultId)
+        const bgAnalyzer = agent.getBackgroundAnalyzer()
+        bgAnalyzer.setVaultPath(vaultId)
+
+        const state = agent.getState() as { messages?: Array<{ role: string; content: unknown; timestamp: number }> }
+        const messages = (state.messages ?? []).map(
+          (m) => ({
+            role: m.role,
+            content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+            timestamp: m.timestamp,
+          }),
+        )
+
+        await bgAnalyzer.analyze(
+          messages.slice(-40),
+          async (systemPrompt: string, userMessage: string) => {
+            return aiManager.callAPI(systemPrompt, [{ role: 'user', content: userMessage }])
+          },
+        )
+
+        console.debug(`[Agent API] Profile analysis triggered: reason=${body.reason}, vault=${vaultId}`)
+        return c.json({ success: true, reason: body.reason })
+      } catch (err) {
+        console.debug('[Agent API] Profile analysis trigger failed:', err)
+        return c.json({ success: false, error: 'Background analysis failed' }, 500)
+      }
+    })
+  })
 
 // ── Agent instance cache per user ──────────────────────────
 // Each user gets a persistent agent that retains conversation memory.
@@ -1708,8 +1750,9 @@ async function maybeRecordProfileQuestionAnswer(input: {
       return null
     })
     const text = analysis?.claim || `用户在「${step.label}」维度补充了画像线索，需要后续学习行为继续确认。`
-    const confidence = analysis?.confidence ?? 0.3
-    const evidenceSummary = analysis?.evidence || `来自画像补全问题的「${step.label}」回答，尚未形成强结论。`
+    // User-provided answers carry higher baseline confidence than pure system inference
+    const confidence = analysis?.confidence ?? 0.5
+    const evidenceSummary = analysis?.evidence || `来自画像补全问题的「${step.label}」回答，用户主动提供。`
     notificationDetails.push(`- ${step.label}: ${text.slice(0, 120)}（置信度 ${Math.round(confidence * 100)}%）`)
     observations.push({
       key: `profile_question_answer_${input.sessionId}_${dimension}_${hashString(answer)}`,
@@ -1718,6 +1761,7 @@ async function maybeRecordProfileQuestionAnswer(input: {
         category: `profile_${dimension}`,
         confidence,
         analysisMode: analysis ? 'llm_context' : 'fallback_needs_confirmation',
+        entryPoint: 'user_confirmed_profile_answer',
         rawAnswer: answer,
         sourceObjectType: 'learningSession',
         sourceObjectId: input.sessionId,

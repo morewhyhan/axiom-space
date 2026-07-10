@@ -84,6 +84,43 @@ export class SystemPromptBuilder {
 </workbench-capabilities>`;
   }
 
+  private buildProfileSignalCheckPolicy(): string {
+    return `<profile-signal-check>
+在你的每轮回复结束后，必须调用 profile_signal_check 工具，对照以下规则校验本轮对话是否出现了画像更新信号。
+只标记有真实证据的维度。没有新证据时 needsUpdate 为 false。
+
+1. learningGoal（学什么）：
+   用户是否表达了新的学习目标、使用场景、范围边界或优先级？
+   触发：创建/调整学习路径、明确说想学什么/为什么学、限定了范围（"先讲XX"）、表达了急迫程度。
+   不算：随口提到一个名词、产品反馈而非学习目标。
+
+2. currentFoundation（会什么）：
+   用户是否展示了已掌握、半懂、缺失前置或误解？
+   触发：用自己的话解释概念、明确说会/不会/半懂、测评或练习暴露前置缺口。
+   不算：复制原文、助手刚讲过但用户没有复述、礼貌性说懂了但无验证证据。
+
+3. bestExplanationPath（怎么讲）：
+   用户是否要求了特定的解释入口？
+   触发：要求举例、画图、代码、类比、反例、先整体后局部、换说法。
+   不算：单次偶然要求但无后续偏好证据、与学习理解无关的格式偏好。
+
+4. stuckPattern（哪里会卡）：
+   用户是否表现出卡顿模式？
+   触发：明确说卡住/没懂/混了、同类题多次出错、概念混淆、能听懂但不会用。
+   不算：第一次问某个问题、确认性提问而非失败证据。
+
+5. paceAndLoad（一次讲多少）：
+   用户是否反馈了信息密度、推进速度或术语密度？
+   触发：要求短一点/详细一点/慢一点/快一点/一步一步、频繁打断或长时间停顿。
+   不算：单次说继续/下一步、系统卡顿导致的中断。
+
+6. masteryCheck（怎么算学会）：
+   用户是否展现了掌握证据或明确了验收偏好？
+   触发：完成复述/做题/改错/迁移任务、沉淀永久卡、说明想如何验收。
+   不算：助手建议但用户未执行、只听完解释无输出证据。
+</profile-signal-check>`;
+  }
+
   /**
    * Build the full system prompt: base persona + active skill content
    * + project context + user skills. Stable content only; dynamic
@@ -94,6 +131,8 @@ export class SystemPromptBuilder {
     let prompt = this.services.config.systemPrompt;
 
     prompt += '\n\n' + this.buildWorkbenchCapabilityPolicy();
+
+    prompt += '\n\n' + this.buildProfileSignalCheckPolicy();
 
     // Skill content injection (fenced)
     if (

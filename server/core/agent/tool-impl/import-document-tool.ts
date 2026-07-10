@@ -13,6 +13,7 @@
 import { Type } from '@mariozechner/pi-ai';
 import { createTool, toolRegistry } from "../tools";
 import { getCurrentVaultId, getCurrentUserId } from '../agent-context';
+import { pushSuggestionEngine } from '@/server/core/push/push-suggestion-engine';
 import { DocumentImportError, importDocumentToVault } from '@/server/core/learning/document-import-service';
 
 const importDocumentTool = createTool(
@@ -77,6 +78,13 @@ ${result.concepts.map((name) => `- ${name}`).join('\n')}
 - 从学习路径进入 AI 工作台继续打磨灵感草稿
 - 只有用户确认并满足质量门禁后，灵感草稿才会沉淀为永久知识
 `;
+
+      // Trigger push scan after document import (structural change)
+      const scanVaultId = getCurrentVaultId()
+      const scanUserId = getCurrentUserId()
+      if (scanVaultId && scanUserId) {
+        void pushSuggestionEngine.scanAndPersist({ userId: scanUserId, vaultId: scanVaultId, trigger: 'auto' }).catch(() => {})
+      }
 
       return {
         content: [{ type: 'text', text: report }],

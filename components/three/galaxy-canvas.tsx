@@ -147,6 +147,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     const STRUCTURED_LAYOUT_MODES = new Set<GraphLayoutMode>(['layered', 'matrix', 'mastery', 'evidence']);
     const GALAXY_VISIBLE_SEMANTIC_EDGE_TYPES = new Set(['prerequisite', 'related', 'wikilink', 'derived', 'supports', 'contradicts', 'evidence', 'citation']);
     const DEFAULT_GRAPH_LAYOUT_MODE: GraphLayoutMode = 'concentric';
+    const DEFAULT_CAMERA_POSITION = new THREE.Vector3(-344.9, 964.2, -231.5);
+    const DEFAULT_CONTROLS_TARGET = new THREE.Vector3(-344.9, -4.4, -20.3);
 
     let frames = 0;
     let lastTime = performance.now();
@@ -216,16 +218,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     const nodeRaycastTargets: THREE.Object3D[] = [];
 
     const { register, unregister } = useGalaxyActions.getState()
-    const initialGraphPrefs = useAppStore.getState();
-    layoutMode = initialGraphPrefs.graphLayoutMode === 'galaxy' || initialGraphPrefs.graphLayoutMode === 'radial'
-      ? DEFAULT_GRAPH_LAYOUT_MODE
-      : (initialGraphPrefs.graphLayoutMode ?? DEFAULT_GRAPH_LAYOUT_MODE);
-    if (initialGraphPrefs.graphLayoutMode === 'galaxy' || initialGraphPrefs.graphLayoutMode === 'radial') {
-      useAppStore.getState().setGraphLayoutMode(DEFAULT_GRAPH_LAYOUT_MODE);
-    }
-    hoverAttentionEnabled = initialGraphPrefs.graphHoverAttention;
-    semanticClusterLensEnabled = initialGraphPrefs.graphSemanticClusterLens;
-    galaxyForceEnabled = initialGraphPrefs.graphForceMotion;
+    layoutMode = DEFAULT_GRAPH_LAYOUT_MODE;
+    useAppStore.getState().setGraphLayoutMode(DEFAULT_GRAPH_LAYOUT_MODE);
+    hoverAttentionEnabled = useAppStore.getState().graphHoverAttention;
+    semanticClusterLensEnabled = useAppStore.getState().graphSemanticClusterLens;
+    galaxyForceEnabled = useAppStore.getState().graphForceMotion;
 
     // --- Deep Space Background (Nebula & Distant Stars) ---
     let nebulaGroup: THREE.Group;
@@ -3059,26 +3056,23 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (STRUCTURED_LAYOUT_MODES.has(mode)) controls.maxDistance = 2600;
     }
 
-    function frameLayoutCamera(mode: GraphLayoutMode, duration = 0.95): void {
-      const cameraTargets: Record<GraphLayoutMode, THREE.Vector3> = {
-        galaxy: new THREE.Vector3(940, 520, 720),
-        flat: new THREE.Vector3(0, 1680, 0.1),
-        radial: new THREE.Vector3(0, 1480, 0.1),
-        concentric: new THREE.Vector3(0, 1360, 0.1),
-        layered: new THREE.Vector3(940, 720, 920),
-        matrix: new THREE.Vector3(980, 820, 920),
-        'task-flow': new THREE.Vector3(0, 1560, 0.1),
-        timeline: new THREE.Vector3(0, 1520, 0.1),
-        mastery: new THREE.Vector3(980, 860, 980),
-        evidence: new THREE.Vector3(920, 700, 1040),
-      };
+    function frameLayoutCamera(_mode: GraphLayoutMode, duration = 0.95): void {
       gsap.killTweensOf(controls.target);
       gsap.killTweensOf(camera.position);
-      // Offset target slightly left (negative X) in galaxy/dashboard modes to account for left panel
-      const targetX = mode === 'galaxy' ? -220 : 0;
-      gsap.to(controls.target, { x: targetX, y: 0, z: 0, duration, ease: 'expo.inOut' });
-      const target = cameraTargets[mode];
-      gsap.to(camera.position, { x: target.x, y: target.y, z: target.z, duration, ease: 'expo.inOut' });
+      gsap.to(controls.target, {
+        x: DEFAULT_CONTROLS_TARGET.x,
+        y: DEFAULT_CONTROLS_TARGET.y,
+        z: DEFAULT_CONTROLS_TARGET.z,
+        duration,
+        ease: 'expo.inOut',
+      });
+      gsap.to(camera.position, {
+        x: DEFAULT_CAMERA_POSITION.x,
+        y: DEFAULT_CAMERA_POSITION.y,
+        z: DEFAULT_CAMERA_POSITION.z,
+        duration,
+        ease: 'expo.inOut',
+      });
     }
 
     function applyGraphLayout(mode: GraphLayoutMode, duration = 0.95): void {
@@ -3124,13 +3118,13 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const mode = layoutMode;
       setResetButtonVisible(mode !== DEFAULT_GRAPH_LAYOUT_MODE);
       if (autoRotateBeforeFocus !== null) {
-        if (mode === 'galaxy') controls.autoRotate = autoRotateBeforeFocus;
+        controls.autoRotate = autoRotateBeforeFocus;
         autoRotateBeforeFocus = null;
       }
       useAppStore.getState().setGraphLayoutMode(mode);
       concentricCenterNode = null;
       if (autoRotateBeforeLayout !== null) {
-        if (mode === 'galaxy') controls.autoRotate = autoRotateBeforeLayout;
+        controls.autoRotate = autoRotateBeforeLayout;
         autoRotateBeforeLayout = null;
       }
       lockedNode = null;
@@ -3166,13 +3160,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         return;
       }
 
-      const targets = mode === 'galaxy' ? restoreInitialGalaxyAnchors() : computeLayoutTargets(mode);
-      animateNodesTo(targets, 0.85, () => {
-        if (mode === 'galaxy') rebuildGalaxyBoundaryRings();
-      });
+      const targets = computeLayoutTargets(mode);
+      animateNodesTo(targets, 0.85);
       applyGraphAttention(null);
       refreshLinksAndLabels();
-      frameLayoutCamera(mode, mode === 'galaxy' ? 1.2 : 0.85);
+      frameLayoutCamera(mode, 0.85);
     }
 
     // Expose resetCameraView via window so imperative handle can call it
@@ -3402,7 +3394,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       1,
       10000
     );
-    camera.position.set(940, 520, 720);
+    camera.position.copy(DEFAULT_CAMERA_POSITION);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
@@ -3436,16 +3428,22 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     controls.zoomSpeed = 0.85;
     controls.autoRotate = true;
     controls.autoRotateSpeed = 0.2;
-    controls.target.set(-220, 0, 0); // offset center left for left-panel balance
+    controls.target.copy(DEFAULT_CONTROLS_TARGET);
     layoutMode = DEFAULT_GRAPH_LAYOUT_MODE;
     useAppStore.getState().setGraphLayoutMode(DEFAULT_GRAPH_LAYOUT_MODE);
     applyNodeModeVisual(useAppStore.getState().mode, true);
     const unsubscribeModeVisual = useAppStore.subscribe((state, prevState) => {
       if (state.mode !== prevState.mode) {
         applyNodeModeVisual(state.mode);
-        // Offset camera target for modes with left panel
+        // Restore controls target for modes with left panel
         if (state.mode === 'dashboard' || state.mode === 'galaxy') {
-          gsap.to(controls.target, { x: -220, y: 0, z: 0, duration: 0.6, ease: 'expo.inOut' });
+          gsap.to(controls.target, {
+            x: DEFAULT_CONTROLS_TARGET.x,
+            y: DEFAULT_CONTROLS_TARGET.y,
+            z: DEFAULT_CONTROLS_TARGET.z,
+            duration: 0.6,
+            ease: 'expo.inOut',
+          });
         }
         // Clear locked node when leaving galaxy/dashboard to prevent force simulation starvation
         if (state.mode === 'forge' || state.mode === 'cognition' || state.mode === 'learn') {
@@ -4321,6 +4319,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       const coordsEl = document.getElementById('cluster-coords');
       if (coordsEl)
         coordsEl.textContent = `${camera.position.x.toFixed(1)} / ${camera.position.y.toFixed(1)} / ${camera.position.z.toFixed(1)}`;
+      const targetEl = document.getElementById('cluster-target');
+      if (targetEl)
+        targetEl.textContent = `${controls.target.x.toFixed(1)} / ${controls.target.y.toFixed(1)} / ${controls.target.z.toFixed(1)}`;
     }
 
     animate();

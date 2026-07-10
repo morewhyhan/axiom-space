@@ -21,8 +21,9 @@ test('hyperframes resource renderer produces real docx, pdf, and pptx files', as
   const docx = await renderDocx('HyperFrames Demo', bodyHtml)
   const pdf = await renderPdf('HyperFrames Demo', bodyHtml)
   const pptx = await renderPptx('HyperFrames Demo', [
-    '<h1>Slide 1</h1><p>Intro</p>',
-    '<h1>Slide 2</h1><p>Detail</p><ul><li>A</li><li>B</li></ul>',
+    { type: 'cover_slide', title: 'HyperFrames Demo', subtitle: 'Test' },
+    { type: 'executive_summary_paragraph', title: 'Overview', paragraphs: ['Intro', 'Detail: A, B'] },
+    { type: 'dark_navy_summary', key_points: ['Test passed'] },
   ])
 
   await writeArtifact('demo.docx', docx)

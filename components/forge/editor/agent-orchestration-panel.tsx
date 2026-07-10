@@ -53,7 +53,7 @@ function buildUserFacingAgents(
   const allDone = orchestration.status === 'completed'
   const resourceList = resources.length
     ? resources.map((item) => item.title || item.type).join('、')
-    : '讲解文档、思维导图、练习题、代码实操、视频/动画脚本'
+    : '讲解文档、思维导图、练习题、代码实操、教学视频/动画'
   const sourceTitle = resources.find((item) => item.sourceTitle)?.sourceTitle || '当前卡片与检索资料'
   const resourceStatus = resources.length > 0 && resources.every((item) => item.status === 'ready' || !item.status)
     ? 'completed'

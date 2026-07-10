@@ -14,7 +14,6 @@ import type { UserProfile } from '@/server/core/learning/memory/profile-manager'
 import { assertCardType, validatePermanentCardContent } from '@/server/core/domain/contracts'
 import { emitDomainEvent, recordCardRevision } from '@/server/core/domain/events'
 import { BACKGROUND_ANALYSIS_PROMPT } from '@/server/core/ai/prompts'
-import { pushSuggestionEngine } from '@/server/core/push/push-suggestion-engine'
 import { PROFILE_DIMENSION_PROTOCOL } from '@/server/core/learning/profile-protocol'
 import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
 
@@ -246,30 +245,19 @@ export class BackgroundAnalyzer {
         }
       }
       if (baUserId && baVaultId && hasBackgroundPushSignal(result)) {
-        void pushSuggestionEngine.scanAndPersist({
-          userId: baUserId,
-          vaultId: baVaultId,
-          trigger: 'background_analysis',
-          scope: {
-            cards: result.cards?.length ?? 0,
-            cardEdits: result.cardEdits?.length ?? 0,
-            concepts: result.concepts?.length ?? 0,
-            observations: result.observations?.length ?? 0,
-            skills: result.skills?.length ?? 0,
-            evidence: this.latestEvidence.length,
-          },
-        }).then((scan) => {
-          if (scan.created.length === 0) return
+        // Concept push — funnel extracted concepts into the push suggestion box
+        // without running a full scan (that's triggered on structural changes instead)
+        const conceptCount = result.concepts?.length ?? 0
+        const cardCount = (result.cards?.length ?? 0) + (result.cardEdits?.length ?? 0)
+        if (conceptCount > 0 || cardCount > 0) {
           void emitNotification(baVaultId, {
             type: 'toast',
-            message: `推送箱新增 ${scan.created.length} 条候选`,
-            detail: scan.created.slice(0, 5).map((item) => `- ${item.title}: ${item.reason}`).join('\n'),
-            action: 'push_suggestions_generated',
+            message: `对话中识别到 ${conceptCount} 个可学习概念`,
+            detail: `可在 Learn 页面手动扫描查看推送建议`,
+            action: 'push_concepts_detected',
             severity: 'info',
           })
-        }).catch((error) => {
-          console.debug('[BackgroundAnalyzer] Push suggestion scan failed:', error)
-        })
+        }
       }
 
       return result;

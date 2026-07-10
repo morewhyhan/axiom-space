@@ -14,6 +14,7 @@ import { runWithAgentContext } from '@/server/core/agent/agent-context'
 import { CARD_TYPES, validatePermanentCardContent } from '@/server/core/domain/contracts'
 import { emitDomainEvent, recordCardRevision, recordPromotionAttempt } from '@/server/core/domain/events'
 import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
+import { pushSuggestionEngine } from '@/server/core/push/push-suggestion-engine'
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
 
@@ -501,6 +502,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
   wikiSync.autoBacklinkedCardIds.forEach((cardId: string) => {
     scheduleRagIndexCard(cardId, 'auto-backlink')
   })
+
+  // Trigger push scan on structural change (new card or type upgrade)
+  void pushSuggestionEngine.scanAndPersist({ userId, vaultId: card.vaultId, trigger: 'auto' }).catch(() => {})
 
   return c.json({
     success: true,

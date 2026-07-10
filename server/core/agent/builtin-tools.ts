@@ -21,6 +21,7 @@ import { registerImportDocumentTool } from "./tool-impl/import-document-tool";
 import { registerPromptTools } from "./tool-impl/prompt-tools";
 import { registerWorkspaceTools } from "./tool-impl/workspace-tools";
 import { registerPushSuggestionTools } from "./tool-impl/push-suggestion-tools";
+import { registerProfileSignalTools } from "./tool-impl/profile-tools";
 
 export function registerBuiltinTools(): void {
   registerFileTools();
@@ -43,4 +44,5 @@ export function registerBuiltinTools(): void {
   registerPromptTools();
   registerWorkspaceTools();
   registerPushSuggestionTools();
+  registerProfileSignalTools();
 }

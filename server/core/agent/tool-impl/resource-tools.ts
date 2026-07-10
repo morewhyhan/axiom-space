@@ -26,7 +26,7 @@ const RESOURCE_LABELS: Record<string, string> = {
   mindmap: '思维导图',
   quiz: '练习题',
   code: '代码实操',
-  video: '视频/动画脚本',
+  video: '教学视频/动画',
   svg: 'SVG 图解',
   diagram: 'Mermaid 图表',
   docx: 'Word 文档',

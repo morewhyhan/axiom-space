@@ -315,23 +315,40 @@ AXIOM 定义了五类教育子 Agent：
 
 ### 10. 多模态资源生成：从需求到可预览资源
 
-多模态生成主要通过 `push_resource` 进入 `ResourceGenerationOrchestrator`。
+多模态生成主要通过 `push_resource` 工具进入 `ResourceGenerationOrchestrator`。
 
-关键流程：
+#### 10 种资源类型
 
-1. 根据用户画像推断 `userLevel`，没有画像时使用 `intermediate`。
-2. 如果用户没指定格式，`inferDefaultResourceTypes` 自动选择 2 到 4 个核心格式；如果明确要求 Word、PDF、SVG、流程图、思维导图、PPT，则通过 `formats` 指定。
-3. `orchestrationEngine.executeFlow('resource_generation', ...)` 记录 Profile / Planner / Generator / Reviewer / Pusher 协同证据。
-4. `ResourceGenerationState` 为每种资源维护状态。
-5. Orchestrator 对每种资源执行 `generating -> validating -> saving -> ready / failed`。
-6. 生成结果经过 `validateResource` 校验。
-7. 再经过内容安全和事实校验 guardrail，并保存 guardrail report。
-8. 对视频生成 HyperFrames HTML，可选后台渲染 MP4。
-9. 对 docx/pdf/ppt 走对应 renderer，生成可下载文件。
-10. 通过 `resource_progress` 事件实时回传前端。
-11. 最终资源写入 `resources/<topic>/`，并可以合并成资源卡片或进入知识库。
+| 类型 | LLM 产出 | 渲染引擎 | 最终格式 | 前端展示 |
+|------|---------|---------|---------|---------|
+| document | HTML body | html-to-docx | `.docx` | 下载 |
+| mindmap | Mermaid 代码 | 无（自描述） | Mermaid 文本 | 内嵌渲染 |
+| quiz | JSON 题目 | 无（自描述） | JSON | 交互卡片 |
+| code | JSON 题目 | 无（自描述） | JSON | 代码高亮 |
+| video | HyperFrames JSON | hyperframesHTMLBuilder + Puppeteer | `.html` + `.mp4` | VideoCard 播放/下载/全屏 |
+| svg | SVG 代码 | 无（自描述） | SVG | 内嵌渲染 |
+| diagram | Mermaid 代码 | 无（自描述） | Mermaid 文本 | 内嵌渲染 |
+| docx | HTML body | html-to-docx | `.docx` | 下载 |
+| pdf | HTML body | Puppeteer | `.pdf` | 下载 |
+| ppt | slide spec JSON | mckinsey-pptx (Python 桥接) | `.pptx` | 下载（deep-navy McKinsey 主题） |
 
-所以“多模态资源生成效果”不是单次模型输出，而是一条带状态、校验、保存、进度事件和页面预览的资源生成管线。
+#### 完整管线（每种类型）
+
+1. **LLM 生成原始内容** — 每种类型有专用 prompt（`resource-generation.ts`），产出格式各不相同。
+2. **内容校验**（`validateContent`）— 检查长度、格式、结构完整性。
+3. **安全审查**（`FactualCheckGuardrail` + `ContentSafety` + `FileSafetyGuardrail`）。
+4. **后处理 & 渲染** — 自描述格式（Mermaid / SVG / JSON）直接保存；需转换的格式（video / ppt / docx / pdf）走对应渲染器。
+5. **保存到 Vault** — 写入 `resources/<topic>/` 目录，生成文献卡片（type: literature），内容嵌入 `<!-- axiom-resources:[...] -->` manifest 标记。
+6. **进度通知** — `resource_progress` SSE 事件实时推送前端（generating → validating → rendering → saving → ready）。
+7. **前端渲染** — ForgeEditor 检测 `axiom-resources` 标记 → `LearningResourcePanel` 分类渲染（内嵌 / 下载 / 播放）。
+
+#### 视频生成（完整链路，非脚本）
+
+LLM 产出 HyperFrames JSON（场景、动画、时长配置）→ `hyperframesHTMLBuilder.buildHTML()` 生成可预览 HTML 动画 → 保存到 Vault → Puppeteer 后台渲染 MP4 → ForgeEditor 检测标记 → `VideoCard` 组件播放。
+
+#### PPT 生成（McKinsey 主题，2026-07-10 更新）
+
+LLM 产出 slide spec JSON → `renderPptx()` 通过 `spawn` 调用 Python 桥接脚本 → `mckinsey-pptx` 引擎（40 模板，deep-navy 主题）渲染真实 `.pptx` 二进制。旧 PptxGenJS 方案已移除。
 
 ### 11. 页面反馈：技术细节最后要落到可见证据
 
@@ -342,7 +359,7 @@ Agent Harness 的每个动作都要能在页面上证明。
 | API 绑定 session/card | Forge 的 Current Focus、卡片线程 | 用户知道当前对话服务于哪个任务或卡片，不需要在聊天里反复解释上下文 |
 | SSE 流式输出 | AI Workspace 中逐字回复、工具执行状态 | 用户能看到系统正在思考、检索、调用工具还是生成资源，等待过程可理解 |
 | LightRAG 注入 | RAG 引用、相关卡片/文件 | 用户能确认回答参考了自己的资料，而不是只给通用答案 |
-| `push_resource` | 资源生成进度、资源摘要、可预览文件 | 用户能围绕同一知识点获得讲解、导图、练习、代码和脚本等材料 |
+| `push_resource` | 资源生成进度、资源摘要、可预览文件 | 用户能围绕同一知识点获得讲解、导图、练习、代码和教学视频等材料 |
 | BackgroundAnalyzer | Cognition 的 AI 观察记录、画像变化、知识缺口 | 用户能看到系统根据真实对话更新了哪些学习判断 |
 | Graph update | Galaxy 节点、关系边、证据链 | 用户能看到卡片之间的关系和证据来源，知道一个知识点如何连接到其他知识 |
 | Learning path | Learn 路径步骤、评估状态、下一步 | 用户能把“我要学某个主题”变成可执行的步骤，并按掌握情况推进 |
@@ -685,7 +702,7 @@ Agent1 跟用户聊天
     -> 汇总资源并写入 Vault / 文献盒
 ```
 
-在当前页面流程中，对应资源类型可以落到：讲解文档、思维导图、练习题、代码案例、视频或动画脚本。早期文档中的 Literature 角色能力，在当前实现中已经并入 Forge 资源生成专家与 `push_resource` / `ResourceGenerationOrchestrator` 管线。
+在当前页面流程中，对应资源类型可以落到：讲解文档、思维导图、练习题、代码案例、教学视频或动画。早期文档中的 Literature 角色能力，在当前实现中已经并入 Forge 资源生成专家与 `push_resource` / `ResourceGenerationOrchestrator` 管线。
 
 #### 3. 个性化学习路径规划
 

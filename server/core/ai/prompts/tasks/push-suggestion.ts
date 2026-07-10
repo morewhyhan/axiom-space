@@ -73,7 +73,7 @@ export const PUSH_SUGGESTION_JUDGE_PROMPT = definePrompt<PushSuggestionJudgeInpu
       "payloadPatch": {
         "relationType": "prerequisite|explains|causes|part_of|contrasts|supports|extends|example_of|related|contains",
         "missingType": "missing_card|thin_card|missing_example|missing_exercise|missing_resource|missing_definition|missing_bridge",
-        "suggestedFormat": "fleeting_card|markdown_resource|exercise_json|code_practice|ppt|mindmap|video_script|task_group"
+        "suggestedFormat": "fleeting_card|markdown_resource|exercise_json|code_practice|ppt|mindmap|video|task_group"
       }
     }
   ]

@@ -106,6 +106,8 @@ const executePushSuggestionTool = createTool(
         ...ctx,
         suggestionId: params.suggestion_id,
       });
+      // Re-scan after executing a push — new structure may reveal new gaps
+      void pushSuggestionEngine.scanAndPersist({ userId: ctx.userId, vaultId: ctx.vaultId, trigger: 'auto' }).catch(() => {})
       return {
         content: [{ type: 'text', text: `推送已执行：${result.suggestion.title}` }],
         details: result,

@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { BellRing, Check, Link2, PackageOpen, RefreshCcw, X } from 'lucide-react'
+import { Check, Link2, PackageOpen, RefreshCcw, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Button, HudPanel, SegmentedControl } from '@/components/ui'
+import { Button, SegmentedControl } from '@/components/ui'
 import {
   useExecutePushSuggestion,
   usePushSuggestions,
@@ -43,18 +43,12 @@ export function PushSuggestionBox({ pathId }: PushSuggestionBoxProps) {
   }
 
   return (
-    <HudPanel as="div" className="mb-3 rounded-xl p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <BellRing className="h-4 w-4 text-cyan-200/70" />
-          <div className="min-w-0">
-            <div className="mono uppercase text-white/35" style={{ fontSize: 'var(--f8)' }}>Push_Box</div>
-            <div className="truncate text-white/62" style={{ fontSize: 'var(--f9)' }}>
-              {counts.pending ?? suggestions.length} 条待处理建议
-            </div>
-          </div>
+    <div className="learn-push-box">
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="truncate text-white/50" style={{ fontSize: 'var(--f9)' }}>
+          {counts.pending ?? suggestions.length} 条待处理
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           <SegmentedControl
             className="learn-create-tabs"
             itemClassName="learn-create-tab"
@@ -75,7 +69,6 @@ export function PushSuggestionBox({ pathId }: PushSuggestionBoxProps) {
             }}
           >
             <RefreshCcw className="h-3 w-3" />
-            扫描
           </Button>
         </div>
       </div>
@@ -114,7 +107,7 @@ export function PushSuggestionBox({ pathId }: PushSuggestionBoxProps) {
           </div>
         )}
       </div>
-    </HudPanel>
+    </div>
   )
 }
 

@@ -28,7 +28,7 @@ export enum SubagentMode {
 export enum SubagentRole {
   Oracle = 'oracle',       // 主协调者：对话教学、任务分发、汇总结果
   Profile = 'profile',     // 画像构建：对话式学习画像构建与动态更新
-  Forge = 'forge',         // 资源生成：生成文档/导图/题目/代码/视频脚本等多种学习资源
+  Forge = 'forge',         // 资源生成：生成文档/导图/题目/代码/教学视频等多种学习资源
   Guide = 'guide',         // 路径规划：学习路径规划与资源精准推送
   Assess = 'assess',       // 效果评估：学习效果多维度评估与薄弱点分析
 }

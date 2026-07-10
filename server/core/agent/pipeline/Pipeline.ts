@@ -52,6 +52,8 @@ const EDUCATION_PROFILE_CONFIDENCE_DELTA = 0.08;
 // ── Pipeline ──
 
 export class AgentPipeline {
+  private turnCounter = 0
+
   constructor(
     private agent: AxiomAgent,
     private services: AgentServices,
@@ -745,31 +747,59 @@ export class AgentPipeline {
       console.debug('[Agent] Graph update failed (non-fatal):', err instanceof Error ? err.message : String(err));
     }
 
-    // ── Background analysis (Agent B) ──
+    // ── Background analysis (Agent B) with profile_signal_check tool result ──
     const vaultPath =
       this.services.config.vaultPath || getVaultPath() || getCurrentVaultId() || '';
+    this.turnCounter++
+
     if (vaultPath) {
-      this.agent.getBackgroundAnalyzer().setVaultPath(vaultPath);
-      this.agent
-        .getBackgroundAnalyzer()
-        .analyze(
-          this.services.agent.state.messages.map((m: { role: string; content: unknown; timestamp: number }) => ({
-            role: m.role,
-            content:
-              typeof m.content === 'string'
-                ? m.content
-                : JSON.stringify(m.content),
-            timestamp: m.timestamp,
-          })),
-          async (systemPrompt: string, userMessage: string) => {
-            return this.services.promptService.callLLMForSummary(
-              userMessage, systemPrompt
-            );
-          },
-        )
-        .catch((err) =>
-          console.debug('[Agent] Background analysis failed:', err),
-        );
+      const messages = this.services.agent.state.messages.map(
+        (m: { role: string; content: unknown; timestamp: number }) => ({
+          role: m.role,
+          content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+          timestamp: m.timestamp,
+        }),
+      )
+
+      // Extract profile_signal_check tool result from the last tool-call sequence
+      const signalResult = extractProfileSignalFromMessages(messages)
+      const isFullScan = this.turnCounter % 10 === 0
+
+      const needsAnalysis =
+        isFullScan || (signalResult?.needsUpdate && signalResult.dimensions.length > 0)
+
+      if (needsAnalysis) {
+        const reason = isFullScan
+          ? `全量综合分析（第 ${this.turnCounter} 轮）`
+          : `信号触发: ${signalResult!.dimensions.join(', ')}`
+        console.debug(`[Agent] Profile analysis triggered: ${reason}`)
+
+        const focusedContext = !isFullScan && signalResult
+          ? buildFocusedAnalysisPrompt(signalResult.dimensions)
+          : ''
+
+        this.agent.getBackgroundAnalyzer().setVaultPath(vaultPath)
+        this.agent
+          .getBackgroundAnalyzer()
+          .analyze(
+            isFullScan
+              ? messages.slice(-40) // full scan looks at broader window
+              : messages,
+            async (systemPrompt: string, userMessage: string) => {
+              const focusedUserMessage = focusedContext
+                ? `${focusedContext}\n\n---\n\n${userMessage}`
+                : userMessage
+              return this.services.promptService.callLLMForSummary(
+                focusedUserMessage, systemPrompt,
+              )
+            },
+          )
+          .catch((err) =>
+            console.debug('[Agent] Background analysis failed:', err),
+          )
+      } else {
+        console.debug('[Agent] No profile signal — skipping background analysis')
+      }
     }
 
     this.updateEducationProfileSnapshot()
@@ -1221,4 +1251,82 @@ function selectToolsForTurn(tools: AgentTool<any>[], intentRoute: IntentRoute | 
   // Safety is enforced by ToolContracts, confirmation tokens, path guards, and
   // per-tool ownership checks rather than by hiding capabilities.
   return tools;
+}
+
+// ── Profile signal extraction from tool results ──
+
+interface ProfileSignalResult {
+  needsUpdate: boolean
+  dimensions: string[]
+  evidenceSummary: string
+}
+
+/**
+ * Extract profile_signal_check tool result from the message stream.
+ * Scans the last few messages for a tool-call → tool-result pair.
+ */
+function extractProfileSignalFromMessages(
+  messages: Array<{ role: string; content: string }>,
+): ProfileSignalResult | null {
+  // Scan backwards for the most recent profile_signal_check result
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (!msg || msg.role !== 'tool') continue
+
+    try {
+      const parsed = JSON.parse(msg.content) as {
+        toolName?: string
+        result?: {
+          details?: {
+            needsUpdate?: boolean
+            dimensions?: string[]
+            evidenceSummary?: string
+          }
+        }
+      }
+      if (parsed.toolName === 'profile_signal_check' && parsed.result?.details) {
+        return {
+          needsUpdate: parsed.result.details.needsUpdate === true,
+          dimensions: Array.isArray(parsed.result.details.dimensions)
+            ? parsed.result.details.dimensions.filter((d): d is string => typeof d === 'string')
+            : [],
+          evidenceSummary: typeof parsed.result.details.evidenceSummary === 'string'
+            ? parsed.result.details.evidenceSummary
+            : '',
+        }
+      }
+    } catch {
+      // Skip non-JSON tool messages
+    }
+  }
+  return null
+}
+
+const PROFILE_DIMENSION_LABELS: Record<string, string> = {
+  learningGoal: '学什么',
+  currentFoundation: '会什么',
+  bestExplanationPath: '怎么讲',
+  stuckPattern: '哪里会卡',
+  paceAndLoad: '一次讲多少',
+  masteryCheck: '怎么算学会',
+}
+
+/**
+ * Build a focused analysis context for Channel B based on triggered dimensions.
+ * Only used for signal-triggered incremental analysis (not full scans).
+ */
+function buildFocusedAnalysisPrompt(dimensions: string[]): string {
+  if (dimensions.length === 0) return ''
+
+  const lines: string[] = [
+    '以下维度在本轮对话中检测到更新信号，请只分析这些维度：',
+    '',
+  ]
+  for (const key of dimensions) {
+    const label = PROFILE_DIMENSION_LABELS[key] || key
+    lines.push(`- ${label} (${key})`)
+  }
+  lines.push('')
+  lines.push('未标记的维度本轮不需分析。')
+  return lines.join('\n')
 }

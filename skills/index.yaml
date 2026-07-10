@@ -10,9 +10,4 @@ skills:
     path: skills/axiom-forge/SKILL.md
     description: "AI resource generation for learning. Generates learning resources from literature content."
     phases: 3
-    triggers: ["生成资源", "生成文档", "生成题目", "出题", "生成导图", "生成学习资料"]
-  axiom-ppt:
-    path: skills/axiom-ppt/SKILL.md
-    description: "Generate real PowerPoint (.pptx) files and put them in the literature box."
-    phases: 1
-    triggers: ["生成ppt", "做ppt", "演示文稿", "幻灯片", "PPT"]
+    triggers: ["生成资源", "生成文档", "生成题目", "出题", "生成导图", "生成学习资料", "生成ppt", "做ppt", "演示文稿", "幻灯片", "PPT"]

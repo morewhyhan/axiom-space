@@ -1024,7 +1024,7 @@ PushableResource 是可以被推给用户的资源。
 | `mindmap` | 思维导图 |
 | `quiz` | 练习题 |
 | `code` | 代码案例 |
-| `video` | 视频或动画脚本 |
+| `video` | 教学视频或动画 |
 | `svg` | 图解 |
 | `diagram` | Mermaid 或结构图 |
 | `docx` | Word 文档 |

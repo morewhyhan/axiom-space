@@ -28,7 +28,7 @@ export function getDefaultAgentConfig(): Required<AxiomAgentConfig> {
     vaultPath: '',
     userId: '',
     temperature: 0.1,
-    maxTokens: parseInt(process.env.AI_MAX_TOKENS || '8192', 10),
+    maxTokens: process.env.AI_MAX_TOKENS ? parseInt(process.env.AI_MAX_TOKENS, 10) : 0,
     // Learning system configuration
     maxIterations: 90,
     compressionThreshold: 0.50,

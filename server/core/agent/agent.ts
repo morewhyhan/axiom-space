@@ -300,9 +300,9 @@ export class AxiomAgent extends Interruptible {
 
   private _getModel() {
     const { provider, modelId, baseUrl, apiKey } = this.services.modelConfig;
-    // Use configured maxTokens, fallback to env var, then to 8192
+    // Use configured maxTokens if explicitly set, otherwise let the model decide
     const configuredMaxTokens = this.services.config.maxTokens ||
-      parseInt(process.env.AI_MAX_TOKENS || '8192', 10);
+      parseInt(process.env.AI_MAX_TOKENS || '0', 10);
 
     const standardProviders = ['openai', 'anthropic', 'google', 'cerebras', 'zai'];
 
@@ -311,8 +311,8 @@ export class AxiomAgent extends Interruptible {
       // getModel validates the provider-modelId combo at runtime
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const model = getModel(provider as KnownProvider, modelId as never);
-      // Override maxTokens with our configured value to control generation length and cost
-      return { ...model, maxTokens: configuredMaxTokens };
+      // Only override maxTokens when explicitly configured; otherwise let the model decide
+      return configuredMaxTokens > 0 ? { ...model, maxTokens: configuredMaxTokens } : model;
     }
 
     const key = apiKey || this.services.config.apiKey || this._getApiKey();
@@ -329,7 +329,7 @@ export class AxiomAgent extends Interruptible {
       provider: 'openai',
       api: 'openai-completions',
       baseUrl: baseUrl,
-      maxTokens: configuredMaxTokens,  // Override with configured value
+      maxTokens: configuredMaxTokens > 0 ? configuredMaxTokens : baseModel.maxTokens,
       // Do NOT set Authorization header here — pi-ai/OpenAI SDK handles it via apiKey.
       // Setting both causes header conflicts that lead to 403 errors on some relays.
       headers: {

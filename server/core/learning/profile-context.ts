@@ -595,7 +595,16 @@ function buildDimensionInsights(input: {
     const userPenalty = userFeedback?.verdict === 'wrong' ? 0.3 : userFeedback?.verdict === 'partial' ? 0.12 : 0
     const userBoost = userFeedback?.verdict === 'correct' ? 0.08 : 0
     const sourceStrength = clamp01(observations.length / 4)
-    const confidence = clamp01(0.18 + evidenceStrength * 0.36 + sourceStrength * 0.42 + userBoost - userPenalty)
+
+    // Accumulated confidence — multiple low-confidence observations compound
+    const accumulated = accumulateConfidence(observations)
+    // Blend: accumulated evidence dominates when present, fall back to structural evidence when absent
+    const confidence = clamp01(
+      observations.length > 0
+        ? accumulated * 0.7 + evidenceStrength * 0.12 + sourceStrength * 0.18 + userBoost - userPenalty
+        : 0.18 + evidenceStrength * 0.36 + sourceStrength * 0.42 + userBoost - userPenalty,
+    )
+
     const nodeFeedback = Object.fromEntries(
       [...input.feedbackByNode.entries()].filter(([nodeKey]) => nodeKey.startsWith(`${spec.key}:`)),
     )
@@ -817,4 +826,78 @@ function clamp01(value: number): number {
 
 function uniqueStrings(items: string[]): string[] {
   return [...new Set(items.map((item) => item.trim()).filter(Boolean))]
+}
+
+// ── Confidence accumulation ──
+
+const CONFIDENCE_DECAY_LAMBDA = 0.05 // ~14 day half-life
+
+/**
+ * Accumulate confidence from multiple observations.
+ * Formula: 1 - ∏(1 - c_i × decay_i)
+ *   decay_i = e^(-λ × days_since_created_i)
+ *
+ * - 1 obs @ 0.35 → 0.35
+ * - 3 obs @ 0.35 → 0.725
+ * - 5 obs @ 0.35 → 0.884
+ *
+ * Observations with user_confirmed flag get a 1.4× multiplier.
+ */
+function accumulateConfidence(
+  observations: Array<{
+    confidence?: number
+    sourceType?: string
+    entryPoint?: string
+    sourceId?: string
+  }>,
+): number {
+  if (observations.length === 0) return 0
+
+  const now = Date.now()
+  let product = 1
+
+  for (const obs of observations) {
+    const baseConfidence = typeof obs.confidence === 'number' && Number.isFinite(obs.confidence)
+      ? clamp01(obs.confidence)
+      : 0.28
+
+    // User-confirmed observations carry higher weight
+    const isUserConfirmed =
+      obs.entryPoint?.includes('user_confirmed') ||
+      obs.sourceType === 'profile_feedback' ||
+      obs.entryPoint === 'UserConfirmed' ||
+      obs.entryPoint === 'user_confirmed_profile_answer'
+
+    const effectiveConfidence = clamp01(
+      isUserConfirmed ? Math.max(0.55, baseConfidence * 1.4) : baseConfidence,
+    )
+
+    // Time decay: extract timestamp from sourceId or use no decay for fresh entries
+    const daysSinceCreation = extractDaysFromObservation(obs)
+    const decay = Math.exp(-CONFIDENCE_DECAY_LAMBDA * daysSinceCreation)
+
+    product *= 1 - effectiveConfidence * decay
+  }
+
+  return clamp01(1 - product)
+}
+
+/**
+ * Try to extract age in days from observation metadata.
+ * Falls back to 0 (no decay) if timestamp can't be determined.
+ */
+function extractDaysFromObservation(obs: {
+  sourceId?: string
+  entryPoint?: string
+}): number {
+  // Try to parse timestamp from sourceId if it contains a Unix ms suffix
+  const tsMatch = obs.sourceId?.match(/_(\d{13})_?/)
+  if (tsMatch) {
+    const ts = Number(tsMatch[1])
+    if (Number.isFinite(ts) && ts > 0) {
+      return Math.max(0, (Date.now() - ts) / (24 * 60 * 60 * 1000))
+    }
+  }
+  // No timestamp available — treat as recent
+  return 0
 }
