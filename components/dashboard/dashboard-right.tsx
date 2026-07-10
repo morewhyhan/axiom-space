@@ -100,6 +100,11 @@ export default function DashboardRight() {
   const cStats = cognition.data?.stats ?? { streakDays: 0, mastered: 0, pendingReview: 0, chatRounds: 0 }
   const dimAvg = [cDims.depth, cDims.breadth, cDims.connection, cDims.expression, cDims.application].reduce((a, b) => a + b, 0) / 5
   const confidence = cStats.mastered >= 3 ? Math.min(dimAvg + 0.2, 1) : dimAvg * 0.5
+  const hasProfileEvidence = Boolean(
+    cognition.data?.dimensionInsights?.some((dimension) => dimension.observations.length > 0)
+    || (cognition.data?.profileLoop?.evidenceCount ?? 0) > 0
+    || (cognition.data?.assessmentTimeline?.length ?? 0) > 0
+  )
 
   const applyFocus = (f: FocusMode) => {
     setFocus(f)
@@ -140,6 +145,7 @@ export default function DashboardRight() {
   const dFleet = all || metrics === 'fleet' ? (s?.fleeting ?? 0) : 0
   const dLit = all ? (s?.literature ?? 0) : 0
   const dTotal = (s?.totalNodes ?? 0)
+  const hasProfileSignal = hasProfileEvidence || cStats.chatRounds > 0 || dPerm >= 3
   const pct = (n: number) => `${dTotal > 0 ? ((n / dTotal) * 100).toFixed(0) : 0}%`
   const daily = growth?.map((g: GrowthPoint) => g.count) || []
 
@@ -150,7 +156,7 @@ export default function DashboardRight() {
         <div className="hud-line"></div>
       </div>
 
-      {!cognition.loading && confidence < 0.6 && (
+      {!cognition.loading && !hasProfileSignal && confidence < 0.6 && (
         <div data-region="画像未就绪" className="glass-panel p-3 rounded-xl flex-shrink-0">
           <p className="mono text-white/50 text-center" style={{ fontSize: 'var(--f8)' }}>画像未就绪 — 数据不足，继续学习以解锁</p>
         </div>

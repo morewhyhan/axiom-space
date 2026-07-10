@@ -549,7 +549,38 @@ export interface PathAdjustmentData {
     completedSteps: number
     progress: number
   }
-  adjustmentHistory: unknown[]
+  adjustmentHistory: PathAdjustmentRecord[]
+}
+
+export interface PathAdjustmentRecord {
+  id: string
+  adjustmentId: string
+  appliedAt: number
+  trigger: string
+  triggeredBy: string
+  adjustment: {
+    type?: string
+    summary?: string
+    comparison?: {
+      defaultSteps?: string[]
+      personalizedSteps?: string[]
+    }
+    profileEvidence?: Array<{
+      id: string
+      label: string
+      evidence: string
+      confidence?: number
+      status?: string
+    }>
+    changes?: Array<{
+      kind: 'added' | 'skipped' | 'reordered' | 'deepened' | string
+      step: string
+      reason: string
+      evidenceIds?: string[]
+    }>
+  } | null
+  assessmentRef: unknown
+  feedback: string | null
 }
 
 export function usePathAdjustments(pathId?: string) {

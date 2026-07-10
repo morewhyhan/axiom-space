@@ -168,7 +168,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       where: { userId, vaultId: vid },
       orderBy: { createdAt: 'desc' },
       take: 12,
-      select: { concept: true, passed: true, mastery: true, feedback: true, evidence: true, cardId: true, createdAt: true },
+      select: { id: true, concept: true, passed: true, mastery: true, feedback: true, evidence: true, clientContext: true, cardId: true, createdAt: true },
     }),
     prisma.resourceGenerationJob.findMany({
       where: { vaultId: vid },
@@ -487,10 +487,40 @@ const app = new Hono<{ Variables: { userId: string } }>()
     profileLoop: learningProfileContext?.profileLoop ?? profileLoop,
     dimensionInsights: learningProfileContext?.dimensionInsights ?? [],
     promptBlock: learningProfileContext?.promptBlock ?? '',
+    assessmentTimeline: assessments.map((assessment) => ({
+      id: assessment.id,
+      concept: assessment.concept,
+      passed: assessment.passed,
+      mastery: assessment.mastery,
+      feedback: assessment.feedback,
+      evidence: safeJsonStringArray(assessment.evidence),
+      verification: safeJsonRecord(assessment.clientContext),
+      createdAt: assessment.createdAt.toISOString(),
+    })),
   }
 
   return c.json(responseBody)
 })
+
+function safeJsonStringArray(raw: string | null): string[] {
+  if (!raw) return []
+  try {
+    const value = JSON.parse(raw)
+    return Array.isArray(value) ? value.map(String).filter(Boolean) : []
+  } catch {
+    return []
+  }
+}
+
+function safeJsonRecord(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null
+  try {
+    const value = JSON.parse(raw)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+  } catch {
+    return null
+  }
+}
 
 function computeStreak(dates: Date[]): number {
   if (dates.length === 0) return 0

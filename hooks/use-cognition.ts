@@ -107,6 +107,16 @@ export interface CognitionData {
   }
   dimensionInsights?: ProfileDimensionInsight[]
   promptBlock?: string
+  assessmentTimeline?: Array<{
+    id: string
+    concept: string
+    passed: boolean
+    mastery: number
+    feedback: string
+    evidence: string[]
+    verification: Record<string, unknown> | null
+    createdAt: string
+  }>
 }
 
 export interface ProfileDimensionInsight {
@@ -212,6 +222,7 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     profileLoop: data.profileLoop as CognitionData['profileLoop'],
     dimensionInsights: data.dimensionInsights as ProfileDimensionInsight[] | undefined,
     promptBlock: data.promptBlock as string | undefined,
+    assessmentTimeline: data.assessmentTimeline as CognitionData['assessmentTimeline'] ?? [],
   }
 }
 

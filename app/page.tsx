@@ -154,9 +154,7 @@ export default function Home() {
   // Show onboarding after app loads for first-time users
   useEffect(() => {
     if (!showApp || !selectedVault) return
-    const vaultOnboardingKey = `axiom-vault-onboarding:${selectedVault.id}`
-    const vaultSeen = typeof window !== 'undefined' && window.localStorage.getItem(vaultOnboardingKey) === '1'
-    if (!hasCompletedOnboarding || !vaultSeen) {
+    if (!hasCompletedOnboarding) {
       const t = setTimeout(() => setShowOnboarding(true), 800)
       return () => clearTimeout(t)
     }

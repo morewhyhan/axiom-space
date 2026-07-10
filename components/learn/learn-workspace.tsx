@@ -27,6 +27,7 @@ import {
   useGeneratePath,
   useImportDocument,
   useLearningPaths,
+  usePathAdjustments,
   useUpdateStepProgress,
 } from '@/hooks/use-learning'
 import type { AssessmentEvaluation, LearningPath, LearningStep } from '@/hooks/use-learning'
@@ -100,6 +101,7 @@ export default function LearnWorkspace() {
   )
 
   const currentSteps = useMemo(() => currentPath?.steps ?? [], [currentPath?.steps])
+  const pathAdjustments = usePathAdjustments(currentPath?.id)
   const currentStep = useMemo(() => {
     if (!currentSteps.length) return null
     return currentSteps.find((step) => step.id === activeLearningStepId) ?? getNextStep(currentSteps)
@@ -371,6 +373,8 @@ export default function LearnWorkspace() {
               <RouteHeader
                 path={currentPath}
                 steps={currentSteps}
+                adjustmentHistory={pathAdjustments.data?.adjustmentHistory ?? []}
+                adjustmentsLoading={pathAdjustments.loading}
                 totalDone={totalDone}
                 totalProgress={totalProgress}
                 allDone={allDone}

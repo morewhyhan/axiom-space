@@ -123,6 +123,15 @@ export default function LandingPage({
         <button className="landing-btn landing-btn-primary landing-btn-large hover:shadow-[0_0_20px_rgba(168,85,247,0.3)]" onClick={onOpenVaultPicker}>
           进入知识库 <span className="landing-arrow">→</span>
         </button>
+        <button
+          type="button"
+          className="landing-btn landing-btn-secondary"
+          aria-label="退出登录"
+          onClick={() => signOut.mutate()}
+          disabled={signOut.isPending}
+        >
+          {signOut.isPending ? '正在退出...' : '退出登录'}
+        </button>
       </div>
     </>
   )

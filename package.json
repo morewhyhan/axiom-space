@@ -27,12 +27,14 @@
     "db:studio": "prisma studio",
     "db:seed": "node --import tsx prisma/seed.ts",
     "db:seed:demo": "node --env-file=.env scripts/demo-reset-ui.mjs",
+    "db:seed:a3-golden": "node --import tsx scripts/seed-a3-golden.ts",
     "db:seed:cs408": "node --import tsx scripts/seed-cs408.ts",
     "db:seed:career": "node --import tsx scripts/seed-career.ts",
     "seed:career": "node --import tsx scripts/seed-career.ts",
     "db:verify:cs408": "node scripts/verify-cs408-seed.mjs",
     "agent:eval": "tsx scripts/eval-agent-production.ts",
-    "check:demo": "node --import tsx scripts/test/check-demo.ts"
+    "check:demo": "node --import tsx scripts/test/check-demo.ts",
+    "check:a3-golden": "node --import tsx scripts/test/check-a3-golden.ts"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.4.1",
