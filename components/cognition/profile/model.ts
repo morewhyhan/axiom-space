@@ -81,6 +81,14 @@ export type ProfileNode = {
   confidence: number
   freshness: string
   evidenceDetail?: string
+  evidenceTrace?: {
+    sourceLabel: string
+    sourceType: string
+    sourceId: string
+    sourceLocation: string
+    evidence: string
+    analysisMode?: string
+  }
   feedback?: NonNullable<ProfileDimensionInsight['userFeedback']>
 }
 
@@ -270,6 +278,14 @@ function buildDynamicProfileNodes(dimension: ProfileDimensionInsight): ProfileNo
       confidence,
       freshness: feedback ? '已校验' : confidence < 0.45 ? '待确认' : '有新证据',
       evidenceDetail: buildObservationEvidenceDetail(observation),
+      evidenceTrace: {
+        sourceLabel,
+        sourceType: observation.sourceType,
+        sourceId: observation.sourceId,
+        sourceLocation: observation.entryPoint || '未标注',
+        evidence: observation.evidence?.trim() || '当前来源只提供对象引用，尚无可展示的原始证据文本。',
+        analysisMode: observation.analysisMode,
+      },
       feedback,
     }]
   })

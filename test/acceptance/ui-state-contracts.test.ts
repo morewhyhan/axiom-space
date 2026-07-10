@@ -1,6 +1,42 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { buildProfileTree } from '@/components/cognition/profile/model'
+import type { ProfileDimensionInsight } from '@/hooks/use-cognition'
 import { DEFAULT_PANEL_SIZES, useAppStore, type GraphLayoutMode } from '@/stores/mode-store'
+
+test('profile evidence nodes preserve structured trace fields for the visible evidence drawer', () => {
+  const dimension: ProfileDimensionInsight = {
+    key: 'stuckPattern',
+    label: '哪里会卡住',
+    score: 0.52,
+    confidence: 0.63,
+    interpretation: '需要验证因果链缺口。',
+    evidence: [],
+    observations: [{
+      text: '遇到省略前提时会停下来追问。',
+      entryPoint: 'LearningMessage',
+      evidence: '用户原话：我知道代码怎么写，但不知道为什么要多调一次。',
+      confidence: 0.61,
+      analysisMode: 'llm_context',
+      sourceType: 'vaultMemory',
+      sourceId: 'message-visitor-1',
+    }],
+  }
+
+  const [view] = buildProfileTree(null, [dimension])
+  const [node] = view.nodes
+
+  assert.deepEqual(node.evidenceTrace, {
+    sourceLabel: '画像观察',
+    sourceType: 'vaultMemory',
+    sourceId: 'message-visitor-1',
+    sourceLocation: 'LearningMessage',
+    evidence: '用户原话：我知道代码怎么写，但不知道为什么要多调一次。',
+    analysisMode: 'llm_context',
+  })
+  assert.equal(node.freshness, '有新证据')
+  assert.match(node.promptEffect, /卡点/)
+})
 
 test('UI state contracts keep page state separate from domain objects', async (t) => {
   await t.test('mode switching changes only the UI mode value', () => {

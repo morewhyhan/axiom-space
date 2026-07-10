@@ -264,18 +264,75 @@ export function ProfileNodeCard({
             overflowY: 'auto',
             padding: '14px 16px 16px',
           }}>
-            <div style={{
-              whiteSpace: 'pre-wrap',
-              fontFamily: 'var(--font-jetbrains-mono), monospace',
-              fontSize: 11,
-              lineHeight: 1.65,
-              color: 'rgba(207,250,254,0.72)',
-            }}>
-              {node.evidenceDetail}
-            </div>
+            {node.evidenceTrace ? (
+              <div data-testid="profile-evidence-trace" style={{ display: 'grid', gap: 10 }}>
+                <EvidenceField label="画像判断" value={node.claim} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <EvidenceField
+                    label="判断性质"
+                    value={node.evidenceTrace.sourceType === 'assessmentResult' ? '评估结果' : '证据支持的观察'}
+                  />
+                  <EvidenceField label="验证状态" value={node.freshness} />
+                </div>
+                <EvidenceField label="证据内容" value={node.evidenceTrace.evidence} />
+                <EvidenceField
+                  label="来源对象"
+                  value={`${node.evidenceTrace.sourceLabel} · ${node.evidenceTrace.sourceLocation}\n${node.evidenceTrace.sourceId}`}
+                />
+                {node.evidenceTrace.analysisMode && (
+                  <EvidenceField label="分析方式" value={node.evidenceTrace.analysisMode} />
+                )}
+                <EvidenceField label="将如何影响教学" value={node.promptEffect} />
+                {node.feedback && (
+                  <EvidenceField
+                    label="用户校验"
+                    value={`${node.feedback.verdict} · ${node.feedback.summary || node.feedback.note || '已记录反馈'}`}
+                  />
+                )}
+              </div>
+            ) : (
+              <div style={{
+                whiteSpace: 'pre-wrap',
+                fontFamily: 'var(--font-jetbrains-mono), monospace',
+                fontSize: 11,
+                lineHeight: 1.65,
+                color: 'rgba(207,250,254,0.72)',
+              }}>
+                {node.evidenceDetail}
+              </div>
+            )}
           </div>
         </div>
       )}
     </HudPanel>
+  )
+}
+
+function EvidenceField({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{
+      border: '1px solid rgba(255,255,255,0.07)',
+      borderRadius: 8,
+      background: 'rgba(255,255,255,0.025)',
+      padding: '9px 10px',
+    }}>
+      <div style={{
+        marginBottom: 4,
+        color: 'rgba(103,232,249,0.5)',
+        fontFamily: 'var(--font-jetbrains-mono), monospace',
+        fontSize: 9,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        whiteSpace: 'pre-wrap',
+        overflowWrap: 'anywhere',
+        color: 'rgba(226,232,240,0.76)',
+        fontSize: 12,
+        lineHeight: 1.55,
+      }}>
+        {value}
+      </div>
+    </div>
   )
 }
