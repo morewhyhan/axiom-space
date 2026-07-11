@@ -25,6 +25,29 @@ interface ProfileUpdate { [key: string]: unknown; }
 interface SkillUpdate {
   name: string; category: string; description: string; confidence?: number;
 }
+
+function normalizeProfileMechanism(observation: ProfileObservationUpdate): ProfileMechanism {
+  const allowedScopes = new Set(['current_topic', 'domain_pattern', 'cross_domain_pattern'])
+  const allowedStatuses = new Set(['hypothesis', 'supported', 'confirmed', 'weakened', 'refuted', 'improved', 'needs_retest'])
+  const clean = (value: unknown, max = 500) => typeof value === 'string' && value.trim()
+    ? value.trim().slice(0, max)
+    : undefined
+  return {
+    subDimensionKey: normalizeSubDimensionKey(observation.subDimensionKey),
+    subDimensionLabel: clean(observation.subDimensionLabel, 24),
+    userFacingSummary: clean(observation.userFacingSummary, 360),
+    observableBehavior: clean(observation.observableBehavior),
+    mechanismHypothesis: clean(observation.mechanismHypothesis),
+    competingHypotheses: Array.isArray(observation.competingHypotheses)
+      ? uniqueStrings(observation.competingHypotheses.filter((item): item is string => typeof item === 'string')).slice(0, 4)
+      : undefined,
+    discriminatingEvidence: clean(observation.discriminatingEvidence),
+    teachingIntervention: clean(observation.teachingIntervention),
+    verificationCriterion: clean(observation.verificationCriterion),
+    scope: allowedScopes.has(observation.scope || '') ? observation.scope : 'current_topic',
+    status: allowedStatuses.has(observation.status || '') ? observation.status : 'hypothesis',
+  }
+}
 interface CardUpdate {
   type: 'fleeting' | 'permanent'; title: string; content: string; status?: string;
 }
@@ -46,11 +69,28 @@ interface ConceptPushUpdate {
 }
 interface ProfileObservationUpdate {
   dimensionKey?: string
+  subDimensionKey?: string
+  subDimensionLabel?: string
   claim?: string
+  userFacingSummary?: string
   text?: string
   evidence?: string | string[]
   confidence?: number
+  observableBehavior?: string
+  mechanismHypothesis?: string
+  competingHypotheses?: string[]
+  discriminatingEvidence?: string
+  teachingIntervention?: string
+  verificationCriterion?: string
+  scope?: 'current_topic' | 'domain_pattern' | 'cross_domain_pattern'
+  status?: 'hypothesis' | 'supported' | 'confirmed' | 'weakened' | 'refuted' | 'improved' | 'needs_retest'
 }
+
+type ProfileMechanism = Pick<ProfileObservationUpdate,
+  'subDimensionKey' | 'subDimensionLabel' | 'userFacingSummary' |
+  'observableBehavior' | 'mechanismHypothesis' | 'competingHypotheses' |
+  'discriminatingEvidence' | 'teachingIntervention' | 'verificationCriterion' |
+  'scope' | 'status'>
 interface AnalysisResult {
   profile?: ProfileUpdate
   skills?: SkillUpdate[]
@@ -208,6 +248,7 @@ export class BackgroundAnalyzer {
             evidence,
             dimensionKey ? `profile_${dimensionKey}` : 'background-analysis',
             confidence,
+            normalizeProfileMechanism(observation),
           )
           if (dimensionKey) {
             const baVaultId = getCurrentVaultId()
@@ -578,7 +619,13 @@ export class BackgroundAnalyzer {
     return createdTitles
   }
 
-  private async writeObservation(text: string, evidence: string[], category = 'background-analysis', confidence?: number): Promise<string | null> {
+  private async writeObservation(
+    text: string,
+    evidence: string[],
+    category = 'background-analysis',
+    confidence?: number,
+    mechanism?: ProfileMechanism,
+  ): Promise<string | null> {
     try {
       if (evidence.length === 0) return null
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
@@ -596,6 +643,7 @@ export class BackgroundAnalyzer {
             analysisMode: category.startsWith('profile_') ? 'runtime_extraction' : 'background_observation',
             sourceObjectType: 'derived',
             sourceObjectId,
+            ...mechanism,
             evidence: evidence.map((item, index) => ({
               sourceObjectType: 'derived',
               sourceObjectId: `${sourceObjectId}:message:${index}`,
@@ -666,6 +714,12 @@ function prepareBackgroundMessage(message: { role: string; content: string }): P
     evidenceContent: (message.role === 'user' ? authoredContent : raw).trim(),
     sessionContext,
   }
+}
+
+function normalizeSubDimensionKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '')
+  return normalized ? normalized.slice(0, 60) : undefined
 }
 
 function extractTaggedBlock(content: string, tag: string): string | null {

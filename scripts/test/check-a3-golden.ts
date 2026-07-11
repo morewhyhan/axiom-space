@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/db'
+import { buildLearningProfileContext } from '@/server/core/learning/profile-context'
 
 const CLEAN_VAULT = '小林·Visitor 黄金案例'
 const MATURE_VAULT = '小林·设计模式学期档案'
@@ -37,6 +38,34 @@ async function main() {
   assert(clean, `${CLEAN_VAULT} does not exist`)
   assert(mature, `${MATURE_VAULT} does not exist`)
 
+  const matureProfileObservations = mature.vaultMemories.flatMap((memory) => {
+    if (memory.category !== 'observation') return []
+    try {
+      const value = JSON.parse(memory.value) as Record<string, unknown>
+      const category = typeof value.category === 'string' ? value.category : ''
+      return category.startsWith('profile_') ? [{ ...value, dimensionKey: category.slice('profile_'.length) }] : []
+    } catch {
+      return []
+    }
+  })
+  const matureDimensionKeys = ['learningGoal', 'currentFoundation', 'bestExplanationPath', 'stuckPattern', 'paceAndLoad', 'masteryCheck']
+  for (const dimensionKey of matureDimensionKeys) {
+    const observations = matureProfileObservations.filter((item) => item.dimensionKey === dimensionKey)
+    assert(observations.length >= 3, `Mature profile dimension ${dimensionKey} needs at least three necessary sub-dimensions`)
+    assert(observations.every((item) => typeof item.subDimensionKey === 'string'), `${dimensionKey} has an observation without subDimensionKey`)
+    assert(observations.every((item) => typeof item.subDimensionLabel === 'string'), `${dimensionKey} has an observation without a human-readable label`)
+    assert(observations.every((item) => typeof item.userFacingSummary === 'string'), `${dimensionKey} has an observation without a user-facing summary`)
+    assert(observations.every((item) => typeof item.observableBehavior === 'string'), `${dimensionKey} has an observation without observable behavior`)
+    assert(observations.every((item) => typeof item.mechanismHypothesis === 'string'), `${dimensionKey} has an observation without analysis`)
+    assert(observations.every((item) => typeof item.teachingIntervention === 'string'), `${dimensionKey} has an observation without intervention`)
+    assert(observations.every((item) => typeof item.verificationCriterion === 'string'), `${dimensionKey} has an observation without verification`)
+  }
+  const matureProfileContext = await buildLearningProfileContext({ vaultId: mature.id, userId: user.id })
+  assert(/当前分析:/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain mechanism analysis')
+  assert(/本轮干预:/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain teaching intervention')
+  assert(/验证动作:/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain verification action')
+  assert(/\[.+\]/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not preserve dynamic sub-dimension labels')
+
   const dimensionKeys = new Set(clean.vaultMemories.flatMap((memory) => {
     try {
       const value = JSON.parse(memory.value) as { category?: string }
@@ -50,6 +79,30 @@ async function main() {
     ['bestExplanationPath', 'currentFoundation', 'learningGoal', 'masteryCheck', 'paceAndLoad', 'stuckPattern'].sort(),
     'Clean vault must contain all six profile dimensions',
   )
+  const cleanProfileObservations = clean.vaultMemories.flatMap((memory) => {
+    if (memory.category !== 'observation') return []
+    try {
+      const value = JSON.parse(memory.value) as Record<string, unknown>
+      const category = typeof value.category === 'string' ? value.category : ''
+      return category.startsWith('profile_') ? [{ ...value, dimensionKey: category.slice('profile_'.length) }] : []
+    } catch {
+      return []
+    }
+  })
+  assert(cleanProfileObservations.length >= 6, 'Clean vault needs evidence-backed profile observations')
+  for (const observation of cleanProfileObservations) {
+    assert(typeof observation.subDimensionKey === 'string', 'Clean profile observation is missing subDimensionKey')
+    assert(typeof observation.subDimensionLabel === 'string', 'Clean profile observation is missing a human-readable label')
+    assert(typeof observation.userFacingSummary === 'string', 'Clean profile observation is missing a user-facing summary')
+    assert(typeof observation.observableBehavior === 'string', 'Clean profile observation is missing observable behavior')
+    assert(typeof observation.mechanismHypothesis === 'string', 'Clean profile observation is missing mechanism analysis')
+    assert(typeof observation.teachingIntervention === 'string', 'Clean profile observation is missing intervention')
+    assert(typeof observation.verificationCriterion === 'string', 'Clean profile observation is missing verification')
+  }
+  const cleanFoundation = cleanProfileObservations.find((item) => item.dimensionKey === 'currentFoundation')
+  assert(cleanFoundation, 'Clean currentFoundation profile observation is missing')
+  assert(cleanFoundation.subDimensionKey === 'knowledge_boundary_summary', 'Current foundation should be a knowledge-boundary summary, not a concept checklist')
+  assert(/知识图谱/.test(String(cleanFoundation.text)) || /图谱/.test(String(cleanFoundation.teachingIntervention)), 'Current foundation must delegate detailed concept mastery to the knowledge graph')
 
   const cleanPath = clean.learningPaths.find((path) => path.name.includes('Visitor'))
   assert(cleanPath, 'Clean vault Visitor path is missing')

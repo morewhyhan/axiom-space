@@ -146,6 +146,17 @@ export interface ProfileDimensionInsight {
     evidence: string
     confidence?: number
     analysisMode?: string
+    subDimensionKey?: string
+    subDimensionLabel?: string
+    userFacingSummary?: string
+    observableBehavior?: string
+    mechanismHypothesis?: string
+    competingHypotheses?: string[]
+    discriminatingEvidence?: string
+    teachingIntervention?: string
+    verificationCriterion?: string
+    scope?: string
+    status?: string
     sourceType: 'vaultMemory' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
     sourceId: string
   }>

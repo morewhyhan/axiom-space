@@ -247,7 +247,7 @@ export function ProfileNodeCard({
                 {node.caption}
               </div>
               <div style={{ marginTop: 3, color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>
-                置信度 {Math.round(node.confidence * 100)}% · {node.freshness}
+                当前可信度 {Math.round(node.confidence * 100)}% · {node.freshness}
               </div>
             </div>
             <button
@@ -267,6 +267,12 @@ export function ProfileNodeCard({
             {node.evidenceTrace ? (
               <div data-testid="profile-evidence-trace" style={{ display: 'grid', gap: 10 }}>
                 <EvidenceField label="画像判断" value={node.claim} />
+                {node.evidenceTrace.evidenceCount && (
+                  <EvidenceField
+                    label="长期观察积累"
+                    value={`这条结论由 ${node.evidenceTrace.evidenceCount} 条相关观察合并而来。`}
+                  />
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <EvidenceField
                     label="判断性质"
@@ -275,6 +281,18 @@ export function ProfileNodeCard({
                   <EvidenceField label="验证状态" value={node.freshness} />
                 </div>
                 <EvidenceField label="证据内容" value={node.evidenceTrace.evidence} />
+                {node.evidenceTrace.observableBehavior && (
+                  <EvidenceField label="我们观察到" value={node.evidenceTrace.observableBehavior} />
+                )}
+                {node.evidenceTrace.mechanismHypothesis && (
+                  <EvidenceField label="我们目前的理解" value={node.evidenceTrace.mechanismHypothesis} />
+                )}
+                {node.evidenceTrace.competingHypotheses?.length ? (
+                  <EvidenceField label="竞争解释" value={node.evidenceTrace.competingHypotheses.join('\n')} />
+                ) : null}
+                {node.evidenceTrace.discriminatingEvidence && (
+                  <EvidenceField label="鉴别与排除依据" value={node.evidenceTrace.discriminatingEvidence} />
+                )}
                 <EvidenceField
                   label="来源对象"
                   value={`${node.evidenceTrace.sourceLabel} · ${node.evidenceTrace.sourceLocation}\n${node.evidenceTrace.sourceId}`}
@@ -282,7 +300,22 @@ export function ProfileNodeCard({
                 {node.evidenceTrace.analysisMode && (
                   <EvidenceField label="分析方式" value={node.evidenceTrace.analysisMode} />
                 )}
-                <EvidenceField label="将如何影响教学" value={node.promptEffect} />
+                <EvidenceField
+                  label="接下来会这样帮助你"
+                  value={node.evidenceTrace.teachingIntervention || node.promptEffect}
+                />
+                {node.evidenceTrace.verificationCriterion && (
+                  <EvidenceField label="验证标准" value={node.evidenceTrace.verificationCriterion} />
+                )}
+                {(node.evidenceTrace.scope || node.evidenceTrace.status) && (
+                  <EvidenceField
+                    label="这条结论目前适用于"
+                    value={[profileScopeLabel(node.evidenceTrace.scope), profileEvidenceStatusLabel(node.evidenceTrace.status)].filter(Boolean).join(' · ')}
+                  />
+                )}
+                {node.evidenceTrace.mergedObservations?.length ? (
+                  <EvidenceField label="合并的观察" value={node.evidenceTrace.mergedObservations.join('\n')} />
+                ) : null}
                 {node.feedback && (
                   <EvidenceField
                     label="用户校验"
@@ -306,6 +339,26 @@ export function ProfileNodeCard({
       )}
     </HudPanel>
   )
+}
+
+function profileScopeLabel(scope?: string): string {
+  if (scope === 'current_topic') return '当前知识点'
+  if (scope === 'domain_pattern') return '当前课程中的稳定模式'
+  if (scope === 'cross_domain_pattern') return '跨课程重复出现的模式'
+  return scope || ''
+}
+
+function profileEvidenceStatusLabel(status?: string): string {
+  const labels: Record<string, string> = {
+    hypothesis: '仍在验证',
+    supported: '已有证据支持',
+    confirmed: '已多次确认',
+    weakened: '近期证据减弱',
+    refuted: '已被后续证据推翻',
+    improved: '已经改善',
+    needs_retest: '等待复测',
+  }
+  return status ? labels[status] || status : ''
 }
 
 function EvidenceField({ label, value }: { label: string; value: string }) {

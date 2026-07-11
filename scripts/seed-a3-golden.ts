@@ -6,6 +6,7 @@ const prisma = new PrismaClient()
 const EMAIL = process.env.A3_SEED_EMAIL || 'demo@axiom.space'
 const PASSWORD = process.env.A3_SEED_PASSWORD || 'demo123456'
 const MODE = process.env.A3_SEED_MODE || 'all'
+const RESET_USER = process.env.A3_SEED_RESET_USER === '1'
 const CLEAN_VAULT = '小林·Visitor 黄金案例'
 const MATURE_VAULT = '小林·设计模式学期档案'
 const DAY = 24 * 60 * 60 * 1000
@@ -164,6 +165,19 @@ public class VisitorDispatchLab {
 ] as const
 
 async function ensureUser() {
+  if (RESET_USER) {
+    const existing = await prisma.user.findUnique({ where: { email: EMAIL }, select: { id: true } })
+    if (existing) {
+      await prisma.assessmentResult.deleteMany({ where: { userId: existing.id } })
+      await prisma.cardRevision.deleteMany({ where: { userId: existing.id } })
+      await prisma.promotionAttempt.deleteMany({ where: { userId: existing.id } })
+      await prisma.sourceDocument.deleteMany({ where: { userId: existing.id } })
+      await prisma.domainEvent.deleteMany({ where: { userId: existing.id } })
+      await prisma.agentAuditLog.deleteMany({ where: { userId: existing.id } })
+      await prisma.user.delete({ where: { id: existing.id } })
+      console.log(`Deleted test account: ${EMAIL}`)
+    }
+  }
   const user = await prisma.user.upsert({
     where: { email: EMAIL },
     update: { name: '小林', emailVerified: true },
@@ -217,11 +231,22 @@ async function seedCards(vaultId: string, mature: boolean) {
 
 async function addObservation(vaultId: string, key: string, input: {
   dimension: string
+  subDimensionKey?: string
+  subDimensionLabel?: string
   text: string
+  userFacingSummary?: string
   evidence: string
   confidence: number
   sourceId: string
   createdAt?: Date
+  observableBehavior?: string
+  mechanismHypothesis?: string
+  competingHypotheses?: string[]
+  discriminatingEvidence?: string
+  teachingIntervention?: string
+  verificationCriterion?: string
+  scope?: 'current_topic' | 'domain_pattern' | 'cross_domain_pattern'
+  status?: 'hypothesis' | 'supported' | 'confirmed' | 'weakened' | 'refuted' | 'improved' | 'needs_retest'
 }) {
   await prisma.vaultMemory.create({
     data: {
@@ -232,10 +257,21 @@ async function addObservation(vaultId: string, key: string, input: {
       value: JSON.stringify({
         text: input.text,
         category: `profile_${input.dimension}`,
+        subDimensionKey: input.subDimensionKey,
+        subDimensionLabel: input.subDimensionLabel,
+        userFacingSummary: input.userFacingSummary,
         confidence: input.confidence,
         analysisMode: 'llm_context',
         sourceObjectType: 'learningMessage',
         sourceObjectId: input.sourceId,
+        observableBehavior: input.observableBehavior,
+        mechanismHypothesis: input.mechanismHypothesis,
+        competingHypotheses: input.competingHypotheses,
+        discriminatingEvidence: input.discriminatingEvidence,
+        teachingIntervention: input.teachingIntervention,
+        verificationCriterion: input.verificationCriterion,
+        scope: input.scope,
+        status: input.status,
         evidence: [{ sourceObjectType: 'learningSession', sourceObjectId: input.sourceId, summary: input.evidence }],
       }),
     },
@@ -320,12 +356,104 @@ async function seedClean(userId: string) {
   for (const [index, [role, content]] of messages.entries()) {
     await prisma.learningMessage.create({ data: { sessionId: session.id, role, content, timestamp: new Date(Date.now() - (messages.length - index) * 60_000) } })
   }
-  await addObservation(vault.id, 'golden_goal', { dimension: 'learningGoal', text: '目标不是背 Visitor 结构图，而是能在课程项目里判断 Visitor 何时适用、何时不适用；教学必须围绕“可迁移的设计决策能力”组织。', evidence: messages[0][1], confidence: 0.78, sourceId: session.id })
-  await addObservation(vault.id, 'golden_foundation', { dimension: 'currentFoundation', text: '学生能复现 Visitor 的 UML 角色，说明结构记忆已具备；真正缺口在 Java 重载/重写的过程模型，若不先补这个前提，accept 的必要性无法被理解。', evidence: messages[2][1], confidence: 0.88, sourceId: session.id })
-  await addObservation(vault.id, 'golden_explanation', { dimension: 'bestExplanationPath', text: '最佳讲法应从“先预测代码输出”进入，再逐帧追踪编译期重载选择和运行时重写分派，最后让学生用反例解释；定义和整页 PPT 应后置。', evidence: '用户要求把每一步为什么这样选择讲清楚。', confidence: 0.72, sourceId: session.id })
-  await addObservation(vault.id, 'golden_stuck', { dimension: 'stuckPattern', text: '学习阻塞不是全局反应慢，而是关键因果前提缺失时会停下来深挖；老师继续往后讲会造成链式听不懂，但已掌握的 UML 反复细讲会降低效率。', evidence: '用户指出“这一步我一直没想清楚”。', confidence: 0.62, sourceId: session.id })
-  await addObservation(vault.id, 'golden_pace', { dimension: 'paceAndLoad', text: '节奏控制应采用“一个因果缺口一轮闭合”：预测、解释、运行验证、再继续；确认通过后其他已会内容可以加速跳过。', evidence: '用户要求逐步预测每个调用阶段。', confidence: 0.66, sourceId: session.id })
-  await addObservation(vault.id, 'golden_mastery', { dimension: 'masteryCheck', text: '掌握标准必须是可证伪的：能预测陌生代码、运行结果一致、说明反例边界，并在隔日换题后仍能迁移，而不是复述 Visitor 定义。', evidence: '不能以复述定义作为通过证据。', confidence: 0.74, sourceId: session.id })
+  await addObservation(vault.id, 'golden_goal', {
+    dimension: 'learningGoal',
+    subDimensionKey: 'transferable_design_decision',
+    subDimensionLabel: '目标取向',
+    text: '目标不是背模式结构，而是形成可迁移的设计决策能力；教学要服务“遇到真实课程项目时知道何时用、何时不用”。',
+    userFacingSummary: '你真正想获得的是能做设计判断的能力，不只是把某个模式的结构说出来。',
+    observableBehavior: '提问集中在“为什么必须这样调”和“这个东西该怎么用”，而不是要求再讲一遍角色名称。',
+    mechanismHypothesis: '学习目标指向可迁移决策；如果教学停留在结构复述，不能满足当前学习任务。',
+    teachingIntervention: '后续路径用真实需求、选择边界和反例来组织，而不是以定义背诵作为主线。',
+    verificationCriterion: '面对陌生需求时能说明采用或排除某个模式的理由。',
+    evidence: messages[0][1],
+    confidence: 0.78,
+    sourceId: session.id,
+    scope: 'current_topic',
+    status: 'supported',
+  })
+  await addObservation(vault.id, 'golden_foundation', {
+    dimension: 'currentFoundation',
+    subDimensionKey: 'knowledge_boundary_summary',
+    subDimensionLabel: '知识边界摘要',
+    text: '知识掌握情况只需在画像里摘要：学生已具备基本结构记忆，但有一个会影响理解的前置过程模型缺口；具体知识节点交给知识图谱展开。',
+    userFacingSummary: '你不是从零开始，也不是整门课都薄弱；当前只需要把一个关键前置过程补准，具体概念关系会在图谱里呈现。',
+    observableBehavior: '能照着写出结构，却在“为什么要多调一次”处停住，并把实际输出预测错。',
+    mechanismHypothesis: '这是局部前提模型未闭合，不宜把画像写成大量“会什么/不会什么”的知识点清单。',
+    teachingIntervention: '画像面板只标出可教学控制的边界；具体掌握节点、前置关系和知识演进在知识图谱里查看。',
+    verificationCriterion: '补齐该前提后，学生能继续推进后续迁移任务，而无需重讲整套基础结构。',
+    evidence: messages[2][1],
+    confidence: 0.88,
+    sourceId: session.id,
+    scope: 'current_topic',
+    status: 'supported',
+  })
+  await addObservation(vault.id, 'golden_explanation', {
+    dimension: 'bestExplanationPath',
+    subDimensionKey: 'predict_then_trace',
+    subDimensionLabel: '最佳讲法',
+    text: '最佳讲法是先让学生预测一个最小现象，再逐步追踪因果链；定义和完整结构图应在机制闭合后再出现。',
+    userFacingSummary: '你更适合先看到一个会出错的最小现象，再把背后的原因一格一格拆开。',
+    observableBehavior: '直接看结构仍不明白原因，先预测输出后能够准确暴露真正卡点。',
+    mechanismHypothesis: '预测错误提供了定位隐含模型的入口，比直接讲定义更能发现底层误解。',
+    teachingIntervention: '本轮先抛最小可验证问题，再按时间顺序追踪关键决定点。',
+    verificationCriterion: '解释后能用自己的话复述每个决定点，并在变式中做出正确预测。',
+    evidence: '用户要求把每一步为什么这样选择讲清楚。',
+    confidence: 0.72,
+    sourceId: session.id,
+    scope: 'current_topic',
+    status: 'hypothesis',
+  })
+  await addObservation(vault.id, 'golden_stuck', {
+    dimension: 'stuckPattern',
+    subDimensionKey: 'causal_gap_not_global_slow',
+    subDimensionLabel: '底层卡点',
+    text: '学习阻塞更像是关键因果前提未闭合，而不是整体反应慢或基础全面薄弱；一旦这个前提没落地，后续课堂信息会失去落点。',
+    userFacingSummary: '你卡住不是因为整体慢，而是因为关键原因还没闭合时，后面的内容会暂时接不上。',
+    observableBehavior: '在一个关键步骤上持续追问“为什么”，而不是对所有基础内容都无法跟随。',
+    mechanismHypothesis: '未闭合的因果节点占用注意力，导致后续内容无法被整合进已有理解。',
+    competingHypotheses: ['基础全面薄弱', '全局加工速度较慢', '只是缺少练习熟练度'],
+    discriminatingEvidence: '如果补齐关键前提后能快速迁移，且重复基础结构没有明显收益，就支持因果缺口假设。',
+    teachingIntervention: '先停在当前关键因果节点，闭合后再继续；已掌握内容不反复慢讲。',
+    verificationCriterion: '补齐前提后，在陌生场景中能恢复正常推进并解释变化原因。',
+    evidence: '用户指出“这一步我一直没想清楚”。',
+    confidence: 0.62,
+    sourceId: session.id,
+    scope: 'domain_pattern',
+    status: 'hypothesis',
+  })
+  await addObservation(vault.id, 'golden_pace', {
+    dimension: 'paceAndLoad',
+    subDimensionKey: 'one_open_causal_node',
+    subDimensionLabel: '负荷原则',
+    text: '节奏控制不是简单慢讲，而是一次只打开一个尚未闭合的关键因果节点；闭合后应恢复推进速度。',
+    userFacingSummary: '系统不该把所有内容都讲慢讲碎，只在关键原因还没闭合时放慢。',
+    observableBehavior: '用户要求逐步解释调用阶段，但不需要重复已经会的结构名称。',
+    mechanismHypothesis: '负荷瓶颈来自未闭合节点并行过多，不来自“不能听深”。',
+    teachingIntervention: '采用预测、解释、运行验证、再继续的短循环，并在通过后加速跳过已会内容。',
+    verificationCriterion: '每轮只留下一个待验证问题；回答通过后下一步不再重复上一节点。',
+    evidence: '用户要求逐步预测每个调用阶段。',
+    confidence: 0.66,
+    sourceId: session.id,
+    scope: 'current_topic',
+    status: 'supported',
+  })
+  await addObservation(vault.id, 'golden_mastery', {
+    dimension: 'masteryCheck',
+    subDimensionKey: 'falsifiable_transfer',
+    subDimensionLabel: '学会标准',
+    text: '掌握标准必须可证伪：预测、解释、运行结果和陌生迁移一致，才算真正学会。',
+    userFacingSummary: '真正学会不是复述定义，而是能预测会发生什么、解释为什么，并在换题后仍然用得出来。',
+    observableBehavior: '单纯复述结构不能证明理解，必须用输出预测和反例边界来检验。',
+    mechanismHypothesis: '可证伪任务能区分“听起来懂”和“过程模型真的成立”。',
+    teachingIntervention: '每个关键概念结束时安排预测题、反例题和一次换场景迁移。',
+    verificationCriterion: '预测结果、因果解释、真实运行和陌生迁移均通过；隔日复测保持。',
+    evidence: '不能以复述定义作为通过证据。',
+    confidence: 0.74,
+    sourceId: session.id,
+    scope: 'current_topic',
+    status: 'supported',
+  })
   await prisma.vaultCapability.create({ data: { vaultId: vault.id, concept: 'Visitor 双重分派', masteryLevel: 28, status: 'learning', weakAreas: JSON.stringify(['重载选择机制', '两次分派调用轨迹']), strongAreas: JSON.stringify(['能复现标准结构']) } })
   const path = await createPath(userId, vault.id, cardIds, false)
   const firstStep = await prisma.learningPathStep.findFirstOrThrow({ where: { pathId: path.id }, orderBy: { order: 'asc' } })
@@ -347,9 +475,200 @@ async function seedMature(userId: string) {
   for (const [index, item] of assessments.entries()) {
     await prisma.assessmentResult.create({ data: { userId, vaultId: vault.id, pathId: path.id, stepId: steps[Math.min(index, steps.length - 1)]?.id, cardId: cardIds.get(index ? 'dispatch' : 'overload'), concept: item.concept, passed: item.passed, mastery: item.mastery, feedback: item.feedback, evidence: JSON.stringify(item.evidence), clientContext: JSON.stringify({ rubricId: 'visitor-transfer-v1', deterministicCheck: item.passed ? 'passed' : 'failed' }), createdAt: daysAgo(item.days) } })
   }
-  await addObservation(vault.id, 'semester_stuck_initial', { dimension: 'stuckPattern', text: '初始假设认为学生整体需要慢速细讲；后续证据显示更准确的机制是“关键因果前提缺口”造成节奏失配。', evidence: '首次会话连续追问重载为什么不看运行时参数类型。', confidence: 0.58, sourceId: 'semester-session-1', createdAt: daysAgo(20) })
-  await addObservation(vault.id, 'semester_stuck_corrected', { dimension: 'stuckPattern', text: '修正后画像：不是所有内容都要讲深。对已掌握 UML 快速略过；对重载选择、双重分派、模式适用边界这些因果断点，采用预测-验证-反例闭环。', evidence: '用户反馈基础 UML 重复讲解过慢，但调用机制逐步解释有效。', confidence: 0.86, sourceId: 'semester-session-4', createdAt: daysAgo(4) })
-  await addObservation(vault.id, 'semester_mastery', { dimension: 'masteryCheck', text: 'Visitor 掌握已不只停留在定义层：陌生 AST 迁移、真实代码执行、反例边界说明和隔日复测共同通过，说明知识已转成可迁移能力。', evidence: '迁移评估 91；隔日复测 88；Java 测试全部通过。', confidence: 0.9, sourceId: 'visitor-assessment-chain', createdAt: daysAgo(1) })
+  const matureProfileObservations = [
+    {
+      key: 'semester_goal_purpose', dimension: 'learningGoal', subDimensionKey: 'goal_and_use', subDimensionLabel: '目标与用途',
+      text: '当前核心目标是能在课程项目中独立判断设计模式，而不是背诵 UML。',
+      userFacingSummary: '你现在最在意的不是记住模式名称，而是面对真实需求时能判断该不该用、为什么这样选。',
+      observableBehavior: '多次要求解释适用条件、变化成本，并主动追问不该使用 Visitor 的场景。',
+      mechanismHypothesis: '学习动机稳定指向可迁移的设计决策能力，单纯结构复述不能满足当前目标。',
+      teachingIntervention: '案例和路径优先围绕课程项目选型、变化方向和替代方案组织，压缩纯记忆内容。',
+      verificationCriterion: '面对陌生需求能选择模式并说明为什么排除至少一个替代方案。',
+      evidence: '学习目标对话、路径主题和三次模式边界追问一致。', confidence: 0.91, status: 'confirmed' as const,
+    },
+    {
+      key: 'semester_goal_stage', dimension: 'learningGoal', subDimensionKey: 'current_stage', subDimensionLabel: '当前阶段',
+      text: '学习阶段已从理解单个 Visitor 转向比较多个行为型模式。',
+      userFacingSummary: 'Visitor 的核心机制已经比较稳定，接下来更值得把精力放在 Visitor、Strategy、Command 的选择边界上。',
+      observableBehavior: 'Visitor 迁移与隔日复测通过，路径下一步自动转向模式选择。',
+      mechanismHypothesis: '继续重复单模式基础内容的边际收益已经很低，横向比较是当前能力增长点。',
+      teachingIntervention: '跳过 Visitor 基础 UML，使用同一业务需求比较多个模式的变化成本。',
+      verificationCriterion: '完成陌生业务选型题并给出统一比较坐标。',
+      evidence: 'Visitor 迁移 91；隔日复测 88；路径步骤已调整。', confidence: 0.9, status: 'supported' as const,
+    },
+    {
+      key: 'semester_goal_output', dimension: 'learningGoal', subDimensionKey: 'desired_output', subDimensionLabel: '成果标准',
+      text: '高质量学习成果应同时包含可运行代码、设计取舍和永久卡沉淀。',
+      userFacingSummary: '你希望最后留下的不只是“我听懂了”，而是一份以后还能复用、能经得起追问的理解。',
+      observableBehavior: '完成代码运行、费曼解释，并将 Visitor 机制整理为永久卡。',
+      mechanismHypothesis: '可复用产出能够迫使隐含理解外显，更适合检验深层掌握。',
+      teachingIntervention: '重要主题结束时安排代码验证与永久卡整理，不以口头确认收尾。',
+      verificationCriterion: '产出包含机制、条件、例子、反例和替代方案的永久卡。',
+      evidence: '永久卡审核通过，资源与代码结果均已关联。', confidence: 0.85, status: 'supported' as const,
+    },
+    {
+      key: 'semester_foundation_mastered', dimension: 'currentFoundation', subDimensionKey: 'stable_mastery', subDimensionLabel: '稳定掌握',
+      text: 'Java 重载、重写与 Visitor 双重分派已经达到可解释和可迁移层级。',
+      userFacingSummary: '你已经不只是记住 Visitor 的写法，而是能追踪两次分派、预测结果并迁移到陌生 AST。',
+      observableBehavior: '陌生代码调用轨迹正确，AST 迁移通过，隔日无提示复测保持。',
+      mechanismHypothesis: '编译期签名选择与运行时实现执行的过程模型已经闭合。',
+      teachingIntervention: '后续把这些内容作为已知前提，避免重复基础讲解。',
+      verificationCriterion: '间隔一周后仍能无提示解释调用轨迹。',
+      evidence: '评估 86、91、88；Java 测试 4/4。', confidence: 0.93, status: 'confirmed' as const,
+    },
+    {
+      key: 'semester_foundation_boundary', dimension: 'currentFoundation', subDimensionKey: 'unstable_boundary', subDimensionLabel: '不稳定边界',
+      text: '单个模式结构能够解释，但多个模式同时可用时的选择边界仍不稳定。',
+      userFacingSummary: '你已经会解释单个模式；现在真正需要补的是“几个方案都能实现时，怎样比较才不凭感觉”。',
+      observableBehavior: '能区分 Visitor 与 Strategy 的定义，但对象结构和操作同时变化时选择不稳定。',
+      mechanismHypothesis: '当前缺口是缺少统一的比较坐标，而不是模式定义记忆不足。',
+      teachingIntervention: '固定使用变化方向、职责归属、扩展成本三个坐标进行横向比较。',
+      verificationCriterion: '在两个陌生需求中使用同一坐标得出可辩护的不同选择。',
+      evidence: '模式选择能力 62；Visitor 与 Strategy 基本区分已通过。', confidence: 0.78, status: 'supported' as const,
+    },
+    {
+      key: 'semester_foundation_repair', dimension: 'currentFoundation', subDimensionKey: 'recent_repair', subDimensionLabel: '近期修正',
+      text: '把重载与重写合并成一次运行时选择的错误模型已经修正。',
+      userFacingSummary: '你之前真正卡住的是调用过程被合并了；现在已经能把编译期选签名和运行时找实现分开说明。',
+      observableBehavior: '基线预测 visit(Pdf) 失败，干预后能正确预测 visit(Node) 并解释原因。',
+      mechanismHypothesis: '原问题属于局部过程模型断裂，不代表 Java 基础整体薄弱。',
+      teachingIntervention: '新语言机制继续采用“先标决策阶段，再追踪执行”的方式。',
+      verificationCriterion: '在泛型或继承变式中继续正确区分签名选择和实现执行。',
+      evidence: '基线 36；机制干预后 86；隔日复测 88。', confidence: 0.91, status: 'improved' as const,
+    },
+    {
+      key: 'semester_explain_sequence', dimension: 'bestExplanationPath', subDimensionKey: 'effective_sequence', subDimensionLabel: '最佳解释路径',
+      text: '最有效顺序是最小代码预测、查看结果、拆因果、给定义、做反例和陌生迁移。',
+      userFacingSummary: '你在先做预测、再看冲突发生在哪里时理解得最扎实；这样系统能直接找到你脑中的过程模型。',
+      observableBehavior: '直接复述 UML 后仍失败，代码预测暴露误解，逐步解释后迁移成功。',
+      mechanismHypothesis: '预测产生的认知冲突能定位隐含错误模型，随后单节点解释完成修正。',
+      teachingIntervention: '机制类问题默认先测后讲，并在解释后立即安排一个变式。',
+      verificationCriterion: '同一解释顺序在另一个 Java 或设计模式机制上仍能减少重复追问。',
+      evidence: 'UML 复述未改善；预测-验证干预后评估提升至 86。', confidence: 0.9, status: 'confirmed' as const,
+    },
+    {
+      key: 'semester_explain_medium', dimension: 'bestExplanationPath', subDimensionKey: 'effective_medium', subDimensionLabel: '有效媒介',
+      text: '机制问题使用最小代码和执行时间线有效，结构总结再使用 UML。',
+      userFacingSummary: '你不是排斥 UML，而是需要先看清代码在时间上怎样一步步作出决定，之后类图才真正有意义。',
+      observableBehavior: '执行轨迹能被准确复述，单独 UML 只能复述角色。',
+      mechanismHypothesis: '动态协作问题需要时间序列表征，静态结构图无法单独承载调用阶段。',
+      teachingIntervention: '动态机制先用代码与时间线，完成后再用 UML 压缩结构。',
+      verificationCriterion: '用户能根据时间线自行补画对应 UML 关系。',
+      evidence: '调用轨迹复述通过；UML 基础早已掌握。', confidence: 0.84, status: 'supported' as const,
+    },
+    {
+      key: 'semester_explain_avoid', dimension: 'bestExplanationPath', subDimensionKey: 'avoid_full_dump', subDimensionLabel: '应避免讲法',
+      text: '机制未闭合前直接给完整项目和大量并列定义会遮蔽关键原因。',
+      userFacingSummary: '一次看到太多完整结构时，你会把精力花在类名和细节上；先缩小到一个决定点，反而更快。',
+      observableBehavior: '完整 UML 重讲没有改善预测，最小对照代码迅速定位错误。',
+      mechanismHypothesis: '非关键结构增加外在负荷，使真正需要修正的因果节点不突出。',
+      teachingIntervention: '首轮案例只保留一个变量和一个可观察差异，机制闭合后再恢复完整项目。',
+      verificationCriterion: '最小案例后能指出完整项目中对应的同一机制。',
+      evidence: '重复 UML 无提升；最小代码干预后成功迁移。', confidence: 0.82, status: 'supported' as const,
+    },
+    {
+      key: 'semester_stuck_mechanism', dimension: 'stuckPattern', subDimensionKey: 'causal_prerequisite_gap', subDimensionLabel: '核心阻塞机制',
+      text: '关键因果前提未闭合时，后续信息难以进入；这不是整体反应慢。',
+      userFacingSummary: '你并不是整体学得慢。真正影响你的是关键原因还没闭合时，后面的内容会暂时失去落点。',
+      observableBehavior: '重载选择未理解时持续追问 accept；补齐后能快速完成后续 AST 迁移。',
+      mechanismHypothesis: '未闭合因果前提持续占用注意，造成后续课堂信息的链式失配。',
+      competingHypotheses: ['Java 基础整体薄弱', '全局信息加工速度偏慢', '学习动机不足'],
+      discriminatingEvidence: '已掌握 UML 快速略过未降低表现；机制补齐后迁移显著提升；主动完成多项任务。',
+      teachingIntervention: '保留知识深度，但先闭合当前关键因果节点；已掌握内容快速跳过。',
+      verificationCriterion: '在操作系统或网络机制课程中观察同类前提缺口是否再次触发停顿。',
+      evidence: '三个竞争假设经四次评估区分，H1 从 58% 升至 90%。', confidence: 0.9, status: 'confirmed' as const,
+    },
+    {
+      key: 'semester_stuck_error', dimension: 'stuckPattern', subDimensionKey: 'decision_stage_merge', subDimensionLabel: '典型错误模式',
+      text: '容易把不同阶段作出的决定合并成同一个运行时过程。',
+      userFacingSummary: '你过去容易把“什么时候选方法”和“最后执行谁”合成一步；把决策阶段标出来后，这类问题会明显清楚。',
+      observableBehavior: '曾认为重载也根据参数对象的运行时类型选择。',
+      mechanismHypothesis: '过程表征缺少时间阶段，导致静态选择与动态执行被压缩为单一事件。',
+      teachingIntervention: '遇到调用机制先标注决策者、发生时间和可见类型信息。',
+      verificationCriterion: '处理新的重载、泛型和继承调用时能独立画出阶段表。',
+      evidence: '基线错误、纠错解释和隔日复测形成完整证据链。', confidence: 0.88, status: 'improved' as const,
+    },
+    {
+      key: 'semester_stuck_guard', dimension: 'stuckPattern', subDimensionKey: 'guard_strategy', subDimensionLabel: '防错策略',
+      text: '按对象、条件、决策阶段、结果和反例展开能提前阻止同类误解。',
+      userFacingSummary: '以后遇到类似机制，系统会先帮你标出“谁根据什么作决定”，避免关键步骤被一句话带过。',
+      observableBehavior: '按阶段追踪后，用户能主动指出删掉 accept 会丢失哪段类型信息。',
+      mechanismHypothesis: '显式过程结构降低了阶段合并和结论记忆的风险。',
+      teachingIntervention: '机制解释默认使用五段防错结构，并要求用户预测其中一个节点。',
+      verificationCriterion: '同类变式错误率连续两次保持下降。',
+      evidence: 'Visitor 调用轨迹与反例边界均通过。', confidence: 0.83, status: 'supported' as const,
+    },
+    {
+      key: 'semester_pace_principle', dimension: 'paceAndLoad', subDimensionKey: 'causal_span', subDimensionLabel: '总体负荷原则',
+      text: '不需要降低解释深度，需要缩短尚未闭合的因果跨度。',
+      userFacingSummary: '系统不会因为你需要想清原因就把内容讲浅；只会把新的关键因果拆成更短、可验证的步骤。',
+      observableBehavior: '关键机制细拆有效，已掌握 UML 细讲反而被评价为低效。',
+      mechanismHypothesis: '负荷瓶颈来自并行未闭合节点数量，而不是知识深度本身。',
+      teachingIntervention: '每轮只保留一个待闭合因果节点，其余已知内容快速带过。',
+      verificationCriterion: '节点闭合后能立即恢复正常速度并完成连续任务。',
+      evidence: '慢拆机制后迁移成功；快速略过 UML 未降低表现。', confidence: 0.89, status: 'confirmed' as const,
+    },
+    {
+      key: 'semester_pace_dose', dimension: 'paceAndLoad', subDimensionKey: 'new_concept_dose', subDimensionLabel: '新内容剂量',
+      text: '新机制一次推进一个关键节点，最多同时引入两个相互依赖概念。',
+      userFacingSummary: '新机制一次只推进一个关键决定最合适；理解闭合后，你可以很快继续，并不需要整节课都放慢。',
+      observableBehavior: '单节点问答能准确复述；多个调用阶段并列时会反复回到第一步。',
+      mechanismHypothesis: '同时维护多个未知阶段会使主线位置不稳定。',
+      teachingIntervention: '新术语随当前节点引入，关键节点后用一次预测确认。',
+      verificationCriterion: '连续两次多步迁移成功后将单轮负荷提高到两个节点。',
+      evidence: '路径逐步任务完成速度与对话追问位置一致。', confidence: 0.8, status: 'supported' as const,
+    },
+    {
+      key: 'semester_pace_adjust', dimension: 'paceAndLoad', subDimensionKey: 'adaptive_load', subDimensionLabel: '升降载条件',
+      text: '迁移成功后应提速，暴露错误过程模型时应暂停新增内容。',
+      userFacingSummary: '系统会根据你的真实表现调节节奏：已经会的会跳过，新的错误模型出现时才停下来一起拆清楚。',
+      observableBehavior: 'Visitor 复测通过后路径跳过基础内容，当前转向更难的模式选择。',
+      mechanismHypothesis: '以行为证据调载比固定“慢讲偏好”更符合真实能力变化。',
+      teachingIntervention: '用迁移结果触发提速，用错误原因而非单次分数触发降载。',
+      verificationCriterion: '路径难度调整后学习表现不下降且重复内容减少。',
+      evidence: '路径已完成一次自动提速和重排。', confidence: 0.84, status: 'supported' as const,
+    },
+    {
+      key: 'semester_mastery_current', dimension: 'masteryCheck', subDimensionKey: 'mechanism_proof', subDimensionLabel: '理解标准',
+      text: '机制类概念必须能预测结果并解释中间因果，复述定义不足以通过。',
+      userFacingSummary: '对你来说，真正学会不是把定义说顺，而是能预测会发生什么，并讲清中间每一步为什么。',
+      observableBehavior: '初期能复述 Visitor 结构但预测失败；过程解释形成后预测正确。',
+      mechanismHypothesis: '预测与因果解释能区分结构记忆和可运行过程模型。',
+      teachingIntervention: '机制主题结束时固定安排无提示预测与原因说明。',
+      verificationCriterion: '预测、因果链和真实运行三者一致。',
+      evidence: '基线复述与错误预测对照；干预后调用轨迹正确。', confidence: 0.91, status: 'confirmed' as const,
+    },
+    {
+      key: 'semester_mastery_transfer', dimension: 'masteryCheck', subDimensionKey: 'transfer_proof', subDimensionLabel: '迁移标准',
+      text: '陌生场景迁移和反例边界是高于熟悉题复现的掌握证据。',
+      userFacingSummary: '你能把 Visitor 迁移到陌生 AST，并说清什么时候不该用，这比做对原题更能证明理解已经属于你。',
+      observableBehavior: 'AST 迁移 91，能够说明新增元素类型时 Visitor 的成本。',
+      mechanismHypothesis: '陌生表面下仍能调用同一机制，说明知识已脱离具体例子。',
+      teachingIntervention: '新主题至少安排一个陌生迁移和一个反例辨析。',
+      verificationCriterion: '在不同业务表面下保持相同判断原则。',
+      evidence: 'AST 迁移与架构取舍量规全部通过。', confidence: 0.9, status: 'confirmed' as const,
+    },
+    {
+      key: 'semester_mastery_retention', dimension: 'masteryCheck', subDimensionKey: 'retention_proof', subDimensionLabel: '稳定掌握标准',
+      text: '当日通过只算当前理解，间隔复测和真实任务再次调用后才算稳定掌握。',
+      userFacingSummary: '系统不会因为一次答对就草率地说你完全掌握；隔一段时间仍能独立调用，才会把它作为稳定能力。',
+      observableBehavior: 'Visitor 隔日无提示复测 88，未使用原题变量名。',
+      mechanismHypothesis: '间隔提取能排除短期工作记忆和题面熟悉造成的虚假掌握。',
+      teachingIntervention: '关键知识进入间隔复测；同类错误重现时降为待复测而非完全不会。',
+      verificationCriterion: '一周后跨会话复测或课程项目中再次正确调用。',
+      evidence: '隔日复测已通过，一周保持仍待验证。', confidence: 0.86, status: 'needs_retest' as const,
+    },
+  ]
+  for (const [index, observation] of matureProfileObservations.entries()) {
+    await addObservation(vault.id, observation.key, {
+      ...observation,
+      sourceId: `semester-profile-${index + 1}`,
+      createdAt: daysAgo(Math.max(1, 18 - index)),
+      scope: observation.dimension === 'stuckPattern' || observation.dimension === 'paceAndLoad'
+        ? 'domain_pattern'
+        : 'current_topic',
+    })
+  }
   const hypotheses = [
     {
       key: 'hypothesis_causal_gap',

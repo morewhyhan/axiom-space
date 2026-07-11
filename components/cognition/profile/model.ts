@@ -88,6 +88,18 @@ export type ProfileNode = {
     sourceLocation: string
     evidence: string
     analysisMode?: string
+    subDimensionKey?: string
+    subDimensionLabel?: string
+    observableBehavior?: string
+    mechanismHypothesis?: string
+    competingHypotheses?: string[]
+    discriminatingEvidence?: string
+    teachingIntervention?: string
+    verificationCriterion?: string
+    scope?: string
+    status?: string
+    evidenceCount?: number
+    mergedObservations?: string[]
   }
   feedback?: NonNullable<ProfileDimensionInsight['userFeedback']>
 }
@@ -148,7 +160,12 @@ export function buildProfileTree(
         feedback,
       }
     })
-    const nodes = dynamicNodes.length > 0 ? dynamicNodes : fallbackNodes
+    const nodes = dynamicNodes.length > 0 ? dynamicNodes : fallbackNodes.map((node) => ({
+      ...node,
+      claim: `证据不足：${node.claim}`,
+      confidence: Math.min(node.confidence, 0.24),
+      freshness: '等待证据',
+    }))
 
     return { ...dimension, tone, nodes }
   })
@@ -243,52 +260,84 @@ export function buildProfileTransitionSummary(
 }
 
 function buildDynamicProfileNodes(dimension: ProfileDimensionInsight): ProfileNode[] {
-  const seen = new Set<string>()
-  return dimension.observations.flatMap((observation, index) => {
-    const claim = normalizeClaim(observation.text)
-    const dedupeKey = claim.replace(/\s+/g, '').slice(0, 80)
-    if (!claim || seen.has(dedupeKey)) return []
-    seen.add(dedupeKey)
+  const grouped = new Map<string, ProfileDimensionInsight['observations']>()
+  for (const observation of dimension.observations) {
+    const fallbackKey = normalizeClaim(observation.text).replace(/\s+/g, '').slice(0, 80)
+    const key = observation.subDimensionKey?.trim() || fallbackKey
+    if (!key) continue
+    grouped.set(key, [...(grouped.get(key) ?? []), observation])
+  }
 
-    const sourceLabel = SOURCE_LABELS[observation.sourceType] ?? observation.entryPoint ?? '画像证据'
-    const nodeId = `${dimension.key}:obs:${observation.sourceType}:${observation.sourceId}:${index}`
+  return [...grouped.entries()].map(([subDimensionKey, observations], index) => {
+    const primary = [...observations].sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))[0]
+    const claim = normalizeClaim(primary.userFacingSummary || primary.text)
+    const sourceLabel = SOURCE_LABELS[primary.sourceType] ?? primary.entryPoint ?? '画像证据'
+    const nodeId = `${dimension.key}:sub:${subDimensionKey}`
     const feedback = dimension.nodeFeedback?.[nodeId]
     const feedbackShift =
       feedback?.verdict === 'correct' ? 0.1
         : feedback?.verdict === 'partial' ? 0.02
           : feedback?.verdict === 'wrong' ? -0.18
             : 0
-    const observationConfidence = typeof observation.confidence === 'number' ? observation.confidence : null
+    const observationConfidence = typeof primary.confidence === 'number' ? primary.confidence : null
+    const independentEvidenceBoost = Math.min(0.12, Math.max(0, observations.length - 1) * 0.035)
     const confidence = clamp01(
       (observationConfidence ?? dimension.confidence) * 0.84 +
       0.08 +
+      independentEvidenceBoost +
       feedbackShift +
       (feedback ? feedback.confidence * 0.08 : 0),
     )
 
-    return [{
+    return {
       id: nodeId,
-      key: `obs-${index}`,
-      caption: sourceLabel,
+      key: subDimensionKey || `obs-${index}`,
+      caption: primary.subDimensionLabel || sourceLabel,
       dimensionKey: dimension.key,
       dimensionLabel: dimension.label,
       claim: feedback?.summary?.trim() || claim,
-      explanation: buildObservationExplanation(observation),
-      promptEffect: DYNAMIC_PROMPT_EFFECTS[dimension.key] ?? '下一轮教学应只在证据支持时使用这条画像。',
+      explanation: primary.mechanismHypothesis
+        ? `我们目前的理解：${primary.mechanismHypothesis}`
+        : `我们观察到：${buildObservationExplanation(primary)}`,
+      promptEffect: primary.teachingIntervention
+        ? `接下来会这样帮助你：${primary.teachingIntervention}`
+        : DYNAMIC_PROMPT_EFFECTS[dimension.key] ?? '下一轮教学只会在证据支持时使用这条画像。',
       confidence,
-      freshness: feedback ? '已校验' : confidence < 0.45 ? '待确认' : '有新证据',
-      evidenceDetail: buildObservationEvidenceDetail(observation),
+      freshness: feedback ? '已校验' : profileStatusLabel(primary.status, confidence),
+      evidenceDetail: observations.map(buildObservationEvidenceDetail).join('\n\n'),
       evidenceTrace: {
         sourceLabel,
-        sourceType: observation.sourceType,
-        sourceId: observation.sourceId,
-        sourceLocation: observation.entryPoint || '未标注',
-        evidence: observation.evidence?.trim() || '当前来源只提供对象引用，尚无可展示的原始证据文本。',
-        analysisMode: observation.analysisMode,
+        sourceType: primary.sourceType,
+        sourceId: observations.map((item) => item.sourceId).join(' · '),
+        sourceLocation: primary.entryPoint || '未标注',
+        evidence: observations.map((item) => item.evidence?.trim()).filter(Boolean).slice(0, 6).join('\n') || '当前来源只提供对象引用，尚无可展示的原始证据文本。',
+        analysisMode: primary.analysisMode,
+        subDimensionKey,
+        subDimensionLabel: primary.subDimensionLabel,
+        observableBehavior: primary.observableBehavior,
+        mechanismHypothesis: primary.mechanismHypothesis,
+        competingHypotheses: primary.competingHypotheses,
+        discriminatingEvidence: primary.discriminatingEvidence,
+        teachingIntervention: primary.teachingIntervention,
+        verificationCriterion: primary.verificationCriterion,
+        scope: primary.scope,
+        status: primary.status,
+        evidenceCount: observations.length,
+        mergedObservations: observations.map((item) => normalizeClaim(item.text)).slice(0, 6),
       },
       feedback,
-    }]
-  })
+    }
+  }).sort((a, b) => b.confidence - a.confidence).slice(0, 5)
+}
+
+function profileStatusLabel(status: string | undefined, confidence: number): string {
+  if (status === 'confirmed') return '已确认'
+  if (status === 'improved') return '已改善'
+  if (status === 'needs_retest') return '待复测'
+  if (status === 'weakened') return '证据减弱'
+  if (status === 'refuted') return '已推翻'
+  if (status === 'supported') return '证据支持'
+  return confidence < 0.45 ? '待确认' : '有新证据'
 }
 
 function pickObservation(
@@ -336,6 +385,14 @@ function buildObservationEvidenceDetail(observation: ProfileDimensionInsight['ob
     observation.evidence?.trim() ? `证据摘要：${observation.evidence.trim()}` : '',
     typeof observation.confidence === 'number' ? `观察置信度：${Math.round(observation.confidence * 100)}%` : '',
     observation.analysisMode ? `分析模式：${observation.analysisMode}` : '',
+    observation.observableBehavior ? `可观察行为：${observation.observableBehavior}` : '',
+    observation.mechanismHypothesis ? `机制假设：${observation.mechanismHypothesis}` : '',
+    observation.competingHypotheses?.length ? `竞争解释：${observation.competingHypotheses.join('；')}` : '',
+    observation.discriminatingEvidence ? `鉴别依据：${observation.discriminatingEvidence}` : '',
+    observation.teachingIntervention ? `干预规则：${observation.teachingIntervention}` : '',
+    observation.verificationCriterion ? `验证标准：${observation.verificationCriterion}` : '',
+    observation.scope ? `适用范围：${observation.scope}` : '',
+    observation.status ? `判断状态：${observation.status}` : '',
   ]
   return lines.filter(Boolean).join('\n')
 }

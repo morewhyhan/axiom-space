@@ -1300,9 +1300,18 @@ type DirectChatMessage = {
 }
 
 type ProfileObservationAnalysis = {
+  subDimensionKey?: string
+  subDimensionLabel?: string
   claim: string
+  userFacingSummary?: string
   evidence: string
   confidence: number
+  observableBehavior?: string
+  mechanismHypothesis?: string
+  competingHypotheses?: string[]
+  discriminatingEvidence?: string
+  teachingIntervention?: string
+  verificationCriterion?: string
 }
 
 async function callOpenAiCompatibleChat(input: {
@@ -1509,7 +1518,8 @@ async function analyzeProfileObservation(input: {
           `本轮原始回答：${rawAnswer}`,
           '',
           '请输出 JSON：',
-          '{"claim":"45-160字，必须包含可观察行为、底层机制假设、教学干预含义；证据不足则为空字符串","evidence":"一句话说明依据，不能照抄原文","confidence":0.35}',
+          '{"subDimensionKey":"可供多轮合并的稳定语义键","subDimensionLabel":"2-8字、用户看得懂的子维度名","claim":"45-160字的可校验结论；证据不足则为空字符串","userFacingSummary":"让用户看得懂且感到被理解的当前总结；避免定型，说明结论可继续修正","evidence":"一句话说明依据，不能照抄原文","observableBehavior":"用户可观察的回答或学习行为","mechanismHypothesis":"可证伪的底层学习机制假设，不能写人格标签","competingHypotheses":["至少一个仍需排除的解释"],"discriminatingEvidence":"已经排除什么，或下一步如何鉴别","teachingIntervention":"下一轮具体改变讲解顺序、因果跨度、信息剂量或校验动作","verificationCriterion":"预测、反例、改错、迁移或卡片产出等可观察标准","confidence":0.35}',
+          '同一教学决策的多条线索必须复用同一个 subDimensionKey；不要因为措辞不同创建重复子维度。只有会改变下一轮教学的内容才能进入画像。',
           input.mode === 'initial_profile'
             ? 'confidence 规则：用户明确自述且会影响教学策略 0.52-0.68；弱推断或需要行为验证的能力判断 0.22-0.42；首次画像不要超过 0.68。'
             : 'confidence 规则：单轮弱推断 0.28-0.45；用户明确自述且会影响教学策略 0.55-0.78；多轮上下文一致或用户反复确认可到 0.82；不要超过 0.82。',
@@ -1547,10 +1557,35 @@ function parseProfileObservationAnalysis(raw: string, rawAnswer: string): Profil
   if (isLikelyRawAnswerEcho(claim, rawAnswer)) return null
 
   return {
+    subDimensionKey: normalizeProfileSubDimensionKey(parsed.subDimensionKey),
+    subDimensionLabel: normalizeOptionalProfileField(parsed.subDimensionLabel, 24),
     claim,
+    userFacingSummary: normalizeOptionalProfileField(parsed.userFacingSummary, 360),
     evidence: evidence || '来自本轮画像访谈，需要后续学习行为继续校验。',
     confidence: Math.max(0.2, confidence),
+    observableBehavior: normalizeOptionalProfileField(parsed.observableBehavior, 240),
+    mechanismHypothesis: normalizeOptionalProfileField(parsed.mechanismHypothesis, 300),
+    competingHypotheses: Array.isArray(parsed.competingHypotheses)
+      ? parsed.competingHypotheses
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => normalizeProfileAnalysisText(item, 180))
+        .filter(Boolean)
+        .slice(0, 4)
+      : undefined,
+    discriminatingEvidence: normalizeOptionalProfileField(parsed.discriminatingEvidence, 300),
+    teachingIntervention: normalizeOptionalProfileField(parsed.teachingIntervention, 300),
+    verificationCriterion: normalizeOptionalProfileField(parsed.verificationCriterion, 300),
   }
+}
+
+function normalizeProfileSubDimensionKey(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '')
+  return normalized ? normalized.slice(0, 60) : undefined
+}
+
+function normalizeOptionalProfileField(value: unknown, maxLength: number): string | undefined {
+  return typeof value === 'string' ? normalizeProfileAnalysisText(value, maxLength) || undefined : undefined
 }
 
 function extractJsonObjectText(raw: string): string | null {
@@ -1807,6 +1842,21 @@ async function persistInitialProfileHypotheses(input: {
         category: 'profile_stuckPattern',
         confidence: 0.66,
         analysisMode: 'initial_profile_synthesis',
+        subDimensionKey: 'causal_prerequisite_gap',
+        subDimensionLabel: '核心阻塞机制',
+        userFacingSummary: '你并不是整体学得慢。当前证据更支持：关键原因还没有闭合时，后面的内容会暂时失去落点；系统会继续用迁移任务确认这个判断。',
+        observableBehavior: '学生能跟随 Visitor 的结构名词，但无法解释 accept(visitor) 后为何还要 visit(this)，并明确表示关键原因未闭合时会停下来深挖。',
+        mechanismHypothesis: '当前阻塞更可能来自“编译期重载选择 + 运行时重写执行”的过程模型未闭合；未解决的因果前提持续占用注意，使后续 UML、优缺点和适用场景难以进入。',
+        competingHypotheses: [
+          'Java 多态基础整体薄弱，而非单点过程模型缺口。',
+          '只是没有记熟 Visitor 的 UML 角色和标准结构。',
+          '信息加工速度在所有任务中都偏慢，而非仅在因果前提缺失时停顿。',
+        ],
+        discriminatingEvidence: '分别测试重写接收者与重载参数表达式；若只在重载参数选择失败，且补齐过程模型后能迁移到陌生 AST，则降低“整体基础差”和“全局反应慢”假设。',
+        teachingIntervention: '保持解释深度，但把单轮因果跨度缩短为一个节点：先预测静态类型选择的签名，再运行验证动态实现；确认后再进入 accept 与 visit 的第二次分派。',
+        verificationCriterion: '能预测只改变变量声明类型后的输出，解释编译期与运行期各决定什么，并迁移到陌生 AST 节点后用反例说明何时不需要 Visitor。',
+        scope: 'current_topic',
+        status: 'supported',
         sourceObjectType: 'learningSession',
         sourceObjectId: input.sessionId,
         evidence: [{
@@ -1894,6 +1944,9 @@ async function maybeRecordProfileQuestionAnswer(input: {
         category: `profile_${dimension}`,
         confidence,
         analysisMode: analysis ? 'llm_context' : 'fallback_needs_confirmation',
+        subDimensionKey: analysis?.subDimensionKey || `profile_answer_${dimension}`,
+        subDimensionLabel: analysis?.subDimensionLabel || step.label,
+        userFacingSummary: analysis?.userFacingSummary || text,
         entryPoint: 'user_confirmed_profile_answer',
         rawAnswer: answer,
         sourceObjectType: 'learningSession',
@@ -1984,6 +2037,17 @@ async function writeInitialProfileObservation(input: {
         category: `profile_${input.step.key}`,
         confidence,
         analysisMode: analysis ? 'llm_context' : 'fallback_needs_confirmation',
+        subDimensionKey: analysis?.subDimensionKey || `initial_${input.step.key}`,
+        subDimensionLabel: analysis?.subDimensionLabel || input.step.label,
+        userFacingSummary: analysis?.userFacingSummary || text,
+        observableBehavior: analysis?.observableBehavior,
+        mechanismHypothesis: analysis?.mechanismHypothesis,
+        competingHypotheses: analysis?.competingHypotheses,
+        discriminatingEvidence: analysis?.discriminatingEvidence,
+        teachingIntervention: analysis?.teachingIntervention,
+        verificationCriterion: analysis?.verificationCriterion,
+        scope: 'current_topic',
+        status: 'hypothesis',
         rawAnswer: answer,
         sourceObjectType: 'vaultMemory',
         sourceObjectId: input.rawMemoryId,
