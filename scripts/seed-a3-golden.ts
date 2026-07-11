@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { hashPassword } from 'better-auth/crypto'
 import { createHash } from 'node:crypto'
+import { buildA3DesignPatternCourseNodes, type A3CourseNode } from './data/a3-design-pattern-course'
 
 const prisma = new PrismaClient()
 const EMAIL = process.env.A3_SEED_EMAIL || 'demo@axiom.space'
@@ -163,6 +164,689 @@ public class VisitorDispatchLab {
     content: `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>body{margin:0;background:#080b12;color:#e6edf7;font:16px system-ui}.stage{padding:28px}.row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.box{border:1px solid #35506d;padding:18px;background:#101826}.active{border-color:#4ade80;box-shadow:0 0 0 2px #4ade8033}.step{margin-top:20px;color:#93c5fd}button{margin-top:18px;padding:9px 14px;background:#1d4ed8;color:white;border:0;cursor:pointer}</style></head><body><div class="stage"><h2>Visitor 双重分派调用轨迹</h2><div class="row"><div class="box" id="a">Node 引用<br>真实对象 PdfNode</div><div class="box" id="b">PdfNode.accept<br>this: PdfNode</div><div class="box" id="c">TraceVisitor<br>visit(PdfNode)</div></div><p class="step" id="t">点击下一步，观察类型信息如何被保留下来。</p><button onclick="next()">下一步</button></div><script>let i=0;const text=['第一次分派：接收者真实类型进入 PdfNode.accept。','编译期重载：this 的静态类型是 PdfNode，锁定 visit(PdfNode)。','第二次分派：Visitor 真实类型执行 TraceVisitor.visit(PdfNode)。','验证完成：删掉 accept，会退回 visit(Node)。'];function next(){document.querySelectorAll('.box').forEach(x=>x.classList.remove('active'));if(i<3)document.getElementById(['a','b','c'][i]).classList.add('active');document.getElementById('t').textContent=text[i%4];i++}</script></body></html>`,
   },
 ] as const
+
+type CourseModuleSeed = {
+  name: string
+  color: string
+  position: number
+  concepts: string[]
+}
+
+type PatternSeed = {
+  name: string
+  family: 'creational' | 'structural' | 'behavioral'
+  cn: string
+  contrast: string
+  scenario: string
+}
+
+const patternSeeds: PatternSeed[] = [
+  { name: 'Singleton', family: 'creational', cn: '单例模式', contrast: '全局状态与依赖注入', scenario: '配置中心与连接池' },
+  { name: 'Factory Method', family: 'creational', cn: '工厂方法', contrast: '简单工厂与抽象工厂', scenario: '日志导出器扩展' },
+  { name: 'Abstract Factory', family: 'creational', cn: '抽象工厂', contrast: '工厂方法与 Builder', scenario: '跨平台 UI 组件族' },
+  { name: 'Builder', family: 'creational', cn: '建造者模式', contrast: '构造函数重载与参数对象', scenario: '复杂报表生成' },
+  { name: 'Prototype', family: 'creational', cn: '原型模式', contrast: '拷贝构造与工厂创建', scenario: '低成本复制图形对象' },
+  { name: 'Adapter', family: 'structural', cn: '适配器模式', contrast: 'Facade 与 Bridge', scenario: '接入旧支付接口' },
+  { name: 'Bridge', family: 'structural', cn: '桥接模式', contrast: 'Adapter 与 Strategy', scenario: '形状与渲染平台双维变化' },
+  { name: 'Composite', family: 'structural', cn: '组合模式', contrast: '树结构与普通集合', scenario: '文件夹和菜单树' },
+  { name: 'Decorator', family: 'structural', cn: '装饰器模式', contrast: '继承扩展与代理', scenario: '输入流功能叠加' },
+  { name: 'Facade', family: 'structural', cn: '外观模式', contrast: 'Adapter 与 Mediator', scenario: '一键启动子系统' },
+  { name: 'Flyweight', family: 'structural', cn: '享元模式', contrast: '缓存与对象池', scenario: '海量字符渲染' },
+  { name: 'Proxy', family: 'structural', cn: '代理模式', contrast: 'Decorator 与 Adapter', scenario: '远程访问与权限控制' },
+  { name: 'Chain of Responsibility', family: 'behavioral', cn: '责任链模式', contrast: 'Pipeline 与 Command', scenario: '审批流和过滤器链' },
+  { name: 'Command', family: 'behavioral', cn: '命令模式', contrast: 'Strategy 与事件对象', scenario: '撤销重做与任务队列' },
+  { name: 'Interpreter', family: 'behavioral', cn: '解释器模式', contrast: 'Parser 与 Visitor', scenario: '小型规则语言' },
+  { name: 'Iterator', family: 'behavioral', cn: '迭代器模式', contrast: '集合暴露与 Stream', scenario: '统一遍历容器' },
+  { name: 'Mediator', family: 'behavioral', cn: '中介者模式', contrast: 'Observer 与 Facade', scenario: '复杂表单控件协作' },
+  { name: 'Memento', family: 'behavioral', cn: '备忘录模式', contrast: '快照与事件溯源', scenario: '编辑器历史状态' },
+  { name: 'Observer', family: 'behavioral', cn: '观察者模式', contrast: '发布订阅与回调', scenario: '库存变化通知' },
+  { name: 'State', family: 'behavioral', cn: '状态模式', contrast: 'Strategy 与状态机', scenario: '订单生命周期' },
+  { name: 'Strategy', family: 'behavioral', cn: '策略模式', contrast: 'State 与 Template Method', scenario: '价格计算规则切换' },
+  { name: 'Template Method', family: 'behavioral', cn: '模板方法', contrast: 'Strategy 与 Hook', scenario: '固定流程中的可变步骤' },
+  { name: 'Visitor', family: 'behavioral', cn: '访问者模式', contrast: 'Strategy、Command 与 Interpreter', scenario: '稳定 AST 上新增操作' },
+]
+
+const courseModuleSeeds: CourseModuleSeed[] = [
+  {
+    name: '面向对象基础',
+    color: '#38bdf8',
+    position: 1,
+    concepts: [
+      '对象与职责', '类与对象边界', '封装的真正目标', '继承的替换风险', '多态调用入口', '组合优于继承',
+      '接口隔离的动机', '抽象类和接口选择', '依赖方向', '运行时绑定', '编译期类型', '对象生命周期',
+      '可变对象与不可变对象', '协作对象', '消息发送', '职责分配', '领域对象', '值对象', '服务对象',
+      '贫血模型误区', '过度继承误区', '委托关系', '对象图', '扩展点', '稳定点与变化点', '类爆炸',
+      '内聚与耦合', '信息隐藏', '对象创建职责', '对象协作测试', '面向接口编程', '重构前置知识',
+    ],
+  },
+  {
+    name: '设计原则',
+    color: '#22c55e',
+    position: 2,
+    concepts: [
+      '单一职责原则', '开放封闭原则', '里氏替换原则', '接口隔离原则', '依赖倒置原则', '迪米特法则',
+      '合成复用原则', '变化方向识别', '稳定抽象', '封装变化', '抽象泄漏', '策略性过度设计',
+      '局部复杂度', '全局复杂度', '扩展成本', '修改成本', '认知成本', '测试成本', 'API 稳定性',
+      '可读性与可扩展性冲突', '面向对象原则综合题', '设计原则反例', '原则之间的取舍', '需求变化假设',
+      '变化轴数量', '职责漂移', '接口膨胀', '继承层级过深', '组合边界', '设计原则复盘',
+    ],
+  },
+  {
+    name: 'UML 与建模',
+    color: '#a78bfa',
+    position: 3,
+    concepts: [
+      '类图角色', '关联关系', '聚合关系', '组合关系', '依赖关系', '泛化关系', '实现关系', '可见性标记',
+      '时序图生命线', '同步消息与异步消息', '返回消息', '对象创建消息', '状态图', '活动图', '用例图边界',
+      '类图到代码', '代码到类图', '图形符号误读', '静态结构与动态过程', 'UML 过度建模', '建模粒度',
+      '课程项目建模', '模式结构图阅读', '模式时序图阅读', '设计文档证据',
+    ],
+  },
+  {
+    name: '重构与坏味道',
+    color: '#f97316',
+    position: 7,
+    concepts: [
+      '重复代码', '过长函数', '过大的类', '过长参数列表', '发散式变化', '霰弹式修改', '依恋情结',
+      '数据泥团', '基本类型偏执', 'switch 语句膨胀', '平行继承体系', '冗余类', '夸夸其谈未来性',
+      '临时字段', '消息链', '中间人', '内幕交易', '过大的继承树', '重构安全网', '提炼函数',
+      '搬移函数', '以多态取代条件表达式', '引入参数对象', '提炼类', '替换继承为委托', '重构前后对比',
+      '坏味道定位练习', '模式与重构关系', '重构后复测', '真实项目复盘',
+    ],
+  },
+  {
+    name: '架构权衡',
+    color: '#facc15',
+    position: 8,
+    concepts: [
+      '变化方向矩阵', '对象结构稳定性', '操作集合稳定性', '创建过程复杂度', '运行时切换频率',
+      '跨平台产品族', '树结构统一处理', '权限代理边界', '事件通知边界', '算法替换边界',
+      '状态生命周期边界', '请求封装边界', '小语言解释边界', '性能与对象数量', '缓存一致性',
+      '并发访问风险', '测试替身', '设计决策记录 ADR', '模式选择量规', '反例优先验证',
+      '课程项目架构评审', '模式组合风险', '模式撤销条件', '代码审查证据',
+    ],
+  },
+  {
+    name: '课程项目实践',
+    color: '#fb7185',
+    position: 9,
+    concepts: [
+      '图书管理项目', '在线点餐项目', '课程选课项目', '文件导出项目', '权限审批项目', '聊天通知项目',
+      '报表生成项目', '表达式规则项目', '游戏角色状态项目', '画图编辑器项目', '电商订单项目',
+      '插件化工具项目', '日志系统项目', '支付网关项目', '跨平台 UI 项目', '菜单树项目',
+      '撤销重做项目', '库存监听项目', '工作流项目', '项目答辩材料', '项目代码复盘', '项目迁移题',
+      '期末综合设计', '隔周复测任务',
+    ],
+  },
+]
+
+function familyLabel(family: PatternSeed['family']) {
+  if (family === 'creational') return '创建型模式'
+  if (family === 'structural') return '结构型模式'
+  return '行为型模式'
+}
+
+function slug(input: string) {
+  return input.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+}
+
+function courseCardContent(input: {
+  title: string
+  module: string
+  summary: string
+  why: string
+  mistakes: string[]
+  checks: string[]
+}) {
+  return [
+    `# ${input.title}`,
+    '',
+    `## 所属模块`,
+    input.module,
+    '',
+    '## 核心理解',
+    input.summary,
+    '',
+    '## 为什么要学',
+    input.why,
+    '',
+    '## 常见误区',
+    ...input.mistakes.map((item) => `- ${item}`),
+    '',
+    '## 掌握证据',
+    ...input.checks.map((item) => `- ${item}`),
+  ].join('\n')
+}
+
+function patternCards(pattern: PatternSeed): CardSeed[] {
+  const module = familyLabel(pattern.family)
+  const base = slug(pattern.name)
+  return [
+    {
+      key: `${base}-intent`,
+      title: `${pattern.cn}：意图与适用场景`,
+      type: 'permanent',
+      tags: [module, pattern.name, '意图'],
+      content: courseCardContent({
+        title: `${pattern.cn}：意图与适用场景`,
+        module,
+        summary: `${pattern.cn}解决的是「${pattern.scenario}」中的变化点安放问题，而不是为了套模板。`,
+        why: '先判断变化方向，再决定是否引入模式。',
+        mistakes: ['只背角色名，不判断变化方向', `把它和${pattern.contrast}混成同一个方案`],
+        checks: ['能说出它保护哪个稳定点', '能给出一个不该使用它的反例'],
+      }),
+    },
+    {
+      key: `${base}-roles`,
+      title: `${pattern.cn}：结构角色`,
+      type: 'fleeting',
+      tags: [module, pattern.name, 'UML'],
+      content: courseCardContent({
+        title: `${pattern.cn}：结构角色`,
+        module,
+        summary: `用参与者职责理解 ${pattern.cn} 的结构，而不是只画类图。`,
+        why: '结构角色是后续代码实现和时序分析的入口。',
+        mistakes: ['把角色数量当成模式本质', '只记图形，不解释对象协作'],
+        checks: ['能从代码反推角色', '能画出最小类图'],
+      }),
+    },
+    {
+      key: `${base}-tradeoff`,
+      title: `${pattern.cn}：变化方向权衡`,
+      type: 'permanent',
+      tags: [module, pattern.name, '权衡'],
+      content: courseCardContent({
+        title: `${pattern.cn}：变化方向权衡`,
+        module,
+        summary: `${pattern.cn}提高某个方向的扩展性，同时把成本转移到另一个方向。`,
+        why: '这张卡用于做模式选择，而不是做定义复述。',
+        mistakes: ['只说优点，不说代价', '没有说明新增需求时改哪里'],
+        checks: ['能列出新增需求的修改点', '能比较替代方案的成本'],
+      }),
+    },
+    {
+      key: `${base}-misuse`,
+      title: `${pattern.cn}：典型误用`,
+      type: 'fleeting',
+      tags: [module, pattern.name, '误区'],
+      content: courseCardContent({
+        title: `${pattern.cn}：典型误用`,
+        module,
+        summary: `误用通常来自把 ${pattern.cn} 当成固定代码形状，而不是当成变化控制策略。`,
+        why: '反例能防止学生形成“模式万能”的模板化理解。',
+        mistakes: ['需求没有变化点却强行套用', '为了看起来高级而增加间接层'],
+        checks: ['能删除不必要的模式层', '能解释何时保持简单代码'],
+      }),
+    },
+    {
+      key: `${base}-java`,
+      title: `${pattern.cn}：Java 实现笔记`,
+      type: 'fleeting',
+      tags: [module, pattern.name, 'Java'],
+      content: courseCardContent({
+        title: `${pattern.cn}：Java 实现笔记`,
+        module,
+        summary: `实现 ${pattern.cn} 时要同时检查接口、依赖方向、对象创建位置和测试方式。`,
+        why: '设计模式最终要落到可运行、可维护的代码。',
+        mistakes: ['接口命名漂亮但依赖方向错误', '没有用测试证明扩展点'],
+        checks: ['能写出最小 Java 示例', '能指出新增需求时哪些类不改'],
+      }),
+    },
+    {
+      key: `${base}-case`,
+      title: `${pattern.cn}：项目案例`,
+      type: 'literature',
+      tags: [module, pattern.name, '案例'],
+      content: courseCardContent({
+        title: `${pattern.cn}：项目案例`,
+        module,
+        summary: `案例场景：${pattern.scenario}。先描述需求变化，再说明为什么选择 ${pattern.cn}。`,
+        why: '案例用于连接课程项目，不让知识停留在教材定义。',
+        mistakes: ['案例只换名词，不换变化条件', '没有说明替代方案为什么不选'],
+        checks: ['能迁移到另一业务表面', '能写出设计决策记录'],
+      }),
+    },
+    {
+      key: `${base}-contrast`,
+      title: `${pattern.cn}：与${pattern.contrast}的边界`,
+      type: 'permanent',
+      tags: [module, pattern.name, '辨析'],
+      content: courseCardContent({
+        title: `${pattern.cn}：与${pattern.contrast}的边界`,
+        module,
+        summary: `小林需要用统一比较坐标区分 ${pattern.cn} 和${pattern.contrast}，避免凭感觉选模式。`,
+        why: '横向辨析是长期学习后真正影响项目判断的能力。',
+        mistakes: ['只比较类图形状', '忽略变化原因和职责归属'],
+        checks: ['能用同一坐标比较两个模式', '能在陌生需求中排除一个替代方案'],
+      }),
+    },
+    {
+      key: `${base}-quiz`,
+      title: `${pattern.cn}：复盘题`,
+      type: 'literature',
+      tags: [module, pattern.name, '复测'],
+      content: courseCardContent({
+        title: `${pattern.cn}：复盘题`,
+        module,
+        summary: `复盘题要求小林预测改动影响、说明适用边界，并写出一个反例。`,
+        why: '复盘题把“觉得懂”转成可验证输出。',
+        mistakes: ['只背定义就通过', '没有做间隔复测'],
+        checks: ['当日迁移通过', '隔周换题仍能解释'],
+      }),
+    },
+  ]
+}
+
+function generatedCourseCards(): Array<CardSeed & { module: string }> {
+  const outsourcedNodes = buildA3DesignPatternCourseNodes()
+  if (outsourcedNodes.length) {
+    return outsourcedNodes.map((item, index) => {
+      const typeCycle: CardSeed['type'][] = ['literature', 'fleeting', 'permanent']
+      const type = typeCycle[index % typeCycle.length]
+      return {
+        key: `course-${item.key}`,
+        module: mapA3NodeModule(item),
+        title: item.title,
+        type,
+        tags: [...item.tags, type === 'permanent' ? '永久卡' : type === 'literature' ? '资料卡' : '灵感卡'],
+        content: [
+          `# ${item.title}`,
+          '',
+          '## 核心理解',
+          item.summary,
+          '',
+          '## 为什么要学',
+          item.why,
+          '',
+          '## 真实例子',
+          item.example,
+          '',
+          '## 常见误区',
+          item.misconceptions,
+          '',
+          '## 验证标准',
+          item.verification,
+          '',
+          '## 相关节点',
+          ...item.related.map((key) => `- ${key}`),
+        ].join('\n'),
+      }
+    })
+  }
+
+  const generated: Array<CardSeed & { module: string }> = []
+  for (const module of courseModuleSeeds) {
+    module.concepts.forEach((concept, index) => {
+      const type: CardSeed['type'] = index % 5 === 0 ? 'literature' : index % 3 === 0 ? 'permanent' : 'fleeting'
+      generated.push({
+        key: `${slug(module.name)}-${index + 1}`,
+        module: module.name,
+        title: concept,
+        type,
+        tags: [module.name, type === 'permanent' ? '永久卡' : type === 'literature' ? '资料卡' : '灵感卡'],
+        content: courseCardContent({
+          title: concept,
+          module: module.name,
+          summary: `${concept}是《软件设计模式》课程中的一个可追踪概念节点，记录了小林长期学习后的理解边界。`,
+          why: '它帮助系统判断后续教学是跳过、复测、横向比较，还是回到前置机制。',
+          mistakes: ['只记名词，不说明设计影响', '无法把它放回课程项目中验证'],
+          checks: ['能用自己的话解释', '能给出例子和反例', '能连接至少一个相关模式'],
+        }),
+      })
+    })
+  }
+
+  for (const pattern of patternSeeds) {
+    const module = familyLabel(pattern.family)
+    patternCards(pattern).forEach((card) => generated.push({ ...card, module }))
+  }
+
+  return generated
+}
+
+function mapA3NodeModule(item: A3CourseNode) {
+  if (item.module === 'gof') {
+    if (item.tags.includes('创建型')) return '创建型模式'
+    if (item.tags.includes('结构型')) return '结构型模式'
+    if (item.tags.includes('行为型')) return '行为型模式'
+    return '架构权衡'
+  }
+  const moduleMap: Record<string, string> = {
+    oo: '面向对象基础',
+    principles: '设计原则',
+    uml: 'UML 与建模',
+    refactor: '重构与坏味道',
+    projects: '课程项目实践',
+    review: '课程项目实践',
+  }
+  return moduleMap[item.module] ?? '课程项目实践'
+}
+
+async function seedSemesterScaleCourse(userId: string, vaultId: string, rootCardId?: string) {
+  const moduleByName = new Map<string, { id: string; name: string }>()
+  const allModules = [
+    ...courseModuleSeeds,
+    { name: '创建型模式', color: '#2dd4bf', position: 4, concepts: [] },
+    { name: '结构型模式', color: '#60a5fa', position: 5, concepts: [] },
+    { name: '行为型模式', color: '#c084fc', position: 6, concepts: [] },
+  ]
+  for (const module of allModules) {
+    const cluster = await prisma.cluster.create({
+      data: { vaultId, name: module.name, color: module.color, position: module.position },
+    })
+    moduleByName.set(module.name, { id: cluster.id, name: module.name })
+  }
+
+  const sourceByModule = new Map<string, { sourceId: string; chunkIds: string[] }>()
+  for (const module of allModules) {
+    const content = `《软件设计模式》${module.name}课程资料：包含课堂讲义、课堂练习、项目案例、复测任务和小林的长期学习记录。`
+    const source = await prisma.sourceDocument.create({
+      data: {
+        userId,
+        vaultId,
+        title: `《软件设计模式》${module.name}讲义与练习`,
+        source: `semester-design-patterns/${slug(module.name)}.md`,
+        contentHash: sha256(`${module.name}:${content}`),
+        metadata: JSON.stringify({ course: '软件设计模式', module: module.name, seededFor: 'A3 golden long-term archive' }),
+      },
+    })
+    const chunks = []
+    for (let index = 0; index < 3; index++) {
+      const chunk = await prisma.sourceDocumentChunk.create({
+        data: {
+          sourceDocumentId: source.id,
+          index,
+          headingPath: `${module.name}/第 ${index + 1} 组材料`,
+          content: `${module.name}资料片段 ${index + 1}：用于支撑知识图谱、学习路径、画像证据和资源推送。`,
+        },
+      })
+      chunks.push(chunk.id)
+    }
+    sourceByModule.set(module.name, { sourceId: source.id, chunkIds: chunks })
+  }
+
+  const cardsByKey = new Map<string, string>()
+  const cardsByTitle = new Map<string, string>()
+  const generated = generatedCourseCards()
+  for (const [index, item] of generated.entries()) {
+    const module = moduleByName.get(item.module) ?? moduleByName.get('课程项目实践')!
+    const source = sourceByModule.get(item.module)
+    const sourceChunkIds = source?.chunkIds ?? []
+    const card = await prisma.card.create({
+      data: {
+        vaultId,
+        clusterId: module.id,
+        sourceDocumentId: source?.sourceId,
+        sourceChunkId: sourceChunkIds.length ? sourceChunkIds[index % sourceChunkIds.length] : undefined,
+        path: `${item.module}/${item.key}.md`,
+        title: item.title,
+        type: item.type,
+        tags: JSON.stringify(item.tags),
+        content: item.content,
+        createdAt: daysAgo(Math.max(1, 90 - Math.floor(index / 4))),
+        updatedAt: daysAgo(Math.max(1, 30 - Math.floor(index / 18))),
+      },
+    })
+    cardsByKey.set(item.key, card.id)
+    cardsByTitle.set(item.title, card.id)
+  }
+
+  const cardsByModule = new Map<string, string[]>()
+  for (const item of generated) {
+    const cardId = cardsByKey.get(item.key)
+    if (!cardId) continue
+    cardsByModule.set(item.module, [...(cardsByModule.get(item.module) ?? []), cardId])
+  }
+  for (const [moduleName, ids] of cardsByModule.entries()) {
+    for (let index = 0; index < ids.length; index++) {
+      if (rootCardId && index === 0) {
+        await prisma.edge.create({ data: { vaultId, sourceId: rootCardId, targetId: ids[index], type: 'contains', weight: 1 } }).catch(() => {})
+      }
+      if (index > 0) {
+        await prisma.edge.create({ data: { vaultId, sourceId: ids[index - 1], targetId: ids[index], type: index % 3 === 0 ? 'prerequisite' : 'related', weight: 0.74 } }).catch(() => {})
+      }
+      if (index > 4 && index % 5 === 0) {
+        await prisma.edge.create({ data: { vaultId, sourceId: ids[index - 5], targetId: ids[index], type: 'derived', weight: 0.68 } }).catch(() => {})
+      }
+    }
+    const moduleCluster = moduleByName.get(moduleName)
+    if (moduleCluster && rootCardId && ids.length > 1) {
+      await prisma.edge.create({ data: { vaultId, sourceId: ids[0], targetId: ids[ids.length - 1], type: 'related', weight: 0.52 } }).catch(() => {})
+    }
+  }
+
+  const capabilityTargets = [
+    ...patternSeeds.map((pattern) => pattern.cn),
+    '单一职责原则', '开放封闭原则', '依赖倒置原则', '类图到代码', '时序图生命线',
+    '重复代码', '以多态取代条件表达式', '变化方向矩阵', '模式选择量规', '期末综合设计',
+  ]
+  for (const [index, concept] of capabilityTargets.entries()) {
+    const mastered = index < 28
+    await prisma.vaultCapability.create({
+      data: {
+        vaultId,
+        concept,
+        masteryLevel: mastered ? 82 + (index % 13) : 48 + (index % 18),
+        status: mastered ? 'mastered' : 'learning',
+        weakAreas: JSON.stringify(mastered ? [] : ['横向辨析', '反例边界']),
+        strongAreas: JSON.stringify(mastered ? ['项目迁移', '反例说明'] : ['定义复述']),
+        lastAccessed: daysAgo(Math.max(1, 35 - index)),
+        accessCount: 2 + (index % 8),
+      },
+    }).catch(() => {})
+  }
+
+  return { cardsByKey, cardsByTitle, generatedCount: generated.length }
+}
+
+async function createSemesterCoursePath(userId: string, vaultId: string, cardLookup: Map<string, string>) {
+  const path = await prisma.learningPath.create({
+    data: {
+      userId,
+      vaultId,
+      name: '软件设计模式学期总路径',
+      topic: '软件设计模式完整课程',
+      description: '长期使用后的完整课程路径，覆盖 OO 基础、设计原则、UML、GoF 23 种模式、重构和课程项目。',
+      difficulty: 'advanced',
+      totalSteps: 32,
+      doneSteps: 27,
+      status: 'active',
+      source: 'ai',
+      createdAt: daysAgo(76),
+      updatedAt: daysAgo(1),
+    },
+  })
+  const stepTitles = [
+    'OO 责任边界复盘', 'SOLID 原则综合应用', 'UML 类图到代码', 'UML 时序图到调用过程',
+    '创建型模式总览', 'Singleton 到依赖注入边界', 'Factory Method 与 Abstract Factory 辨析', 'Builder 与复杂对象构造',
+    'Prototype 与复制成本', '结构型模式总览', 'Adapter 与 Facade 边界', 'Bridge 双维变化实验',
+    'Composite 树结构建模', 'Decorator 与 Proxy 辨析', 'Flyweight 性能案例', '行为型模式总览',
+    'Strategy 与 State 辨析', 'Observer 与 Mediator 边界', 'Command 与撤销重做', 'Chain of Responsibility 工作流',
+    'Template Method 与 Hook', 'Iterator 与集合封装', 'Memento 与状态快照', 'Interpreter 小语言边界',
+    'Visitor 双重分派机制', 'Visitor 与 AST 迁移', '重构坏味道识别', '以多态取代条件表达式',
+    '模式组合风险', '课程项目架构评审', '期末综合设计答辩', '隔周复测与长期保持',
+  ]
+  const cardIds = [...cardLookup.values()]
+  for (const [index, title] of stepTitles.entries()) {
+    await prisma.learningPathStep.create({
+      data: {
+        pathId: path.id,
+        order: index,
+        title,
+        chapter: index < 4 ? '基础与建模' : index < 9 ? '创建型模式' : index < 15 ? '结构型模式' : index < 26 ? '行为型模式' : '重构与项目',
+        status: index < 24 ? 'mastered' : index < 27 ? 'completed' : index === 27 ? 'learning' : index < 31 ? 'available' : 'locked',
+        mastery: index < 24 ? 88 + (index % 9) : index < 27 ? 76 + (index % 8) : index === 27 ? 58 : 20 + (index % 20),
+        concept: title,
+        description: `长期课程路径第 ${index + 1} 步：${title}。`,
+        cardId: cardIds[index % cardIds.length],
+        estimatedMinutes: index < 26 ? 18 : 24,
+        prerequisites: index ? JSON.stringify([`${path.id}:step:${index - 1}`]) : '[]',
+        createdAt: daysAgo(Math.max(1, 75 - index * 2)),
+        updatedAt: daysAgo(Math.max(1, 20 - Math.floor(index / 2))),
+      },
+    })
+  }
+  await prisma.pathAdjustmentHistory.create({
+    data: {
+      pathId: path.id,
+      trigger: 'semester_profile_update',
+      appliedAt: daysAgo(2),
+      adjustment: JSON.stringify({
+        type: 'long_term_replan',
+        summary: '学期后段不再按 GoF 顺序线性推进，转为围绕模式辨析、项目迁移和隔周复测组织。',
+        comparison: {
+          defaultSteps: ['按教材逐章复习 23 种模式', '每种模式复述定义', '期末前统一刷选择题', '重复 UML 结构'],
+          personalizedSteps: stepTitles.slice(24),
+        },
+        profileEvidence: [
+          { id: 'semester_stuck_mechanism', label: '底层阻塞机制', evidence: '关键因果前提未闭合时会造成后续失配', confidence: 0.9, status: 'confirmed' },
+          { id: 'semester_foundation_boundary', label: '当前边界', evidence: '单模式解释稳定，多模式选择边界仍需训练', confidence: 0.78, status: 'supported' },
+        ],
+        changes: [
+          { kind: 'skipped', step: '重复 23 种模式定义', reason: '定义复述已不能带来主要提升。', evidenceIds: ['semester_goal_stage'] },
+          { kind: 'added', step: '模式组合风险', reason: '长期项目中更容易在多个模式同时可用时失误。', evidenceIds: ['semester_foundation_boundary'] },
+          { kind: 'reordered', step: '隔周复测与长期保持', reason: '稳定掌握需要跨时间检验。', evidenceIds: ['semester_mastery_retention'] },
+        ],
+      }),
+      feedback: JSON.stringify({ userFeedback: '我更想练怎么选模式，而不是再背一轮定义。' }),
+    },
+  })
+  return path
+}
+
+async function seedLongTermResourcesAndPushes(userId: string, vaultId: string, clusterId: string, cardLookup: Map<string, string>) {
+  const resources = [
+    { type: 'document', topic: '模式选择矩阵', label: '设计模式横向选择手册', fileName: 'pattern-selection-matrix.md' },
+    { type: 'mindmap', topic: 'GoF 全图谱', label: 'GoF 23 种模式总览导图', fileName: 'gof-map.mmd' },
+    { type: 'quiz', topic: '隔周复测', label: '模式辨析隔周复测题库', fileName: 'pattern-retest.json' },
+    { type: 'code', topic: '策略与状态', label: 'Strategy-State 对比实验', fileName: 'StrategyStateLab.java' },
+    { type: 'diagram', topic: '模式协作', label: '课程项目模式协作图', fileName: 'project-patterns.mmd' },
+    { type: 'video', topic: '答辩演示', label: '期末答辩 3 分钟动画脚本', fileName: 'defense-animation.html' },
+  ] as const
+  const manifest = []
+  const cardIds = [...cardLookup.values()]
+  for (const [index, resource] of resources.entries()) {
+    const content = [
+      `# ${resource.label}`,
+      '',
+      `主题：${resource.topic}`,
+      '',
+      '这份资源来自小林长期学习后的知识图谱、画像、测评和路径记录。',
+      '它不是围绕单个 Visitor 概念，而是服务整门《软件设计模式》的项目迁移、模式辨析和复测。',
+      '',
+      '## 使用方式',
+      '- 先看当前问题属于哪个变化方向。',
+      '- 再查看可替代模式及其代价。',
+      '- 最后用反例或代码运行结果验证。',
+    ].join('\n')
+    const path = `resources/semester/${resource.fileName}`
+    const card = await prisma.card.create({
+      data: {
+        vaultId,
+        clusterId,
+        derivedFromCardId: cardIds[index % cardIds.length],
+        path,
+        title: resource.label,
+        type: 'literature',
+        tags: JSON.stringify(['长期资源', resource.type, resource.topic]),
+        content,
+      },
+    })
+    const hash = sha256(content)
+    manifest.push({ type: resource.type, title: resource.label, path, sourceObjectId: card.id, contentHash: hash })
+    await prisma.resourceGenerationJob.create({
+      data: {
+        vaultId,
+        topic: resource.topic,
+        resourceType: resource.type,
+        label: resource.label,
+        status: 'completed',
+        progress: 100,
+        message: '长期课程资源已生成并通过质量检查',
+        path,
+        fileName: resource.fileName,
+        metadata: JSON.stringify({
+          taskId: `semester-resource-${index + 1}`,
+          sourceObjectType: 'card',
+          sourceObjectId: card.id,
+          contentHash: hash,
+          qualityStatus: 'passed',
+          checks: ['覆盖长期课程', '引用画像证据', '可回到知识图谱'],
+        }),
+        createdAt: daysAgo(12 - index),
+        updatedAt: daysAgo(11 - index),
+      },
+    })
+  }
+
+  await prisma.card.create({
+    data: {
+      vaultId,
+      clusterId,
+      path: 'literature/semester-design-pattern-resource-pack.md',
+      title: '软件设计模式长期资源包',
+      type: 'literature',
+      tags: JSON.stringify(['资源包', '长期学习', '设计模式']),
+      content: [
+        '# 软件设计模式长期资源包',
+        '',
+        `<!-- axiom-resources:${JSON.stringify(manifest)} -->`,
+        '',
+        '这组资源展示小林长期使用系统后，围绕整门课程而不是单个知识点形成的个性化资源推送。',
+      ].join('\n'),
+    },
+  })
+
+  const suggestionSeeds = [
+    { boxType: 'link', itemType: 'link', title: 'Refactoring Guru: Design Patterns Catalog', reason: '用于复核 GoF 模式意图和结构，但只作为外部参考，不替代小林自己的图谱。', payload: { url: 'https://refactoring.guru/design-patterns', target: 'external-reference' } },
+    { boxType: 'link', itemType: 'card', title: '打开“模式选择量规”永久卡', reason: '当前主要缺口是多个模式都能实现时的选择边界，需要回到统一比较坐标。', payload: { cardTitle: '模式选择量规', targetType: 'card' } },
+    { boxType: 'resource', itemType: 'resource', title: '推送：设计模式横向选择手册', reason: '长期画像显示小林已不需要重复定义，更需要跨模式比较资源。', payload: { resourcePath: 'resources/semester/pattern-selection-matrix.md', resourceType: 'document' } },
+    { boxType: 'resource', itemType: 'resource', title: '推送：模式辨析隔周复测题库', reason: '一次通过不能代表长期掌握，隔周复测用于排除短期熟悉感。', payload: { resourcePath: 'resources/semester/pattern-retest.json', resourceType: 'quiz' } },
+    { boxType: 'resource', itemType: 'task_group', title: '任务组：期末项目模式组合评审', reason: '知识图谱已有 300+ 节点，下一步应在真实项目中验证模式组合，而不是继续堆单点解释。', payload: { next: ['识别变化方向', '比较三个候选模式', '写 ADR', '用反例验证'], targetType: 'task_group' } },
+    { boxType: 'link', itemType: 'link', title: '课程讲义：UML 时序图与动态过程', reason: '画像显示动态机制先用时间线更有效，这份讲义适合作为复测前置参考。', payload: { sourceDocument: 'UML 与建模讲义', target: 'sourceDocument' } },
+  ] as const
+  for (const [index, item] of suggestionSeeds.entries()) {
+    await prisma.pushSuggestion.create({
+      data: {
+        userId,
+        vaultId,
+        boxType: item.boxType,
+        itemType: item.itemType,
+        title: item.title,
+        reason: item.reason,
+        evidence: JSON.stringify([
+          'profile: 多模式选择边界仍需训练',
+          'graph: 软件设计模式知识图谱已形成长期连接',
+          'assessment: 隔日复测通过但隔周保持仍待验证',
+        ]),
+        confidence: 0.76 + index * 0.03,
+        trigger: index % 2 === 0 ? 'profile_update' : 'path_progress',
+        source: 'push_engine',
+        status: 'pending',
+        payload: JSON.stringify(item.payload),
+        dedupeKey: `a3-semester:${vaultId}:${index}`,
+        createdAt: daysAgo(Math.max(1, 7 - index)),
+      },
+    })
+  }
+
+  await prisma.pushRecord.create({
+    data: {
+      userId,
+      vaultId,
+      resources: JSON.stringify([
+        { id: 'semester-doc', type: 'document', title: '设计模式横向选择手册', topic: '模式选择矩阵', difficulty: 'advanced', estimatedMinutes: 18, concepts: ['模式选择量规', '变化方向矩阵'], tags: ['长期资源'], createdAt: daysAgo(6).getTime() },
+        { id: 'semester-quiz', type: 'quiz', title: '模式辨析隔周复测题库', topic: '隔周复测', difficulty: 'advanced', estimatedMinutes: 20, concepts: ['迁移标准', '稳定掌握'], tags: ['复测'], createdAt: daysAgo(5).getTime() },
+      ]),
+      trigger: 'profile_update',
+      reason: '长期画像显示需要从单模式理解转向跨模式选择和间隔复测。',
+      sentAt: daysAgo(5),
+      expiresAt: new Date(Date.now() + 25 * DAY),
+      engagedCount: 1,
+      feedback: JSON.stringify({ engagedResourceIds: ['semester-doc'], feedbackText: '选择矩阵比单独复习每个模式更有用。' }),
+    },
+  })
+}
 
 async function ensureUser() {
   if (RESET_USER) {
@@ -464,6 +1148,8 @@ async function seedClean(userId: string) {
 async function seedMature(userId: string) {
   const vault = await resetNamedVault(userId, MATURE_VAULT)
   const cardIds = await seedCards(vault.id, true)
+  const semesterCourse = await seedSemesterScaleCourse(userId, vault.id, cardIds.get('root'))
+  await createSemesterCoursePath(userId, vault.id, semesterCourse.cardsByTitle)
   const path = await createPath(userId, vault.id, cardIds, true)
   const steps = await prisma.learningPathStep.findMany({ where: { pathId: path.id }, orderBy: { order: 'asc' } })
   const assessments = [
@@ -715,6 +1401,7 @@ async function seedMature(userId: string) {
   await prisma.vaultCapability.create({ data: { vaultId: vault.id, concept: 'Visitor 双重分派', masteryLevel: 91, status: 'mastered', weakAreas: '[]', strongAreas: JSON.stringify(['调用轨迹预测', 'AST 迁移', '架构权衡']) } })
   await prisma.vaultCapability.create({ data: { vaultId: vault.id, concept: '模式选择边界', masteryLevel: 62, status: 'learning', weakAreas: JSON.stringify(['对象结构和操作同时变化']), strongAreas: JSON.stringify(['Visitor 与 Strategy 基本区分']) } })
   const clusterId = (await prisma.card.findUniqueOrThrow({ where: { id: cardIds.get('root')! }, select: { clusterId: true } })).clusterId
+  if (!clusterId) throw new Error('Mature golden case root card is missing a cluster')
   const manifest = []
   for (const [index, resource] of visitorResources.entries()) {
     const path = `resources/visitor/${resource.fileName}`
@@ -816,6 +1503,7 @@ async function seedMature(userId: string) {
       content: resourcePackContent,
     },
   })
+  await seedLongTermResourcesAndPushes(userId, vault.id, clusterId, semesterCourse.cardsByTitle)
   await prisma.pushSuggestion.create({ data: { userId, vaultId: vault.id, boxType: 'resource', itemType: 'task_group', title: 'Visitor 与其他行为型模式的选择边界', reason: 'Visitor 双重分派已通过陌生代码和隔日复测，不再重复推送基础 UML；下一缺口是模式选择边界。', evidence: JSON.stringify(['assessment:Visitor 隔日复测=88', 'capability:Visitor 双重分派=mastered', 'gap:模式选择边界=62']), confidence: 0.91, trigger: 'assessment_pass', source: 'push_engine', status: 'pending', payload: JSON.stringify({ skipped: ['Visitor 角色与 UML'], next: ['Visitor vs Strategy', 'Visitor vs Command'] }), dedupeKey: `a3-golden:${vault.id}:next-boundary` } })
   const profile = { userId, dimensions: { depth: { score: 88, confidence: 0.9, evidence: ['AST 迁移评估', '隔日复测'] }, breadth: { score: 72, confidence: 0.78, evidence: ['Visitor/Strategy/Command'] }, connection: { score: 84, confidence: 0.86, evidence: ['机制到权衡的知识链'] }, expression: { score: 91, confidence: 0.9, evidence: ['费曼解释与反例'] }, application: { score: 87, confidence: 0.88, evidence: ['真实 Java 执行'] }, learning_pace: { score: 80, confidence: 0.84, evidence: ['关键前提慢拆、已掌握部分加速'] } }, updateHistory: [{ timestamp: daysAgo(18).getTime(), trigger: 'assessment_failed', dimensionsUpdated: ['depth', 'application'], changes: { depth: { before: 32, after: 40 } } }, { timestamp: daysAgo(5).getTime(), trigger: 'assessment_passed', dimensionsUpdated: ['depth', 'expression', 'application'], changes: { depth: { before: 62, after: 88 }, expression: { before: 58, after: 91 } } }], sessionCount: 8, totalLearningMinutes: 246, createdAt: daysAgo(28).getTime(), updatedAt: daysAgo(1).getTime() }
   await prisma.educationProfileHistory.create({ data: { vaultId: vault.id, profile: JSON.stringify(profile), snapshot: JSON.stringify({ coverageDays: 28, learningEvents: 24, assessmentCount: assessments.length }), createdAt: daysAgo(1) } })

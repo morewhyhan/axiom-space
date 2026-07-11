@@ -3,7 +3,7 @@ export { AssessmentPanel } from './assessment-panel'
 export { CreatePathPanel } from './create-path-panel'
 export { EmptyLearnPanel } from './empty-learn-panel'
 export { PathSidebar } from './path-sidebar'
-export { PushSuggestionBox } from './push-suggestion-box'
+export { PushSuggestionBox, PushSuggestionDetailPanel } from './push-suggestion-box'
 export { RouteHeader } from './route-header'
 export {
   AI_GENERATION_STAGES,

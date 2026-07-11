@@ -10,6 +10,7 @@ import {
   DOCUMENT_IMPORT_STAGES,
   EmptyLearnPanel,
   PathSidebar,
+  PushSuggestionDetailPanel,
   PushSuggestionBox,
   RouteHeader,
   canOpenStep,
@@ -21,6 +22,7 @@ import {
   type PathFilter,
 } from './workspace'
 import {
+  type PushSuggestion,
   useArchivePath,
   useDeletePath,
   useExecuteStep,
@@ -68,6 +70,7 @@ export default function LearnWorkspace() {
   } | null>(null)
   const [pathFilter, setPathFilter] = useState<PathFilter>('active')
   const [stepSessionIds, setStepSessionIds] = useState<Record<string, string>>({})
+  const [selectedPushSuggestion, setSelectedPushSuggestion] = useState<PushSuggestion | null>(null)
   const isGenerating = generatePath.isPending || importDocument.isPending
   const generationStages = createMode === 'material' ? DOCUMENT_IMPORT_STAGES : AI_GENERATION_STAGES
   const [generationStageIndex, setGenerationStageIndex] = useState(0)
@@ -158,6 +161,7 @@ export default function LearnWorkspace() {
   const emptyStepArea = !currentPath || groupedSteps.length === 0
 
   const handleSelectPath = (path: LearningPath) => {
+    setSelectedPushSuggestion(null)
     setSelectedPathId(path.id)
     setActiveLearningStepId(getNextStep(path.steps)?.id ?? null)
   }
@@ -339,7 +343,13 @@ export default function LearnWorkspace() {
           currentPathId={currentPath?.id}
           onPathFilterChange={setPathFilter}
           onSelectPath={handleSelectPath}
-          pushBox={currentPath ? <PushSuggestionBox pathId={currentPath.id} /> : null}
+          pushBox={(
+            <PushSuggestionBox
+              pathId={currentPath?.id}
+              selectedId={selectedPushSuggestion?.id}
+              onSelect={setSelectedPushSuggestion}
+            />
+          )}
           createPanel={(
             <CreatePathPanel
               open={createPanelOpen}
@@ -367,8 +377,13 @@ export default function LearnWorkspace() {
           )}
         />
 
-        <section className={`learn-detail${!currentPath ? ' empty' : ''}${sparsePath ? ' sparse' : ''}`}>
-          {currentPath && (
+        <section className={`learn-detail${!currentPath && !selectedPushSuggestion ? ' empty' : ''}${sparsePath && !selectedPushSuggestion ? ' sparse' : ''}`}>
+          {selectedPushSuggestion ? (
+            <PushSuggestionDetailPanel
+              suggestion={selectedPushSuggestion}
+              onClose={() => setSelectedPushSuggestion(null)}
+            />
+          ) : currentPath && (
             <>
               <RouteHeader
                 path={currentPath}
@@ -393,6 +408,7 @@ export default function LearnWorkspace() {
             </>
           )}
 
+          {!selectedPushSuggestion && (
           <div className={`learn-step-scroll no-scrollbar${sparsePath ? ' sparse' : ''}${emptyStepArea ? ' empty' : ''}`}>
             {currentPath ? (
               groupedSteps.length > 0 ? (
@@ -422,6 +438,7 @@ export default function LearnWorkspace() {
               />
             )}
           </div>
+          )}
         </section>
       </div>
     </div>

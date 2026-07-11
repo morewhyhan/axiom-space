@@ -26,11 +26,14 @@ async function main() {
       where: { userId: user.id, name: MATURE_VAULT },
       include: {
         cards: true,
+        clusters: true,
+        edges: true,
         vaultMemories: true,
         vaultCapabilities: true,
         educationProfileHistory: true,
         learningPaths: { include: { steps: true, adjustmentHistory: true } },
         resourceGenerationJobs: true,
+        pushRecords: true,
         pushSuggestions: true,
       },
     }),
@@ -128,6 +131,35 @@ async function main() {
     assert(typeof verification?.rubricId === 'string', `${assessment.concept} is missing rubricId`)
     assert(verification?.deterministicCheck === 'passed' || verification?.deterministicCheck === 'failed', `${assessment.concept} is missing deterministic check result`)
   }
+  const matureTypeCounts = mature.cards.reduce<Record<string, number>>((acc, card) => {
+    acc[card.type] = (acc[card.type] ?? 0) + 1
+    return acc
+  }, {})
+  assert(mature.cards.length >= 300, `Mature vault needs a semester-scale graph, got ${mature.cards.length} cards`)
+  assert((matureTypeCounts.permanent ?? 0) >= 70, 'Mature vault needs enough permanent cards to feel long-term')
+  assert((matureTypeCounts.fleeting ?? 0) >= 85, 'Mature vault needs enough fleeting observations from long-term use')
+  assert((matureTypeCounts.literature ?? 0) >= 85, 'Mature vault needs enough source/resource cards')
+  assert(mature.clusters.length >= 9, 'Mature vault needs course-level clusters, not a single-topic graph')
+  assert(mature.edges.length >= 250, 'Mature vault needs visible graph connectivity across the course')
+
+  const semesterPath = mature.learningPaths.find((item) => item.name.includes('学期总路径'))
+  assert(semesterPath, 'Semester-scale design patterns path is missing')
+  assert(semesterPath.steps.length >= 32, 'Semester-scale path needs at least 32 steps')
+  assert(semesterPath.steps.filter((step) => ['mastered', 'completed'].includes(step.status)).length >= 27, 'Semester-scale path should show long-term progress, not a fresh tiny case')
+  assert(semesterPath.adjustmentHistory.some((item) => /long_term_replan/.test(item.adjustment)), 'Semester path needs visible long-term replanning evidence')
+
+  const suggestionBoxTypes = new Set(mature.pushSuggestions.map((item) => item.boxType))
+  const suggestionItemTypes = new Set(mature.pushSuggestions.map((item) => item.itemType))
+  assert(suggestionBoxTypes.has('link') && suggestionBoxTypes.has('resource'), 'Push suggestions must populate both link and resource boxes')
+  for (const itemType of ['link', 'card', 'resource', 'task_group']) {
+    assert(suggestionItemTypes.has(itemType), `Push suggestions need a saveable ${itemType} item`)
+  }
+  assert(mature.pushRecords.length >= 1, 'Long-term push records are missing')
+  for (const record of mature.pushRecords) {
+    const resources = JSON.parse(record.resources) as unknown[]
+    assert(resources.length >= 2, 'Each long-term push record should contain multiple concrete resources')
+  }
+
   assert(mature.cards.filter((card) => card.type === 'permanent').length >= 5, 'Mature vault needs permanent knowledge outcomes')
   assert(mature.vaultCapabilities.some((item) => item.concept === 'Visitor 双重分派' && item.status === 'mastered'), 'Visitor mastery capability is missing')
   const completedResourceJobs = mature.resourceGenerationJobs.filter((job) => job.status === 'completed')
@@ -163,7 +195,7 @@ async function main() {
 
   console.log('A3 golden case verified')
   console.log(`clean: cards=${clean.cards.length}, dimensions=${dimensionKeys.size}, steps=${cleanPath.steps.length}`)
-  console.log(`mature: cards=${mature.cards.length}, assessments=${assessments.length}, resources=${mature.resourceGenerationJobs.length}`)
+  console.log(`mature: cards=${mature.cards.length}, permanent=${matureTypeCounts.permanent ?? 0}, fleeting=${matureTypeCounts.fleeting ?? 0}, literature=${matureTypeCounts.literature ?? 0}, clusters=${mature.clusters.length}, edges=${mature.edges.length}, assessments=${assessments.length}, resources=${mature.resourceGenerationJobs.length}, pushes=${mature.pushSuggestions.length}`)
 }
 
 main()
