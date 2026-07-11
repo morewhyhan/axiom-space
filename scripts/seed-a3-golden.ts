@@ -320,12 +320,12 @@ async function seedClean(userId: string) {
   for (const [index, [role, content]] of messages.entries()) {
     await prisma.learningMessage.create({ data: { sessionId: session.id, role, content, timestamp: new Date(Date.now() - (messages.length - index) * 60_000) } })
   }
-  await addObservation(vault.id, 'golden_goal', { dimension: 'learningGoal', text: '目标是理解 Visitor 双重分派并能用于课程代码实践。', evidence: messages[0][1], confidence: 0.78, sourceId: session.id })
-  await addObservation(vault.id, 'golden_foundation', { dimension: 'currentFoundation', text: '能够照着 UML 写 Visitor 结构，但重载与重写的过程模型不稳定。', evidence: messages[2][1], confidence: 0.88, sourceId: session.id })
-  await addObservation(vault.id, 'golden_explanation', { dimension: 'bestExplanationPath', text: '需要代码实际输出、调用轨迹和逐步因果解释。', evidence: '用户要求把每一步为什么这样选择讲清楚。', confidence: 0.72, sourceId: session.id })
-  await addObservation(vault.id, 'golden_stuck', { dimension: 'stuckPattern', text: '遇到被省略的关键前提时会停下来深挖，导致跟不上连续讲授节奏。', evidence: '用户指出“这一步我一直没想清楚”。', confidence: 0.62, sourceId: session.id })
-  await addObservation(vault.id, 'golden_pace', { dimension: 'paceAndLoad', text: '适合一次闭合一个因果缺口，确认后再继续。', evidence: '用户要求逐步预测每个调用阶段。', confidence: 0.66, sourceId: session.id })
-  await addObservation(vault.id, 'golden_mastery', { dimension: 'masteryCheck', text: '掌握必须通过陌生代码预测、模式权衡和真实运行验证。', evidence: '不能以复述定义作为通过证据。', confidence: 0.74, sourceId: session.id })
+  await addObservation(vault.id, 'golden_goal', { dimension: 'learningGoal', text: '目标不是背 Visitor 结构图，而是能在课程项目里判断 Visitor 何时适用、何时不适用；教学必须围绕“可迁移的设计决策能力”组织。', evidence: messages[0][1], confidence: 0.78, sourceId: session.id })
+  await addObservation(vault.id, 'golden_foundation', { dimension: 'currentFoundation', text: '学生能复现 Visitor 的 UML 角色，说明结构记忆已具备；真正缺口在 Java 重载/重写的过程模型，若不先补这个前提，accept 的必要性无法被理解。', evidence: messages[2][1], confidence: 0.88, sourceId: session.id })
+  await addObservation(vault.id, 'golden_explanation', { dimension: 'bestExplanationPath', text: '最佳讲法应从“先预测代码输出”进入，再逐帧追踪编译期重载选择和运行时重写分派，最后让学生用反例解释；定义和整页 PPT 应后置。', evidence: '用户要求把每一步为什么这样选择讲清楚。', confidence: 0.72, sourceId: session.id })
+  await addObservation(vault.id, 'golden_stuck', { dimension: 'stuckPattern', text: '学习阻塞不是全局反应慢，而是关键因果前提缺失时会停下来深挖；老师继续往后讲会造成链式听不懂，但已掌握的 UML 反复细讲会降低效率。', evidence: '用户指出“这一步我一直没想清楚”。', confidence: 0.62, sourceId: session.id })
+  await addObservation(vault.id, 'golden_pace', { dimension: 'paceAndLoad', text: '节奏控制应采用“一个因果缺口一轮闭合”：预测、解释、运行验证、再继续；确认通过后其他已会内容可以加速跳过。', evidence: '用户要求逐步预测每个调用阶段。', confidence: 0.66, sourceId: session.id })
+  await addObservation(vault.id, 'golden_mastery', { dimension: 'masteryCheck', text: '掌握标准必须是可证伪的：能预测陌生代码、运行结果一致、说明反例边界，并在隔日换题后仍能迁移，而不是复述 Visitor 定义。', evidence: '不能以复述定义作为通过证据。', confidence: 0.74, sourceId: session.id })
   await prisma.vaultCapability.create({ data: { vaultId: vault.id, concept: 'Visitor 双重分派', masteryLevel: 28, status: 'learning', weakAreas: JSON.stringify(['重载选择机制', '两次分派调用轨迹']), strongAreas: JSON.stringify(['能复现标准结构']) } })
   const path = await createPath(userId, vault.id, cardIds, false)
   const firstStep = await prisma.learningPathStep.findFirstOrThrow({ where: { pathId: path.id }, orderBy: { order: 'asc' } })
@@ -347,9 +347,9 @@ async function seedMature(userId: string) {
   for (const [index, item] of assessments.entries()) {
     await prisma.assessmentResult.create({ data: { userId, vaultId: vault.id, pathId: path.id, stepId: steps[Math.min(index, steps.length - 1)]?.id, cardId: cardIds.get(index ? 'dispatch' : 'overload'), concept: item.concept, passed: item.passed, mastery: item.mastery, feedback: item.feedback, evidence: JSON.stringify(item.evidence), clientContext: JSON.stringify({ rubricId: 'visitor-transfer-v1', deterministicCheck: item.passed ? 'passed' : 'failed' }), createdAt: daysAgo(item.days) } })
   }
-  await addObservation(vault.id, 'semester_stuck_initial', { dimension: 'stuckPattern', text: '初始假设：因果前提缺口会造成节奏失配。', evidence: '首次会话连续追问重载为什么不看运行时参数类型。', confidence: 0.58, sourceId: 'semester-session-1', createdAt: daysAgo(20) })
-  await addObservation(vault.id, 'semester_stuck_corrected', { dimension: 'stuckPattern', text: '修正后判断：不是所有内容都需要讲深；只在关键因果前提缺失时逐步闭合，其余部分可以加速。', evidence: '用户反馈基础 UML 重复讲解过慢，但调用机制逐步解释有效。', confidence: 0.86, sourceId: 'semester-session-4', createdAt: daysAgo(4) })
-  await addObservation(vault.id, 'semester_mastery', { dimension: 'masteryCheck', text: 'Visitor 掌握已由陌生 AST 迁移、代码执行和隔日复测共同支持。', evidence: '迁移评估 91；隔日复测 88；Java 测试全部通过。', confidence: 0.9, sourceId: 'visitor-assessment-chain', createdAt: daysAgo(1) })
+  await addObservation(vault.id, 'semester_stuck_initial', { dimension: 'stuckPattern', text: '初始假设认为学生整体需要慢速细讲；后续证据显示更准确的机制是“关键因果前提缺口”造成节奏失配。', evidence: '首次会话连续追问重载为什么不看运行时参数类型。', confidence: 0.58, sourceId: 'semester-session-1', createdAt: daysAgo(20) })
+  await addObservation(vault.id, 'semester_stuck_corrected', { dimension: 'stuckPattern', text: '修正后画像：不是所有内容都要讲深。对已掌握 UML 快速略过；对重载选择、双重分派、模式适用边界这些因果断点，采用预测-验证-反例闭环。', evidence: '用户反馈基础 UML 重复讲解过慢，但调用机制逐步解释有效。', confidence: 0.86, sourceId: 'semester-session-4', createdAt: daysAgo(4) })
+  await addObservation(vault.id, 'semester_mastery', { dimension: 'masteryCheck', text: 'Visitor 掌握已不只停留在定义层：陌生 AST 迁移、真实代码执行、反例边界说明和隔日复测共同通过，说明知识已转成可迁移能力。', evidence: '迁移评估 91；隔日复测 88；Java 测试全部通过。', confidence: 0.9, sourceId: 'visitor-assessment-chain', createdAt: daysAgo(1) })
   const hypotheses = [
     {
       key: 'hypothesis_causal_gap',

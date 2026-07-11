@@ -6,7 +6,7 @@ const CLEAN_VAULT = '小林·Visitor 黄金案例'
 const MATURE_VAULT = '小林·设计模式学期档案'
 const EMAIL = process.env.A3_CHECK_EMAIL || 'demo@axiom.space'
 const LIVE_MODE = process.env.A3_CHECK_LIVE === '1'
-const CLEAN_VAULT_ALIASES = [CLEAN_VAULT, '小林·Visitor黄金案例']
+const CLEAN_VAULT_ALIASES = [process.env.A3_CHECK_CLEAN_VAULT, CLEAN_VAULT, '小林·Visitor黄金案例'].filter(Boolean) as string[]
 
 async function main() {
   const user = await prisma.user.findUnique({ where: { email: EMAIL } })

@@ -1028,12 +1028,11 @@ body {
 /* ── Profile Top Row ── */
 
 .profile-top-row {
-    display: grid;
-    grid-template-columns: minmax(260px, 1fr) minmax(320px, auto) minmax(150px, 1fr);
+    display: flex;
+    justify-content: center;
     align-items: center;
-    gap: clamp(10px, 1.4vw, 18px);
-    min-height: 48px;
-    padding: 0 0 10px;
+    min-height: 40px;
+    padding: 0 0 8px;
 }
 
 .profile-top-copy,
@@ -1057,7 +1056,7 @@ body {
     display: flex;
     align-items: center;
     justify-self: center;
-    max-width: min(620px, 46vw);
+    max-width: min(920px, 72vw);
     gap: 6px;
     overflow-x: auto;
     padding: 6px;

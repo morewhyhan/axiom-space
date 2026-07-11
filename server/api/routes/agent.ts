@@ -1478,7 +1478,7 @@ async function analyzeProfileObservation(input: {
 
   const raw = await callOpenAiCompatibleChat({
     temperature: 0.2,
-    maxTokens: 260,
+    maxTokens: 420,
     messages: [
       {
         role: 'system',
@@ -1490,6 +1490,8 @@ async function analyzeProfileObservation(input: {
           '禁止把用户原话、问题标题或“维度：回答”直接当作画像；要综合上下文后写成分析结论。',
           '禁止人格化、情绪化、过度诊断；不要把一次回答写成高确定性长期标签。',
           '只分析当前维度，不要扩写到其他维度。',
+          '优秀画像不是标签，而是“可观察学习行为 → 底层机制假设 → 下一步教学控制”的压缩结论。',
+          '如果用户表现为“想得深所以慢”，必须区分：全局反应慢、关键前提缺口、已掌握内容被重复讲解导致低效，这三者不能混为一谈。',
           '首次画像只建立低成本初始画像：用户明确自述的目标、基础、偏好、卡点和掌握方式可以给中等置信；需要由后续真实学习行为验证的能力判断必须低置信。',
           '只输出严格 JSON，不要 Markdown，不要解释。',
         ].join('\n'),
@@ -1507,7 +1509,7 @@ async function analyzeProfileObservation(input: {
           `本轮原始回答：${rawAnswer}`,
           '',
           '请输出 JSON：',
-          '{"claim":"20-90字，分析后的画像判断；证据不足则为空字符串","evidence":"一句话说明依据，不能照抄原文","confidence":0.35}',
+          '{"claim":"45-160字，必须包含可观察行为、底层机制假设、教学干预含义；证据不足则为空字符串","evidence":"一句话说明依据，不能照抄原文","confidence":0.35}',
           input.mode === 'initial_profile'
             ? 'confidence 规则：用户明确自述且会影响教学策略 0.52-0.68；弱推断或需要行为验证的能力判断 0.22-0.42；首次画像不要超过 0.68。'
             : 'confidence 规则：单轮弱推断 0.28-0.45；用户明确自述且会影响教学策略 0.55-0.78；多轮上下文一致或用户反复确认可到 0.82；不要超过 0.82。',
@@ -1746,9 +1748,9 @@ async function persistInitialProfileHypotheses(input: {
     {
       key: 'causal_process_gap',
       title: 'H1 缺少编译期与运行期的过程模型',
-      claim: '当前困难可能集中在重载选择与重写执行的中间机制，而不是 Visitor 角色名称。',
-      prediction: '补齐类型分派过程后，陌生代码预测和 accept 解释应明显改善。',
-      test: '用只改变变量声明类型的 Java 对照程序，再进行陌生 AST 迁移题。',
+      claim: '当前困难更像关键因果前提缺失：学生能跟随结构名词，但没有闭合“编译期重载选择 + 运行时重写执行”的过程模型；这不是简单整体反应慢或基础差。',
+      prediction: '若该假设成立，补齐类型分派过程后，陌生代码预测、accept 解释和 Visitor 变化成本权衡会明显改善；重复讲 UML 不会显著改善。',
+      test: '用只改变变量声明类型的 Java 对照程序区分重载/重写，再进行陌生 AST 迁移和变化成本题。',
       result: '待执行路径中的代码预测与迁移任务验证。',
       status: 'pending',
       confidenceBefore: 0.72,
@@ -1758,8 +1760,8 @@ async function persistInitialProfileHypotheses(input: {
       key: 'global_foundation_gap',
       title: 'H2 Java 多态基础整体薄弱',
       claim: '也可能不是单点机制缺口，而是重载、重写和静态类型基础整体不稳定。',
-      prediction: '若基础整体薄弱，重写接收者和重载参数两类小测都会失败。',
-      test: '分别测试重写接收者与重载参数表达式，不把两者混成一道题。',
+      prediction: '若基础整体薄弱，重写接收者和重载参数两类小测都会失败，且分步讲解后仍不能迁移。',
+      test: '分别测试重写接收者与重载参数表达式，不把两者混成一道题；若只在重载参数题失败，则降低该假设。',
       result: '待前置机制小测区分。',
       status: 'pending',
       confidenceBefore: 0.35,
@@ -1778,6 +1780,9 @@ async function persistInitialProfileHypotheses(input: {
     },
   ]
   await prisma.vaultMemory.deleteMany({
+    where: { vaultId: input.vaultId, key: { in: [`initial_${input.sessionId}_mechanism_observation`] } },
+  })
+  await prisma.vaultMemory.deleteMany({
     where: { vaultId: input.vaultId, category: 'hypothesis', key: { startsWith: `initial_${input.sessionId}_` } },
   })
   await prisma.vaultMemory.createMany({
@@ -1791,6 +1796,26 @@ async function persistInitialProfileHypotheses(input: {
         evidence,
       }),
     })),
+  })
+  await prisma.vaultMemory.create({
+    data: {
+      vaultId: input.vaultId,
+      key: `initial_${input.sessionId}_mechanism_observation`,
+      category: 'observation',
+      value: JSON.stringify({
+        text: '综合六问后的核心机制假设：学生不是整体反应慢或简单基础差，而是在关键因果前提没有闭合时会停下来深挖，后续信息进入失败；教学应保留知识深度，但缩小单次因果跨度，先用代码预测和运行验证补齐编译期重载与运行时重写的过程模型。',
+        category: 'profile_stuckPattern',
+        confidence: 0.66,
+        analysisMode: 'initial_profile_synthesis',
+        sourceObjectType: 'learningSession',
+        sourceObjectId: input.sessionId,
+        evidence: [{
+          sourceObjectType: 'learningSession',
+          sourceObjectId: input.sessionId,
+          summary: evidence || '六问画像回答显示学习阻塞集中在 Visitor accept、Java 重载/重写过程模型与逐步因果解释需求。',
+        }],
+      }),
+    },
   })
 }
 

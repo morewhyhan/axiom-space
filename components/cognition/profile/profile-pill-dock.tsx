@@ -25,6 +25,7 @@ export function ProfilePillDock({ dimensions, activeKey, onSelect }: ProfilePill
               '--profile-soft': dimension.tone.soft,
               '--profile-border': dimension.tone.border,
             } as CSSProperties}
+            data-testid={`profile-pill-${dimension.key}`}
             onClick={() => onSelect(dimension.key)}
           >
             {dimension.label}

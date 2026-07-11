@@ -102,9 +102,18 @@ async function main() {
   let sessionId: string
   if (resume && existing) {
     vaultId = existing.id
-    const completedSession = await prisma.learningSession.findFirst({
+    const candidateSessions = await prisma.learningSession.findMany({
       where: { userId: user.id, vaultId, domain: '__agent__' },
       orderBy: { updatedAt: 'desc' },
+      take: 20,
+    })
+    const completedSession = candidateSessions.find((session) => {
+      try {
+        const metadata = JSON.parse(session.metadata || '{}') as JsonRecord
+        return metadata.initialProfileCompleted === true
+      } catch {
+        return false
+      }
     })
     assert(completedSession, 'Resume requested but no live profile session exists')
     sessionId = completedSession.id
@@ -150,8 +159,13 @@ async function main() {
   assert.equal(rawProfile.length, 6, 'Raw six-dimensional answers were not all persisted')
   assert(profileObservations.length >= 6, 'Six profile observations were not persisted')
   assert(profileHistory.length >= 6, 'Profile evolution snapshots were not persisted')
+  const profileObservationText = profileObservations.map((item) => item.value).join('\n')
+  assert(/因果|前提|过程模型|编译期|重载|重写/.test(profileObservationText), 'Profile observations do not expose the causal mechanism behind the learning block')
+  assert(/不是|不等于|而不是|整体|全局|基础差/.test(profileObservationText), 'Profile observations do not distinguish the mechanism from shallow labels like global slowness or weak foundation')
   const hypotheses = await prisma.vaultMemory.findMany({ where: { vaultId, category: 'hypothesis' } })
   assert(hypotheses.length >= 3, 'Competing falsifiable hypotheses were not persisted')
+  const hypothesisText = hypotheses.map((item) => item.value).join('\n')
+  assert(/整体反应慢|基础差|关键因果前提|过程模型/.test(hypothesisText), 'Competing hypotheses do not make the judge-visible mechanism distinction')
 
   const pathRequest = await chat(
     cookie,
@@ -169,9 +183,10 @@ async function main() {
   assert(visitorPath.steps.some((step) => /AST|迁移|反例|边界/.test(`${step.title}${step.concept || ''}`)), 'Path lacks transfer or boundary verification')
   const profileAdjustment = await prisma.pathAdjustmentHistory.findFirst({ where: { pathId: visitorPath.id, trigger: 'profile_confirmed' } })
   assert(profileAdjustment, 'Personalized path comparison was not persisted')
-  const comparison = JSON.parse(profileAdjustment.adjustment) as { comparison?: { defaultSteps?: string[]; personalizedSteps?: string[] }; changes?: Array<{ kind?: string }> }
+  const comparison = JSON.parse(profileAdjustment.adjustment) as { summary?: string; comparison?: { defaultSteps?: string[]; personalizedSteps?: string[] }; changes?: Array<{ kind?: string; reason?: string }> }
   assert((comparison.comparison?.defaultSteps?.length || 0) >= 4, 'Default path comparison is missing')
   assert((comparison.comparison?.personalizedSteps?.length || 0) >= 4, 'Personalized path comparison is missing')
+  assert(/不降低|保留知识深度|单次因果跨度|UML/.test(`${comparison.summary || ''}${JSON.stringify(comparison.changes || [])}`), 'Path comparison does not prove the intervention changed depth/span rather than only wording')
   const changeKinds = new Set(comparison.changes?.map((item) => item.kind))
   for (const kind of ['added', 'skipped', 'reordered']) assert(changeKinds.has(kind), `Path comparison lacks ${kind}`)
 

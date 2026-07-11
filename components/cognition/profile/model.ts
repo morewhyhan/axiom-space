@@ -314,7 +314,7 @@ function pickObservation(
 
 
 function normalizeClaim(text: string): string {
-  return text.trim().replace(/\s+/g, ' ').slice(0, 220)
+  return text.trim().replace(/\s+/g, ' ').slice(0, 360)
 }
 
 function buildObservationExplanation(observation: ProfileDimensionInsight['observations'][number]): string {

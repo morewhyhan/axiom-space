@@ -4,8 +4,6 @@ import { useMemo, useState, type CSSProperties } from 'react'
 import { CheckCircle2, ChevronDown, ChevronUp, FlaskConical, GitCompareArrows, XCircle } from 'lucide-react'
 import { HudPanel } from '@/components/ui'
 import { useCognition, useSubmitProfileFeedback } from '@/hooks/use-cognition'
-import PromptModal from './observations-panel'
-import { ProfileHistoryStrip } from './profile-history-strip'
 import {
   ProfileEmptyState,
   ProfileLoadingState,
@@ -64,7 +62,14 @@ export default function LearningProfile() {
 
   return (
     <aside className="cognition-workbench pointer-events-auto">
-      <ProfileHistoryStrip />
+      <div className="profile-top-row">
+        <ProfilePillDock
+          dimensions={profileTree}
+          activeKey={activeKey}
+          onSelect={setSelectedKey}
+        />
+      </div>
+
       {!!data?.hypothesisTimeline?.length && (
         <HudPanel as="section" className="mb-3 rounded-xl p-3" data-testid="hypothesis-evidence-timeline">
           <button
@@ -121,25 +126,6 @@ export default function LearningProfile() {
           )}
         </HudPanel>
       )}
-      <div className="profile-top-row">
-        <div className="profile-top-copy">
-          {activeDimension && (
-            <p className="profile-interpretation-inline">
-              {activeDimension.interpretation}
-            </p>
-          )}
-        </div>
-
-        <ProfilePillDock
-          dimensions={profileTree}
-          activeKey={activeKey}
-          onSelect={setSelectedKey}
-        />
-
-        <div className="profile-prompt-action">
-          <PromptModal />
-        </div>
-      </div>
 
       {activeDimension && (
         <div className="profile-page-shell">
