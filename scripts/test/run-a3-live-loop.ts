@@ -4,7 +4,7 @@ import { prisma } from '@/lib/db'
 const BASE_URL = process.env.A3_LIVE_URL || 'http://localhost:3000'
 const EMAIL = process.env.A3_LIVE_EMAIL || 'demo@axiom.space'
 const PASSWORD = process.env.A3_LIVE_PASSWORD || 'demo123456'
-const VAULT_NAME = 'A3真实闭环测试'
+const VAULT_NAME = process.env.A3_LIVE_VAULT || '小林·Visitor 黄金案例'
 
 type JsonRecord = Record<string, unknown>
 
@@ -21,11 +21,17 @@ async function request(path: string, options: RequestInit = {}, cookie = '') {
   })
 }
 
-async function signIn() {
-  const response = await request('/api/auth/sign-in/email', {
+async function signInOrSignUp() {
+  let response = await request('/api/auth/sign-in/email', {
     method: 'POST',
     body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
   })
+  if (!response.ok) {
+    response = await request('/api/auth/sign-up/email', {
+      method: 'POST',
+      body: JSON.stringify({ email: EMAIL, password: PASSWORD, name: '小林' }),
+    })
+  }
   assert.equal(response.ok, true, `Sign-in failed: ${response.status} ${await response.text()}`)
   const cookieHeaders = response.headers as Headers & { getSetCookie?: () => string[] }
   const rawCookies = cookieHeaders.getSetCookie?.() ?? [response.headers.get('set-cookie') || '']
@@ -88,10 +94,9 @@ async function chat(cookie: string, vaultId: string, sessionId: string, message:
 }
 
 async function main() {
-  const user = await prisma.user.findUnique({ where: { email: EMAIL } })
-  assert(user, `${EMAIL} does not exist; run pnpm db:seed:a3-golden first`)
+  const cookie = await signInOrSignUp()
+  const user = await prisma.user.findUniqueOrThrow({ where: { email: EMAIL } })
   const existing = await prisma.vault.findFirst({ where: { userId: user.id, name: VAULT_NAME } })
-  const cookie = await signIn()
   const resume = process.env.A3_LIVE_RESUME === '1'
   let vaultId: string
   let sessionId: string
@@ -145,6 +150,8 @@ async function main() {
   assert.equal(rawProfile.length, 6, 'Raw six-dimensional answers were not all persisted')
   assert(profileObservations.length >= 6, 'Six profile observations were not persisted')
   assert(profileHistory.length >= 6, 'Profile evolution snapshots were not persisted')
+  const hypotheses = await prisma.vaultMemory.findMany({ where: { vaultId, category: 'hypothesis' } })
+  assert(hypotheses.length >= 3, 'Competing falsifiable hypotheses were not persisted')
 
   const pathRequest = await chat(
     cookie,
@@ -160,6 +167,13 @@ async function main() {
   assert(visitorPath.steps.length >= 4, 'Persisted learning path is too thin')
   assert(visitorPath.steps.some((step) => /重载|重写/.test(`${step.title}${step.concept || ''}`)), 'Path did not respond to the diagnosed Java dispatch gap')
   assert(visitorPath.steps.some((step) => /AST|迁移|反例|边界/.test(`${step.title}${step.concept || ''}`)), 'Path lacks transfer or boundary verification')
+  const profileAdjustment = await prisma.pathAdjustmentHistory.findFirst({ where: { pathId: visitorPath.id, trigger: 'profile_confirmed' } })
+  assert(profileAdjustment, 'Personalized path comparison was not persisted')
+  const comparison = JSON.parse(profileAdjustment.adjustment) as { comparison?: { defaultSteps?: string[]; personalizedSteps?: string[] }; changes?: Array<{ kind?: string }> }
+  assert((comparison.comparison?.defaultSteps?.length || 0) >= 4, 'Default path comparison is missing')
+  assert((comparison.comparison?.personalizedSteps?.length || 0) >= 4, 'Personalized path comparison is missing')
+  const changeKinds = new Set(comparison.changes?.map((item) => item.kind))
+  for (const kind of ['added', 'skipped', 'reordered']) assert(changeKinds.has(kind), `Path comparison lacks ${kind}`)
 
   const firstStep = [...visitorPath.steps].sort((a, b) => a.order - b.order)[0]
   const execution = await jsonRequest(`/api/learning/path/${visitorPath.id}/execute?vid=${encodeURIComponent(vaultId)}`, cookie, {
@@ -168,6 +182,16 @@ async function main() {
   })
   const learningSession = execution.session as { id?: string; cardId?: string } | undefined
   assert(learningSession?.id && learningSession.cardId, `Step execution did not bind a card session: ${JSON.stringify(execution)}`)
+
+  const incompleteReply = await chat(cookie, vaultId, learningSession.id, 'Visitor 需要调用两次，因为 Java 是单分派语言，所以要用双重分派。')
+  console.log(`[assessment-fail] ${incompleteReply.text.slice(0, 180).replace(/\s+/g, ' ')}`)
+  const failedResponse = await request(`/api/learning/path/${visitorPath.id}/step/${firstStep.id}/progress?vid=${encodeURIComponent(vaultId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ status: 'completed', sessionId: learningSession.id, evidence: ['rubric:visitor-transfer-v1'] }),
+  }, cookie)
+  const failedBody = await failedResponse.json().catch(() => ({})) as JsonRecord
+  assert.equal(failedResponse.status, 422, `Incomplete explanation unexpectedly passed: ${JSON.stringify(failedBody)}`)
+  assert.equal((failedBody.evaluation as { passed?: boolean } | undefined)?.passed, false, 'Failed assessment has no visible failure result')
 
   const feynmanAnswer = [
     '我的解释是：重载和重写不是同一阶段发生的。重载在编译期根据参数表达式的静态类型选择方法签名；重写在运行期根据接收者真实类型选择具体实现。',
@@ -183,7 +207,12 @@ async function main() {
     body: JSON.stringify({
       status: 'completed',
       sessionId: learningSession.id,
-      evidence: ['live-loop:陌生变量解释', 'rubric:机制-例子-反例-验证'],
+      evidence: [
+        'rubric:visitor-transfer-v1',
+        'java-exit:0',
+        'java-output:visit(Node) -> PdfNode.accept -> visit(PdfNode)',
+        'transfer:陌生 AST 场景',
+      ],
     }),
   }, cookie)
   const progress = await progressResponse.json().catch(() => ({})) as JsonRecord
@@ -202,8 +231,28 @@ async function main() {
     if (!assessment) await new Promise((resolve) => setTimeout(resolve, 250))
   }
   assert(assessment, 'Passed assessment was shown but not persisted')
+  const assessmentContext = JSON.parse(assessment.clientContext || '{}') as { rubricId?: string; deterministicCheck?: string }
+  assert.equal(assessmentContext.rubricId, 'visitor-transfer-v1', 'Fixed rubric ID is missing')
+  assert.equal(assessmentContext.deterministicCheck, 'passed', 'Java deterministic check did not pass')
   const adjustment = await prisma.pathAdjustmentHistory.findFirst({ where: { pathId: visitorPath.id }, orderBy: { appliedAt: 'desc' } })
   assert(adjustment, 'Assessment did not produce a path adjustment record')
+
+  const resourceReply = await chat(
+    cookie,
+    vaultId,
+    learningSession.id,
+    '请基于这张卡、当前画像和仍未稳定的 Visitor 双重分派边界，生成完整多模态学习资源包，必须包含文档、思维导图、题库、代码实操、图解和视频动画。',
+  )
+  console.log(`[resources] tools=${resourceReply.tools.join(',') || 'none'} reply=${resourceReply.text.slice(0, 220).replace(/\s+/g, ' ')}`)
+  assert(resourceReply.tools.includes('push_resource'), 'Resource generation bypassed the auditable tool channel')
+  const resourcePack = await prisma.card.findFirst({ where: { vaultId, type: 'literature', title: { contains: '个性化资源包' } }, orderBy: { createdAt: 'desc' } })
+  assert(resourcePack, 'Generated resource pack card is missing')
+  const manifestMatch = resourcePack.content.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
+  assert(manifestMatch?.[1], 'Generated resource manifest is missing')
+  const manifest = JSON.parse(manifestMatch[1]) as Array<{ type?: string; sourceObjectId?: string; contentHash?: string }>
+  assert(new Set(manifest.map((item) => item.type)).size >= 5, 'Fewer than five resource types were generated')
+  assert(manifest.every((item) => item.sourceObjectId && item.contentHash), 'A generated resource lacks traceable ID or content hash')
+  assert(/<!--\s*axiom-orchestration:/.test(resourcePack.content), 'Multi-agent handoff evidence is missing')
 
   const permanentContent = `# Java 重载、重写与 Visitor 双重分派
 
@@ -222,6 +271,18 @@ async function main() {
 ## 证据与必要性
 
 依据本次学习步骤的预测、Java 运行核对和费曼解释评估。删掉 accept 会丢掉具体元素静态类型，导致调用退回 \`visit(Node)\`，所以它是完整证据链中的必要前置条件。`
+  const invalidPermanentContent = permanentContent
+    .replace('重载是编译期依据参数表达式静态类型选择方法签名', 'Java 会根据参数对象的运行时类型选择重载方法')
+    .replace('反例是元素类型频繁新增：所有 Visitor 都要修改', 'Visitor 同时方便新增操作和新增元素类型')
+  const rejectedPromotion = await request(`/api/vault/card/${learningSession.cardId}?vid=${encodeURIComponent(vaultId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ title: '错误候选：Visitor 双重分派', content: invalidPermanentContent, type: 'permanent' }),
+  }, cookie)
+  const rejectedBody = await rejectedPromotion.json().catch(() => ({})) as JsonRecord
+  assert.equal(rejectedPromotion.status, 422, `Factually wrong card unexpectedly promoted: ${JSON.stringify(rejectedBody)}`)
+  const accuracyIssues = rejectedBody.qualityIssues as Array<{ code?: string }> | undefined
+  assert(accuracyIssues?.some((issue) => issue.code === 'javaOverloadRuntimeType'), 'Java overload error was not identified')
+  assert(accuracyIssues?.some((issue) => issue.code === 'visitorChangeDirection'), 'Visitor change-direction error was not identified')
   const promotion = await jsonRequest(`/api/vault/card/${learningSession.cardId}?vid=${encodeURIComponent(vaultId)}`, cookie, {
     method: 'PUT',
     body: JSON.stringify({ title: 'Java 重载、重写与 Visitor 双重分派', content: permanentContent, type: 'permanent' }),
@@ -234,9 +295,11 @@ async function main() {
   console.log(`vault=${vaultId}`)
   console.log(`session=${sessionId}`)
   console.log(`profile: raw=${rawProfile.length}, observations=${profileObservations.length}, history=${profileHistory.length}`)
+  console.log(`hypotheses=${hypotheses.length}, pathComparison=passed`)
   console.log(`path=${visitorPath.id}, steps=${visitorPath.steps.length}`)
   console.log(`assessment=${assessment.id}, mastery=${assessment.mastery}`)
   console.log(`permanentCard=${promotedCard.id}`)
+  console.log(`resourceTypes=${new Set(manifest.map((item) => item.type)).size}`)
 }
 
 main()

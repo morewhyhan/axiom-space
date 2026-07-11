@@ -35,7 +35,8 @@
     "agent:eval": "tsx scripts/eval-agent-production.ts",
     "check:demo": "node --import tsx scripts/test/check-demo.ts",
     "check:a3-golden": "node --import tsx scripts/test/check-a3-golden.ts",
-    "check:a3-live-loop": "node --import tsx scripts/test/run-a3-live-loop.ts"
+    "check:a3-live-loop": "node --import tsx scripts/test/run-a3-live-loop.ts",
+    "record:a3-golden": "node --import tsx scripts/test/record-a3-golden.ts"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.4.1",

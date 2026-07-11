@@ -3,8 +3,9 @@ import { hashPassword } from 'better-auth/crypto'
 import { createHash } from 'node:crypto'
 
 const prisma = new PrismaClient()
-const EMAIL = 'demo@axiom.space'
-const PASSWORD = 'demo123456'
+const EMAIL = process.env.A3_SEED_EMAIL || 'demo@axiom.space'
+const PASSWORD = process.env.A3_SEED_PASSWORD || 'demo123456'
+const MODE = process.env.A3_SEED_MODE || 'all'
 const CLEAN_VAULT = '小林·Visitor 黄金案例'
 const MATURE_VAULT = '小林·设计模式学期档案'
 const DAY = 24 * 60 * 60 * 1000
@@ -504,10 +505,14 @@ async function seedMature(userId: string) {
 
 async function main() {
   const user = await ensureUser()
-  const clean = await seedClean(user.id)
-  const mature = await seedMature(user.id)
-  console.log(`Seeded ${CLEAN_VAULT}: ${clean.id}`)
-  console.log(`Seeded ${MATURE_VAULT}: ${mature.id}`)
+  if (MODE !== 'mature') {
+    const clean = await seedClean(user.id)
+    console.log(`Seeded ${CLEAN_VAULT}: ${clean.id}`)
+  }
+  if (MODE !== 'clean') {
+    const mature = await seedMature(user.id)
+    console.log(`Seeded ${MATURE_VAULT}: ${mature.id}`)
+  }
   console.log(`Login: ${EMAIL} / ${PASSWORD}`)
 }
 

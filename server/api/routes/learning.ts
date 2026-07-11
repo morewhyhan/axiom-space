@@ -1047,6 +1047,7 @@ ${context.answer.slice(0, 2400)}
 
     // ── AI Evaluation when marking as completed ──
     let evaluation: StepEvaluation | null = null
+    let assessmentId: string | null = null
 
     if (requestedStatus === 'completed' || requestedStatus === 'mastered') {
       if (!step.cardId) return c.json({ success: false, error: 'CARD_REQUIRED' }, 409)
@@ -1106,7 +1107,19 @@ ${context.answer.slice(0, 2400)}
             sessionEvidence,
             clientEvidence,
           })
-          void recordAssessmentResult({
+          const deterministicCheck = clientEvidence.some((item) => /java-exit\s*:\s*0/i.test(item))
+            && clientEvidence.some((item) => /java-output\s*:/i.test(item))
+            ? 'passed'
+            : 'failed'
+          if (parsed.passed && deterministicCheck === 'failed') {
+            evaluation = {
+              ...evaluation,
+              passed: false,
+              mastery: Math.min(evaluation.mastery, 59),
+              feedback: '语义解释基本成立，但缺少 Java 编译运行的确定性证据，暂不能通过。',
+            }
+          }
+          assessmentId = await recordAssessmentResult({
             userId,
             vaultId: path.vaultId,
             pathId,
@@ -1118,7 +1131,11 @@ ${context.answer.slice(0, 2400)}
             mastery: evaluation.mastery,
             feedback: evaluation.feedback,
             evidence: sessionEvidence.slice(0, 10),
-            clientContext: clientEvidence.slice(0, 10),
+            clientContext: {
+              rubricId: 'visitor-transfer-v1',
+              deterministicCheck,
+              checks: clientEvidence.slice(0, 10),
+            },
           })
 
           // ── Save assessment observation; promotion remains a separate gated flow. ──
@@ -1133,8 +1150,8 @@ ${context.answer.slice(0, 2400)}
                   mastery: evaluation.mastery,
                   feedback: evaluation.feedback,
                   category: 'assessment',
-                  sourceObjectType: 'learningSession',
-                  sourceObjectId: effectiveSessionId,
+                  sourceObjectType: assessmentId ? 'assessmentResult' : 'learningSession',
+                  sourceObjectId: assessmentId || effectiveSessionId,
                   evidence: sessionEvidence.slice(0, 5).map((item, index) => ({
                     sourceObjectType: 'learningSession',
                     sourceObjectId: effectiveSessionId,
@@ -1159,6 +1176,7 @@ ${context.answer.slice(0, 2400)}
           evaluation,
           sessionEvidence,
           clientEvidence,
+          assessmentId,
         })
         return c.json({ success: false, error: 'ASSESSMENT_FAILED', evaluation }, 422)
       }
@@ -1199,6 +1217,7 @@ ${context.answer.slice(0, 2400)}
         evaluation,
         sessionEvidence,
         clientEvidence,
+        assessmentId,
       })
     }
 
@@ -1267,6 +1286,7 @@ ${context.answer.slice(0, 2400)}
       cardId: step.cardId,
       status: finalStatus,
       mastery: Math.min(100, Math.max(0, finalMastery)),
+      assessmentId,
     })
 
     return c.json({
@@ -1276,6 +1296,7 @@ ${context.answer.slice(0, 2400)}
       evaluation,
       cardUpgraded: false,
       promotionRequired: evaluation?.passed ?? false,
+      assessmentId,
     })
   })
 
@@ -3071,6 +3092,7 @@ async function createAssessmentAdjustmentRecord(params: {
   evaluation: { passed: boolean; feedback: string; mastery: number }
   sessionEvidence: string[]
   clientEvidence?: string[]
+  assessmentId?: string | null
 }) {
   const scorePercentage = params.evaluation.mastery
   const adjustmentData = scorePercentage < 60
@@ -3102,6 +3124,7 @@ async function createAssessmentAdjustmentRecord(params: {
       appliedAt: new Date(),
       feedback: JSON.stringify({
         assessmentRef: {
+          assessmentId: params.assessmentId || null,
           toolName: 'learning_step_assessment',
           score: params.evaluation.mastery,
           maxScore: 100,

@@ -72,12 +72,12 @@ export async function recordAssessmentResult(input: {
   mastery: number
   feedback: string
   evidence?: string[]
-  clientContext?: string[]
-}): Promise<void> {
+  clientContext?: unknown
+}): Promise<string | null> {
   try {
-    const delegate = (prisma as unknown as { assessmentResult?: { create: (args: unknown) => Promise<unknown> } }).assessmentResult
-    if (!delegate) return
-    await delegate.create({
+    const delegate = (prisma as unknown as { assessmentResult?: { create: (args: unknown) => Promise<{ id: string }> } }).assessmentResult
+    if (!delegate) return null
+    const result = await delegate.create({
       data: {
         userId: input.userId,
         vaultId: input.vaultId,
@@ -93,7 +93,10 @@ export async function recordAssessmentResult(input: {
         clientContext: input.clientContext ? JSON.stringify(input.clientContext) : null,
       },
     })
-  } catch {}
+    return result.id
+  } catch {
+    return null
+  }
 }
 
 export async function recordCardRevision(input: {

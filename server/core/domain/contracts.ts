@@ -90,11 +90,31 @@ export function validatePermanentCardContent(content: string): PermanentCardQual
   const missingElements = (Object.entries(checks) as Array<[keyof typeof checks, boolean]>)
     .filter(([, passed]) => !passed)
     .map(([key]) => labels[key])
-  const issues = buildQualityIssues(checks)
+  const accuracyIssues: PermanentCardQualityResult['issues'] = []
+  if (/重载.{0,24}(运行时类型|真实类型).{0,16}(选择|决定)|根据参数对象的运行时类型选择重载/i.test(text)) {
+    accuracyIssues.push({
+      dimension: 'accuracy',
+      code: 'javaOverloadRuntimeType',
+      label: '重载选择机制错误',
+      message: 'Java 重载在编译期依据参数表达式的静态类型选择签名，不依据参数对象的运行时类型改选重载。',
+      fix: '改为“编译期按静态类型选择重载；运行期只对已经选定签名执行重写分派”，并附运行输出。',
+    })
+  }
+  if (/Visitor.{0,36}(方便|容易|便于).{0,12}新增操作.{0,20}(方便|容易|便于).{0,12}新增元素|同时方便新增操作和新增元素/i.test(text)) {
+    accuracyIssues.push({
+      dimension: 'accuracy',
+      code: 'visitorChangeDirection',
+      label: 'Visitor 变化方向错误',
+      message: 'Visitor 通常便于新增操作，但新增元素类型会要求修改 Visitor 接口及已有实现。',
+      fix: '明确区分“新增操作”和“新增元素类型”的相反修改成本。',
+    })
+  }
+  const issues = [...buildQualityIssues(checks), ...accuracyIssues]
+  const allMissingElements = [...missingElements, ...accuracyIssues.map((issue) => `accuracy:${issue.code}`)]
   return {
-    passed: missingElements.length === 0,
+    passed: allMissingElements.length === 0,
     checks,
-    missingElements,
+    missingElements: allMissingElements,
     issues,
   }
 }

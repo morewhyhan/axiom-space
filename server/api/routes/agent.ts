@@ -1695,6 +1695,11 @@ async function maybeHandleInitialProfileTurn(input: {
     completed: !nextStep,
   })
   if (!nextStep) {
+    await persistInitialProfileHypotheses({
+      vaultId: input.vaultId,
+      sessionId: input.sessionId,
+      answers: normalizedAnswers,
+    })
     void emitNotification(input.vaultId, {
       type: 'profile',
       message: '初始学习画像已完成',
@@ -1725,6 +1730,68 @@ async function maybeHandleInitialProfileTurn(input: {
   })
 
   return { text: assistantText }
+}
+
+async function persistInitialProfileHypotheses(input: {
+  vaultId: string
+  sessionId: string
+  answers: Record<string, string>
+}): Promise<void> {
+  const evidence = [
+    input.answers.currentFoundation,
+    input.answers.stuckPattern,
+    input.answers.bestExplanationPath,
+  ].filter(Boolean).join('；').slice(0, 700)
+  const hypotheses = [
+    {
+      key: 'causal_process_gap',
+      title: 'H1 缺少编译期与运行期的过程模型',
+      claim: '当前困难可能集中在重载选择与重写执行的中间机制，而不是 Visitor 角色名称。',
+      prediction: '补齐类型分派过程后，陌生代码预测和 accept 解释应明显改善。',
+      test: '用只改变变量声明类型的 Java 对照程序，再进行陌生 AST 迁移题。',
+      result: '待执行路径中的代码预测与迁移任务验证。',
+      status: 'pending',
+      confidenceBefore: 0.72,
+      confidenceAfter: 0.72,
+    },
+    {
+      key: 'global_foundation_gap',
+      title: 'H2 Java 多态基础整体薄弱',
+      claim: '也可能不是单点机制缺口，而是重载、重写和静态类型基础整体不稳定。',
+      prediction: '若基础整体薄弱，重写接收者和重载参数两类小测都会失败。',
+      test: '分别测试重写接收者与重载参数表达式，不把两者混成一道题。',
+      result: '待前置机制小测区分。',
+      status: 'pending',
+      confidenceBefore: 0.35,
+      confidenceAfter: 0.35,
+    },
+    {
+      key: 'structure_recall_gap',
+      title: 'H3 只是没有记熟 Visitor 结构',
+      claim: '还需排除学生只是忘记 UML 角色或标准模板的可能。',
+      prediction: '若只是记忆问题，复习 UML 后应能解释 accept 并预测调用结果。',
+      test: '跳过重复 UML 前先核对角色复述，再观察机制题是否仍失败。',
+      result: '待路径首轮任务验证。',
+      status: 'pending',
+      confidenceBefore: 0.2,
+      confidenceAfter: 0.2,
+    },
+  ]
+  await prisma.vaultMemory.deleteMany({
+    where: { vaultId: input.vaultId, category: 'hypothesis', key: { startsWith: `initial_${input.sessionId}_` } },
+  })
+  await prisma.vaultMemory.createMany({
+    data: hypotheses.map((hypothesis) => ({
+      vaultId: input.vaultId,
+      key: `initial_${input.sessionId}_${hypothesis.key}`,
+      category: 'hypothesis',
+      value: JSON.stringify({
+        ...hypothesis,
+        evidenceIds: [`session:${input.sessionId}`],
+        evidence,
+      }),
+    })),
+  })
 }
 
 const PROFILE_QUESTION_ANSWER_SKIP_RE = /(跳过|先跳过|不用|不回答|以后再说|别问|不要问|无需|直接做|先做)/

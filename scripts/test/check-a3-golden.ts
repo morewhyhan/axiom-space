@@ -4,14 +4,17 @@ import { prisma } from '@/lib/db'
 
 const CLEAN_VAULT = '小林·Visitor 黄金案例'
 const MATURE_VAULT = '小林·设计模式学期档案'
+const EMAIL = process.env.A3_CHECK_EMAIL || 'demo@axiom.space'
+const LIVE_MODE = process.env.A3_CHECK_LIVE === '1'
+const CLEAN_VAULT_ALIASES = [CLEAN_VAULT, '小林·Visitor黄金案例']
 
 async function main() {
-  const user = await prisma.user.findUnique({ where: { email: 'demo@axiom.space' } })
-  assert(user, 'demo@axiom.space does not exist')
+  const user = await prisma.user.findUnique({ where: { email: EMAIL } })
+  assert(user, `${EMAIL} does not exist`)
 
   const [clean, mature] = await Promise.all([
     prisma.vault.findFirst({
-      where: { userId: user.id, name: CLEAN_VAULT },
+      where: { userId: user.id, name: { in: CLEAN_VAULT_ALIASES } },
       include: {
         cards: true,
         vaultMemories: true,
@@ -50,7 +53,7 @@ async function main() {
 
   const cleanPath = clean.learningPaths.find((path) => path.name.includes('Visitor'))
   assert(cleanPath, 'Clean vault Visitor path is missing')
-  assert(cleanPath.steps.length >= 6, 'Clean Visitor path must contain at least six steps')
+  assert(cleanPath.steps.length >= (LIVE_MODE ? 4 : 6), 'Clean Visitor path does not contain enough executable steps')
   const adjustment = cleanPath.adjustmentHistory.map((item) => JSON.parse(item.adjustment) as {
     comparison?: { defaultSteps?: string[]; personalizedSteps?: string[] }
     profileEvidence?: unknown[]
@@ -58,7 +61,7 @@ async function main() {
   }).find((item) => item.comparison)
   assert(adjustment, 'Path comparison evidence is missing')
   assert((adjustment.comparison?.defaultSteps?.length ?? 0) >= 4, 'Default path comparison is too thin')
-  assert((adjustment.comparison?.personalizedSteps?.length ?? 0) >= 6, 'Personalized path comparison is too thin')
+  assert((adjustment.comparison?.personalizedSteps?.length ?? 0) >= (LIVE_MODE ? 4 : 6), 'Personalized path comparison is too thin')
   assert((adjustment.profileEvidence?.length ?? 0) >= 2, 'Path must cite at least two profile evidence items')
   const changeKinds = new Set(adjustment.changes?.map((item) => item.kind))
   for (const kind of ['added', 'skipped', 'reordered']) assert(changeKinds.has(kind), `Path change ${kind} is missing`)

@@ -141,6 +141,47 @@ ${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于
         where: { id: step.id },
         data: { prerequisites: JSON.stringify([orderedSteps[index].id]) },
       })));
+      const profileMemories = await prisma.vaultMemory.findMany({
+        where: { vaultId, category: 'observation' },
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+      });
+      const profileEvidence = profileMemories.flatMap((memory) => {
+        try {
+          const value = JSON.parse(memory.value) as { text?: string; confidence?: number; category?: string };
+          if (!value.text) return [];
+          return [{
+            id: memory.id,
+            label: value.category?.replace('profile_', '') || '学习画像',
+            evidence: value.text,
+            confidence: value.confidence,
+            status: (value.confidence || 0) >= 0.55 ? '已确认画像证据' : '待验证画像假设',
+          }];
+        } catch {
+          return [];
+        }
+      }).slice(0, 4);
+      const evidenceIds = profileEvidence.map((item) => item.id);
+      await prisma.pathAdjustmentHistory.create({
+        data: {
+          pathId: path.id,
+          trigger: 'profile_confirmed',
+          adjustment: JSON.stringify({
+            type: 'personalize_path',
+            summary: '画像显示当前缺口在 Java 分派过程而非 UML 角色，因此保留知识深度、缩小单次因果跨度。',
+            comparison: {
+              defaultSteps: ['Visitor 意图与角色', 'Visitor UML 结构', '照写标准模板', '模式名称选择题'],
+              personalizedSteps: orderedSteps.map((step) => step.title),
+            },
+            profileEvidence,
+            changes: [
+              { kind: 'added', step: orderedSteps[0]?.title || 'Java 分派过程实验', reason: '先暴露并补齐重载与重写的真实机制缺口。', evidenceIds },
+              { kind: 'skipped', step: 'Visitor 角色与 UML', reason: '用户已能复述结构，重复讲解不能解决 accept 的因果疑问。', evidenceIds },
+              { kind: 'reordered', step: orderedSteps[1]?.title || 'Visitor 双重分派', reason: '先闭合编译期与运行期选择，再进入迁移和边界。', evidenceIds },
+            ],
+          }),
+        },
+      });
 
       const report = `
 ## 学习路径已创建：${pathData.title}
