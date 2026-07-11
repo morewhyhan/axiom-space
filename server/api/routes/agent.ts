@@ -189,6 +189,47 @@ const app = new Hono<{ Variables: { userId: string } }>()
         }
       }
 
+      if (resolvedVaultId && isLearningPathCreationRequest(message)) {
+        await persistMessage(dbSessionId, 'user', message)
+        registerBuiltinTools()
+        const tool = toolRegistry.get('create_learning_path')
+        if (!tool?.execute) {
+          await stream.writeSSE({ event: 'error', data: JSON.stringify({ error: '学习路径工具不可用。' }) })
+          return
+        }
+        const topic = extractLearningPathTopic(message)
+        await stream.writeSSE({
+          event: 'tool_start',
+          data: JSON.stringify({ type: 'tool_start', tool: 'create_learning_path' }),
+        })
+        const result = await tool.execute('direct-learning-path', {
+          topic,
+          goal: message.slice(0, 1200),
+          duration_hours: 8,
+          style: 'mixed',
+        })
+        const toolText = extractToolResultText(result).trim()
+        const details = (result as { details?: Record<string, unknown> } | null)?.details
+        if (details?.error || !details?.path_id || !details?.step_count) {
+          await stream.writeSSE({
+            event: 'tool_end',
+            data: JSON.stringify({ type: 'tool_end', tool: 'create_learning_path', text: toolText, details }),
+          })
+          await stream.writeSSE({
+            event: 'error',
+            data: JSON.stringify({ error: toolText || '学习路径创建失败，未写入可执行步骤。' }),
+          })
+          return
+        }
+        await persistMessage(dbSessionId, 'assistant', toolText)
+        await stream.writeSSE({
+          event: 'tool_end',
+          data: JSON.stringify({ type: 'tool_end', tool: 'create_learning_path', text: toolText, details }),
+        })
+        await stream.writeSSE({ event: 'done', data: JSON.stringify({ text: toolText }) })
+        return
+      }
+
       const initialProfileReply = await maybeHandleInitialProfileTurn({
         userId,
         vaultId: resolvedVaultId,
@@ -2536,6 +2577,21 @@ function isResourceGenerationRequest(message: string): boolean {
     || /(学习资源|学习资料|资源包|五类资源|多模态资料)/i.test(text)
   const contextBound = /(这张卡|当前卡|这个误区|这个问题|刚导入|讲义|资料|文献|画像|缺口|薄弱点|基于)/i.test(text)
   return asksGeneration && contextBound
+}
+
+function isLearningPathCreationRequest(message: string): boolean {
+  const text = message.trim()
+  if (!text) return false
+  const asksForPath = /(create_learning_path|学习路径|学习计划|学习路线|路径规划|可执行路径)/i.test(text)
+  const asksToPersist = /(创建|生成|制定|规划|写入|保存|立即调用|真正)/i.test(text)
+  return asksForPath && asksToPersist
+}
+
+function extractLearningPathTopic(message: string): string {
+  const quoted = message.match(/[“"]([^”"]{2,60})[”"]/)?.[1]?.trim()
+  if (quoted) return quoted
+  const bound = message.match(/(?:为|围绕|关于)([^，。；\n]{2,60}?)(?:创建|生成|制定|规划)/)?.[1]?.trim()
+  return bound || message.match(/(Visitor[^，。；\n]{0,24})/i)?.[1]?.trim() || '当前学习主题'
 }
 
 function buildConfirmedToolParams(tool: string, target: string, confirmationToken: string): Record<string, unknown> | null {

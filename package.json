@@ -34,7 +34,8 @@
     "db:verify:cs408": "node scripts/verify-cs408-seed.mjs",
     "agent:eval": "tsx scripts/eval-agent-production.ts",
     "check:demo": "node --import tsx scripts/test/check-demo.ts",
-    "check:a3-golden": "node --import tsx scripts/test/check-a3-golden.ts"
+    "check:a3-golden": "node --import tsx scripts/test/check-a3-golden.ts",
+    "check:a3-live-loop": "node --import tsx scripts/test/run-a3-live-loop.ts"
   },
   "dependencies": {
     "@hono/swagger-ui": "^0.4.1",

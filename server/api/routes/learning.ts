@@ -2889,9 +2889,9 @@ function summarizeEducationProfileHistory(
   const previousScores = extractEducationDimensionScores(previousProfile)
   const profileKey = typeof snapshot?.profileKey === 'string' ? snapshot.profileKey : null
   const evidence = Array.isArray(snapshot?.evidence)
-    ? snapshot.evidence.map((item) => String(item)).slice(0, 6)
+    ? snapshot.evidence.map(sanitizeProfileHistoryEvidence).filter((item): item is string => Boolean(item)).slice(0, 6)
     : Array.isArray(profile?.evidence)
-      ? profile.evidence.map((item) => String(item)).slice(0, 6)
+      ? profile.evidence.map(sanitizeProfileHistoryEvidence).filter((item): item is string => Boolean(item)).slice(0, 6)
       : []
   const updatedAt = readProfileUpdatedAt(profile, snapshot)
 
@@ -2948,6 +2948,21 @@ function summarizeEducationProfileHistory(
     metricText: `平均 ${avgScore}，会话 ${sessionCount}`,
     isDimensionProfile: true,
   }
+}
+
+function sanitizeProfileHistoryEvidence(value: unknown): string | null {
+  const record = toRecord(value)
+  const candidate = typeof value === 'string'
+    ? value
+    : typeof record?.summary === 'string'
+      ? record.summary
+      : typeof record?.evidence === 'string'
+        ? record.evidence
+        : ''
+  const text = candidate.replace(/\s+/g, ' ').trim()
+  if (!text) return null
+  if (/<session-boundary>|Please continue|"type"\s*:\s*"text"|sessionId|cardId/i.test(text)) return null
+  return text.length > 180 ? `${text.slice(0, 177)}...` : text
 }
 
 function readProfileUpdatedAt(

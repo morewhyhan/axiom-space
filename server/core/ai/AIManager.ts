@@ -11,8 +11,10 @@ import type {
 } from "@/types/common";
 import { getOracles, Oracle, OracleProfile, getOracle } from './oracle';
 import { detectApiMode, getApiEndpoint, type ApiMode } from './api-mode';
-import { DEFAULT_MODEL, DEFAULT_COMPRESSION_MODEL } from '@/types/agent';
 import { resolveAiConfig } from '@/lib/ai-config';
+
+const DEFAULT_MODEL = 'glm-4-flash';
+const DEFAULT_COMPRESSION_MODEL = 'glm-4-plus';
 
 /**
  * 模型配置接口

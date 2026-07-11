@@ -15,19 +15,9 @@ import { CARD_TYPES, validatePermanentCardContent } from '@/server/core/domain/c
 import { emitDomainEvent, recordCardRevision, recordPromotionAttempt } from '@/server/core/domain/events'
 import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
 import { pushSuggestionEngine } from '@/server/core/push/push-suggestion-engine'
+import { safeParseTags } from '@/lib/safe-json'
 
 const vaultQuerySchema = z.object({ vid: z.string().optional() })
-
-/** Defensive JSON.parse — never lets a corrupt tags column 500 the request. */
-export function safeParseTags(raw: string | null | undefined): string[] {
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
 
 type ResourceManifestItem = {
   path?: unknown

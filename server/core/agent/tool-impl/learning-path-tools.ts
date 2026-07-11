@@ -57,6 +57,8 @@ ${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于
 时长：${params.duration_hours || 20} 小时
 风格：${params.style || 'mixed'}
 
+路径必须包含 4 到 6 个可执行阶段。每个阶段只闭合一个主要缺口，必须给出具体学习任务和可观察的完成标志。不得把前置机制、核心机制、陌生场景迁移和反例/适用边界压缩成两个笼统阶段。目标中明确要求跳过的已掌握内容不得重新设为独立阶段。
+
 以严格的 JSON 格式返回（不要 \`\`\`json 包裹，不要任何其他文字）：
 {
   "title": "学习路径名称",
@@ -96,16 +98,49 @@ ${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于
       const pathData = JSON.parse(match[0]);
 
       // 保存到数据库
+      const stages = Array.isArray(pathData.stages) ? pathData.stages : [];
+      if (stages.length < 4 || stages.length > 6) {
+        return {
+          content: [{ type: 'text', text: `路径生成失败：需要 4–6 个可执行阶段，实际返回 ${stages.length} 个。` }],
+          details: { error: 'Invalid executable stage count', stage_count: stages.length },
+        };
+      }
       const path = await prisma.learningPath.create({
         data: {
           vaultId,
           userId,
-          name: params.goal || params.topic,
+          name: pathData.title || `${params.topic}学习路径`,
           topic: params.topic,
           status: 'active',
-          description: JSON.stringify(pathData),
+          description: `依据当前学习画像，为“${params.topic}”生成 ${stages.length} 个可执行阶段；每一步均包含学习概念、建议资源和可观察的完成证据。`,
+          difficulty: params.style === 'theory' ? 'intermediate' : 'adaptive',
+          source: 'ai',
+          totalSteps: stages.length,
+          steps: {
+            create: stages.map((stage: any, index: number) => ({
+              order: index,
+              title: String(stage.name || `阶段 ${index + 1}`),
+              chapter: `阶段 ${stage.stage || index + 1}`,
+              concept: Array.isArray(stage.concepts) ? stage.concepts.map(String).join('、') : String(stage.name || params.topic),
+              description: [
+                Array.isArray(stage.concepts) && stage.concepts.length ? `学习概念：${stage.concepts.map(String).join('、')}` : '',
+                Array.isArray(stage.resources) && stage.resources.length ? `建议资源：${stage.resources.map(String).join('、')}` : '',
+                stage.milestone ? `完成证据：${String(stage.milestone)}` : '',
+              ].filter(Boolean).join('\n'),
+              estimatedMinutes: Math.max(10, Math.round(Number(stage.duration_hours || 1) * 60)),
+              prerequisites: index === 0 ? '[]' : JSON.stringify([`stage:${index}`]),
+              status: index === 0 ? 'available' : 'locked',
+              mastery: 0,
+            })),
+          },
         },
+        include: { steps: true },
       });
+      const orderedSteps = [...path.steps].sort((a, b) => a.order - b.order);
+      await Promise.all(orderedSteps.slice(1).map((step, index) => prisma.learningPathStep.update({
+        where: { id: step.id },
+        data: { prerequisites: JSON.stringify([orderedSteps[index].id]) },
+      })));
 
       const report = `
 ## 学习路径已创建：${pathData.title}
@@ -139,6 +174,7 @@ ${pathData.prerequisites?.length > 0
         details: {
           path_id: path.id,
           topic: params.topic,
+          step_count: path.steps.length,
           stages: pathData.stages,
           metadata: pathData,
         },

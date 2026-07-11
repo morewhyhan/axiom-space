@@ -105,7 +105,7 @@ export async function renderPdf(
       </div>`,
   });
   await page.close();
-  return buf as unknown as Buffer;
+  return Buffer.from(buf);
 }
 
 // ── PPT ───────────────────────────────────────────────────────────
@@ -131,10 +131,7 @@ export async function renderPptx(
   slideSpecs: Record<string, unknown>[],
 ): Promise<Buffer> {
   // Ensure every spec has a section marker so the McKinsey engine formats consistently
-  const specs = slideSpecs.map((spec, i) => ({
-    ...spec,
-    section_marker: (spec.section_marker as string) || title || `Slide ${i + 1}`,
-  }));
+  const specs = slideSpecs.map((spec, i) => normalizePptxSpec(spec, title || `Slide ${i + 1}`));
 
   const tmpDir = await mkdtemp(join(tmpdir(), 'axiom-pptx-'));
   const jsonPath = join(tmpDir, 'spec.json');
@@ -162,6 +159,30 @@ export async function renderPptx(
     // Cleanup temp files
     unlink(jsonPath).catch(() => {});
     unlink(pptxPath).catch(() => {});
+  }
+}
+
+function normalizePptxSpec(spec: Record<string, unknown>, sectionMarker: string): Record<string, unknown> {
+  if (spec.type !== 'dark_navy_summary') {
+    return {
+      ...spec,
+      section_marker: (spec.section_marker as string) || sectionMarker,
+    }
+  }
+  const keyPoints = Array.isArray(spec.key_points) ? spec.key_points.map(String).filter(Boolean) : []
+  const nextSteps = typeof spec.next_steps === 'string' ? spec.next_steps.trim() : ''
+  const body = typeof spec.body === 'string' && spec.body.trim()
+    ? spec.body.trim()
+    : [...keyPoints, nextSteps].filter(Boolean).join('；') || String(spec.title || '学习总结')
+  return {
+    type: 'dark_navy_summary',
+    body,
+    eyebrow: typeof spec.eyebrow === 'string' ? spec.eyebrow : typeof spec.title === 'string' ? spec.title : undefined,
+    page_number: typeof spec.page_number === 'number' ? spec.page_number : undefined,
+    corner_text: typeof spec.corner_text === 'string' ? spec.corner_text : undefined,
+    source: spec.source,
+    footnote: spec.footnote,
+    section_marker: (spec.section_marker as string) || sectionMarker,
   }
 }
 

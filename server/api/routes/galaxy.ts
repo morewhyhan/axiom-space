@@ -6,7 +6,7 @@ import { Hono } from 'hono'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
-import { safeParseTags } from './vault'
+import { safeParseTags } from '@/lib/safe-json'
 import { CONTAINS_EDGE_TYPE, ROOT_CARD_PATH, ensureVaultRootCard } from '@/server/core/domain/concept-graph'
 
 function sanitizeClusterColor(color: unknown): string | undefined {

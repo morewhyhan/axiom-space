@@ -374,7 +374,7 @@ export const RESOURCE_GENERATION_PROMPTS: Record<ResourceGenerationType, PromptC
       'two_column_compare: { "type": "two_column_compare", "title": "对比", "left_header": "A", "right_header": "B", "rows": [{"label": "维度", "left": "A特征", "right": "B特征"}] }',
       'process_flow: { "type": "process_flow", "title": "流程", "steps": [{"label": "步骤1", "description": "说明"}] }',
       'phases_chevron_3: { "type": "phases_chevron_3", "title": "三阶段", "phases": [{"title": "阶段1", "description": "说明"}, ...] }',
-      'dark_navy_summary: { "type": "dark_navy_summary", "title": "总结", "key_points": ["要点1", "要点2"], "next_steps": "下一步建议" }',
+      'dark_navy_summary: { "type": "dark_navy_summary", "eyebrow": "总结", "body": "[结论]: 核心要点与下一步建议" }',
       'big_number: { "type": "big_number", "number": "85%", "label": "关键指标说明" }',
       'funnel: { "type": "funnel", "title": "漏斗/筛选", "steps": [{"label": "层1", "value": "100%"}, ...] }',
       'section_divider: { "type": "section_divider", "title": "章节标题" }',

@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 import { parseWikiLinks } from '@/lib/wiki-links'
-import { safeParseTags } from '@/server/api/routes/vault'
+import { safeParseTags } from '@/lib/safe-json'
 import { getProfileCacheEntry, setProfileCacheEntry } from '@/server/api/profile-cache'
 import {
   consumeConfirmationToken,
@@ -48,7 +48,7 @@ const SOURCE_FILES = [
   'server/core/agent/mcp/MCPServer.ts',
   'server/core/agent/pipeline/ContextBuilder.ts',
   'server/core/agent/pipeline/MemoryService.ts',
-  'server/core/agent/push-suggestion-engine.ts',
+  'server/core/push/push-suggestion-engine.ts',
   'server/core/agent/security/SecretRedactor.ts',
   'server/core/agent/security/ShellHookAllowlist.ts',
   'server/core/agent/skills/SkillRegistry.ts',
@@ -177,7 +177,7 @@ const SOURCE_HINTS: Array<[RegExp, string, RegExp[]]> = [
   [/Skill|Subagent|Orchestration|Flow/, 'server/core/agent/subagent/SubagentTypes.ts', [/role|mode|status|runId/i]],
   [/Memory|Checkpoint|Compress|Dialogue/, 'server/core/agent/pipeline/MemoryService.ts', [/Memory|summary|context/i]],
   [/EducationProfile|Cognitive|Pattern|Gap|Strength|Growth|NextAction/, 'server/core/learning/education-profile.ts', [/evidence|confidence|dimension|score/i]],
-  [/Resource|Manifest|HyperFrames|Video|Render|PushableResource|PushTrigger|NextAction|RemedialPattern/, 'server/core/agent/push-suggestion-engine.ts', [/resource|manifest|target|status|reason/i]],
+  [/Resource|Manifest|HyperFrames|Video|Render|PushableResource|PushTrigger|NextAction|RemedialPattern/, 'server/core/push/push-suggestion-engine.ts', [/resource|manifest|target|status|reason/i]],
   [/Citation|SourceDocument|DocumentImportJob|ImportResult|SourceCitation|PromotionCriteria/, 'server/core/agent/tool-impl/import-document-tool.ts', [/source|citation|created|errors|skipped|import/i]],
   [/PromotionCriteria|PromotionAttempt|CardQuality|CardSection/, 'server/core/agent/tool-impl/content-quality-tools.ts', [/missingSections|quality|criteria|checklist|passed/i]],
   [/数据边界|CurrentUserContext|PermissionError|跨用户|owner/, 'server/api/auth-helper.ts', [/getUserId|resolveVault|userId|session/i]],
@@ -353,7 +353,8 @@ function assertUiStateProbe(testCase: AcceptanceCase, probes: ProbeRecorder): vo
     'evidence',
   ]
   assert.ok(validLayouts.includes('galaxy'))
-  assert.deepEqual(DEFAULT_PANEL_LAYOUT.left, ['sessionList'])
+  assert.deepEqual(DEFAULT_PANEL_LAYOUT.left, [])
+  assert.deepEqual(DEFAULT_PANEL_LAYOUT.right, ['editor'])
   assert.equal(DEFAULT_PANEL_SIZES.editor, 420)
   assert.match(source('stores/mode-store.ts'), /setMode|setSelectedNode|setSelectedPathId|setGraphLayoutMode|panelLayout/)
   probes.hit('ui:store-contract')

@@ -89,9 +89,8 @@ export function ProfileHistoryStrip() {
       )}
       {expanded && hasArchiveSummary && (
         <div data-testid="profile-history-timeline" className="mt-3 grid gap-2 border-t border-white/8 pt-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-white/35" style={{ fontSize: 'var(--f8)' }}>
+          <div className="text-white/35" style={{ fontSize: 'var(--f8)' }}>
             <span>画像变化时间线</span>
-            <span className="mono">原始记录 ID：{latest.id}</span>
           </div>
           {timeline.length > 0 ? [...timeline].reverse().map((entry, index) => (
             <div key={`${entry.timestamp}:${index}`} className="rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2">

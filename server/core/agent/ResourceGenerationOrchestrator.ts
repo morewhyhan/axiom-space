@@ -312,7 +312,7 @@ export class ResourceGenerationOrchestrator {
                 const titleMatch = html.match(/<h[12][^>]*>([\s\S]*?)<\/h[12]>/);
                 const slideTitle = titleMatch ? titleMatch[1].replace(/<[^>]*>/g, '').trim() : `${topic} (${i + 1})`;
                 if (i === 0) return { type: 'cover_slide', title: slideTitle, subtitle: topic };
-                if (i === slides.length - 1) return { type: 'dark_navy_summary', key_points: [stripHtmlTags(html).slice(0, 200)] };
+                if (i === slides.length - 1) return { type: 'dark_navy_summary', body: stripHtmlTags(html).slice(0, 200) };
                 return { type: 'executive_summary_paragraph', title: slideTitle, paragraphs: [stripHtmlTags(html).slice(0, 400)] };
               });
             }

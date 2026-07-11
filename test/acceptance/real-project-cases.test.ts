@@ -41,7 +41,7 @@ const IMPLEMENTATION_FILES = [
   'server/core/agent/subagent/SubagentTypes.ts',
   'server/core/agent/subagent/SubagentSystem.ts',
   'server/core/agent/subagent/SubagentLifecycle.ts',
-  'server/core/agent/push-suggestion-engine.ts',
+  'server/core/push/push-suggestion-engine.ts',
   'server/core/jobs/queue.ts',
   'server/core/jobs/types.ts',
   'server/core/learning/education-profile.ts',
