@@ -2,14 +2,22 @@ import { PrismaClient } from '@prisma/client'
 import { hashPassword } from 'better-auth/crypto'
 import { createHash } from 'node:crypto'
 import { buildA3DesignPatternCourseNodes, type A3CourseNode } from './data/a3-design-pattern-course'
+import { compileInterventionProtocol, type InterventionProtocol } from '../server/core/learning/intervention-protocol'
 
 const prisma = new PrismaClient()
 const EMAIL = process.env.A3_SEED_EMAIL || 'demo@axiom.space'
 const PASSWORD = process.env.A3_SEED_PASSWORD || 'demo123456'
 const MODE = process.env.A3_SEED_MODE || 'all'
 const RESET_USER = process.env.A3_SEED_RESET_USER === '1'
-const CLEAN_VAULT = '小林·Visitor 黄金案例'
-const MATURE_VAULT = '小林·设计模式学期档案'
+const CLEAN_VAULT = '设计模式黄金案例'
+const MATURE_VAULT = '设计模式黄金案例·长期档案'
+const LEGACY_GOLDEN_VAULTS = [
+  '小林·Visitor 黄金案例',
+  '小林·Visitor黄金案例',
+  '小林·设计模式学期档案',
+  '小林·架构决策成长案例',
+  '小林·软件设计与架构学期档案',
+]
 const DAY = 24 * 60 * 60 * 1000
 
 type CardSeed = {
@@ -726,19 +734,7 @@ async function seedLongTermResourcesAndPushes(userId: string, vaultId: string, c
   const manifest = []
   const cardIds = [...cardLookup.values()]
   for (const [index, resource] of resources.entries()) {
-    const content = [
-      `# ${resource.label}`,
-      '',
-      `主题：${resource.topic}`,
-      '',
-      '这份资源来自小林长期学习后的知识图谱、画像、测评和路径记录。',
-      '它不是围绕单个 Visitor 概念，而是服务整门《软件设计模式》的项目迁移、模式辨析和复测。',
-      '',
-      '## 使用方式',
-      '- 先看当前问题属于哪个变化方向。',
-      '- 再查看可替代模式及其代价。',
-      '- 最后用反例或代码运行结果验证。',
-    ].join('\n')
+    const content = buildSemesterResourceContent(resource)
     const path = `resources/semester/${resource.fileName}`
     const card = await prisma.card.create({
       data: {
@@ -848,6 +844,433 @@ async function seedLongTermResourcesAndPushes(userId: string, vaultId: string, c
   })
 }
 
+function buildSemesterResourceContent(resource: { type: string; topic: string; label: string }): string {
+  if (resource.type === 'mindmap') return `mindmap
+  root((GoF 设计模式选择))
+    变化方向
+      对象创建
+      结构组合
+      行为协作
+    选择坐标
+      职责归属
+      扩展成本
+      调试复杂度
+    验证方式
+      陌生迁移
+      替代方案
+      反例边界`
+  if (resource.type === 'diagram') return `flowchart LR
+  R[真实需求] --> V{主要变化方向}
+  V -->|算法变化| S[Strategy]
+  V -->|状态驱动行为| T[State]
+  V -->|稳定结构新增操作| A[Visitor]
+  S --> C[比较职责与扩展成本]
+  T --> C
+  A --> C
+  C --> B{复杂度预算通过?}
+  B -->|是| D[记录 ADR 与复审条件]
+  B -->|否| N[减少模式或回到简单设计]`
+  if (resource.type === 'quiz') return JSON.stringify([
+    { question: '订单行为随内部状态切换，应优先比较哪两个模式？', options: ['Strategy 与 State', 'Visitor 与 Command', 'Adapter 与 Facade'], answer: 'Strategy 与 State', explanation: '关键鉴别点是行为由外部策略替换，还是由对象内部状态迁移驱动。' },
+    { question: '对象结构稳定但需要持续新增统计操作，哪个模式更匹配？', options: ['Visitor', 'Builder', 'Memento'], answer: 'Visitor', explanation: 'Visitor 把新增操作从稳定对象结构中分离，但新增元素类型成本较高。' },
+    { question: '什么时候应该撤销“使用更多模式”的方案？', options: ['模式数量不够多', '扩展收益不足以覆盖理解和调试成本', '类图不够复杂'], answer: '扩展收益不足以覆盖理解和调试成本', explanation: '模式是成本与收益的选择，不是越多越好。' },
+  ], null, 2)
+  if (resource.type === 'code') return `# Strategy 与 State 对比实验
+
+## 练习目标
+用相同订单场景区分“外部替换算法”和“内部状态迁移”。
+
+## 初始代码
+\`\`\`java
+interface Pricing { int price(int base); }
+record Order(int base, Pricing pricing) { int total() { return pricing.price(base); } }
+\`\`\`
+
+## 任务要求
+1. 增加会员定价策略。2. 再实现订单状态迁移。3. 写出两种设计的变化方向。
+
+## 测试样例
+\`\`\`java
+assert new Order(100, base -> base * 8 / 10).total() == 80;
+\`\`\`
+
+## 参考实现
+\`\`\`java
+enum Status { CREATED, PAID, CANCELLED }
+final class StatefulOrder { Status status = Status.CREATED; void pay() { status = Status.PAID; } }
+\`\`\``
+  if (resource.type === 'video') return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
+body{margin:0;background:#0b1018;color:#eef2f7;font:16px system-ui;display:grid;place-items:center;height:100vh}.stage{width:min(760px,90vw)}
+.step{padding:16px;border-left:3px solid #67e8f9;margin:12px 0;background:#121a24;animation:enter .6s both}.step:nth-child(2){animation-delay:.5s}.step:nth-child(3){animation-delay:1s}
+@keyframes enter{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:none}}</style></head><body><main class="stage"><h1>三分钟设计模式答辩</h1><div class="step">1. 从真实变化方向陈述问题</div><div class="step">2. 用职责与扩展成本比较候选方案</div><div class="step">3. 给出反例、风险与重新评估条件</div></main></body></html>`
+  return `# ${resource.label}
+
+## 概述
+这份手册使用变化方向、职责归属、扩展成本和复杂度预算四个坐标，帮助完成设计模式横向选择。
+
+## 核心概念
+模式不是结构标签，而是在特定变化条件下对职责和成本的安排。先说明需求中真正会变化的部分，再比较候选方案。
+
+## 决策步骤
+1. 写出当前需求与预期变化。2. 至少提出一个替代方案。3. 说明扩展收益和调试成本。4. 写出重新评估条件。
+
+## 反例
+当简单条件分支已经稳定、变化频率很低时，引入额外模式可能只增加理解成本。
+
+## 总结
+最终结论必须能被真实任务、反例或后续演进证据推翻，而不是依赖模式名称。`
+}
+
+async function seedMatureOperationalHistory(input: {
+  userId: string
+  vaultId: string
+  visitorCards: Map<string, string>
+  timeline: Awaited<ReturnType<typeof seedMatureLearningTimeline>>
+}) {
+  const { userId, vaultId, visitorCards, timeline } = input
+  const dispatchCardId = visitorCards.get('dispatch')!
+  const strategyCardId = visitorCards.get('strategy')!
+  const semesterPath = await prisma.learningPath.findFirstOrThrow({
+    where: { vaultId, name: { contains: '学期总路径' } },
+    include: { steps: { orderBy: { order: 'asc' } } },
+  })
+
+  const capabilitySeeds = [
+    ['OO 责任边界', 92, 'mastered', [], ['能从变化方向分配职责', '能识别贫血对象']],
+    ['SOLID 综合应用', 89, 'mastered', [], ['能解释原则冲突', '能用项目证据取舍']],
+    ['UML 动态建模', 86, 'mastered', [], ['能从时序图还原调用阶段']],
+    ['创建型模式选择', 84, 'mastered', [], ['能区分对象创建变化方向']],
+    ['结构型模式选择', 81, 'mastered', [], ['能比较 Adapter、Facade、Bridge']],
+    ['行为型模式选择', 74, 'learning', ['多个模式均可实现时的取舍'], ['能识别主要协作责任']],
+    ['重构坏味道识别', 78, 'learning', ['跨模块坏味道优先级'], ['能识别长方法和条件分支']],
+    ['模式组合风险', 58, 'learning', ['过度设计', '模式叠加后的调试成本'], ['能识别单模式局部收益']],
+    ['架构决策记录', 67, 'learning', ['量化替代方案代价'], ['能写出决策背景和结论']],
+    ['间隔复测策略', 82, 'mastered', [], ['能区分即时表现和稳定保持']],
+  ] as const
+  for (const [index, [concept, masteryLevel, status, weakAreas, strongAreas]] of capabilitySeeds.entries()) {
+    await prisma.vaultCapability.create({
+      data: {
+        vaultId,
+        concept,
+        masteryLevel,
+        status,
+        weakAreas: JSON.stringify(weakAreas),
+        strongAreas: JSON.stringify(strongAreas),
+        accessCount: 4 + (index % 7),
+        lastAccessed: daysAgo(Math.max(1, 14 - index)),
+      },
+    })
+  }
+
+  const skillSeeds = [
+    ['用变化方向选择设计模式', '能先识别变化轴，再比较模式带来的维护代价。', '架构判断', 0.87, '证据：AST 陌生迁移通过；课程项目 ADR 明确比较三个候选方案及维护代价。'],
+    ['用执行轨迹解释动态机制', '能把编译期选择与运行期分派拆成可验证的时间线。', '机制建模', 0.92, '证据：Visitor 双重分派评估 86；隔日无提示换表面复测 88。'],
+    ['用反例校验模式边界', '能说明一个模式何时不适用，而不只复述适用场景。', '批判性思维', 0.84, '证据：完成 Visitor、Strategy、Command 选择边界辨析，并主动排除不必要模式。'],
+    ['把学习结论沉淀为永久卡片', '能用定义、边界、例子、证据和关联形成长期知识对象。', '知识表达', 0.89, '证据：永久卡经历一次证据不足驳回，补充迁移与延迟复测后升级通过。'],
+    ['设计间隔复测任务', '能用跨会话、换表面任务排除短期熟悉感。', '学习策略', 0.81, '证据：完成隔日无提示复测，并在学期总路径中安排隔周保持任务。'],
+  ] as const
+  for (const [index, [name, description, category, confidence, evidence]] of skillSeeds.entries()) {
+    await prisma.vaultSkill.create({
+      data: {
+        vaultId,
+        name,
+        description,
+        category,
+        tags: JSON.stringify(['软件设计模式', '长期证据']),
+        confidence,
+        evidence,
+        source: 'assessment-and-project',
+        demonstratedAt: daysAgo(16 - index * 3),
+      },
+    })
+  }
+
+  const broadAssessments = [
+    ['SOLID 冲突取舍', 89, true, 64],
+    ['Factory 与 Builder 辨析', 87, true, 57],
+    ['Bridge 双维变化迁移', 84, true, 48],
+    ['Decorator 与 Proxy 边界', 78, true, 39],
+    ['Strategy 与 State 辨析', 81, true, 31],
+    ['Observer 与 Mediator 边界', 72, true, 24],
+    ['模式组合风险', 58, false, 14],
+    ['课程项目架构评审', 76, true, 8],
+  ] as const
+  for (const [index, [concept, mastery, passed, days]] of broadAssessments.entries()) {
+    const step = semesterPath.steps[Math.min(index * 4 + 1, semesterPath.steps.length - 1)]
+    await prisma.assessmentResult.create({
+      data: {
+        userId,
+        vaultId,
+        pathId: semesterPath.id,
+        stepId: step?.id,
+        cardId: step?.cardId,
+        concept,
+        passed,
+        mastery,
+        feedback: passed
+          ? `能够在陌生项目约束下解释“${concept}”的选择理由，并指出至少一个替代方案。`
+          : `当前能识别局部收益，但尚未稳定估计“${concept}”带来的组合复杂度。`,
+        evidence: JSON.stringify([
+          `rubric: decision-boundary-${index + 1}`,
+          passed ? '迁移任务达到通过线' : '反例与代价分析不足',
+          `student-output: ${concept}`,
+        ]),
+        clientContext: JSON.stringify({ rubricId: `semester-transfer-v${index + 1}`, deterministicCheck: passed ? 'passed' : 'failed', evaluator: 'hybrid-rule-and-llm' }),
+        createdAt: daysAgo(days),
+      },
+    })
+  }
+
+  await prisma.cardRevision.create({
+    data: {
+      userId,
+      vaultId,
+      cardId: dispatchCardId,
+      title: 'Visitor 双重分派',
+      type: 'fleeting',
+      content: '# Visitor 双重分派\n\n我知道有两次调用，但还说不清为什么不能直接 visit。',
+      reason: '保留机制闭合前的学生原始理解，用于与永久卡对照。',
+      createdAt: daysAgo(17),
+    },
+  })
+  await prisma.cardRevision.create({
+    data: {
+      userId,
+      vaultId,
+      cardId: dispatchCardId,
+      title: 'Visitor 双重分派',
+      type: 'fleeting',
+      content: '# Visitor 双重分派\n\naccept 让具体元素类型进入 visit 的重载选择；仍需补陌生场景和不适用边界。',
+      reason: '机制解释通过后补充因果链，等待迁移证据。',
+      createdAt: daysAgo(11),
+    },
+  })
+  await prisma.promotionAttempt.create({
+    data: {
+      userId,
+      vaultId,
+      cardId: dispatchCardId,
+      fromCardId: dispatchCardId,
+      fromType: 'fleeting',
+      toType: 'permanent',
+      status: 'rejected',
+      missingElements: JSON.stringify(['陌生场景迁移', '不适用边界', '间隔保持证据']),
+      qualityChecks: JSON.stringify({ clarity: true, accuracy: true, necessity: true, evidence: false, decision: 'reject' }),
+      createdAt: daysAgo(10),
+    },
+  })
+  await prisma.promotionAttempt.create({
+    data: {
+      userId,
+      vaultId,
+      cardId: dispatchCardId,
+      fromCardId: dispatchCardId,
+      toCardId: dispatchCardId,
+      fromType: 'fleeting',
+      toType: 'permanent',
+      status: 'accepted',
+      missingElements: '[]',
+      qualityChecks: JSON.stringify({ clarity: true, accuracy: true, necessity: true, evidence: true, transfer: true, delayedRetest: true, decision: 'accept' }),
+      createdAt: daysAgo(1),
+    },
+  })
+  await prisma.promotionAttempt.create({
+    data: {
+      userId,
+      vaultId,
+      cardId: strategyCardId,
+      fromCardId: strategyCardId,
+      fromType: 'fleeting',
+      toType: 'permanent',
+      status: 'rejected',
+      missingElements: JSON.stringify(['对象结构与算法替换同时出现时的选择依据']),
+      qualityChecks: JSON.stringify({ clarity: true, accuracy: true, necessity: false, evidence: false, decision: 'reject' }),
+      createdAt: daysAgo(2),
+    },
+  })
+
+  await prisma.agentSession.create({
+    data: {
+      id: `a3-golden-agent-${vaultId}`,
+      vaultId,
+      name: 'Visitor 长期学习线程',
+      messages: JSON.stringify([
+        { role: 'system', content: '绑定 Visitor 路径、当前卡片、六维画像和个人知识引用。' },
+        { role: 'user', content: '不要重复 UML，先检查我能不能解释调用轨迹。' },
+        { role: 'assistant', content: '已跳过角色复述，进入最小代码预测与迁移验证。' },
+      ]),
+      createdAt: daysAgo(21),
+      updatedAt: daysAgo(1),
+    },
+  })
+  const auditSeeds = [
+    [21, 1, 'context', 'profile_context_loaded', { dimensions: 6, sources: ['message', 'assessment', 'path'] }],
+    [18, 1, 'tool', 'assessment_recorded', { toolName: 'feynman_test', risk: ['interactive', 'llm', 'write'], status: 'failed-baseline' }],
+    [14, 1, 'background', 'profile_observation_updated', { dimension: 'stuckPattern', status: 'supported' }],
+    [10, 2, 'tool', 'promotion_blocked', { toolName: 'create_permanent_card', reason: 'evidence-required', status: 'rejected' }],
+    [6, 1, 'resource', 'resource_pack_generated', { types: ['document', 'mindmap', 'quiz', 'code', 'diagram', 'video'], status: 'completed' }],
+    [1, 1, 'tool', 'promotion_accepted', { toolName: 'create_permanent_card', status: 'accepted', evidence: ['transfer', 'delayed-retest'] }],
+  ] as const
+  for (const [days, level, category, event, details] of auditSeeds) {
+    await prisma.agentAuditLog.create({ data: { userId, vaultId, sessionId: timeline.sessionIds.get(days > 15 ? 'diagnosis' : days > 7 ? 'mechanism' : days > 2 ? 'transfer' : 'retest'), level, category, event, details: JSON.stringify(details), createdAt: daysAgo(days) } })
+  }
+
+  const eventSeeds = [
+    [21, 'LearningSession', timeline.sessionIds.get('diagnosis'), 'LearningDiagnosisStarted', { concept: 'Visitor 双重分派' }],
+    [18, 'Assessment', semesterPath.id, 'AssessmentFailed', { concept: 'Java 重载选择', mastery: 36 }],
+    [14, 'Profile', vaultId, 'ProfileObservationUpdated', { dimension: 'stuckPattern', confidence: 0.78 }],
+    [10, 'Card', dispatchCardId, 'CardPromotionRejected', { missing: ['迁移证据', '边界'] }],
+    [6, 'Assessment', semesterPath.id, 'TransferAssessmentPassed', { concept: 'AST Visitor 迁移', mastery: 91 }],
+    [5, 'Resource', dispatchCardId, 'ResourcePackGenerated', { count: 6 }],
+    [2, 'LearningPath', semesterPath.id, 'LearningPathReplanned', { focus: '模式选择边界' }],
+    [1, 'Card', dispatchCardId, 'CardPromoted', { toType: 'permanent' }],
+  ] as const
+  for (const [days, aggregateType, aggregateId, eventType, payload] of eventSeeds) {
+    await prisma.domainEvent.create({ data: { userId, vaultId, aggregateType, aggregateId, eventType, payload: JSON.stringify(payload), createdAt: daysAgo(days) } })
+  }
+
+  const indexedCards = await prisma.card.findMany({ where: { vaultId }, orderBy: { updatedAt: 'desc' }, take: 48 })
+  for (const [index, card] of indexedCards.entries()) {
+    const formatted = `${card.title ?? ''}\n${card.type}\n${card.path}\n${card.content}`
+    await prisma.ragDocumentIndex.create({
+      data: {
+        vaultId,
+        cardId: card.id,
+        provider: 'lightrag',
+        workspace: `axiom_${vaultId}`,
+        documentId: `axiom:${vaultId}:card:${card.id}`,
+        contentHash: sha256(formatted),
+        trackId: `golden-track-${index + 1}`,
+        status: 'indexed',
+        indexedAt: daysAgo(Math.max(1, 12 - Math.floor(index / 4))),
+        lastSyncedAt: daysAgo(Math.max(1, 12 - Math.floor(index / 4))),
+      },
+    })
+  }
+
+  const interventionObservations = await prisma.vaultMemory.findMany({
+    where: { vaultId, category: 'observation' },
+    orderBy: { createdAt: 'asc' },
+  })
+  const interventionSeeds = [
+    {
+      observation: interventionObservations.find((memory) => memory.key === 'semester_explain_sequence'),
+      runId: 'golden-intervention-predict-trace',
+      dimensionKey: 'bestExplanationPath',
+      subDimensionLabel: '最佳解释路径',
+      intervention: '先让用户预测最小代码结果，再按时间线拆解因果，最后安排一个陌生变式。',
+      criterion: '能够预测结果、解释中间因果，并在陌生变式中保持正确。',
+      status: 'verified',
+      outcome: '用户正确解释两次分派，并在 AST 场景迁移通过。',
+      mastery: 91,
+      days: 5,
+    },
+    {
+      observation: interventionObservations.find((memory) => memory.key === 'semester_pace_adjust'),
+      runId: 'golden-intervention-adaptive-load',
+      dimensionKey: 'paceAndLoad',
+      subDimensionLabel: '升降载条件',
+      intervention: '已掌握的 UML 与单模式定义直接跳过，把时间用于跨模式选择和组合风险。',
+      criterion: '提速后表现不下降，且能完成至少一次跨模式选择。',
+      status: 'observed',
+      outcome: 'Strategy/State 与 Observer/Mediator 辨析通过；模式组合风险仍需正式复测。',
+      days: 2,
+    },
+    {
+      observation: interventionObservations.find((memory) => memory.key === 'semester_foundation_boundary'),
+      runId: 'golden-intervention-composition-risk',
+      dimensionKey: 'currentFoundation',
+      subDimensionLabel: '不稳定边界',
+      intervention: '要求用变化方向、职责归属、扩展成本和复杂度预算比较三个以上候选方案。',
+      criterion: '能主动排除不必要模式，并写出代价和重新评估条件。',
+      status: 'needs_adjustment',
+      outcome: '能排除一个候选方案，但对模式组合后的调试成本估计不足。',
+      days: 1,
+    },
+  ] as const
+  for (const item of interventionSeeds) {
+    if (!item.observation) throw new Error(`Missing observation for intervention run: ${item.runId}`)
+    const observationValue = JSON.parse(item.observation.value) as {
+      observableBehavior?: string
+      mechanismHypothesis?: string
+      competingHypotheses?: string[]
+      confidence?: number
+      interventionProtocol?: Partial<InterventionProtocol>
+    }
+    const protocol = compileInterventionProtocol({
+      dimensionKey: item.dimensionKey,
+      subDimensionLabel: item.subDimensionLabel,
+      observableBehavior: observationValue.observableBehavior,
+      mechanismHypothesis: observationValue.mechanismHypothesis,
+      competingHypotheses: observationValue.competingHypotheses,
+      teachingIntervention: item.intervention,
+      verificationCriterion: item.criterion,
+      confidence: observationValue.confidence,
+      protocol: observationValue.interventionProtocol,
+    })
+    const deliveredAt = daysAgo(item.days).toISOString()
+    await prisma.vaultMemory.create({
+      data: {
+        vaultId,
+        key: `intervention_run:${item.runId}`,
+        category: 'intervention_run',
+        value: JSON.stringify({
+          runId: item.runId,
+          observationId: item.observation.id,
+          dimensionKey: item.dimensionKey,
+          subDimensionLabel: item.subDimensionLabel,
+          intervention: protocol.primaryIntervention,
+          verificationCriterion: protocol.verificationTask,
+          protocol,
+          status: item.status,
+          confidence: item.status === 'verified' ? 0.91 : 0.82,
+          sessionId: timeline.sessionIds.get(item.days >= 5 ? 'transfer' : item.days >= 2 ? 'comparison' : 'project'),
+          plannedAt: deliveredAt,
+          deliveredAt,
+          deliveryEvidence: item.intervention,
+          alignmentScore: 0.86,
+          userOutcome: item.outcome,
+          outcomeObservedAt: deliveredAt,
+          ...(item.mastery ? { assessmentMastery: item.mastery } : {}),
+          ...(item.status === 'needs_adjustment' ? { adjustmentReason: '组合风险量规仍未达到通过线，下一轮缩小到一个真实 ADR 进行复测。' } : {}),
+        }),
+        createdAt: daysAgo(item.days),
+      },
+    })
+  }
+
+  const notification = await prisma.vaultMemory.create({
+    data: {
+      vaultId,
+      key: 'notification_next_boundary',
+      category: 'notification',
+      value: JSON.stringify({
+        title: 'Visitor 已形成稳定证据，下一步转向模式选择边界',
+        body: '系统已跳过基础 UML，建议比较 Visitor、Strategy 与 Command 的变化方向。',
+        targetType: 'learningPath',
+        targetId: semesterPath.id,
+        sourceEvent: 'assessment_passed',
+      }),
+      createdAt: daysAgo(1),
+    },
+  })
+  await prisma.notificationReceipt.create({
+    data: { userId, vaultId, memoryId: notification.id, readAt: new Date(), createdAt: daysAgo(1) },
+  })
+  await prisma.agentConfirmationToken.create({
+    data: {
+      tokenHash: sha256(`a3-golden-promotion-${vaultId}`),
+      userId,
+      vaultId,
+      toolName: 'create_permanent_card',
+      target: dispatchCardId,
+      expiresAt: new Date(Date.now() + DAY),
+      usedAt: daysAgo(1),
+      createdAt: daysAgo(1),
+    },
+  })
+}
+
 async function ensureUser() {
   if (RESET_USER) {
     const existing = await prisma.user.findUnique({ where: { email: EMAIL }, select: { id: true } })
@@ -878,6 +1301,17 @@ async function resetNamedVault(userId: string, name: string) {
   const existing = await prisma.vault.findFirst({ where: { userId, name } })
   if (existing) await prisma.vault.delete({ where: { id: existing.id } })
   return prisma.vault.create({ data: { userId, name } })
+}
+
+async function removeLegacyGoldenVaults(userId: string) {
+  const legacy = await prisma.vault.findMany({
+    where: { userId, name: { in: LEGACY_GOLDEN_VAULTS } },
+    select: { id: true, name: true },
+  })
+  for (const vault of legacy) {
+    await prisma.vault.delete({ where: { id: vault.id } })
+    console.log(`Removed legacy golden vault: ${vault.name}`)
+  }
 }
 
 async function seedCards(vaultId: string, mature: boolean) {
@@ -922,6 +1356,9 @@ async function addObservation(vaultId: string, key: string, input: {
   evidence: string
   confidence: number
   sourceId: string
+  sourceObjectType?: 'learningMessage' | 'assessmentResult' | 'cardRevision' | 'learningPath' | 'userFeedback'
+  evidenceSourceType?: 'learningMessage' | 'learningSession' | 'assessmentResult' | 'cardRevision' | 'learningPath' | 'userFeedback'
+  evidenceSourceId?: string
   createdAt?: Date
   observableBehavior?: string
   mechanismHypothesis?: string
@@ -929,9 +1366,32 @@ async function addObservation(vaultId: string, key: string, input: {
   discriminatingEvidence?: string
   teachingIntervention?: string
   verificationCriterion?: string
+  interventionProtocol?: Partial<InterventionProtocol>
   scope?: 'current_topic' | 'domain_pattern' | 'cross_domain_pattern'
   status?: 'hypothesis' | 'supported' | 'confirmed' | 'weakened' | 'refuted' | 'improved' | 'needs_retest'
 }) {
+  const teachingIntervention = input.teachingIntervention || '先确认当前判断，再选择一个最小学习动作。'
+  const verificationCriterion = input.verificationCriterion || '用户完成一个可观察任务后再更新判断。'
+  const dimensionLabels: Record<string, string> = {
+    learningGoal: '学什么',
+    currentFoundation: '会什么',
+    bestExplanationPath: '怎么讲',
+    stuckPattern: '哪里会卡',
+    paceAndLoad: '一次讲多少',
+    masteryCheck: '怎么算学会',
+  }
+  const interventionProtocol = compileInterventionProtocol({
+    dimensionKey: input.dimension,
+    dimensionLabel: dimensionLabels[input.dimension],
+    subDimensionLabel: input.subDimensionLabel,
+    observableBehavior: input.observableBehavior,
+    mechanismHypothesis: input.mechanismHypothesis,
+    competingHypotheses: input.competingHypotheses,
+    teachingIntervention,
+    verificationCriterion,
+    confidence: input.confidence,
+    protocol: input.interventionProtocol,
+  })
   await prisma.vaultMemory.create({
     data: {
       vaultId,
@@ -946,20 +1406,117 @@ async function addObservation(vaultId: string, key: string, input: {
         userFacingSummary: input.userFacingSummary,
         confidence: input.confidence,
         analysisMode: 'llm_context',
-        sourceObjectType: 'learningMessage',
+        sourceObjectType: input.sourceObjectType ?? 'learningMessage',
         sourceObjectId: input.sourceId,
         observableBehavior: input.observableBehavior,
         mechanismHypothesis: input.mechanismHypothesis,
         competingHypotheses: input.competingHypotheses,
         discriminatingEvidence: input.discriminatingEvidence,
-        teachingIntervention: input.teachingIntervention,
-        verificationCriterion: input.verificationCriterion,
+        teachingIntervention,
+        verificationCriterion,
+        interventionProtocol,
         scope: input.scope,
         status: input.status,
-        evidence: [{ sourceObjectType: 'learningSession', sourceObjectId: input.sourceId, summary: input.evidence }],
+        evidence: [{
+          sourceObjectType: input.evidenceSourceType ?? input.sourceObjectType ?? 'learningMessage',
+          sourceObjectId: input.evidenceSourceId ?? input.sourceId,
+          summary: input.evidence,
+        }],
       }),
     },
   })
+}
+
+async function seedMatureLearningTimeline(userId: string, vaultId: string) {
+  const timeline = [
+    {
+      key: 'diagnosis', days: 21, phase: 'diagnose', status: 'completed', concept: 'Visitor 前置机制诊断',
+      outcome: '确认问题不在 UML 角色记忆，而在重载选择与动态分派的阶段混淆。',
+      messages: [
+        ['user', '我可以写出 Visitor 的标准结构，但我一直觉得 visit 应该根据参数对象的运行时类型自动选重载。'],
+        ['assistant', '我们先不用 Visitor 的术语。请预测 Node n = new PdfNode(); visitor.visit(n) 会进入哪个重载，并说出决定发生在编译期还是运行期。'],
+        ['user', '我预测 visit(PdfNode)，但运行结果是 visit(Node)。现在看起来重载在编译期已经按 n 的静态类型选完了。'],
+      ],
+    },
+    {
+      key: 'mechanism', days: 14, phase: 'practice', status: 'completed', concept: 'Visitor 双重分派机制',
+      outcome: '能沿时间线解释 accept 如何保留具体元素类型，并完成最小代码验证。',
+      messages: [
+        ['user', '我试着解释：第一次是 element 的真实类型决定进入 PdfNode.accept；在这个方法里 this 的静态类型就是 PdfNode，所以重载选中 visit(PdfNode)；然后 Visitor 的真实类型再决定执行哪个实现。'],
+        ['assistant', '这个因果链已经闭合。现在删掉 accept，直接用 Node 引用调用 visit，你预计会丢掉哪段类型信息？'],
+        ['user', '会丢掉 PdfNode.accept 方法体里 this 的具体静态类型，调用点只剩 Node，所以只能先选 visit(Node)。'],
+      ],
+    },
+    {
+      key: 'transfer', days: 6, phase: 'transfer', status: 'completed', concept: 'AST Visitor 陌生迁移',
+      outcome: '在陌生 AST 场景完成迁移，并能说明 Visitor 的变化方向代价。',
+      messages: [
+        ['user', '如果 AST 节点类型稳定、但要不断增加格式化、类型检查和代码生成操作，我会选 Visitor；如果节点类型每周都新增，我会避免它，因为所有 Visitor 都要一起改。'],
+        ['assistant', '请再给一个反例：什么情况下 Strategy 比 Visitor 更直接？'],
+        ['user', '如果只是同一个上下文要替换一组算法，没有稳定的异构对象结构需要遍历，Strategy 更直接。'],
+      ],
+    },
+    {
+      key: 'comparison', days: 4, phase: 'compare', status: 'completed', concept: '跨模式选择边界',
+      outcome: '能使用变化方向、职责归属和扩展成本比较 Strategy、State、Observer 与 Mediator。',
+      messages: [
+        ['assistant', '现在不问模式定义。一个订单流程既要切换计价算法，又要随生命周期改变可执行操作，你会怎样拆分 Strategy 和 State 的职责？'],
+        ['user', '计价算法可以独立替换，放 Strategy；订单状态决定当前允许哪些行为，放 State。我会先找变化方向，不会因为两者都有“切换”就混在一起。'],
+        ['user', 'Observer 和 Mediator 也类似：前者解决事件订阅，后者集中协调多对象交互。我要比较的是依赖如何变化，而不是类图长得像不像。'],
+      ],
+    },
+    {
+      key: 'project', days: 2, phase: 'project', status: 'completed', concept: '课程项目架构评审',
+      outcome: '能够写出包含候选方案、选择理由、代价和反例的架构决策记录。',
+      messages: [
+        ['user', '项目里我最后没有堆三个模式。我保留 Strategy 处理规则变化，用事件记录审计；没有稳定异构结构，所以排除了 Visitor。'],
+        ['assistant', '请把这个决定写成 ADR：背景、候选方案、选择、代价和何时重新评估。'],
+        ['user', '我会把“新增元素类型频率”和“新增操作频率”设为复审触发条件。如果对象结构以后稳定，再重新评估 Visitor。'],
+      ],
+    },
+    {
+      key: 'retest', days: 1, phase: 'retest', status: 'completed', concept: 'Visitor 隔日无提示复测',
+      outcome: '无提示恢复双重分派机制，下一缺口转为多模式选择边界。',
+      messages: [
+        ['assistant', '不看旧卡片，请用新的 ReportNode 场景解释两次分派，并说明 Visitor 什么时候不值得使用。'],
+        ['user', 'ReportNode 的真实类型先决定 accept；accept 里的 this 让 visit(ReportNode) 在编译期被选中；具体 Visitor 再在运行期分派。若元素类型频繁变化，维护成本会压过新增操作的收益。'],
+        ['user', '这部分我现在能稳定解释了。下一步我更想练多个模式都能做时怎么选，而不是再背一遍定义。'],
+      ],
+    },
+  ] as const
+
+  const messageIds = new Map<string, string>()
+  const sessionIds = new Map<string, string>()
+  for (const item of timeline) {
+    const session = await prisma.learningSession.create({
+      data: {
+        userId,
+        vaultId,
+        domain: '软件设计模式',
+        concept: item.concept,
+        status: item.status,
+        phase: item.phase,
+        outcome: item.outcome,
+        metadata: JSON.stringify({ case: 'A3-golden', timelineKey: item.key, evidenceGrade: 'observed' }),
+        createdAt: daysAgo(item.days),
+        updatedAt: daysAgo(Math.max(0, item.days - 1)),
+      },
+    })
+    sessionIds.set(item.key, session.id)
+    for (const [index, [role, content]] of item.messages.entries()) {
+      const message = await prisma.learningMessage.create({
+        data: {
+          sessionId: session.id,
+          role,
+          content,
+          timestamp: new Date(daysAgo(item.days).getTime() + (index + 1) * 4 * 60_000),
+          metadata: JSON.stringify({ evidenceEligible: role === 'user', timelineKey: item.key }),
+        },
+      })
+      if (role === 'user') messageIds.set(`${item.key}:${index}`, message.id)
+    }
+  }
+  return { messageIds, sessionIds }
 }
 
 async function createPath(userId: string, vaultId: string, cardIds: Map<string, string>, mature: boolean) {
@@ -1037,8 +1594,10 @@ async function seedClean(userId: string) {
     ['assistant', '先不讲定义。Node n = new Pdf() 时，直接 visitor.visit(n) 会在编译期选 visit(Node) 还是 visit(Pdf)？'],
     ['user', '我原来以为会看 n 运行时是 Pdf，所以选 visit(Pdf)，但实际输出是 visit(Node)。这一步我一直没想清楚。'],
   ]
+  const messageIds: string[] = []
   for (const [index, [role, content]] of messages.entries()) {
-    await prisma.learningMessage.create({ data: { sessionId: session.id, role, content, timestamp: new Date(Date.now() - (messages.length - index) * 60_000) } })
+    const message = await prisma.learningMessage.create({ data: { sessionId: session.id, role, content, timestamp: new Date(Date.now() - (messages.length - index) * 60_000) } })
+    messageIds.push(message.id)
   }
   await addObservation(vault.id, 'golden_goal', {
     dimension: 'learningGoal',
@@ -1052,7 +1611,9 @@ async function seedClean(userId: string) {
     verificationCriterion: '面对陌生需求时能说明采用或排除某个模式的理由。',
     evidence: messages[0][1],
     confidence: 0.78,
-    sourceId: session.id,
+    sourceId: messageIds[0],
+    evidenceSourceType: 'learningSession',
+    evidenceSourceId: session.id,
     scope: 'current_topic',
     status: 'supported',
   })
@@ -1068,7 +1629,9 @@ async function seedClean(userId: string) {
     verificationCriterion: '补齐该前提后，学生能继续推进后续迁移任务，而无需重讲整套基础结构。',
     evidence: messages[2][1],
     confidence: 0.88,
-    sourceId: session.id,
+    sourceId: messageIds[2],
+    evidenceSourceType: 'learningSession',
+    evidenceSourceId: session.id,
     scope: 'current_topic',
     status: 'supported',
   })
@@ -1084,7 +1647,9 @@ async function seedClean(userId: string) {
     verificationCriterion: '解释后能用自己的话复述每个决定点，并在变式中做出正确预测。',
     evidence: '用户要求把每一步为什么这样选择讲清楚。',
     confidence: 0.72,
-    sourceId: session.id,
+    sourceId: messageIds[0],
+    evidenceSourceType: 'learningSession',
+    evidenceSourceId: session.id,
     scope: 'current_topic',
     status: 'hypothesis',
   })
@@ -1102,7 +1667,9 @@ async function seedClean(userId: string) {
     verificationCriterion: '补齐前提后，在陌生场景中能恢复正常推进并解释变化原因。',
     evidence: '用户指出“这一步我一直没想清楚”。',
     confidence: 0.62,
-    sourceId: session.id,
+    sourceId: messageIds[2],
+    evidenceSourceType: 'learningSession',
+    evidenceSourceId: session.id,
     scope: 'domain_pattern',
     status: 'hypothesis',
   })
@@ -1118,7 +1685,9 @@ async function seedClean(userId: string) {
     verificationCriterion: '每轮只留下一个待验证问题；回答通过后下一步不再重复上一节点。',
     evidence: '用户要求逐步预测每个调用阶段。',
     confidence: 0.66,
-    sourceId: session.id,
+    sourceId: messageIds[0],
+    evidenceSourceType: 'learningSession',
+    evidenceSourceId: session.id,
     scope: 'current_topic',
     status: 'supported',
   })
@@ -1134,7 +1703,9 @@ async function seedClean(userId: string) {
     verificationCriterion: '预测结果、因果解释、真实运行和陌生迁移均通过；隔日复测保持。',
     evidence: '不能以复述定义作为通过证据。',
     confidence: 0.74,
-    sourceId: session.id,
+    sourceId: messageIds[2],
+    evidenceSourceType: 'learningSession',
+    evidenceSourceId: session.id,
     scope: 'current_topic',
     status: 'supported',
   })
@@ -1148,6 +1719,7 @@ async function seedClean(userId: string) {
 async function seedMature(userId: string) {
   const vault = await resetNamedVault(userId, MATURE_VAULT)
   const cardIds = await seedCards(vault.id, true)
+  const timeline = await seedMatureLearningTimeline(userId, vault.id)
   const semesterCourse = await seedSemesterScaleCourse(userId, vault.id, cardIds.get('root'))
   await createSemesterCoursePath(userId, vault.id, semesterCourse.cardsByTitle)
   const path = await createPath(userId, vault.id, cardIds, true)
@@ -1159,58 +1731,73 @@ async function seedMature(userId: string) {
     { days: 1, passed: true, mastery: 88, concept: 'Visitor 隔日复测', feedback: '无提示复测保持，下一缺口转为模式选择边界。', evidence: ['跨会话复测通过', '未使用原题变量名'] },
   ]
   for (const [index, item] of assessments.entries()) {
-    await prisma.assessmentResult.create({ data: { userId, vaultId: vault.id, pathId: path.id, stepId: steps[Math.min(index, steps.length - 1)]?.id, cardId: cardIds.get(index ? 'dispatch' : 'overload'), concept: item.concept, passed: item.passed, mastery: item.mastery, feedback: item.feedback, evidence: JSON.stringify(item.evidence), clientContext: JSON.stringify({ rubricId: 'visitor-transfer-v1', deterministicCheck: item.passed ? 'passed' : 'failed' }), createdAt: daysAgo(item.days) } })
+    const sessionKey = ['diagnosis', 'mechanism', 'transfer', 'retest'][index]
+    await prisma.assessmentResult.create({ data: { userId, vaultId: vault.id, pathId: path.id, stepId: steps[Math.min(index, steps.length - 1)]?.id, cardId: cardIds.get(index ? 'dispatch' : 'overload'), sessionId: timeline.sessionIds.get(sessionKey), concept: item.concept, passed: item.passed, mastery: item.mastery, feedback: item.feedback, evidence: JSON.stringify(item.evidence), clientContext: JSON.stringify({ rubricId: 'visitor-transfer-v1', deterministicCheck: item.passed ? 'passed' : 'failed', evidenceSessionKey: sessionKey }), createdAt: daysAgo(item.days) } })
   }
   const matureProfileObservations = [
     {
       key: 'semester_goal_purpose', dimension: 'learningGoal', subDimensionKey: 'goal_and_use', subDimensionLabel: '目标与用途',
-      text: '当前核心目标是能在课程项目中独立判断设计模式，而不是背诵 UML。',
-      userFacingSummary: '你现在最在意的不是记住模式名称，而是面对真实需求时能判断该不该用、为什么这样选。',
-      observableBehavior: '多次要求解释适用条件、变化成本，并主动追问不该使用 Visitor 的场景。',
+      text: '当前核心目标是形成可迁移的软件设计与架构决策能力，而不是背诵 GoF 模式或 UML。',
+      userFacingSummary: '你现在最在意的，是面对真实需求能判断职责怎样分、方案为什么选、代价由谁承担，而不是记住更多模式名称。',
+      observableBehavior: '在 Visitor、Strategy/State、Observer/Mediator 和课程项目中持续要求比较适用条件、变化成本与替代方案。',
       mechanismHypothesis: '学习动机稳定指向可迁移的设计决策能力，单纯结构复述不能满足当前目标。',
       teachingIntervention: '案例和路径优先围绕课程项目选型、变化方向和替代方案组织，压缩纯记忆内容。',
       verificationCriterion: '面对陌生需求能选择模式并说明为什么排除至少一个替代方案。',
-      evidence: '学习目标对话、路径主题和三次模式边界追问一致。', confidence: 0.91, status: 'confirmed' as const,
+      evidence: '六次跨主题学习对话、学期路径与课程项目 ADR 的目标表达一致。', confidence: 0.93, status: 'confirmed' as const,
     },
     {
       key: 'semester_goal_stage', dimension: 'learningGoal', subDimensionKey: 'current_stage', subDimensionLabel: '当前阶段',
-      text: '学习阶段已从理解单个 Visitor 转向比较多个行为型模式。',
-      userFacingSummary: 'Visitor 的核心机制已经比较稳定，接下来更值得把精力放在 Visitor、Strategy、Command 的选择边界上。',
-      observableBehavior: 'Visitor 迁移与隔日复测通过，路径下一步自动转向模式选择。',
-      mechanismHypothesis: '继续重复单模式基础内容的边际收益已经很低，横向比较是当前能力增长点。',
-      teachingIntervention: '跳过 Visitor 基础 UML，使用同一业务需求比较多个模式的变化成本。',
-      verificationCriterion: '完成陌生业务选型题并给出统一比较坐标。',
-      evidence: 'Visitor 迁移 91；隔日复测 88；路径步骤已调整。', confidence: 0.9, status: 'supported' as const,
+      text: '学习阶段已从单模式理解进入跨模式权衡、模式组合风险和课程项目架构评审。',
+      userFacingSummary: '单个模式的机制已经不是主要障碍；下一阶段要练的是多个方案都能工作时，如何做出可辩护、可复审的选择。',
+      observableBehavior: '多个单模式评估通过，能够比较 Strategy/State 与 Observer/Mediator，项目中开始主动排除不必要模式。',
+      mechanismHypothesis: '继续线性复习模式定义的边际收益较低，真实决策和组合约束是当前能力增长点。',
+      teachingIntervention: '路径转向模式选择矩阵、组合风险、ADR 和跨时间复测，跳过已掌握的定义与基础 UML。',
+      verificationCriterion: '在陌生项目中给出候选方案、选择理由、代价、反例和复审条件。',
+      evidence: '学期路径 27/32；跨模式辨析通过；课程项目 ADR 已形成。', confidence: 0.91, status: 'supported' as const,
     },
     {
       key: 'semester_goal_output', dimension: 'learningGoal', subDimensionKey: 'desired_output', subDimensionLabel: '成果标准',
       text: '高质量学习成果应同时包含可运行代码、设计取舍和永久卡沉淀。',
       userFacingSummary: '你希望最后留下的不只是“我听懂了”，而是一份以后还能复用、能经得起追问的理解。',
-      observableBehavior: '完成代码运行、费曼解释，并将 Visitor 机制整理为永久卡。',
+      observableBehavior: '完成代码运行、费曼解释、跨模式选择矩阵、课程项目 ADR 和多张永久卡沉淀。',
       mechanismHypothesis: '可复用产出能够迫使隐含理解外显，更适合检验深层掌握。',
       teachingIntervention: '重要主题结束时安排代码验证与永久卡整理，不以口头确认收尾。',
       verificationCriterion: '产出包含机制、条件、例子、反例和替代方案的永久卡。',
-      evidence: '永久卡审核通过，资源与代码结果均已关联。', confidence: 0.85, status: 'supported' as const,
+      evidence: '长期档案包含代码、评估、ADR、资源包与永久卡升级历史。', confidence: 0.89, status: 'supported' as const,
     },
     {
       key: 'semester_foundation_mastered', dimension: 'currentFoundation', subDimensionKey: 'stable_mastery', subDimensionLabel: '稳定掌握',
-      text: 'Java 重载、重写与 Visitor 双重分派已经达到可解释和可迁移层级。',
-      userFacingSummary: '你已经不只是记住 Visitor 的写法，而是能追踪两次分派、预测结果并迁移到陌生 AST。',
-      observableBehavior: '陌生代码调用轨迹正确，AST 迁移通过，隔日无提示复测保持。',
-      mechanismHypothesis: '编译期签名选择与运行时实现执行的过程模型已经闭合。',
-      teachingIntervention: '后续把这些内容作为已知前提，避免重复基础讲解。',
-      verificationCriterion: '间隔一周后仍能无提示解释调用轨迹。',
-      evidence: '评估 86、91、88；Java 测试 4/4。', confidence: 0.93, status: 'confirmed' as const,
+      text: 'OO 责任边界、动态协作过程和单模式变化方向已经达到可解释、可迁移层级。',
+      userFacingSummary: '你已经能从调用机制走到设计取舍：不仅会解释代码怎样运行，也能说明职责为什么这样分、模式什么时候不该用。',
+      observableBehavior: 'Visitor 陌生迁移、Strategy/State 与 Observer/Mediator 辨析、课程项目方案排除均有通过证据。',
+      mechanismHypothesis: '过程模型和变化方向已形成可跨案例调用的稳定框架，而不是只记住一个 Visitor 例子。',
+      teachingIntervention: '后续把单模式机制作为已知前提，集中训练组合风险、架构权衡和复审条件。',
+      verificationCriterion: '在新项目中保持同一套变化方向和职责边界判断，并能用证据修正选择。',
+      evidence: '跨主题评估、课程项目 ADR 与隔日复测共同支持。', confidence: 0.91, status: 'confirmed' as const,
     },
     {
       key: 'semester_foundation_boundary', dimension: 'currentFoundation', subDimensionKey: 'unstable_boundary', subDimensionLabel: '不稳定边界',
-      text: '单个模式结构能够解释，但多个模式同时可用时的选择边界仍不稳定。',
-      userFacingSummary: '你已经会解释单个模式；现在真正需要补的是“几个方案都能实现时，怎样比较才不凭感觉”。',
-      observableBehavior: '能区分 Visitor 与 Strategy 的定义，但对象结构和操作同时变化时选择不稳定。',
+      text: '单模式与成对辨析已经稳定，但三个以上模式组合时的复杂度预算和演进风险仍不稳定。',
+      userFacingSummary: '你已经能比较两个方案；现在真正需要补的是多个模式一起出现时，怎样控制复杂度、避免为了漂亮结构而过度设计。',
+      observableBehavior: 'Strategy/State 与 Observer/Mediator 的成对选择通过，但模式组合风险评估仅 58。',
       mechanismHypothesis: '当前缺口是缺少统一的比较坐标，而不是模式定义记忆不足。',
       teachingIntervention: '固定使用变化方向、职责归属、扩展成本三个坐标进行横向比较。',
       verificationCriterion: '在两个陌生需求中使用同一坐标得出可辩护的不同选择。',
-      evidence: '模式选择能力 62；Visitor 与 Strategy 基本区分已通过。', confidence: 0.78, status: 'supported' as const,
+      interventionProtocol: {
+        currentLearningObject: '三个以上设计模式同时可用时的方案选择与复杂度控制。',
+        observationFact: '成对模式辨析已经通过，但模式组合风险评估为 58 分。',
+        currentJudgment: '当前问题是缺少稳定的多方案比较坐标，不是模式定义记忆不足。',
+        judgmentBoundary: '该判断只适用于多模式组合决策；不能据此推断其单模式理解薄弱。',
+        primaryIntervention: '只使用变化方向、职责归属、扩展成本和复杂度预算四个坐标比较候选方案。',
+        executionSteps: ['给出一个存在三个候选模式的陌生需求。', '让用户先独立填写四坐标比较表。', '要求逐一排除不必要的模式并说明代价。', '补写触发重新评估该选择的演进条件。'],
+        forbiddenActions: ['禁止先讲解各模式定义。', '禁止把模式数量多当作设计质量高。', '禁止在用户完成比较前直接给推荐答案。'],
+        verificationTask: '连续完成两个业务表面不同的陌生需求，并用同一四坐标得出可辩护的选择。',
+        passCriteria: ['两个案例均主动排除至少一个候选模式。', '明确写出所选方案的扩展收益与调试成本。', '给出至少一个重新评估条件。'],
+        failureBranch: '若仍按熟悉度选模式，缩小到一个真实 ADR，只比较两个候选方案，并逐项追问坐标证据。',
+        stopCondition: '达到全部通过标准后停止基础比较训练，转入真实项目的模式组合复审。',
+        priority: 92,
+      },
+      evidence: '行为型模式选择 74；模式组合风险 58；项目架构评审 76。', confidence: 0.84, status: 'supported' as const,
     },
     {
       key: 'semester_foundation_repair', dimension: 'currentFoundation', subDimensionKey: 'recent_repair', subDimensionLabel: '近期修正',
@@ -1230,6 +1817,20 @@ async function seedMature(userId: string) {
       mechanismHypothesis: '预测产生的认知冲突能定位隐含错误模型，随后单节点解释完成修正。',
       teachingIntervention: '机制类问题默认先测后讲，并在解释后立即安排一个变式。',
       verificationCriterion: '同一解释顺序在另一个 Java 或设计模式机制上仍能减少重复追问。',
+      interventionProtocol: {
+        currentLearningObject: '包含静态选择与动态执行的程序机制。',
+        observationFact: '直接复述 UML 后仍预测失败；最小代码预测暴露误解后，迁移评估提升至 86。',
+        currentJudgment: '先预测再沿时间线修正单个错误节点，是当前最有效的解释入口。',
+        judgmentBoundary: '该顺序适用于机制和过程问题，不替代结构总结或事实查询。',
+        primaryIntervention: '先测后讲：预测最小代码结果，再沿时间线只修正一个错误因果节点。',
+        executionSteps: ['给出不超过 12 行的最小代码并要求无提示预测。', '记录预测与真实结果的第一个分歧点。', '只解释该分歧点的决策者、发生时间和可见信息。', '立即给出表面不同但机制相同的变式。'],
+        forbiddenActions: ['禁止预测前先给定义或答案。', '禁止一次展开完整项目结构。', '禁止把一次口头复述当作理解通过。'],
+        verificationTask: '在陌生 Java 或设计模式机制中，独立预测结果并解释完整中间因果。',
+        passCriteria: ['预测结果正确。', '指出每个决定发生的阶段与依据。', '陌生变式无需重复讲解即可通过。'],
+        failureBranch: '若预测仍错，只回退到第一个错误节点，提供一组单变量对照代码后重新预测。',
+        stopCondition: '陌生变式的预测、因果解释与真实运行三者一致后停止讲解。',
+        priority: 90,
+      },
       evidence: 'UML 复述未改善；预测-验证干预后评估提升至 86。', confidence: 0.9, status: 'confirmed' as const,
     },
     {
@@ -1262,6 +1863,20 @@ async function seedMature(userId: string) {
       discriminatingEvidence: '已掌握 UML 快速略过未降低表现；机制补齐后迁移显著提升；主动完成多项任务。',
       teachingIntervention: '保留知识深度，但先闭合当前关键因果节点；已掌握内容快速跳过。',
       verificationCriterion: '在操作系统或网络机制课程中观察同类前提缺口是否再次触发停顿。',
+      interventionProtocol: {
+        currentLearningObject: '新机制学习中尚未闭合的首个关键因果前提。',
+        observationFact: '重载选择未理解时持续追问 accept；补齐该前提后快速完成 AST 迁移。',
+        currentJudgment: '停顿主要由一个关键因果前提未闭合引起，并非整体速度慢或动机不足。',
+        judgmentBoundary: '这是有竞争假设的当前解释；只有跨主题复现后才能视为稳定规律。',
+        primaryIntervention: '暂停新增内容，定位并闭合首个错误因果节点，同时跳过已有掌握证据的内容。',
+        executionSteps: ['要求用户指出从哪一步开始无法预测。', '把该步改写为“谁在何时根据什么作决定”。', '用一个单变量反例检验该因果前提。', '闭合后立刻恢复原任务并观察是否继续推进。'],
+        forbiddenActions: ['禁止把停顿描述为整体能力不足。', '禁止同时修补多个可能原因。', '禁止重复讲解已有掌握证据的基础内容。'],
+        verificationTask: '在操作系统或网络机制的新主题中，检验闭合首个前提后能否立即恢复后续推理。',
+        passCriteria: ['能准确定位第一个断点。', '单节点修正后不再重复追问同一前提。', '恢复原任务后至少连续完成两个后续步骤。'],
+        failureBranch: '若闭合后仍停顿，撤销当前判断，依次检验信息负荷、先修知识和任务动机三个竞争解释。',
+        stopCondition: '恢复连续推理后立即停止补救，避免把局部干预扩展成整节慢讲。',
+        priority: 96,
+      },
       evidence: '三个竞争假设经四次评估区分，H1 从 58% 升至 90%。', confidence: 0.9, status: 'confirmed' as const,
     },
     {
@@ -1292,6 +1907,20 @@ async function seedMature(userId: string) {
       mechanismHypothesis: '负荷瓶颈来自并行未闭合节点数量，而不是知识深度本身。',
       teachingIntervention: '每轮只保留一个待闭合因果节点，其余已知内容快速带过。',
       verificationCriterion: '节点闭合后能立即恢复正常速度并完成连续任务。',
+      interventionProtocol: {
+        currentLearningObject: '当前任务中尚未闭合的因果节点数量。',
+        observationFact: '细拆关键机制后迁移成功；对已掌握 UML 继续细讲被评价为低效。',
+        currentJudgment: '应缩短未闭合因果跨度，而不是降低知识深度或全程放慢。',
+        judgmentBoundary: '只在出现新机制断点时降载；已有掌握证据的内容保持正常速度。',
+        primaryIntervention: '每轮只打开一个未知因果节点，闭合后立即恢复正常推进速度。',
+        executionSteps: ['标记本轮唯一待闭合节点。', '其余概念仅引用已有结论，不重新展开。', '用一次预测确认节点是否闭合。', '通过后立即推进到下一个真实任务步骤。'],
+        forbiddenActions: ['禁止同时引入两个独立未知机制。', '禁止把解释深度降为只给结论。', '禁止在节点已闭合后继续重复确认。'],
+        verificationTask: '节点闭合后，以正常速度连续完成两个后续任务步骤。',
+        passCriteria: ['能复述当前节点的因果关系。', '后续两个步骤无需回退到该节点。', '提速后准确率不下降。'],
+        failureBranch: '若提速后再次断裂，回退并检查前一节点的验证任务是否过弱，而不是继续新增内容。',
+        stopCondition: '连续完成两个后续步骤后结束降载状态。',
+        priority: 88,
+      },
       evidence: '慢拆机制后迁移成功；快速略过 UML 未降低表现。', confidence: 0.89, status: 'confirmed' as const,
     },
     {
@@ -1327,12 +1956,26 @@ async function seedMature(userId: string) {
     {
       key: 'semester_mastery_transfer', dimension: 'masteryCheck', subDimensionKey: 'transfer_proof', subDimensionLabel: '迁移标准',
       text: '陌生场景迁移和反例边界是高于熟悉题复现的掌握证据。',
-      userFacingSummary: '你能把 Visitor 迁移到陌生 AST，并说清什么时候不该用，这比做对原题更能证明理解已经属于你。',
-      observableBehavior: 'AST 迁移 91，能够说明新增元素类型时 Visitor 的成本。',
-      mechanismHypothesis: '陌生表面下仍能调用同一机制，说明知识已脱离具体例子。',
-      teachingIntervention: '新主题至少安排一个陌生迁移和一个反例辨析。',
-      verificationCriterion: '在不同业务表面下保持相同判断原则。',
-      evidence: 'AST 迁移与架构取舍量规全部通过。', confidence: 0.9, status: 'confirmed' as const,
+      userFacingSummary: '你已经能把同一套判断原则迁移到 AST、订单流程和课程项目，并说清一个方案什么时候不该用；这比做对原题更能证明理解属于你。',
+      observableBehavior: 'AST 迁移 91，Strategy/State 与 Observer/Mediator 辨析通过，课程项目能主动排除不必要模式。',
+      mechanismHypothesis: '在不同业务表面下仍能使用变化方向、职责边界和扩展成本，说明知识已脱离单个例子。',
+      teachingIntervention: '新主题至少安排一个陌生迁移、一个替代方案比较和一个反例辨析。',
+      verificationCriterion: '在不同业务表面下保持同一判断原则，同时能随新证据修正方案。',
+      interventionProtocol: {
+        currentLearningObject: '设计原则能否脱离熟悉题面迁移到陌生业务。',
+        observationFact: 'AST 迁移 91，跨模式辨析通过，课程项目能主动排除不必要模式。',
+        currentJudgment: '当前已形成可迁移框架，但仍需用反例和方案修正能力防止模板化套用。',
+        judgmentBoundary: '已有证据覆盖行为型模式与课程项目，不能外推为所有架构领域均已掌握。',
+        primaryIntervention: '用陌生迁移、替代方案比较和反例边界三项任务联合验收。',
+        executionSteps: ['提供一个未出现过的业务需求。', '要求提出主方案及至少一个替代方案。', '用变化方向、职责边界和扩展成本说明取舍。', '加入一条反例条件并要求据此修正或撤销原方案。'],
+        forbiddenActions: ['禁止复用原题类名和叙述。', '禁止只判断模式名称是否正确。', '禁止把不修改原方案误认为立场坚定。'],
+        verificationTask: '在陌生业务中完成方案选择、替代比较、反例修正和代价说明。',
+        passCriteria: ['判断原则在新业务表面下保持一致。', '能说明替代方案何时更优。', '新证据出现时能合理修正或撤销原选择。'],
+        failureBranch: '若只能复现熟悉方案，回退到单一判断原则做一组正反例辨析，再重新进入陌生任务。',
+        stopCondition: '四项验收全部通过后记为迁移通过，并转入间隔保持复测。',
+        priority: 91,
+      },
+      evidence: 'AST 迁移、跨模式辨析和课程项目 ADR 形成三类证据。', confidence: 0.91, status: 'confirmed' as const,
     },
     {
       key: 'semester_mastery_retention', dimension: 'masteryCheck', subDimensionKey: 'retention_proof', subDimensionLabel: '稳定掌握标准',
@@ -1346,9 +1989,24 @@ async function seedMature(userId: string) {
     },
   ]
   for (const [index, observation] of matureProfileObservations.entries()) {
+    const evidenceKey = observation.dimension === 'learningGoal'
+      ? 'project:2'
+      : observation.dimension === 'currentFoundation'
+        ? 'comparison:1'
+        : observation.dimension === 'bestExplanationPath'
+          ? 'mechanism:0'
+          : observation.dimension === 'stuckPattern'
+            ? 'diagnosis:2'
+            : observation.dimension === 'paceAndLoad'
+              ? 'comparison:1'
+              : 'project:0'
+    const sourceId = timeline.messageIds.get(evidenceKey)
+    if (!sourceId) throw new Error(`Missing mature profile evidence message: ${evidenceKey}`)
     await addObservation(vault.id, observation.key, {
       ...observation,
-      sourceId: `semester-profile-${index + 1}`,
+      sourceId,
+      evidenceSourceType: 'learningSession',
+      evidenceSourceId: timeline.sessionIds.get(evidenceKey.split(':')[0]),
       createdAt: daysAgo(Math.max(1, 18 - index)),
       scope: observation.dimension === 'stuckPattern' || observation.dimension === 'paceAndLoad'
         ? 'domain_pattern'
@@ -1505,13 +2163,90 @@ async function seedMature(userId: string) {
   })
   await seedLongTermResourcesAndPushes(userId, vault.id, clusterId, semesterCourse.cardsByTitle)
   await prisma.pushSuggestion.create({ data: { userId, vaultId: vault.id, boxType: 'resource', itemType: 'task_group', title: 'Visitor 与其他行为型模式的选择边界', reason: 'Visitor 双重分派已通过陌生代码和隔日复测，不再重复推送基础 UML；下一缺口是模式选择边界。', evidence: JSON.stringify(['assessment:Visitor 隔日复测=88', 'capability:Visitor 双重分派=mastered', 'gap:模式选择边界=62']), confidence: 0.91, trigger: 'assessment_pass', source: 'push_engine', status: 'pending', payload: JSON.stringify({ skipped: ['Visitor 角色与 UML'], next: ['Visitor vs Strategy', 'Visitor vs Command'] }), dedupeKey: `a3-golden:${vault.id}:next-boundary` } })
-  const profile = { userId, dimensions: { depth: { score: 88, confidence: 0.9, evidence: ['AST 迁移评估', '隔日复测'] }, breadth: { score: 72, confidence: 0.78, evidence: ['Visitor/Strategy/Command'] }, connection: { score: 84, confidence: 0.86, evidence: ['机制到权衡的知识链'] }, expression: { score: 91, confidence: 0.9, evidence: ['费曼解释与反例'] }, application: { score: 87, confidence: 0.88, evidence: ['真实 Java 执行'] }, learning_pace: { score: 80, confidence: 0.84, evidence: ['关键前提慢拆、已掌握部分加速'] } }, updateHistory: [{ timestamp: daysAgo(18).getTime(), trigger: 'assessment_failed', dimensionsUpdated: ['depth', 'application'], changes: { depth: { before: 32, after: 40 } } }, { timestamp: daysAgo(5).getTime(), trigger: 'assessment_passed', dimensionsUpdated: ['depth', 'expression', 'application'], changes: { depth: { before: 62, after: 88 }, expression: { before: 58, after: 91 } } }], sessionCount: 8, totalLearningMinutes: 246, createdAt: daysAgo(28).getTime(), updatedAt: daysAgo(1).getTime() }
-  await prisma.educationProfileHistory.create({ data: { vaultId: vault.id, profile: JSON.stringify(profile), snapshot: JSON.stringify({ coverageDays: 28, learningEvents: 24, assessmentCount: assessments.length }), createdAt: daysAgo(1) } })
+  await seedMatureOperationalHistory({ userId, vaultId: vault.id, visitorCards: cardIds, timeline })
+
+  const profileStages = [
+    {
+      days: 70,
+      trigger: 'course_baseline',
+      dimensions: {
+        depth: { score: 46, confidence: 0.48, evidence: ['能复述部分模式定义，迁移证据不足'] },
+        breadth: { score: 35, confidence: 0.42, evidence: ['仅覆盖基础与创建型模式'] },
+        connection: { score: 31, confidence: 0.4, evidence: ['卡片以单点记录为主'] },
+        expression: { score: 54, confidence: 0.5, evidence: ['能够说明结构，边界表达不足'] },
+        application: { score: 38, confidence: 0.44, evidence: ['主要完成熟悉代码模仿'] },
+        learning_pace: { score: 57, confidence: 0.46, evidence: ['尚未形成稳定调节策略'] },
+      },
+      summary: '课程初期：具备基本术语和结构记忆，尚缺迁移、关联与项目决策证据。',
+      events: 11,
+      assessments: 2,
+    },
+    {
+      days: 28,
+      trigger: 'midterm_profile_update',
+      dimensions: {
+        depth: { score: 68, confidence: 0.72, evidence: ['Bridge、Decorator、Strategy/State 迁移任务'] },
+        breadth: { score: 64, confidence: 0.7, evidence: ['完成创建型与结构型，进入行为型'] },
+        connection: { score: 66, confidence: 0.69, evidence: ['开始用变化方向连接模式'] },
+        expression: { score: 73, confidence: 0.74, evidence: ['卡片开始包含反例和替代方案'] },
+        application: { score: 65, confidence: 0.7, evidence: ['能在约束下选择成对模式'] },
+        learning_pace: { score: 71, confidence: 0.68, evidence: ['已掌握定义加速，机制缺口细拆'] },
+      },
+      summary: '课程中期：形成变化方向框架，能做成对模式辨析，但复杂组合决策仍依赖提示。',
+      events: 37,
+      assessments: 7,
+    },
+    {
+      days: 1,
+      trigger: 'project_and_delayed_retest',
+      dimensions: {
+        depth: { score: 88, confidence: 0.9, evidence: ['动态分派机制', '跨模式取舍', '隔日复测'] },
+        breadth: { score: 86, confidence: 0.88, evidence: ['GoF 23 种模式、SOLID、UML、重构和课程项目'] },
+        connection: { score: 84, confidence: 0.86, evidence: ['变化方向、职责边界和证据链连接'] },
+        expression: { score: 91, confidence: 0.9, evidence: ['费曼解释、反例、ADR 与永久卡'] },
+        application: { score: 87, confidence: 0.88, evidence: ['陌生 AST、跨模式辨析和项目架构评审'] },
+        learning_pace: { score: 80, confidence: 0.84, evidence: ['关键前提细拆、已掌握部分加速'] },
+      },
+      summary: '学期后期：已形成可迁移的设计决策框架，当前增长点转向模式组合复杂度和长期保持。',
+      events: 68,
+      assessments: assessments.length + 8,
+    },
+  ]
+  for (const [index, stage] of profileStages.entries()) {
+    const profile = {
+      userId,
+      dimensions: stage.dimensions,
+      updateHistory: profileStages.slice(0, index + 1).map((item) => ({
+        timestamp: daysAgo(item.days).getTime(),
+        trigger: item.trigger,
+        dimensionsUpdated: Object.keys(item.dimensions),
+      })),
+      sessionCount: index === 0 ? 4 : index === 1 ? 19 : 42,
+      totalLearningMinutes: index === 0 ? 118 : index === 1 ? 612 : 1260,
+      createdAt: daysAgo(76).getTime(),
+      updatedAt: daysAgo(stage.days).getTime(),
+    }
+    await prisma.educationProfileHistory.create({
+      data: {
+        vaultId: vault.id,
+        profile: JSON.stringify(profile),
+        snapshot: JSON.stringify({
+          stage: index === 0 ? 'baseline' : index === 1 ? 'midterm' : 'current',
+          summary: stage.summary,
+          coverageDays: 76 - stage.days,
+          learningEvents: stage.events,
+          assessmentCount: stage.assessments,
+        }),
+        createdAt: daysAgo(stage.days),
+      },
+    })
+  }
   return vault
 }
 
 async function main() {
   const user = await ensureUser()
+  await removeLegacyGoldenVaults(user.id)
   if (MODE !== 'mature') {
     const clean = await seedClean(user.id)
     console.log(`Seeded ${CLEAN_VAULT}: ${clean.id}`)

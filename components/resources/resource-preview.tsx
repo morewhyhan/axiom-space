@@ -18,7 +18,7 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
   const isMermaid = item.type === 'mindmap' || item.type === 'diagram'
   const markdown = useMemo(() => {
     if (!content) return '<p style="color:var(--text-dim);font-style:italic;">资源内容为空</p>'
-    if (isMermaid) return parseMD(`\`\`\`mermaid\n${content}\n\`\`\``)
+    if (isMermaid) return parseMD(`\`\`\`mermaid\n${normalizeMermaidContent(content, item.type)}\n\`\`\``)
     if (item.type === 'document' || item.type === 'code') return parseMD(content)
     return ''
   }, [content, isMermaid, item.type])
@@ -43,6 +43,7 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
         htmlContent={htmlContent}
         duration={90}
         topic={item.title || ''}
+        expanded={expanded}
       />
     )
   }
@@ -52,7 +53,7 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
   }
 
   if (item.type === 'svg') {
-    return <iframe srcDoc={content} className={`${expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />
+    return <iframe sandbox="" srcDoc={extractSvgContent(content)} className={`${expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />
   }
 
   if (item.type === 'docx' || item.type === 'ppt') {
@@ -87,7 +88,13 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
         </div>
       )
     } catch {
-      return <pre className="max-h-80 overflow-auto rounded-lg bg-black/30 p-4 text-xs text-white/65">{content}</pre>
+      return (
+        <div
+          ref={ref}
+          className={`markdown-body text-white/80 ${expanded ? 'max-w-4xl' : ''}`}
+          dangerouslySetInnerHTML={{ __html: parseMD(content) }}
+        />
+      )
     }
   }
 
@@ -102,4 +109,21 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
   }
 
   return <pre className="max-h-80 overflow-auto rounded-lg bg-black/30 p-4 text-xs text-white/65">{content}</pre>
+}
+
+function normalizeMermaidContent(content: string, type: string) {
+  let text = content.trim()
+  const fenced = text.match(/```mermaid\s*([\s\S]*?)\s*```/)
+  if (fenced?.[1]) text = fenced[1].trim()
+  if (type === 'mindmap' && !/^mindmap\b/i.test(text)) {
+    text = `mindmap\n  root((${text.split('\n')[0]?.trim() || '知识导图'}))\n${text}`
+  }
+  return text
+}
+
+function extractSvgContent(content: string) {
+  const svg = content.match(/<svg[\s\S]*?<\/svg>/i)
+  if (svg?.[0]) return svg[0]
+  const fenced = content.match(/```(?:svg|xml|html)?\s*([\s\S]*?)\s*```/)
+  return fenced?.[1]?.trim() || content
 }

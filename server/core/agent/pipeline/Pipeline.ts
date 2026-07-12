@@ -28,6 +28,7 @@ import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-c
 import { prisma } from '@/lib/db';
 import { getProfileCacheEntry, setProfileCacheEntry } from '@/server/api/profile-cache';
 import { emitNotification } from '@/server/core/agent/notification-bus';
+import { recordProfileInterventionTurn } from '@/server/core/learning/profile-intervention-runtime';
 // (Capability tracking integrated via MemoryManager)
 import { MessageRole } from '@/types/learning';
 
@@ -806,6 +807,21 @@ export class AgentPipeline {
       .catch((err) =>
         console.debug('[Agent] Education profile update failed:', err),
       );
+
+    const interventionUserId = getCurrentUserId()
+    const interventionVaultId = getCurrentVaultId()
+    const interventionUserMessage = this.agent.getLastUserMessage()
+    if (interventionUserId && interventionVaultId && interventionUserMessage && assistantContent.trim()) {
+      recordProfileInterventionTurn({
+        userId: interventionUserId,
+        vaultId: interventionVaultId,
+        sessionId: this.services.sessionId,
+        userMessage: interventionUserMessage,
+        assistantMessage: assistantContent,
+      }).catch((err) =>
+        console.debug('[Agent] Profile intervention tracking failed:', err),
+      )
+    }
 
     // ── Background review (every N turns) ──
     if (this.agent.getBackgroundReview()) {

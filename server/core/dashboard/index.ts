@@ -3,6 +3,7 @@
  * 纯业务逻辑，零 Hono 依赖，从 route 层提取而来
  */
 import { prisma } from '@/lib/db'
+import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
 
 export interface DashboardStats {
   totalNodes: number
@@ -37,15 +38,16 @@ export interface DashboardData {
 
 export async function computeDashboardStats(vid: string): Promise<DashboardData> {
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0)
+  const visibleCards = { vaultId: vid, path: { not: ROOT_CARD_PATH } } as const
 
   const [totalNodes, totalEdges, permanent, fleeting, literature, cardsToday, orphanCount, clusters] = await Promise.all([
-    prisma.card.count({ where: { vaultId: vid } }),
+    prisma.card.count({ where: visibleCards }),
     prisma.edge.count({ where: { vaultId: vid } }),
     prisma.card.count({ where: { vaultId: vid, type: 'permanent' } }),
-    prisma.card.count({ where: { vaultId: vid, type: 'fleeting' } }),
+    prisma.card.count({ where: { ...visibleCards, type: 'fleeting' } }),
     prisma.card.count({ where: { vaultId: vid, type: 'literature' } }),
-    prisma.card.count({ where: { vaultId: vid, createdAt: { gte: todayStart } } }),
-    prisma.card.count({ where: { vaultId: vid, edgesFrom: { none: {} }, edgesTo: { none: {} } } }),
+    prisma.card.count({ where: { ...visibleCards, createdAt: { gte: todayStart } } }),
+    prisma.card.count({ where: { ...visibleCards, edgesFrom: { none: {} }, edgesTo: { none: {} } } }),
     prisma.cluster.count({ where: { vaultId: vid } }),
   ])
 
@@ -53,7 +55,7 @@ export async function computeDashboardStats(vid: string): Promise<DashboardData>
 
   // conceptCount: unique tags
   const tagsCards = await prisma.card.findMany({
-    where: { vaultId: vid, tags: { not: null } },
+    where: { ...visibleCards, tags: { not: null } },
     select: { tags: true },
   })
   const uniqueTags = new Set<string>()
@@ -67,7 +69,7 @@ export async function computeDashboardStats(vid: string): Promise<DashboardData>
   const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6); sevenDaysAgo.setHours(0, 0, 0, 0)
   const dailyCounts = await prisma.card.groupBy({
     by: ['createdAt'],
-    where: { vaultId: vid, createdAt: { gte: sevenDaysAgo } },
+    where: { ...visibleCards, createdAt: { gte: sevenDaysAgo } },
     _count: { id: true },
   })
 
@@ -89,7 +91,7 @@ export async function computeDashboardStats(vid: string): Promise<DashboardData>
 
   // ── Recent activity ──
   const recent = await prisma.card.findMany({
-    where: { vaultId: vid },
+    where: visibleCards,
     orderBy: { updatedAt: 'desc' },
     take: 8,
     select: { title: true, type: true, createdAt: true, updatedAt: true },

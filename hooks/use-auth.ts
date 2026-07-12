@@ -1,6 +1,6 @@
 import { authClient, signIn, signUp, signOut, useSession } from '@/lib/auth-client'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 
 export function useAuthSession() {
   return useSession()

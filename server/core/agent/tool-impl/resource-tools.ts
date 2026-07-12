@@ -57,6 +57,8 @@ type GeneratedResourceManifestItem = {
   title: string;
   path: string;
   ref: string;
+  rawPath?: string;
+  rawRef?: string;
   mp4Path?: string;
   mp4Ref?: string;
   fileName: string;
@@ -70,6 +72,9 @@ type GeneratedResourceManifestItem = {
   generatedAt: string;
 };
 
+const GRAPH_RESOURCE_TYPES = new Set<ResourceType>(['document', 'mindmap', 'diagram', 'quiz', 'svg', 'video', 'code', 'pdf', 'docx', 'ppt']);
+const MARKDOWN_RENDERED_RESOURCE_TYPES = new Set<ResourceType>(['document', 'mindmap', 'diagram', 'quiz', 'svg', 'code']);
+
 type ResourceProfileEvidence = {
   profileSummary: string;
   remainingGaps: string[];
@@ -82,6 +87,88 @@ type ResourceProfileEvidence = {
 
 function sha256Text(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function safeResourceSlug(value: string): string {
+  return value.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'resource';
+}
+
+function displayResourceTitle(topic: string, type: string): string {
+  return `${topic} - ${RESOURCE_LABELS[type] || type}`;
+}
+
+function renderResourceCardMarkdown(params: {
+  type: string;
+  title: string;
+  topic: string;
+  rawPath: string;
+  rawContent: string;
+  resourcePackTitle: string;
+  mp4Path?: string;
+}) {
+  const { type, title, topic, rawPath, rawContent, resourcePackTitle, mp4Path } = params;
+  const trimmed = rawContent.trim();
+  let body = trimmed;
+  if (type === 'mindmap' || type === 'diagram') {
+    body = `\`\`\`mermaid\n${trimmed}\n\`\`\``;
+  } else if (type === 'quiz') {
+    body = renderQuizMarkdown(trimmed);
+  } else if (type === 'svg') {
+    body = trimmed.includes('<svg') ? trimmed : `\`\`\`xml\n${trimmed}\n\`\`\``;
+  } else if (type === 'video') {
+    body = [
+      `<!-- axiom-video-html:${rawPath} -->`,
+      mp4Path ? `<!-- axiom-video-mp4:${mp4Path} -->` : '',
+      `<!-- axiom-video:${rawPath} -->`,
+      '',
+      '视频会在资源预览面板中播放。',
+    ].filter(Boolean).join('\n');
+  } else if (type === 'pdf' || type === 'docx' || type === 'ppt') {
+    body = `成品文件：\`${rawPath}\`\n\n请在资源预览面板中预览或下载。`;
+  }
+
+  return `---
+title: "${title}"
+source_type: ai-resource
+source: AI 自动生成
+created: ${new Date().toISOString()}
+tags: [ai-generated-resource, ${type}, ${topic}]
+---
+
+# ${title}
+
+> 资源包：[[${resourcePackTitle}]]
+> 原始资源：\`${rawPath}\`
+
+${body}
+`;
+}
+
+function renderQuizMarkdown(rawContent: string) {
+  try {
+    const parsed = JSON.parse(rawContent) as Array<{
+      question?: string;
+      options?: string[];
+      answer?: string;
+      explanation?: string;
+    }>;
+    if (!Array.isArray(parsed)) throw new Error('quiz is not array');
+    return [
+      '## 练习题',
+      '',
+      ...parsed.flatMap((question, index) => [
+        `### ${index + 1}. ${question.question || '未命名题目'}`,
+        '',
+        ...(Array.isArray(question.options) ? question.options.map((option) => `- ${option}`) : []),
+        '',
+        `**答案**：${question.answer || '未提供'}`,
+        question.explanation ? `**解析**：${question.explanation}` : '',
+        '',
+      ]),
+    ].filter(Boolean).join('\n');
+  } catch {
+    return `\`\`\`json\n${rawContent}\n\`\`\``;
+  }
 }
 
 type PendingExtractCards = {
@@ -104,27 +191,41 @@ function uniqueStrings(items: Array<string | null | undefined>): string[] {
 
 function buildResourceProfileEvidence(profile: LearningProfileContext | null): ResourceProfileEvidence | null {
   if (!profile) return null;
+  const observations = profile.dimensionInsights.flatMap((dimension) =>
+    dimension.observations
+      .filter((observation) => observation.status !== 'refuted')
+      .map((observation) => ({ dimensionKey: dimension.key, ...observation })),
+  );
+  if (observations.length === 0 || !profile.promptBlock.trim()) return null;
+
   const remainingGaps = uniqueStrings([
     ...profile.knowledgeProfile.weakConcepts,
     ...profile.knowledgeProfile.missingPrerequisites,
     ...profile.knowledgeProfile.isolatedNodes.map((node) => node.title),
     ...profile.knowledgeProfile.weakDomains,
   ]).slice(0, 8);
-  const resourcePreference = uniqueStrings([
-    ...profile.preferences.resourceTypes,
-    ...profile.teachingPolicy.explainStyle,
-    profile.teachingPolicy.shouldUseExamples ? '例子' : '',
-    profile.teachingPolicy.shouldPreferPractice ? '练习' : '',
-    profile.teachingPolicy.shouldSuggestWikiLinks ? '关系图' : '',
-  ]).slice(0, 8);
+  const strategyObservations = observations.filter((observation) =>
+    ['bestExplanationPath', 'paceAndLoad', 'masteryCheck'].includes(observation.dimensionKey),
+  );
+  const resourcePreference = uniqueStrings(strategyObservations.flatMap((observation) => [
+    observation.subDimensionLabel,
+    observation.teachingIntervention,
+    observation.verificationCriterion,
+  ])).slice(0, 8);
+  const profileSummary = uniqueStrings(observations.map((observation) =>
+    observation.userFacingSummary || observation.text,
+  )).slice(0, 3).join('；');
+  const teachingFocus = uniqueStrings(observations.map((observation) =>
+    observation.teachingIntervention,
+  )).slice(0, 3).join('；');
 
   return {
-    profileSummary: profile.profileSummary.summary,
+    profileSummary,
     remainingGaps,
     resourcePreference,
     recentEvidence: profile.profileLoop.recentEvidence.slice(0, 5),
     masteredConcepts: profile.knowledgeProfile.masteredConcepts.slice(0, 8),
-    teachingFocus: profile.profileSummary.teachingFocus,
+    teachingFocus,
     contextText: profile.promptBlock,
   };
 }
@@ -176,9 +277,15 @@ function inferDefaultResourceTypes(
   userLevel: string,
 ): ResourceType[] {
   const text = `${topic} ${literatureContent || ''}`.toLowerCase();
-  const types = new Set<ResourceType>(['document', 'mindmap', 'quiz', 'code', 'video', 'diagram']);
+  const types = new Set<ResourceType>();
 
-  if (/(图|流程|关系|结构|架构|路径|系统|网络|状态|sequence|flow|diagram|map)/i.test(text)) {
+  if (/(文档|讲义|说明|整理|markdown|\bmd\b|document|article|note)/i.test(text)) {
+    types.add('document');
+  }
+
+  if (/(思维导图|知识导图|脑图|mindmap|mind map)/i.test(text)) {
+    types.add('mindmap');
+  } else if (/(图|流程|关系|结构|架构|路径|系统|网络|状态|sequence|flow|diagram|map)/i.test(text)) {
     types.add(/(关系|结构|体系|知识|章节|地图|mindmap|map)/i.test(text) ? 'mindmap' : 'diagram');
   }
 
@@ -209,12 +316,16 @@ function inferDefaultResourceTypes(
   }
 
   if (/(初学|小白|入门|beginner)/i.test(userLevel)) {
+    if (types.size === 0) types.add('document');
+  }
+
+  if (/(资源包|一套|全部|全套|所有格式|all resources|resource pack)/i.test(text)) {
     types.add('document');
     types.add('mindmap');
     types.add('quiz');
   }
 
-  return Array.from(types).slice(0, 6);
+  return (types.size > 0 ? Array.from(types) : ['document' as ResourceType]).slice(0, 4);
 }
 
 const pushResourceTool = createTool(
@@ -225,14 +336,15 @@ const pushResourceTool = createTool(
   + '📊 SVG矢量图、🔀 Mermaid流程图/时序图/类图等、📝 Word文档(docx)、📑 PDF文档、📽️ PPT演示文稿。'
   + '【关键时机】当用户说"整理成学习资料"、"保存到文献盒"、"生成文档"、"导出Word"、"导出PDF"、"做个PPT"'
   + '"画个流程图"、"生成SVG"等类似请求时，必须直接调用此工具。不要在普通对话里打断式推送资源；'
-  + '不填 formats 时按用户意图和画像至少生成 5 个核心资源，只有明确要求时才生成视频/PDF/Word/PPT 等重资源。'
+  + '必须尊重用户指定格式：用户指定什么就只生成什么。用户没有指定 formats 时，只按明确意图推断少量资源，默认只生成 document；'
+  + '只有用户明确要求"资源包/全套/全部"时才生成多项核心资源，只有明确要求时才生成视频/PDF/Word/PPT 等重资源。'
   + '用户水平自动从画像推断，无需询问用户。自动跳过已有资源。',
   Type.Object({
     topic: Type.String({ description: '学习主题（必填）。从对话上下文或用户消息中提取。' }),
     level: Type.Optional(Type.String({ description: '可选。不填则自动从 .axiom/user-profile.json 读取。' })),
     literatureTitle: Type.Optional(Type.String({ description: '关联的文献标题。' })),
     literatureContent: Type.Optional(Type.String({ description: '文献内容截取。' })),
-    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成SVG和图表。不填则按对话意图和画像生成至少 5 个核心资源。可用值: document,mindmap,quiz,code,video,svg,diagram,docx,pdf,ppt' })),
+    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成 SVG 和图表；"mindmap" 只生成知识导图。不填则按明确意图推断，默认只生成 document。可用值: document,mindmap,quiz,code,video,svg,diagram,docx,pdf,ppt' })),
   }),
   async (_id, params) => {
     try {
@@ -284,7 +396,7 @@ const pushResourceTool = createTool(
         resourceExists: async (type: string, literatureTitle: string): Promise<boolean> => {
           const fileName = (RESOURCE_FILE_MAP as Record<string, string>)[type];
           if (!fileName) return false;
-          const resourceDir = `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
+          const resourceDir = `resources/${safeResourceSlug(literatureTitle)}`;
           const fullPath = `${resourceDir}/${fileName}`;
           const result = await getFileStorage().readFile(fullPath);
           return result?.success === true;
@@ -292,7 +404,7 @@ const pushResourceTool = createTool(
         saveResource: async (type: string, literatureTitle: string, content: string): Promise<void> => {
           const fileName = (RESOURCE_FILE_MAP as Record<string, string>)[type];
           if (!fileName) return;
-          const resourceDir = `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
+          const resourceDir = `resources/${safeResourceSlug(literatureTitle)}`;
           await getFileStorage().ensureDir(resourceDir);
           const fullPath = `${resourceDir}/${fileName}`;
           const result = await getFileStorage().writeFile(fullPath, content);
@@ -301,7 +413,10 @@ const pushResourceTool = createTool(
           }
         },
         saveResourceFile: async (literatureTitle: string, fileName: string, content: string): Promise<void> => {
-          const resourceDir = `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
+          // Guardrail/report JSON is machine-only metadata. Do not persist it as a card,
+          // otherwise it pollutes the human knowledge graph.
+          if (/\.json$/i.test(fileName)) return;
+          const resourceDir = `resources/${safeResourceSlug(literatureTitle)}`;
           await getFileStorage().ensureDir(resourceDir);
           const fullPath = `${resourceDir}/${fileName}`;
           const result = await getFileStorage().writeFile(fullPath, content);
@@ -461,8 +576,8 @@ const pushResourceTool = createTool(
         } : undefined,
       );
 
-      // 读取生成的资源，合并为一个文献卡片
-      const sanitizedDir = litTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+      // 读取生成的资源，写入 manifest。资源正文保持在各自独立文件/卡片中，汇总卡只做索引。
+      const sanitizedDir = safeResourceSlug(litTitle);
       const resourceDir = `resources/${sanitizedDir}`;
       const sections: string[] = [];
       const resourceManifest: GeneratedResourceManifestItem[] = [];
@@ -509,7 +624,7 @@ const pushResourceTool = createTool(
                 mp4Ref: mp4Result?.success ? videoMp4Ref : undefined,
               });
               sections.push([
-                `> 📺 **教学视频已生成** — 在 READ 模式下可预览和播放`,
+                `- **${RESOURCE_LABELS[type]}**：\`${videoHtmlRef}\`${mp4Result?.success ? `，MP4：\`${videoMp4Ref}\`` : ''}`,
                 '',
                 `<!-- axiom-video-html:${videoHtmlRef} -->`,
                 mp4Result?.success ? `<!-- axiom-video-mp4:${videoMp4Ref} -->` : '',
@@ -517,13 +632,13 @@ const pushResourceTool = createTool(
               ].filter(Boolean).join('\n'));
             } else if (type === 'mindmap' || type === 'diagram') {
               resourceManifest.push(item);
-              sections.push(`## ${RESOURCE_LABELS[type]}\n\n\`\`\`mermaid\n${result.content.trim()}\n\`\`\``);
+              sections.push(`- **${RESOURCE_LABELS[type]}**：\`${resourcePath}\`（点击资源面板中的条目单独预览）`);
             } else if (type === 'quiz' || type === 'svg' || type === 'docx' || type === 'pdf' || type === 'ppt') {
               resourceManifest.push(item);
-              sections.push(`> **${RESOURCE_LABELS[type]}已生成** — 可在下方资源面板预览、放大或下载。`);
+              sections.push(`- **${RESOURCE_LABELS[type]}**：\`${resourcePath}\`（点击资源面板中的条目单独预览/下载）`);
             } else {
               resourceManifest.push(item);
-              sections.push(result.content);
+              sections.push(`- **${RESOURCE_LABELS[type]}**：\`${resourcePath}\`（点击资源面板中的条目单独打开）`);
             }
             generatedCount++;
           }
@@ -537,22 +652,27 @@ const pushResourceTool = createTool(
         };
       }
 
-      // 合并为一个文件，直接放 literature/ 文献盒
+      // 汇总卡只保存生成依据、manifest 和独立资源入口，不再把多个产物正文拼进一个 Markdown。
       const litDir = `literature`;
       await getFileStorage().ensureDir(litDir);
       const litFileName = `lit-${Date.now()}.md`;
       const litPath = `${litDir}/${litFileName}`;
-      const resourcePackTitle = `${params.topic} - 个性化资源包`;
+      const resourcePackTitle = profileEvidence
+        ? `${params.topic} - 个性化资源包`
+        : `${params.topic} - 学习资源包`;
       const evidenceLines = [
         `- 当前主题：${params.topic}`,
         `- 当前资料/卡片：${litTitle}`,
-        profileEvidence?.remainingGaps.length ? `- 剩余缺口：${profileEvidence.remainingGaps.join('、')}` : '- 剩余缺口：暂无稳定缺口',
-        profileEvidence?.resourcePreference.length ? `- 资源偏好：${profileEvidence.resourcePreference.join('、')}` : '- 资源偏好：暂无稳定偏好',
+        profileEvidence?.remainingGaps.length ? `- 剩余缺口：${profileEvidence.remainingGaps.join('、')}` : '',
+        profileEvidence?.resourcePreference.length ? `- 画像支持的资源策略：${profileEvidence.resourcePreference.join('、')}` : '',
         profileEvidence?.masteredConcepts.length ? `- 已掌握概念：${profileEvidence.masteredConcepts.join('、')}` : '',
+        profileEvidence ? '' : '- 画像依据：暂无可用证据，本次只按当前主题和卡片生成，不宣称个性化。',
         ragContext.references.length ? `- 资料来源：${ragContext.references.slice(0, 5).join('、')}` : '',
-        `- 目标：围绕当前误区/薄弱点生成可预览学习资源，并回应画像里的下一步缺口。`,
+        profileEvidence
+          ? '- 目标：围绕有证据的当前缺口生成可预览学习资源。'
+          : '- 目标：围绕当前主题生成可预览学习资源。',
       ].filter(Boolean).join('\n');
-      const fullContent = `---
+      let fullContent = `---
 title: "${params.topic}"
 source_type: ai
 source: AI 自动生成
@@ -570,7 +690,7 @@ tags: [ai-generated, ${params.topic}]
 })} -->
 <!-- axiom-profile-evidence:${JSON.stringify(profileEvidence)} -->
 
-## 画像驱动依据
+## ${profileEvidence ? '画像驱动依据' : '生成依据'}
 
 ${evidenceLines}
 
@@ -587,8 +707,21 @@ ${orchestrationEvidence ? [
   `- 资源安全/事实核查：已为每个产物写入 guardrail-*.json 报告`,
 ].join('\n') : ''}
 
-${sections.join('\n\n---\n\n')}
-`;
+## 独立资源
+
+${sections.join('\n')}
+
+${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as ResourceType)) ? [
+  '## 知识库资源卡',
+  '',
+  ...resourceManifest
+    .filter((item) => GRAPH_RESOURCE_TYPES.has(item.type as ResourceType))
+    .map((item) => `- [[${displayResourceTitle(params.topic, item.type)}]]`),
+  '',
+].join('\n') : ''}
+
+> 每个资源已单独写入 \`resources/${sanitizedDir}/\`。在 READ 模式下点击资源条目，可在右侧预览区单独打开、放大或下载。
+	`;
       await getFileStorage().writeFile(litPath, fullContent);
 
       // Also create a DB Card record for the literature so it appears in galaxy/knowledge graph
@@ -622,6 +755,85 @@ ${sections.join('\n\n---\n\n')}
             path: resourceCard.path,
           };
           scheduleRagIndexCard(resourceCard.id, 'resource-generation');
+
+          const graphResourceCards: Array<{ id: string; title: string | null; path: string }> = [];
+          for (const item of resourceManifest) {
+            if (!GRAPH_RESOURCE_TYPES.has(item.type as ResourceType)) continue;
+            const resourceTitle = displayResourceTitle(params.topic, item.type);
+            const resourceCardPath = `literature/${safeResourceSlug(resourceTitle)}.md`;
+            const rawResourcePath = item.path;
+            const rawResource = await getFileStorage().readFile(rawResourcePath).catch(() => null);
+            const rawContent = rawResource?.success ? rawResource.content || '' : '';
+            const resourceCardContent = renderResourceCardMarkdown({
+              type: item.type,
+              title: resourceTitle,
+              topic: params.topic,
+              rawPath: rawResourcePath,
+              rawContent,
+              resourcePackTitle,
+              mp4Path: item.mp4Path,
+            });
+            const graphCard = await litDb.card.upsert({
+              where: { vaultId_path: { vaultId: litVid, path: resourceCardPath } },
+              create: {
+                vaultId: litVid,
+                path: resourceCardPath,
+                title: resourceTitle,
+                content: resourceCardContent,
+                type: 'literature',
+                tags: JSON.stringify(['ai-generated-resource', item.type, params.topic]),
+              },
+              update: {
+                title: resourceTitle,
+                content: resourceCardContent,
+                tags: JSON.stringify(['ai-generated-resource', item.type, params.topic]),
+                updatedAt: new Date(),
+              },
+            });
+            if (MARKDOWN_RENDERED_RESOURCE_TYPES.has(item.type as ResourceType)) {
+              item.rawPath = rawResourcePath;
+              item.rawRef = rawResourcePath;
+              item.path = graphCard.path;
+              item.ref = graphCard.path;
+              item.fileName = resourceCardPath.split('/').pop() || item.fileName;
+              item.contentHash = sha256Text(resourceCardContent);
+            }
+            item.sourceObjectId = graphCard.id;
+            item.sourcePath = graphCard.path;
+            item.sourceTitle = resourceTitle;
+            graphResourceCards.push({ id: graphCard.id, title: graphCard.title, path: graphCard.path });
+            scheduleRagIndexCard(graphCard.id, 'resource-generation-card');
+          }
+
+          for (const graphCard of graphResourceCards) {
+            await Promise.all([
+              litDb.edge.upsert({
+                where: { vaultId_sourceId_targetId_type: { vaultId: litVid, sourceId: resourceCard.id, targetId: graphCard.id, type: 'related' } },
+                create: { vaultId: litVid, sourceId: resourceCard.id, targetId: graphCard.id, type: 'related', weight: 1 },
+                update: { weight: 1 },
+              }),
+              litDb.edge.upsert({
+                where: { vaultId_sourceId_targetId_type: { vaultId: litVid, sourceId: graphCard.id, targetId: resourceCard.id, type: 'related' } },
+                create: { vaultId: litVid, sourceId: graphCard.id, targetId: resourceCard.id, type: 'related', weight: 1 },
+                update: { weight: 1 },
+              }),
+            ]).catch((edgeErr) => {
+              console.warn('[push_resource] Failed to link resource card:', edgeErr);
+            });
+          }
+
+          const updatedFullContent = fullContent.replace(
+            /<!--\s*axiom-resources:[\s\S]*?\s*-->/,
+            `<!-- axiom-resources:${JSON.stringify(resourceManifest)} -->`,
+          );
+          if (updatedFullContent !== fullContent) {
+            fullContent = updatedFullContent;
+            await getFileStorage().writeFile(litPath, fullContent);
+            await litDb.card.update({
+              where: { id: resourceCard.id },
+              data: { content: fullContent.slice(0, 10000), updatedAt: new Date() },
+            }).catch(() => {});
+          }
         }
 
         // ── Assign to relevant cluster ──
@@ -661,6 +873,8 @@ ${sections.join('\n\n---\n\n')}
         title: RESOURCE_LABELS[item.type as keyof typeof RESOURCE_LABELS] || item.title || item.type,
         path: item.path,
         ref: item.ref,
+        rawPath: item.rawPath,
+        rawRef: item.rawRef,
         mp4Path: item.mp4Path,
         mp4Ref: item.mp4Ref,
         fileName: item.fileName,

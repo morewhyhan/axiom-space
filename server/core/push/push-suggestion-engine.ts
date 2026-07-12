@@ -7,6 +7,7 @@ import {
   ensureConceptCard,
   ensureContainsEdge,
   normalizeConceptLookup,
+  ROOT_CARD_PATH,
   safeConceptFileName,
 } from '@/server/core/domain/concept-graph';
 import { buildGenerationRagContext, type GenerationRagContext } from '@/server/core/rag/generation-context';
@@ -106,7 +107,7 @@ export class PushSuggestionEngine {
       ],
       take: Math.min(Math.max(params.limit ?? 80, 1), 200),
     });
-    return records.map(deserializeSuggestion);
+    return uniqueSuggestionsForDisplay(records.map(deserializeSuggestion));
   }
 
   async scanAndPersist(params: {
@@ -127,11 +128,19 @@ export class PushSuggestionEngine {
     const judged = await this.judgeCandidates(vault.name || '知识库', params.trigger, candidates);
     const created: PushSuggestionDTO[] = [];
     let skipped = 0;
+    const seenDisplayKeys = new Set<string>();
 
     for (const candidate of judged
       .filter((item) => item.confidence >= MIN_CONFIDENCE)
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, MAX_SAVED_PER_SCAN)) {
+      const displayKey = suggestionDisplayKey(candidate);
+      if (seenDisplayKeys.has(displayKey)) {
+        skipped += 1;
+        continue;
+      }
+      seenDisplayKeys.add(displayKey);
+
       const existing = await prisma.pushSuggestion.findUnique({
         where: { dedupeKey: candidate.dedupeKey },
       });
@@ -266,7 +275,7 @@ export class PushSuggestionEngine {
   }): Promise<Candidate[]> {
     const [cards, edges, paths, clusters, profile] = await Promise.all([
       prisma.card.findMany({
-        where: { vaultId: params.vaultId, type: { not: 'literature' } },
+        where: { vaultId: params.vaultId, path: { not: ROOT_CARD_PATH }, type: { not: 'literature' } },
         select: {
           id: true,
           title: true,
@@ -327,16 +336,19 @@ export class PushSuggestionEngine {
     const remainingGaps = getProfileRemainingGaps(profile).slice(0, 4);
     if (remainingGaps.length === 0) return;
 
-    const preferredFormats = profile.preferences.resourceTypes.length > 0
+    const hasPreferenceEvidence = profile.dimensionInsights.some((dimension) =>
+      dimension.key === 'bestExplanationPath' && dimension.observations.some((observation) => observation.status !== 'refuted'),
+    );
+    const preferredFormats = hasPreferenceEvidence && profile.preferences.resourceTypes.length > 0
       ? profile.preferences.resourceTypes
-      : profile.teachingPolicy.shouldPreferPractice
+      : hasPreferenceEvidence && profile.teachingPolicy.shouldPreferPractice
         ? ['quiz', 'code']
-        : ['diagram', 'summary'];
+        : [];
     const resourcePreference = uniqueStrings([
       ...preferredFormats,
-      ...profile.teachingPolicy.explainStyle,
-      profile.teachingPolicy.shouldUseExamples ? '例子' : '',
-      profile.teachingPolicy.shouldPreferPractice ? '练习' : '',
+      ...(hasPreferenceEvidence ? profile.teachingPolicy.explainStyle : []),
+      hasPreferenceEvidence && profile.teachingPolicy.shouldUseExamples ? '例子' : '',
+      hasPreferenceEvidence && profile.teachingPolicy.shouldPreferPractice ? '练习' : '',
     ]).slice(0, 5);
     const recentEvidence = collectPushEvidence(profile).slice(0, 6);
     const masteredCards = matchCardsByTitles(cards, profile.knowledgeProfile.masteredConcepts);
@@ -396,7 +408,7 @@ export class PushSuggestionEngine {
             cardTitle: gapCards[0].title,
             missingType: 'profile_remaining_gap',
             suggestedTitle: `${gap} 针对性补充资源`,
-            suggestedFormat: preferredFormats.includes('quiz') || profile.teachingPolicy.shouldPreferPractice ? 'exercise_json' : 'markdown_resource',
+            suggestedFormat: hasPreferenceEvidence && (preferredFormats.includes('quiz') || profile.teachingPolicy.shouldPreferPractice) ? 'exercise_json' : 'markdown_resource',
             profileGap: gap,
             profileDriven: true,
             resourcePreference,
@@ -1128,6 +1140,26 @@ function makeCandidate(input: Omit<Candidate, 'candidateId' | 'dedupeKey'> & { v
   };
 }
 
+function uniqueSuggestionsForDisplay(items: PushSuggestionDTO[]): PushSuggestionDTO[] {
+  const seen = new Set<string>();
+  const result: PushSuggestionDTO[] = [];
+  for (const item of items) {
+    const key = suggestionDisplayKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function suggestionDisplayKey(item: Pick<PushSuggestionDTO, 'boxType' | 'itemType' | 'title'> | Candidate): string {
+  return [
+    item.boxType,
+    item.itemType,
+    item.title.replace(/\s+/g, ' ').trim().toLowerCase(),
+  ].join(':');
+}
+
 function candidateForAI(candidate: Candidate) {
   return {
     candidateId: candidate.candidateId,
@@ -1199,10 +1231,12 @@ function collectPushEvidence(profile: LearningProfileContext): string[] {
     ...profile.profileLoop.contextInjection,
     ...profile.knowledgeProfile.masteredConcepts.map((item) => `已掌握概念：${item}`),
     ...profile.knowledgeProfile.weakConcepts.map((item) => `薄弱概念：${item}`),
-    ...profile.dimensionInsights.flatMap((dimension) => [
-      ...dimension.evidence,
-      ...dimension.observations.slice(0, 2).map((observation) => observation.evidence || observation.text),
-    ]),
+    ...profile.dimensionInsights.flatMap((dimension) =>
+      dimension.observations
+        .filter((observation) => observation.status !== 'refuted')
+        .slice(0, 2)
+        .map((observation) => observation.evidence || observation.userFacingSummary || observation.text),
+    ),
   ]).slice(0, 24);
 }
 

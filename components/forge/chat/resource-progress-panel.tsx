@@ -2,6 +2,9 @@
 
 import type { ResourceProgressItem } from '@/stores/agent-store'
 import { HudPanel } from '@/components/ui'
+import { client } from '@/lib/api-client'
+import { toast } from '@/lib/ui-feedback'
+import { useAppStore } from '@/stores/mode-store'
 
 const RESOURCE_STATUS_LABEL: Record<string, string> = {
   queued: '等待',
@@ -15,6 +18,7 @@ const RESOURCE_STATUS_LABEL: Record<string, string> = {
 }
 
 export function ResourceProgressPanel({ items }: { items: ResourceProgressItem[] }) {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
   if (items.length === 0) return null
   const topic = items.find((item) => item.topic)?.topic || '学习资料'
   const doneCount = items.filter((item) => item.status === 'ready' || item.status === 'completed').length
@@ -44,8 +48,21 @@ export function ResourceProgressPanel({ items }: { items: ResourceProgressItem[]
         {items.map((item) => {
           const isFailed = item.status === 'failed'
           const isDone = item.status === 'ready' || item.status === 'completed'
+          const canOpen = isDone && !!item.path
           return (
-            <div key={item.resourceType} className="px-3 py-2">
+            <button
+              key={item.resourceType}
+              type="button"
+              className={`block w-full px-3 py-2 text-left transition-colors ${
+                canOpen ? 'cursor-pointer hover:bg-white/[0.045]' : 'cursor-default'
+              }`}
+              disabled={!canOpen}
+              onClick={() => {
+                if (!item.path) return
+                void openResourceTarget(item.path, currentVaultId)
+              }}
+              title={canOpen ? '打开这个资源' : undefined}
+            >
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
@@ -64,10 +81,41 @@ export function ResourceProgressPanel({ items }: { items: ResourceProgressItem[]
                   <div className="mono text-white/25" style={{ fontSize: 'var(--f7)' }}>{Math.round(item.progress || 0)}%</div>
                 </div>
               </div>
-            </div>
+            </button>
           )
         })}
       </div>
     </HudPanel>
   )
+}
+
+async function openResourceTarget(path: string, vaultId: string | null) {
+  try {
+    const res = await (client.api.vault['resource-target'].$get as (args: {
+      query: { path: string; vid?: string }
+    }) => Promise<Response>)({ query: { path, vid: vaultId || undefined } })
+    const data = await res.json() as {
+      success?: boolean
+      error?: string
+      card?: { id: string; title: string | null; type: string } | null
+    }
+    if (!res.ok || !data.success || !data.card) {
+      throw new Error(data.error || '没有找到可打开的资源卡')
+    }
+    const app = useAppStore.getState()
+    app.setSelectedNode({
+      id: data.card.id,
+      title: data.card.title || '生成资源',
+      type: data.card.type || 'literature',
+    })
+    app.setRightPanelView('read')
+    if (!app.panelLayout.right.includes('editor')) {
+      app.setPanelLayout({
+        left: app.panelLayout.left,
+        right: [...app.panelLayout.right, 'editor'],
+      })
+    }
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : '打开资源失败')
+  }
 }

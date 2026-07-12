@@ -30,6 +30,7 @@ type FlushInput = {
   cardId?: string
   reason: CardThreadFlushReason
   requireNewTurn?: boolean
+  forceAcceptedFeynman?: boolean
 }
 
 type SessionMetadata = Record<string, unknown> & {
@@ -45,6 +46,13 @@ type FlushDecision = {
   title: string
   content: string
   evidence: string[]
+  cardFields: {
+    definition: string
+    example: string
+    boundary: string
+    relations: string
+    verification: string
+  }
   confidence: number
   reason: string
 }
@@ -80,6 +88,11 @@ export async function maybeFlushCardThreadEveryThreeTurns(input: {
 
 export async function flushCardThreadInsights(input: FlushInput): Promise<CardThreadFlushResult> {
   const flightKey = `${input.vaultId}:${input.sessionId}:${input.cardId || 'auto'}`
+  if (inFlightFlushes.has(flightKey) && input.reason === 'manual') {
+    for (let attempt = 0; attempt < 40 && inFlightFlushes.has(flightKey); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 100))
+    }
+  }
   if (inFlightFlushes.has(flightKey)) {
     return {
       status: 'skipped',
@@ -96,23 +109,18 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
         id: input.sessionId,
         userId: input.userId,
         vaultId: input.vaultId,
-        domain: '__agent__',
       },
       select: { id: true, concept: true, metadata: true, status: true },
     })
-    if (!session || session.status === 'completed') {
+    if (!session || (session.status === 'completed' && !input.cardId)) {
       return { status: 'skipped', reason: 'session_not_found', sessionId: input.sessionId }
     }
 
     const metadata = parseSessionMetadata(session.metadata)
     const cardId = input.cardId || metadata.cardId
-    if (!cardId || metadata.sessionKind === 'conversation') {
+    if (!cardId || (metadata.sessionKind === 'conversation' && !input.cardId)) {
       return { status: 'skipped', reason: 'not_card_thread', sessionId: input.sessionId }
     }
-    if (input.cardId && metadata.cardId && metadata.cardId !== input.cardId) {
-      return { status: 'skipped', reason: 'card_mismatch', sessionId: input.sessionId, cardId }
-    }
-
     const userTurnCount = await prisma.learningMessage.count({
       where: { sessionId: input.sessionId, role: 'user' },
     })
@@ -148,7 +156,10 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
       return { status: 'skipped', reason: 'no_visible_messages', sessionId: input.sessionId, cardId, userTurnCount }
     }
 
-    const decision = await analyzeCardThreadFlush({
+    const acceptedFeynman = input.forceAcceptedFeynman === true || ((card.content || '').includes('axiom-feynman:')
+      && /费曼解释（已通过）/.test(card.content || '')
+    )
+    const analysisInput = {
       reason: input.reason,
       sessionTitle: session.concept,
       cardTitle: card.title || card.path,
@@ -160,7 +171,18 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
         content: message.content,
         timestamp: message.timestamp,
       })),
+    }
+    let decision = await analyzeCardThreadFlush(analysisInput).catch((err) => {
+      if (!acceptedFeynman || input.reason !== 'manual') throw err
+      return buildAcceptedFeynmanFallback(analysisInput)
     })
+    if (!decision.shouldWrite && acceptedFeynman && input.reason === 'manual') {
+      decision = buildAcceptedFeynmanFallback(analysisInput)
+    }
+    decision = keepOnlyUserSupportedFields(
+      decision,
+      visibleMessages.filter((message) => message.role === 'user').map((message) => message.content).join('\n'),
+    )
 
     if (!decision.shouldWrite) {
       await markSessionFlushed(input.sessionId, metadata, userTurnCount, input.reason, 'no_write')
@@ -196,10 +218,16 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
       reason: input.reason,
       createdAt: new Date(),
     })
-    const nextContent = appendToMarkdownSection(card.content || '', section, entry)
     const nextMetadata = buildNextFlushMetadata(metadata, userTurnCount, input.reason, 'updated')
 
     await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM card WHERE id = ${card.id} FOR UPDATE`
+      const latestCard = await tx.card.findUnique({ where: { id: card.id }, select: { content: true } })
+      const latestContent = latestCard?.content || ''
+      const structuredContent = section === '我的理解'
+        ? writeCardFields(latestContent, decision.cardFields, marker)
+        : latestContent
+      const nextContent = appendToMarkdownSection(structuredContent, section, entry)
       await tx.card.update({
         where: { id: card.id },
         data: { content: nextContent },
@@ -215,7 +243,7 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
           category: 'observation',
           value: JSON.stringify({
             text: `Agent2 根据卡片线程为「${card.title || card.path}」补充了${section}。`,
-            category: section === '待补全' ? 'profile_stuckPattern' : 'profile_masteryCheck',
+            category: 'card_thread_capture',
             confidence,
             sourceObjectType: 'card',
             sourceObjectId: card.id,
@@ -264,7 +292,7 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
         `写入位置：${section}`,
         `内容摘要：${entryContent.slice(0, 180)}`,
         `证据：${evidence.slice(0, 3).join(' / ')}`,
-        '观察记录与画像证据已同步更新。',
+        '卡片写入记录与来源证据已同步保存。',
       ].join('\n'),
       targetId: card.id,
       targetTitle: card.title || card.path,
@@ -305,9 +333,12 @@ async function analyzeCardThreadFlush(input: {
       '只处理当前卡片线程。不要创建新卡，不要跨卡片写入，不要把普通对话或界面反馈写进卡片。',
       '充分必要原则：只有对提升这张卡片的学习效果、概念边界、例证、误区修正、掌握判断有必要的内容才写。没有必要就 shouldWrite=false。',
       '证据原则：必须能从用户自己的发言中找到证据。仅 AI 单方面讲解、用户只问问题、用户只说 UI/产品反馈、工具操作、寒暄，都不要写入“我的理解”。',
+      '提炼原则：content 必须是你的概念化总结和结构化归纳，不得原封不动复制用户整段原话；用户原话只能压缩成 evidence 摘要。若用户已经给出完整费曼解释，也要先命名它解决的机制、边界或验证点，再保留证据摘要。',
       '分区规则：用户用自己的话讲清楚概念/关系/例子，写入“我的理解”；用户暴露不确定、误解、未补齐条件，写入“待补全”；对话中形成可复用的澄清结论但还不是用户掌握证明，写入“对话沉淀”。',
+      '强证据规则：如果当前卡片已经包含 axiom-feynman 且状态为“已通过”，说明费曼捕获器已完成前置校验。此时只要最近对话对应这次解释，就必须 shouldWrite=true、section=我的理解，并尽可能填写五个 cardFields；不得再次以“证据不足”拒绝。',
       '输出必须是严格 JSON，不要 Markdown 代码块，不要多余解释。',
-      'JSON 结构：{"shouldWrite":boolean,"section":"我的理解|待补全|对话沉淀","title":"短标题","content":"自然语言 Markdown 正文，禁止 JSON，最多 600 字","evidence":["用户发言证据摘要"],"confidence":0.0,"reason":"为什么写或不写"}',
+      '当 section=我的理解 时，还要把已经有用户证据支持的内容拆进 cardFields。没有证据的字段留空，禁止替用户编造。definition 必须用“X 是指/是一种……”明确下定义；example 必须含“例如”；boundary 必须说明“不是什么/何时不成立”；relations 必须用 [[概念名]] 表示至少一个相邻概念；verification 必须写出可执行的验证动作和预期差异。',
+      'JSON 结构：{"shouldWrite":boolean,"section":"我的理解|待补全|对话沉淀","title":"短标题","content":"自然语言 Markdown 正文，禁止 JSON，最多 600 字","cardFields":{"definition":"","example":"","boundary":"","relations":"","verification":""},"evidence":["不超过80字的用户发言证据摘要"],"confidence":0.0,"reason":"为什么写或不写"}',
     ].join('\n'),
     [{
       role: 'user',
@@ -379,7 +410,17 @@ function parseFlushDecision(raw: string): FlushDecision {
       ? parsed.evidence.filter((item): item is string => typeof item === 'string').map((item) => normalizeInlineText(item, 220))
       : []
     const confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0.55
-    return { shouldWrite, section, title, content, evidence, confidence, reason }
+    const fields = parsed.cardFields && typeof parsed.cardFields === 'object' && !Array.isArray(parsed.cardFields)
+      ? parsed.cardFields as Record<string, unknown>
+      : {}
+    const cardFields = {
+      definition: normalizeField(fields.definition),
+      example: normalizeField(fields.example),
+      boundary: normalizeField(fields.boundary),
+      relations: normalizeField(fields.relations),
+      verification: normalizeField(fields.verification),
+    }
+    return { shouldWrite, section, title, content, evidence, cardFields, confidence, reason }
   } catch {
     return noWriteDecision('invalid_json')
   }
@@ -392,9 +433,62 @@ function noWriteDecision(reason: string): FlushDecision {
     title: '',
     content: '',
     evidence: [],
+    cardFields: emptyCardFields(),
     confidence: 0,
     reason,
   }
+}
+
+function buildAcceptedFeynmanFallback(input: {
+  cardTitle: string
+  messages: Array<{ role: string; content: string }>
+}): FlushDecision {
+  const explanation = [...input.messages].reverse().find((message) => message.role === 'user')?.content.trim() || ''
+  const paragraphs = explanation.split(/\n{2,}/).map((item) => normalizeInlineText(item, 420)).filter(Boolean)
+  const example = paragraphs.find((item) => /例如|比如|举例|案例/.test(item)) || ''
+  const boundary = paragraphs.find((item) => /反例|边界|不一定|不适合|不是|如果/.test(item)) || ''
+  const verification = paragraphs.find((item) => /验证|运行|核对|预测|测试/.test(item)) || ''
+  const conceptLinks = uniqueStrings([
+    /重载/.test(explanation) ? '[[Java 重载]]' : '',
+    /重写/.test(explanation) ? '[[Java 重写]]' : '',
+    /双重分派/.test(explanation) ? '[[双重分派]]' : '',
+    /Visitor|访问者/.test(explanation) ? '[[Visitor 模式]]' : '',
+    /静态类型/.test(explanation) ? '[[静态类型]]' : '',
+  ]).slice(0, 4)
+  const core = paragraphs[0] || explanation
+  return {
+    shouldWrite: true,
+    section: '我的理解',
+    title: `${input.cardTitle}的费曼解释`,
+    content: `用户已经把当前概念拆成可检验的因果过程，并给出了例子、适用边界与验证动作。该结论来自已通过的费曼解释，后续仍以运行结果和陌生迁移复核。`,
+    cardFields: {
+      definition: core ? `${input.cardTitle}的当前机制解释是：${truncate(core.replace(/^我的解释是[:：]?/, ''), 300)}` : '',
+      example: example ? `例如，${truncate(example.replace(/^例如[，,:：]?/, ''), 320)}` : '',
+      boundary: boundary ? `当前识别到的边界是：${truncate(boundary, 320)}` : '',
+      relations: conceptLinks.length > 0 ? `用户的解释实际涉及 ${conceptLinks.join('、')}。` : '',
+      verification: verification ? `可执行验证：${truncate(verification, 340)}` : '',
+    },
+    evidence: [normalizeInlineText(explanation, 80)],
+    confidence: 0.78,
+    reason: 'accepted_feynman_deterministic_fallback',
+  }
+}
+
+function keepOnlyUserSupportedFields(decision: FlushDecision, userText: string): FlushDecision {
+  if (!decision.shouldWrite || decision.section !== '我的理解') return decision
+  const fields = { ...decision.cardFields }
+  const hasSelfExplanation = /我的(?:解释|理解)|我现在理解|换句话说|也就是说|因为|所以/.test(userText)
+  const hasExample = /例如|比如|举例|案例|example|e\.g\./i.test(userText)
+  const hasBoundary = /反例|边界|不适合|不成立|不一定|不是|如果.{0,40}(不|会|则)/.test(userText)
+  const hasVerification = /验证|运行|核对|测试|预测.{0,40}(输出|结果)|对照实验/.test(userText)
+  const hasRelations = /\[\[.+?\]\]|关联|连接|前置|依赖|重载|重写|静态类型|动态分派|对比|区别/.test(userText)
+
+  if (!hasSelfExplanation) fields.definition = ''
+  if (!hasExample) fields.example = ''
+  if (!hasBoundary) fields.boundary = ''
+  if (!hasRelations) fields.relations = ''
+  if (!hasVerification) fields.verification = ''
+  return { ...decision, cardFields: fields }
 }
 
 function parseSessionMetadata(metadata?: string | null): SessionMetadata {
@@ -438,10 +532,57 @@ function buildFlushEntry(input: {
 
 ${input.content.trim()}
 
+- AI 提炼：以上内容是 Agent2 对当前卡片线程的结构化归纳，不是用户原话搬运。
+- 用户原话证据摘要：${input.evidence.slice(0, 3).map((item) => truncate(item, 90)).join(' / ')}
 - 来源：Agent2 ${formatFlushReason(input.reason)}
-- 证据：${input.evidence.slice(0, 3).join(' / ')}
 - 置信度：${Math.round(input.confidence * 100)}%
-- 记录状态：自动保存成功；观察记录已更新；画像证据已新增。`
+- 记录状态：自动保存成功；卡片写入记录与来源证据已更新。`
+}
+
+const CARD_FIELD_HEADINGS: Record<keyof FlushDecision['cardFields'], string> = {
+  definition: '我的定义',
+  example: '我的例子',
+  boundary: '我的边界或反例',
+  relations: '我的关联',
+  verification: '如何验证',
+}
+
+function emptyCardFields(): FlushDecision['cardFields'] {
+  return { definition: '', example: '', boundary: '', relations: '', verification: '' }
+}
+
+function normalizeField(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  return normalizeGeneratedMarkdown(value).slice(0, 500)
+}
+
+function writeCardFields(
+  content: string,
+  fields: FlushDecision['cardFields'],
+  sourceMarker: string,
+): string {
+  return (Object.keys(CARD_FIELD_HEADINGS) as Array<keyof FlushDecision['cardFields']>)
+    .reduce((current, key) => {
+      const value = fields[key].trim()
+      if (!value) return current
+      const evidenceBackedValue = `${value}\n\n<!-- ${sourceMarker}:${key} -->\n> 依据：Agent2 根据本轮用户费曼解释提炼，原话证据见“我的理解”。`
+      return upsertMarkdownSection(current, CARD_FIELD_HEADINGS[key], evidenceBackedValue)
+    }, content)
+}
+
+function upsertMarkdownSection(content: string, heading: string, value: string): string {
+  const trimmed = content.trimEnd()
+  const headingRe = new RegExp(`^##\\s+${escapeRegExp(heading)}\\s*$`, 'm')
+  const match = headingRe.exec(trimmed)
+  if (!match) return `${trimmed}\n\n## ${heading}\n\n${value}\n`
+  const bodyStart = match.index + match[0].length
+  const nextHeading = /^##\s+/gm
+  nextHeading.lastIndex = bodyStart
+  const next = nextHeading.exec(trimmed)
+  const bodyEnd = next ? next.index : trimmed.length
+  const existing = trimmed.slice(bodyStart, bodyEnd).trim()
+  const nextBody = existing ? `${existing}\n\n${value}` : value
+  return `${trimmed.slice(0, bodyStart)}\n\n${nextBody}\n\n${trimmed.slice(bodyEnd).trimStart()}`.trimEnd()
 }
 
 function appendToMarkdownSection(content: string, heading: string, entry: string): string {

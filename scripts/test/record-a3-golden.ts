@@ -82,7 +82,8 @@ async function main() {
   }
 
   await clickIfVisible(page, /进入知识库/)
-  const cleanVault = page.getByRole('button', { name: /小林·Visitor\s*黄金案例/ }).first()
+  const cleanVault = page.getByRole('button', { name: /设计模式黄金案例|小林·架构决策成长案例|小林·Visitor\s*黄金案例/ }).first()
+  await cleanVault.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
   if (!await cleanVault.isVisible().catch(() => false)) {
     console.log((await page.locator('body').innerText().catch(() => '')).slice(0, 2400))
   }
@@ -113,9 +114,11 @@ async function main() {
   await switchMode(page, 'galaxy')
   await pause(page, 4000)
 
-  await selectVaultFromHeader(page, /选择知识库 小林·设计模式学期档案/, 'Mature semester')
+  await selectVaultFromHeader(page, /选择知识库 设计模式黄金案例·长期档案|选择知识库 小林·软件设计与架构学期档案|选择知识库 小林·设计模式学期档案/, 'Mature semester')
   await switchMode(page, 'cognition')
   await requireText(page, /正式评估/, 'Long-term assessment history')
+  const interventionRun = page.getByTestId('profile-intervention-run')
+  assert(await interventionRun.isVisible().catch(() => false), 'Profile intervention run is not visible in the mature archive')
   await pause(page, 6000)
   await switchMode(page, 'learn')
   await pause(page, 5000)

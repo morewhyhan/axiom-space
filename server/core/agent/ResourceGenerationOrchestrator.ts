@@ -527,6 +527,9 @@ export class ResourceGenerationOrchestrator {
       }
 
       const bytes = await readFile(result.outputPath);
+      if (bytes.length < 10_000 || bytes.subarray(4, 8).toString('ascii') !== 'ftyp') {
+        throw new Error(`MP4 成品校验失败：${bytes.length} bytes，缺少有效 ftyp 文件头`);
+      }
       const dataUrl = `data:video/mp4;base64,${bytes.toString('base64')}`;
       await this.deps.saveResourceFile(literatureTitle, 'video.mp4', dataUrl);
       this.deps.onProgress?.({

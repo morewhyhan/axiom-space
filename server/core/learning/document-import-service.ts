@@ -336,13 +336,24 @@ _自动生成文献记录_`
     const title = concept.name?.trim()
     if (!title) continue
     const parentCondition = resolveConditionCard(title, conceptIndex)
-    const content = `## ${title}
+    const content = `# ${title}
 
-${concept.description || ''}
+> 从「${docTitle}」抽取的理解卡脚手架。资料内容是学习证据，不代表用户已经掌握。
 
 **归属条件：** [[${parentCondition.title || clusterName}]]
 
-${buildImportProfileNote({ profileContext, topic, cardTitle: title })}
+## 我的定义
+
+## 我的例子
+
+## 我的边界或反例
+
+## 我的关联
+
+## 如何验证
+
+## 资料线索
+${concept.description || '- 回到原始资料定位相关段落。'}
 
 ---
 source: ${source}
@@ -403,12 +414,23 @@ _从「${docTitle}」自动生成_`
     const linksSection = linkedTargets.length > 0
       ? '\n\n**关联概念：** ' + linkedTargets.map((target) => `[[${target}]]`).join('、')
       : ''
-    const body = `## ${title}
+    const body = `# ${title}
 
-${fc.content || ''}${linksSection}`
+> 从「${docTitle}」抽取的理解卡脚手架。先在 AI 工作台中形成自己的解释，再沉淀为永久知识。
+
+## 我的定义
+
+## 我的例子
+
+## 我的边界或反例
+
+## 我的关联
+
+## 如何验证
+
+## 资料线索
+${fc.content || '- 回到原始资料定位相关段落。'}${linksSection}`
     const content = `${body}
-
-${buildImportProfileNote({ profileContext, topic, cardTitle: title })}
 
 ---
 source: ${source}
@@ -577,7 +599,7 @@ async function parseDocumentWithAi(params: {
         [{ role: 'user', content: prompt }],
         { temperature: 0.1, maxTokens: 4096 },
       )
-      const parsed = parseJsonObject(response) as Partial<StructuredDocument> & { digest?: string }
+      const parsed = await parseAiJsonObject(params.aiManager, response, '文档分片抽取') as Partial<StructuredDocument> & { digest?: string }
       if (Array.isArray(parsed.concepts)) concepts.push(...parsed.concepts)
       if (Array.isArray(parsed.fleetingCards)) fleetingCards.push(...parsed.fleetingCards)
       if (Array.isArray(parsed.relations)) relations.push(...parsed.relations)
@@ -604,7 +626,7 @@ async function parseDocumentWithAi(params: {
     [{ role: 'user', content: parsePrompt }],
     { temperature: 0.1, maxTokens: 8192 },
   )
-  const parsed = parseJsonObject(response) as StructuredDocument
+  const parsed = await parseAiJsonObject(params.aiManager, response, '完整文档抽取') as StructuredDocument
   return {
     title: parsed.title,
     concepts: Array.isArray(parsed.concepts) ? parsed.concepts : [],
@@ -640,7 +662,7 @@ async function planNecessaryStructure(params: {
       }],
       { temperature: 0.16, maxTokens: 4096 },
     )
-    return sanitizeStructurePlan(parseJsonObject(response), params)
+    return sanitizeStructurePlan(await parseAiJsonObject(params.aiManager, response, '必要结构规划'), params)
   } catch (err) {
     console.warn('[DocumentImportService] Failed to plan necessary structure with AI, using fallback:', err)
     return fallbackStructurePlan(params)
@@ -963,7 +985,7 @@ async function createLearningPathForImport(params: {
         )
         pathData = {
           ...pathData,
-          ...parseJsonObject(response),
+          ...await parseAiJsonObject(params.aiManager, response, '学习路径规划'),
         }
       } catch (err) {
         console.warn('[DocumentImportService] Failed to plan import path with AI, using fallback steps:', err)
@@ -1106,6 +1128,31 @@ function parseJsonObject(raw: string): Record<string, unknown> {
     return JSON.parse(match[0]) as Record<string, unknown>
   } catch (err) {
     throw new DocumentImportError('AI_OUTPUT_JSON_FAILED', err instanceof Error ? err.message : 'AI output JSON parse failed', 502)
+  }
+}
+
+async function parseAiJsonObject(
+  aiManager: AiManagerLike,
+  raw: string,
+  purpose: string,
+): Promise<Record<string, unknown>> {
+  try {
+    return parseJsonObject(raw)
+  } catch (firstError) {
+    const repaired = await aiManager.callAPI(
+      [
+        '你是严格 JSON 修复器。',
+        '只修复输入中的 JSON 语法，不增加、不删除、不改写业务内容。',
+        '只输出一个合法 JSON 对象，不要代码块、注释或解释。',
+      ].join('\n'),
+      [{
+        role: 'user',
+        content: `用途：${purpose}\n\n待修复内容：\n${raw.slice(0, 30000)}`,
+      }],
+      { temperature: 0, maxTokens: 8192 },
+    ).catch(() => '')
+    if (!repaired) throw firstError
+    return parseJsonObject(repaired)
   }
 }
 

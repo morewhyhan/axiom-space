@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { client } from '@/lib/api-client'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
 import { LearningResourcePanel, VideoCard, type GeneratedResourceItem } from '@/components/resources/resource-cards'
 import { HudPanel } from '@/components/ui'
@@ -189,7 +189,7 @@ export default function ForgeEditor() {
     const mp4Marker = cardContent.match(/<!--\s*axiom-video-mp4:(.+?)\s*-->/)
     const legacyMarker = cardContent.match(/<!--\s*axiom-video:(.+?)\s*-->/)
     const htmlPath = (htmlMarker?.[1] || legacyMarker?.[1])?.trim()
-    const mp4Path = mp4Marker?.[1]?.trim()
+    const mp4Path = mp4Marker?.[1]?.trim() || deriveVideoMp4Path(htmlPath)
     if (!htmlPath && !mp4Path) return
 
     setVideoLoading(true)
@@ -245,9 +245,12 @@ export default function ForgeEditor() {
           })
           const data: { success: boolean; content?: string; error?: string } = await res.json()
           let videoUrl: string | undefined
-          if (item.type === 'video' && item.mp4Path) {
+          const resolvedMp4Path = item.type === 'video'
+            ? item.mp4Path || deriveVideoMp4Path(item.rawPath || item.path)
+            : undefined
+          if (item.type === 'video' && resolvedMp4Path) {
             const mp4Res = await client.api.vault.read.$get({
-              query: { path: item.mp4Path, vid: currentVaultId || undefined },
+              query: { path: resolvedMp4Path, vid: currentVaultId || undefined },
             }).catch(() => null)
             const mp4Data: { success: boolean; content?: string; error?: string } | null = mp4Res
               ? await mp4Res.json().catch(() => null)
@@ -261,7 +264,9 @@ export default function ForgeEditor() {
             title: item.title,
             path: item.path,
             ref: item.ref,
-            mp4Path: item.mp4Path,
+            rawPath: item.rawPath,
+            rawRef: item.rawRef,
+            mp4Path: resolvedMp4Path || item.mp4Path,
             mp4Ref: item.mp4Ref,
             fileName: item.fileName,
             status: item.status,
@@ -1159,3 +1164,9 @@ export default function ForgeEditor() {
 	    </aside>
 	  )
 	}
+
+function deriveVideoMp4Path(htmlPath?: string | null): string | undefined {
+  const normalized = htmlPath?.trim()
+  if (!normalized || !/\.html$/i.test(normalized)) return undefined
+  return normalized.replace(/[^/]+\.html$/i, 'video.mp4')
+}

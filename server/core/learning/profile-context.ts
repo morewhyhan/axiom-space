@@ -1,5 +1,9 @@
 import { prisma } from '@/lib/db'
+import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
 import { getProfileDimensionTeachingImpact } from '@/server/core/learning/profile-protocol'
+import { compileInterventionProtocol, formatInterventionProtocol, type InterventionProtocol } from '@/server/core/learning/intervention-protocol'
+
+const NON_KNOWLEDGE_PROFILE_CARD_RE = /画像|访谈|学习情况|学习状态|学习计划|对话|任务|仓库|知识库/
 
 export type UserLevel = 'beginner' | 'intermediate' | 'advanced'
 
@@ -69,6 +73,7 @@ export interface ProfileDimensionInsight {
     discriminatingEvidence?: string
     teachingIntervention?: string
     verificationCriterion?: string
+    interventionProtocol?: Partial<InterventionProtocol>
     scope?: string
     status?: string
     sourceType: 'vaultMemory' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
@@ -130,7 +135,7 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
 
   const [cards, edges, clusters, capabilities, learningSessions, learningPaths, observations, feedbackMemories, assessments, resourceJobs, promptSummaries] = await Promise.all([
     prisma.card.findMany({
-      where: { vaultId: input.vaultId },
+      where: { vaultId: input.vaultId, path: { not: ROOT_CARD_PATH } },
       select: { id: true, path: true, type: true, title: true, content: true, clusterId: true, tags: true, createdAt: true, updatedAt: true },
     }),
     prisma.edge.findMany({ where: { vaultId: input.vaultId }, select: { sourceId: true, targetId: true, type: true, createdAt: true } }),
@@ -254,8 +259,13 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
     return source.title || source.path
   })).slice(0, 8)
 
-  const parsedObservations = observations.map((item) => ({ id: item.id, ...parseObservationRecord(item.value), createdAt: item.createdAt }))
-  const observationText = parsedObservations.map((item) => item.text).join('\n')
+  const parsedObservations = observations
+    .map((item) => ({ id: item.id, ...parseObservationRecord(item.value), createdAt: item.createdAt }))
+    .filter((item) => shouldUseObservationForProfile(item, cardById))
+  const profileObservations = parsedObservations.filter((item) =>
+    item.category.startsWith('profile_') && item.status !== 'refuted',
+  )
+  const observationText = profileObservations.map((item) => item.text).join('\n')
   const resourceTypeCounts = new Map<string, number>()
   resourceJobs.forEach((job) => resourceTypeCounts.set(job.resourceType, (resourceTypeCounts.get(job.resourceType) ?? 0) + 1))
   const resourceTypes = [...resourceTypeCounts.entries()].sort((a, b) => b[1] - a[1]).map(([type]) => type).slice(0, 4)
@@ -316,17 +326,18 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
     weakDomains,
   }
 
+  const hasExplanationEvidence = profileObservations.some((item) => observationMatchesDimension(item.category, 'bestExplanationPath'))
   const profileLoop: ProfileLoop = {
-    evidenceCount: observations.length + assessments.length + learningSessions.length,
+    evidenceCount: profileObservations.length + assessments.length,
     gapCount: noPermanentClusters.length,
-    lastObservationAt: observations[0]?.createdAt?.toISOString() ?? null,
+    lastObservationAt: profileObservations[0]?.createdAt?.toISOString() ?? null,
     contextInjection: uniqueStrings([
       activeGoals[0] ? `学什么：${activeGoals[0]}` : '',
       masteredConcepts[0] ? `会什么：${masteredConcepts[0]}` : '',
       weakConcepts[0] ? `哪里会卡住：${weakConcepts[0]}` : '',
-      `怎么讲：${teachingPolicy.explainStyle.join('、')}`,
+      hasExplanationEvidence ? `怎么讲：${teachingPolicy.explainStyle.join('、')}` : '',
     ]),
-    recentEvidence: parsedObservations.slice(0, 3).map((item) => item.text),
+    recentEvidence: profileObservations.slice(0, 3).map((item) => item.text),
   }
 
   const feedbackByDimension = new Map<string, ProfileDimensionInsight['userFeedback']>()
@@ -360,7 +371,7 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
       cardCount,
       edgeCount: edges.length,
       clusterCount: clusters.length,
-      observationCount: observations.length,
+      observationCount: profileObservations.length,
       assessmentCount: assessments.length,
       learningSessionCount: learningSessions.length,
     },
@@ -374,7 +385,7 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
         ...assessments.filter((assessment) => !assessment.passed || assessment.mastery < 60).map((assessment) => ({ id: assessment.id, text: assessment.concept, sourceType: 'assessmentResult' as const })),
       ],
       recentEvidence: profileLoop.recentEvidence,
-      observations: parsedObservations.map((item) => ({
+      observations: profileObservations.map((item) => ({
         id: item.id,
         text: item.text,
         category: item.category,
@@ -390,6 +401,7 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
         discriminatingEvidence: item.discriminatingEvidence,
         teachingIntervention: item.teachingIntervention,
         verificationCriterion: item.verificationCriterion,
+        interventionProtocol: item.interventionProtocol,
         scope: item.scope,
         status: item.status,
       })),
@@ -399,30 +411,52 @@ export async function buildLearningProfileContext(input: { vaultId: string; user
     },
     feedbackByDimension,
     feedbackByNode,
+  }).flatMap((dimension) => {
+    const activeObservations = dimension.observations.filter((observation) => observation.status !== 'refuted')
+    return activeObservations.length > 0
+      ? [{ ...dimension, observations: activeObservations }]
+      : []
   })
 
-  const deterministicPromptBlock = buildPromptBlock({ profileSummary, knowledgeProfile, preferences, teachingPolicy, profileLoop, dimensionInsights })
-  const promptBlock = selectFreshGeneratedPrompt(
-    promptSummaries[0],
-    deterministicPromptBlock,
-    [
-      observations[0]?.createdAt,
-      feedbackMemories[0]?.createdAt,
-      assessments[0]?.createdAt,
-      latestDate(cards.map((card) => card.updatedAt)),
-      latestDate(edges.map((edge) => edge.createdAt)),
-      latestDate(clusters.map((cluster) => cluster.updatedAt)),
-      latestDate(capabilities.map((capability) => capability.lastAccessed)),
-      latestDate(learningSessions.map((session) => session.updatedAt)),
-      latestDate(learningPaths.map((path) => path.updatedAt)),
-      latestDate(resourceJobs.map((job) => job.updatedAt)),
-    ],
-  )
+  profileLoop.evidenceCount = new Set(
+    dimensionInsights.flatMap((dimension) =>
+      dimension.observations.map((observation) => `${observation.sourceType}:${observation.sourceId}`),
+    ),
+  ).size
+  profileLoop.recentEvidence = dimensionInsights
+    .flatMap((dimension) => dimension.observations)
+    .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
+    .map((observation) => observation.userFacingSummary || observation.text)
+    .filter(Boolean)
+    .slice(0, 3)
+
+  const deterministicPromptBlock = dimensionInsights.length > 0
+    ? buildPromptBlock({ profileSummary, knowledgeProfile, preferences, teachingPolicy, profileLoop, dimensionInsights })
+    : ''
+  const promptBlock = deterministicPromptBlock
+    ? selectFreshGeneratedPrompt(
+      promptSummaries[0],
+      deterministicPromptBlock,
+      [
+        profileObservations[0]?.createdAt,
+        feedbackMemories[0]?.createdAt,
+        assessments[0]?.createdAt,
+        latestDate(cards.map((card) => card.updatedAt)),
+        latestDate(edges.map((edge) => edge.createdAt)),
+        latestDate(clusters.map((cluster) => cluster.updatedAt)),
+        latestDate(capabilities.map((capability) => capability.lastAccessed)),
+        latestDate(learningSessions.map((session) => session.updatedAt)),
+        latestDate(learningPaths.map((path) => path.updatedAt)),
+        latestDate(resourceJobs.map((job) => job.updatedAt)),
+      ],
+    )
+    : ''
   return { profileSummary, knowledgeProfile, preferences, teachingPolicy, profileLoop, dimensionInsights, promptBlock }
 }
 
 export function buildPromptBlock(ctx: Omit<LearningProfileContext, 'promptBlock'>): string {
   const { profileSummary, knowledgeProfile, profileLoop, dimensionInsights } = ctx
+  if (dimensionInsights.length === 0) return ''
   const dimensionLines = dimensionInsights.map((dimension) => {
     const activeObservations = dimension.observations
       .filter((observation) => observation.status !== 'refuted')
@@ -447,10 +481,26 @@ export function buildPromptBlock(ctx: Omit<LearningProfileContext, 'promptBlock'
     const observationText = activeObservations.length > 0
       ? activeObservations.slice(0, 4).map(formatObservationForPrompt).join('；')
       : '暂无可执行观察'
+    const primary = activeObservations.find((observation) => observation.teachingIntervention && observation.verificationCriterion)
+    const protocolText = primary
+      ? formatInterventionProtocol(compileInterventionProtocol({
+        dimensionKey: dimension.key,
+        dimensionLabel: dimension.label,
+        subDimensionLabel: primary.subDimensionLabel,
+        observableBehavior: primary.observableBehavior,
+        mechanismHypothesis: primary.mechanismHypothesis,
+        competingHypotheses: primary.competingHypotheses,
+        teachingIntervention: primary.teachingIntervention!,
+        verificationCriterion: primary.verificationCriterion!,
+        confidence: primary.confidence ?? dimension.confidence,
+        protocol: primary.interventionProtocol,
+      }))
+      : '暂无可执行干预协议。'
     return [
       `- ${dimension.label}: 画像强度 ${Math.round(dimension.score * 100)}%, 可信度 ${Math.round(dimension.confidence * 100)}%。${confidenceLabel} ${dimension.interpretation} ${feedbackText}${nodeFeedbackText} ${evidenceText}`,
       `  画像观察: ${observationText}`,
       `  教学影响: ${getProfileDimensionTeachingImpact(dimension.key)}`,
+      `  干预协议:\n${protocolText.split('\n').map((line) => `  ${line}`).join('\n')}`,
     ].join('\n')
   }).join('\n')
 
@@ -476,6 +526,8 @@ Instruction:
 - 低置信画像只能用于轻量追问或小测确认，不能直接改变整轮教学节奏。
 - 状态为 refuted 的动态子维度不得影响教学；状态为 hypothesis 的节点只能触发鉴别问题或小任务。
 - 对 supported、confirmed 或 improved 的节点，必须把 teachingIntervention 实际落实为本轮讲解顺序、起点、信息剂量、防错动作或验收方式。
+- 每轮最多选择一个最高优先级干预协议作为唯一主干预；其他协议只作为边界，不得同时执行。
+- 必须遵守所选协议的执行顺序、禁止事项、失败分支和停止条件，不能省略验证任务。
 - 不要向用户机械宣布“画像显示你……”。通过实际教学行为体现理解；只有需要确认时才用自然语言说明当前判断仍可修正。
 - 当多个观察拥有相同 subDimensionKey 时，把它们视为同一个教学控制节点，不重复执行同义策略。
 - 围绕“学什么、会什么、怎么讲最容易懂、哪里会卡住、一次讲多少、怎么算学会”制定下一轮对话方法。
@@ -736,6 +788,7 @@ function dimensionObservations(key: string, evidence: {
     discriminatingEvidence: item.discriminatingEvidence,
     teachingIntervention: item.teachingIntervention,
     verificationCriterion: item.verificationCriterion,
+    interventionProtocol: item.interventionProtocol,
     scope: item.scope,
     status: item.status,
     sourceType: 'vaultMemory' as const,
@@ -835,6 +888,10 @@ type ParsedObservation = {
   text: string
   category: string
   confidence?: number
+  sourceObjectType?: string
+  sourceObjectId?: string
+  cardId?: string
+  feynmanStatus?: string
   analysisMode?: string
   evidenceSummary?: string
   subDimensionKey?: string
@@ -846,6 +903,7 @@ type ParsedObservation = {
   discriminatingEvidence?: string
   teachingIntervention?: string
   verificationCriterion?: string
+  interventionProtocol?: Partial<InterventionProtocol>
   scope?: string
   status?: string
 }
@@ -858,6 +916,10 @@ function parseObservationRecord(raw: string): ParsedObservation {
       concept?: unknown
       category?: unknown
       confidence?: unknown
+      sourceObjectType?: unknown
+      sourceObjectId?: unknown
+      cardId?: unknown
+      feynmanStatus?: unknown
       analysisMode?: unknown
       evidence?: unknown
       subDimensionKey?: unknown
@@ -869,6 +931,7 @@ function parseObservationRecord(raw: string): ParsedObservation {
       discriminatingEvidence?: unknown
       teachingIntervention?: unknown
       verificationCriterion?: unknown
+      interventionProtocol?: unknown
       scope?: unknown
       status?: unknown
     }
@@ -893,6 +956,10 @@ function parseObservationRecord(raw: string): ParsedObservation {
       confidence: typeof parsed.confidence === 'number' && Number.isFinite(parsed.confidence)
         ? clamp01(parsed.confidence)
         : undefined,
+      sourceObjectType: stringField(parsed.sourceObjectType),
+      sourceObjectId: stringField(parsed.sourceObjectId),
+      cardId: stringField(parsed.cardId),
+      feynmanStatus: stringField(parsed.feynmanStatus),
       analysisMode: typeof parsed.analysisMode === 'string' ? parsed.analysisMode : undefined,
       evidenceSummary: evidenceSummary || undefined,
       subDimensionKey: stringField(parsed.subDimensionKey),
@@ -906,12 +973,34 @@ function parseObservationRecord(raw: string): ParsedObservation {
       discriminatingEvidence: stringField(parsed.discriminatingEvidence),
       teachingIntervention: stringField(parsed.teachingIntervention),
       verificationCriterion: stringField(parsed.verificationCriterion),
+      interventionProtocol: parsed.interventionProtocol && typeof parsed.interventionProtocol === 'object' && !Array.isArray(parsed.interventionProtocol)
+        ? parsed.interventionProtocol as Partial<InterventionProtocol>
+        : undefined,
       scope: stringField(parsed.scope),
       status: stringField(parsed.status),
     }
   } catch {
     return { text: raw, category: 'observation' }
   }
+}
+
+function shouldUseObservationForProfile(
+  observation: ParsedObservation,
+  cards: Map<string, { title: string | null; content: string; type: string }>,
+) {
+  if (observation.category !== 'profile_masteryCheck') return true
+  if (observation.feynmanStatus && observation.feynmanStatus !== 'accepted') return false
+
+  const cardId = observation.cardId || (observation.sourceObjectType === 'card' ? observation.sourceObjectId : undefined)
+  const card = cardId ? cards.get(cardId) : undefined
+  if (!card) return true
+
+  return !isNonKnowledgeProfileCard(card)
+}
+
+function isNonKnowledgeProfileCard(card: { title: string | null; content: string; type: string }) {
+  if (card.type === 'permanent') return false
+  return NON_KNOWLEDGE_PROFILE_CARD_RE.test(`${card.title || ''}\n${card.content || ''}`)
 }
 
 function stringField(value: unknown): string | undefined {

@@ -41,15 +41,22 @@ const RULES: IntentRule[] = [
     intent: 'learn',
     keywords: ['学', '教', '解释', '什么是', '为什么', '怎么理解', '怎么学', '帮我理解',
       '讲解', '入门', '概念', '原理', '基础', '入门', 'learn', 'explain', 'teach',
-      'understand', 'concept', '怎么做的', '如何实现'],
-    patterns: [/想学|想了解|想理解|想明白/, /能(帮|教|告诉).*(吗|么|嘛)$/, /什么是|什么意思/],
+      'understand', 'concept', '怎么做的', '如何实现', '讲清楚', '输出预测', '预测输出',
+      '重载', '重写', 'Visitor', 'visitor', 'accept', 'visit'],
+    patterns: [
+      /想学|想了解|想理解|想明白/,
+      /能(帮|教|告诉).*(吗|么|嘛)$/,
+      /什么是|什么意思/,
+      /(为什么|怎么|如何).*(Visitor|visitor|accept|visit|重载|重写|输出|预测)/,
+      /(Visitor|visitor|accept|visit|重载|重写).*(为什么|怎么|如何|讲清楚|解释)/,
+    ],
     tools: ['read', 'read_skill', 'list_skills', 'ask_user', 'web_search', 'memory', 'write'],
     promptSuffix: '用户正在学习，请耐心解释概念，使用类比和例子帮助理解。',
   },
   {
     intent: 'create',
     keywords: ['创建', '新建', '写', '生成', '制作', '添加', '记录', '保存', '整理',
-      'create', 'write', 'add', 'new', 'make', 'generate', '笔记', '卡片', '题目', '出题', 'quiz', '出卷', '做题', '试题', '测试', '考题', '资料', '文献', '给我', 'ppt', 'PPT', '演示文稿'],
+      'create', 'write', 'add', 'new', 'make', 'generate', '笔记', '卡片', '题目', '出题', 'quiz', '出卷', '做题', '试题', '测试', '考题', '资料', '文献', 'ppt', 'PPT', '演示文稿'],
     patterns: [/帮我(写|创建|新建|生成|出)/, /(写|创建|新建|生成|出)(一个|一份|一篇|一套)/, /(出题|生成题目|生成资源|生成文档|生成导图|出卷|做题|练习题|来.*题目|来.*测试)/, /给我.*(资料|文献|文档|ppt|PPT)/, /(生成|做|弄).*(ppt|PPT|演示文稿)/],
     tools: ['push_resource', 'generate_ppt', 'web_search', 'read', 'write', 'mkdir', 'create_fleeing_card', 'create_permanent_card', 'memory'],
     promptSuffix: '【系统指令-最高优先级】用户发出了创建/生成请求。PPT→调 generate_ppt(topic从上下文提取)。学习资料→调 push_resource。如用户指定格式(如"导出Word/PDF/SVG/流程图/思维导图")，在 push_resource 的 formats 参数中指定(如 formats="docx,pdf")。generate_ppt 只需传 topic，工具内部自动生成内容。不要手动写文件、不要创建目录。直接调工具。',
@@ -87,6 +94,9 @@ const RULES: IntentRule[] = [
  * 模糊场景下建议优先使用 classifyIntentSmart（async，带 LLM 仲裁）。
  */
 export function classifyIntent(message: string): IntentRoute {
+  const learningQuestion = getLearningQuestionRoute(message);
+  if (learningQuestion) return learningQuestion;
+
   const ranked = rankByRules(message);
   if (ranked.length === 0) {
     return { intent: 'chat', confidence: 0.3, source: 'rules' };
@@ -136,6 +146,9 @@ export async function classifyIntentSmart(
   message: string,
   recentContext?: Array<{ role: string; content: string }>,
 ): Promise<IntentRoute> {
+  const learningQuestion = getLearningQuestionRoute(message);
+  if (learningQuestion) return learningQuestion;
+
   const ranked = rankByRules(message);
   const top = ranked[0];
   const second = ranked[1];
@@ -228,6 +241,31 @@ export async function classifyIntentSmart(
     console.debug('[IntentRouter] LLM disambiguation failed:', err);
     return classifyIntent(message);
   }
+}
+
+function getLearningQuestionRoute(message: string): IntentRoute | null {
+  const msg = message.trim();
+  const learningRule = RULES.find(r => r.intent === 'learn');
+  if (!learningRule) return null;
+
+  const asksForMechanism =
+    /为什么|怎么理解|如何理解|讲清楚|解释|原理|机制|本质/.test(msg);
+  const asksForVerificationStep =
+    /输出预测|预测输出|代码.*预测|预测.*代码|重载|重写|override|overload|Visitor/i.test(msg);
+  const asksToCreateStandaloneArtifact =
+    /生成(文档|资料|导图|PPT|ppt|演示文稿)|制作(文档|资料|导图|PPT|ppt|演示文稿)|新建|创建/.test(msg);
+
+  if ((asksForMechanism || asksForVerificationStep) && !asksToCreateStandaloneArtifact) {
+    return {
+      intent: 'learn',
+      confidence: 0.95,
+      tools: learningRule.tools,
+      promptSuffix: learningRule.promptSuffix,
+      source: 'rules',
+    };
+  }
+
+  return null;
 }
 
 /**

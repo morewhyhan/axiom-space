@@ -114,6 +114,18 @@ export const BACKGROUND_ANALYSIS_PROMPT = definePrompt<BackgroundAnalysisInput>(
       "discriminatingEvidence": "本轮证据排除了什么，或还需什么任务才能区分",
       "teachingIntervention": "下一轮教学因此具体改变什么",
       "verificationCriterion": "用什么可观察结果验证判断和干预",
+      "interventionProtocol": {
+        "currentLearningObject": "本轮唯一处理的学习对象",
+        "judgmentBoundary": "当前判断不意味着什么，以及仍未排除什么",
+        "primaryIntervention": "本轮唯一主干预",
+        "executionSteps": ["第一步", "第二步", "验证步骤"],
+        "forbiddenActions": ["本轮明确不能做什么", "不能用什么方式虚假判定掌握"],
+        "verificationTask": "用户必须完成的可观察任务",
+        "passCriteria": ["可直接判定的通过条件"],
+        "failureBranch": "未通过时具体怎样换方案",
+        "stopCondition": "何时停止当前干预并进入下一节点",
+        "priority": 80
+      },
       "scope": "current_topic|domain_pattern|cross_domain_pattern",
       "status": "hypothesis|supported|confirmed|weakened|refuted|improved|needs_retest",
       "confidence": 0.35
@@ -157,6 +169,7 @@ Rules:
 - A mechanismHypothesis without observableBehavior and evidence must not be returned. If the mechanism cannot yet be distinguished from alternatives, use status=hypothesis and name the competing hypotheses.
 - teachingIntervention must differ from generic advice such as "加强练习" or "多举例"; state the changed order, information dose, checkpoint, representation, or assessment action.
 - verificationCriterion must be directly observable, such as a prediction, explanation of an intermediate cause, counterexample, correction, transfer task, or card output.
+- For supported, confirmed, or improved observations, interventionProtocol must make the intervention operational: one currentLearningObject, one primaryIntervention, at least three ordered executionSteps, at least two forbiddenActions, an observable verificationTask, explicit passCriteria, a failureBranch, and a stopCondition.
 - Keep only observations that change the next teaching decision. A course activity log, isolated topic mention, or duplicate claim must not become a main profile observation.
 - Do not claim the user mastered something just because the assistant explained it.
 - Do not extract the same claim again if the conversation only repeats an existing observation without stronger evidence.`,

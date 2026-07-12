@@ -10,7 +10,7 @@ import {
   Search,
   SlidersHorizontal,
 } from 'lucide-react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 import { useGalaxyData } from '@/hooks/use-galaxy'
 import { useAppStore, useGalaxyActions, type GraphLayoutMode } from '@/stores/mode-store'
 import {
@@ -122,6 +122,7 @@ export default function GalaxyControls() {
 
   const nodes = galaxyData?.nodes ?? []
   const edges = galaxyData?.edges ?? []
+  const contentNodeCount = nodes.filter((node) => !node.isRoot).length
 
   return (
     <aside
@@ -143,7 +144,7 @@ export default function GalaxyControls() {
             <div className="mt-1 text-white/72" style={{ fontSize: 'var(--f9)' }}>知识图谱</div>
           </div>
           <div className="grid grid-cols-2 gap-2 text-right">
-            <GalaxyHudStat label="节点" value={nodes.length} />
+            <GalaxyHudStat label="节点" value={contentNodeCount} />
             <GalaxyHudStat label="连接" value={edges.length} />
           </div>
         </div>
@@ -155,7 +156,7 @@ export default function GalaxyControls() {
       </GalaxyHudCard>
 
       <GalaxyHudCard>
-        <GalaxyHudTitle icon={<Eye className="h-3.5 w-3.5" />} label="节点筛选" meta={`${nodes.length}`} />
+        <GalaxyHudTitle icon={<Eye className="h-3.5 w-3.5" />} label="节点筛选" meta={`${contentNodeCount}`} />
         <div className="mt-3 space-y-1.5">
           <GalaxyFilterRow color="bg-purple-400" label="永久知识" active={filterPerm} onClick={() => toggleType('permanent', filterPerm, setFilterPerm)} />
           <GalaxyFilterRow color="bg-cyan-400" label="灵感草稿" active={filterFleet} onClick={() => toggleType('fleeting', filterFleet, setFilterFleet)} />

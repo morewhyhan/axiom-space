@@ -18,6 +18,7 @@ export default function LearningProfile() {
   const submitFeedback = useSubmitProfileFeedback()
   const dimensions = useMemo(() => buildDimensions(data), [data])
   const profileTree = useMemo(() => buildProfileTree(data, dimensions), [data, dimensions])
+  const latestIntervention = data?.interventionRuns?.[0]
 
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
@@ -68,6 +69,38 @@ export default function LearningProfile() {
         <PromptModal />
       </div>
 
+      {latestIntervention && (
+        <div
+          data-testid="profile-intervention-run"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(140px, 0.7fr) minmax(240px, 1.6fr) minmax(220px, 1.2fr)',
+            gap: 14,
+            alignItems: 'start',
+            padding: '10px 14px',
+            borderTop: '1px solid rgba(255,255,255,0.07)',
+            borderBottom: '1px solid rgba(255,255,255,0.07)',
+            background: 'rgba(8,12,18,0.72)',
+            fontFamily: 'var(--font-jetbrains-mono), monospace',
+          }}
+        >
+          <InterventionField
+            label="干预状态"
+            value={interventionStatusLabel(latestIntervention.status, latestIntervention.assessmentMastery)}
+          />
+          <InterventionField
+            label="本轮实际干预"
+            value={latestIntervention.protocol
+              ? `${latestIntervention.protocol.primaryIntervention}\n${latestIntervention.protocol.executionSteps.map((step, index) => `${index + 1}. ${step}`).join('\n')}\n停止：${latestIntervention.protocol.stopCondition}`
+              : latestIntervention.intervention}
+          />
+          <InterventionField
+            label={latestIntervention.userOutcome ? '观察到的结果' : '下一步验证'}
+            value={latestIntervention.userOutcome || latestIntervention.verificationCriterion}
+          />
+        </div>
+      )}
+
       {activeDimension && (
         <div className="profile-page-shell">
           <div
@@ -95,4 +128,20 @@ export default function LearningProfile() {
       )}
     </aside>
   )
+}
+
+function InterventionField({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ color: 'rgba(255,255,255,0.36)', fontSize: 8, marginBottom: 4 }}>{label}</div>
+      <div style={{ color: 'rgba(255,255,255,0.78)', fontSize: 10, lineHeight: 1.55, overflowWrap: 'anywhere' }}>{value}</div>
+    </div>
+  )
+}
+
+function interventionStatusLabel(status: string, mastery?: number) {
+  if (status === 'verified') return `已验证${typeof mastery === 'number' ? ` · 掌握度 ${mastery}` : ''}`
+  if (status === 'needs_adjustment') return '需要调整'
+  if (status === 'observed') return '已观察，等待正式验证'
+  return '已执行，等待用户结果'
 }

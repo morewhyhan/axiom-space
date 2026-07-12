@@ -26,16 +26,43 @@ test('profile evidence nodes preserve structured trace fields for the visible ev
   const [view] = buildProfileTree(null, [dimension])
   const [node] = view.nodes
 
-  assert.deepEqual(node.evidenceTrace, {
-    sourceLabel: '画像观察',
-    sourceType: 'vaultMemory',
-    sourceId: 'message-visitor-1',
-    sourceLocation: 'LearningMessage',
-    evidence: '用户原话：我知道代码怎么写，但不知道为什么要多调一次。',
-    analysisMode: 'llm_context',
-  })
+  assert.equal(node.evidenceTrace?.sourceLabel, '画像观察')
+  assert.equal(node.evidenceTrace?.sourceType, 'vaultMemory')
+  assert.equal(node.evidenceTrace?.sourceId, 'message-visitor-1')
+  assert.equal(node.evidenceTrace?.sourceLocation, 'LearningMessage')
+  assert.equal(node.evidenceTrace?.evidence, '用户原话：我知道代码怎么写，但不知道为什么要多调一次。')
+  assert.equal(node.evidenceTrace?.analysisMode, 'llm_context')
+  assert.equal(node.evidenceTrace?.evidenceCount, 1)
+  assert.deepEqual(node.evidenceTrace?.mergedObservations, ['遇到省略前提时会停下来追问。'])
   assert.equal(node.freshness, '有新证据')
   assert.match(node.promptEffect, /卡点/)
+})
+
+test('profile view never manufactures claims when no active evidence exists', () => {
+  const emptyDimension: ProfileDimensionInsight = {
+    key: 'paceAndLoad',
+    label: '一次讲多少',
+    score: 0,
+    confidence: 0.18,
+    interpretation: '尚无证据。',
+    evidence: ['节奏反馈观察'],
+    observations: [],
+  }
+  const refutedDimension: ProfileDimensionInsight = {
+    ...emptyDimension,
+    key: 'stuckPattern',
+    label: '哪里会卡住',
+    observations: [{
+      text: '旧判断已经被后续证据推翻。',
+      entryPoint: 'LearningMessage',
+      evidence: '用户明确否认',
+      status: 'refuted',
+      sourceType: 'vaultMemory',
+      sourceId: 'refuted-observation',
+    }],
+  }
+
+  assert.deepEqual(buildProfileTree(null, [emptyDimension, refutedDimension]), [])
 })
 
 test('UI state contracts keep page state separate from domain objects', async (t) => {

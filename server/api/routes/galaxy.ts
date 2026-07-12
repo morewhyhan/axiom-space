@@ -9,6 +9,18 @@ import { resolveVault } from '@/server/api/auth-helper'
 import { safeParseTags } from '@/lib/safe-json'
 import { CONTAINS_EDGE_TYPE, ROOT_CARD_PATH, ensureVaultRootCard } from '@/server/core/domain/concept-graph'
 
+function isGraphHiddenCard(card: { path?: string | null; tags?: string | null }) {
+  const path = card.path || ''
+  const tags = card.tags ? safeParseTags(card.tags) : []
+  if (tags.includes('graph-hidden') || tags.includes('machine-only')) return true
+  if (!path.startsWith('resources/')) return false
+  if (/\/guardrail-[^/]+\.json$/i.test(path)) return true
+  if (/\.(json|mp4|webm)$/i.test(path)) return true
+  if (/\/quiz\.md$/i.test(path)) return true
+  // Raw resource files are preview sources. Human-facing generated resource cards live in literature/.
+  return true
+}
+
 function sanitizeClusterColor(color: unknown): string | undefined {
   if (typeof color !== 'string') return undefined
   const trimmed = color.trim()
@@ -43,10 +55,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
     if (!vault) return c.json({ success: true, nodes: [] })
 
     const rootCard = await ensureVaultRootCard({ vaultId: vault.id, vaultName: vault.name })
-    const cards = await prisma.card.findMany({
+    const allCards = await prisma.card.findMany({
       where: { vaultId: vault.id },
       select: { id: true, title: true, path: true, type: true, clusterId: true, tags: true, createdAt: true, updatedAt: true, cluster: { select: { name: true, color: true } } },
     })
+    const cards = allCards.filter((card) => !isGraphHiddenCard(card))
     const containsEdges = await prisma.edge.findMany({
       where: { vaultId: vault.id, type: CONTAINS_EDGE_TYPE },
       select: { sourceId: true, targetId: true },
@@ -97,11 +110,19 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: true, edges: [] })
 
+    const visibleCards = await prisma.card.findMany({
+      where: { vaultId: vault.id },
+      select: { id: true, path: true, tags: true },
+    })
+    const visibleCardIds = new Set(visibleCards.filter((card) => !isGraphHiddenCard(card)).map((card) => card.id))
     const edges = await prisma.edge.findMany({
       where: { vaultId: vault.id },
       select: { id: true, sourceId: true, targetId: true, weight: true, type: true },
     })
-    return c.json({ success: true, edges })
+    return c.json({
+      success: true,
+      edges: edges.filter((edge) => visibleCardIds.has(edge.sourceId) && visibleCardIds.has(edge.targetId)),
+    })
   })
 
   // ── CLUSTER CRUD ────────────────────────────────────────────────

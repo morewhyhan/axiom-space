@@ -131,6 +131,41 @@ export interface CognitionData {
     evidenceIds: string[]
     createdAt: string
   }>
+  interventionRuns?: ProfileInterventionRun[]
+}
+
+export interface ProfileInterventionRun {
+  runId: string
+  observationId: string
+  dimensionKey: string
+  subDimensionLabel?: string
+  intervention: string
+  verificationCriterion: string
+  status: 'delivered' | 'observed' | 'verified' | 'needs_adjustment'
+  confidence: number
+  deliveredAt: string
+  deliveryEvidence: string
+  alignmentScore: number
+  userOutcome?: string
+  outcomeObservedAt?: string
+  assessmentMastery?: number
+  adjustmentReason?: string
+  protocol?: InterventionProtocol
+}
+
+export interface InterventionProtocol {
+  currentLearningObject: string
+  observationFact: string
+  currentJudgment: string
+  judgmentBoundary: string
+  primaryIntervention: string
+  executionSteps: string[]
+  forbiddenActions: string[]
+  verificationTask: string
+  passCriteria: string[]
+  failureBranch: string
+  stopCondition: string
+  priority: number
 }
 
 export interface ProfileDimensionInsight {
@@ -155,6 +190,7 @@ export interface ProfileDimensionInsight {
     discriminatingEvidence?: string
     teachingIntervention?: string
     verificationCriterion?: string
+    interventionProtocol?: InterventionProtocol
     scope?: string
     status?: string
     sourceType: 'vaultMemory' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
@@ -249,6 +285,7 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     promptBlock: data.promptBlock as string | undefined,
     assessmentTimeline: data.assessmentTimeline as CognitionData['assessmentTimeline'] ?? [],
     hypothesisTimeline: data.hypothesisTimeline as CognitionData['hypothesisTimeline'] ?? [],
+    interventionRuns: data.interventionRuns as ProfileInterventionRun[] ?? [],
   }
 }
 

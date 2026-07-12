@@ -1,6 +1,6 @@
 'use client'
 
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 import { useAppStore, useGalaxyActions, type GraphLayoutMode } from '@/stores/mode-store'
 import { SegmentedControl } from '@/components/ui'
 

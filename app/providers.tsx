@@ -7,6 +7,7 @@ import { Toaster } from 'sonner'
 
 import { getQueryClient } from './get-query-client'
 import { ErrorBoundary } from '@/components/error-boundary'
+import { FEEDBACK_LAYOUT, FEEDBACK_TIMING } from '@/lib/ui-feedback'
 
 export default function Providers({ children }: { children: React.ReactNode }) {
   const queryClient = getQueryClient()
@@ -19,7 +20,13 @@ export default function Providers({ children }: { children: React.ReactNode }) {
           <Toaster
             richColors
             position="bottom-right"
+            visibleToasts={FEEDBACK_LAYOUT.visibleToasts}
+            gap={FEEDBACK_LAYOUT.gap}
+            offset={FEEDBACK_LAYOUT.bottomOffset}
+            expand={false}
+            closeButton={false}
             toastOptions={{
+              duration: FEEDBACK_TIMING.toast,
               style: {
                 fontSize: '12px',
                 fontFamily: 'system-ui, sans-serif',

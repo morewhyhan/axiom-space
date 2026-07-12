@@ -481,6 +481,7 @@ export function useAgent() {
           vaultId: currentVaultId,
           oracleId: useAppStore.getState().oracle,
           sessionId: currentSessionId ?? undefined,
+          cardId: selectedNode?.id,
         }),
         credentials: 'include',
         signal: controller.signal,

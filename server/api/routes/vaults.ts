@@ -8,6 +8,7 @@ import { zValidator } from '@/server/api/validator'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { ensureVaultRootCard } from '@/server/core/domain/concept-graph'
+import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
@@ -18,7 +19,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const vaults = await prisma.vault.findMany({
     where: { userId },
     orderBy: { createdAt: 'asc' },
-    include: { _count: { select: { cards: true } } },
+    include: { _count: { select: { cards: { where: { path: { not: ROOT_CARD_PATH } } } } } },
   })
 
   return c.json({

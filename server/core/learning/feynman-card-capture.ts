@@ -30,13 +30,20 @@ type Assessment = {
     hasConceptUse: boolean
     hasContextMatch: boolean
     hasUncertainty: boolean
+    hasExample: boolean
+    hasBoundary: boolean
+    hasVerification: boolean
   }
 }
 
 const SELF_EXPLANATION_RE = /我的理解|我理解|我觉得|我会这样讲|用自己的话|简单说|也就是说|换句话说|费曼|我试着解释|我来解释|我认为|在我看来/
-const EXPLANATION_SIGNAL_RE = /是|指|意思|用来|解决|用于|因为|所以|比如|例如|不等于|不是|区别|关系|作用|场景|导致|依赖|前置|权重|总代价|总权重|边数|更短/
+const EXPLANATION_SIGNAL_RE = /意思是|用来|解决|用于|因为|所以|比如|例如|不等于|不是|区别|关系|作用|场景|导致|依赖|前置|边界|反例|验证|权重|总代价|总权重|边数|更短/
 const QUESTION_RE = /^(为什么|怎么|如何|什么是|请问|能不能|可不可以|帮我|你来|给我|生成|创建|打开|保存|升级|删除)/
-const UNCERTAINTY_RE = /不知道|不确定|不太懂|没懂|乱说|瞎说|可能吧|大概吧|我猜/
+const CONFUSION_RE = /困惑|不懂|没懂|不明白|不理解|卡住|搞不清|为什么不能|为什么要|是不是多余|像是多绕/
+const UNCERTAINTY_RE = /不知道|不确定|不太懂|没懂|乱说|瞎说|可能吧|大概吧|我猜|我感觉/
+const PROFILE_NARRATIVE_RE = /学习情况|学习状态|学习习惯|上课|老师|跟不上|基础.{0,4}(差|弱|薄)|自我介绍|个人情况|画像|制定.{0,6}(计划|方案)|了解我/
+const META_REQUEST_RE = /请.{0,12}(分析|判断|记录|建立|生成|更新)|帮我.{0,12}(分析|判断|记录|建立|生成|更新)|根据.{0,12}(情况|描述|对话).{0,12}(画像|计划|方案)/
+const NON_KNOWLEDGE_CARD_RE = /画像|访谈|学习情况|学习状态|学习计划|对话|任务|仓库|知识库/
 
 export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promise<FeynmanCaptureResult> {
   let explanation = normalizeText(input.message)
@@ -53,8 +60,8 @@ export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promi
     cardContent: card.content || '',
     explanation,
   })
-  if (assessment.status === 'ignored' && assessment.reason === 'not_a_feynman_explanation') {
-    const combined = await buildRecentUserExplanation(input.sessionId)
+  if (assessment.status === 'ignored' && assessment.reason === 'not_a_feynman_explanation' && SELF_EXPLANATION_RE.test(explanation)) {
+    const combined = await buildRecentUserExplanation(input.sessionId, card.title || '')
     if (combined && combined !== explanation) {
       const combinedAssessment = assessFeynmanExplanation({
         cardTitle: card.title || '当前卡片',
@@ -83,12 +90,14 @@ export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promi
     createdAt: now,
   })
   const targetSection = assessment.status === 'accepted' ? '我的理解' : '待补全'
-  const nextContent = appendToMarkdownSection(card.content || '', targetSection, entry)
-
   await prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM card WHERE id = ${card.id} FOR UPDATE`
+    const latestCard = await tx.card.findUnique({ where: { id: card.id }, select: { content: true } })
+    const latestContent = latestCard?.content || ''
+    const capturedContent = appendToMarkdownSection(latestContent, targetSection, entry)
     await tx.card.update({
       where: { id: card.id },
-      data: { content: nextContent },
+      data: { content: capturedContent },
     })
     await tx.vaultMemory.create({
       data: {
@@ -97,20 +106,26 @@ export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promi
         category: 'observation',
         value: JSON.stringify({
           text: assessment.status === 'accepted'
-            ? `用户已经能用自己的话解释「${card.title || '当前卡片'}」。`
+            ? `用户已经提供了与「${card.title || '当前卡片'}」相关的阶段性自我解释；是否达到稳定掌握仍以完整审核或测评为准。`
             : `用户对「${card.title || '当前卡片'}」的解释存在待修正点：${assessment.issues.join('；')}`,
           category: 'profile_masteryCheck',
-          confidence: assessment.status === 'accepted' ? 0.78 : 0.52,
+          confidence: assessment.status === 'accepted'
+            ? assessment.checks.hasExample && assessment.checks.hasBoundary && assessment.checks.hasVerification ? 0.72 : 0.54
+            : 0.42,
           sourceObjectType: 'card',
           sourceObjectId: card.id,
           cardId: card.id,
           feynmanStatus: assessment.status,
+          promotionReady: assessment.status === 'accepted'
+            && assessment.checks.hasExample
+            && assessment.checks.hasBoundary
+            && assessment.checks.hasVerification,
           checks: assessment.checks,
           issues: assessment.issues,
           evidence: [{
             sourceObjectType: 'learningMessage',
             sourceObjectId: input.sessionId,
-            summary: truncate(explanation, 260),
+            summary: buildEvidenceSummary(explanation),
           }],
         }),
       },
@@ -135,8 +150,10 @@ export async function maybeCaptureFeynmanExplanation(input: CaptureInput): Promi
     targetId: card.id,
     action: assessment.status === 'accepted' ? 'feynman_recorded' : 'feynman_needs_revision',
     detail: assessment.status === 'accepted'
-      ? '自动保存成功；观察记录已更新；画像证据已新增。'
-      : `自动保存成功；观察记录已更新；画像证据已新增。待修正：${assessment.issues.join('；')}`,
+      ? assessment.checks.hasExample && assessment.checks.hasBoundary && assessment.checks.hasVerification
+        ? '自动保存成功；例子、边界和验证证据齐全，可进入后续永久卡审核。'
+        : '自动保存成功；已记录为阶段性理解，仍需补充例子、边界或验证后才能作为晋级证据。'
+      : `自动保存成功；观察记录已更新；暂不作为掌握证据。待修正：${assessment.issues.join('；')}`,
     severity: assessment.status === 'accepted' ? 'success' : 'warning',
   })
   scheduleRagIndexCard(card.id, 'feynman-capture')
@@ -157,20 +174,28 @@ function assessFeynmanExplanation(input: {
   const text = input.explanation
   const compact = text.replace(/\s+/g, '')
   const startsAsQuestion = QUESTION_RE.test(text.trim())
+  const hasConfusion = CONFUSION_RE.test(text)
   const hasSelfCue = SELF_EXPLANATION_RE.test(text)
   const signalCount = countMatches(text, EXPLANATION_SIGNAL_RE)
   const ownWords = hasSelfCue || signalCount >= 2
   const enoughSubstance = compact.length >= 30
   const hasConceptUse = /是|指|意思|用来|解决|用于|因为|所以|如果|应该|代表|说明/.test(text)
   const hasUncertainty = UNCERTAINTY_RE.test(text)
+  const hasExample = /例如|比如|举例|案例|example|e\.g\./i.test(text)
+  const hasBoundary = /反例|边界|不适合|不成立|不一定|不是|如果.{0,30}(不|会|则)/.test(text)
+  const hasVerification = /验证|运行|核对|测试|预测.{0,30}(输出|结果)|对照实验/.test(text)
   const hasContextMatch = matchesCardContext(input.cardTitle, input.cardContent, text)
+  const isNonKnowledgeCard = NON_KNOWLEDGE_CARD_RE.test(`${input.cardTitle}\n${input.cardContent}`)
+  const hasFocusedConcept = mentionsConceptAnchor(input.cardTitle, input.cardContent, text) && !isNonKnowledgeCard
+  const isProfileNarrative = PROFILE_NARRATIVE_RE.test(text)
+  const isMetaRequest = META_REQUEST_RE.test(text)
 
-  if (startsAsQuestion && !hasSelfCue) {
+  if (((startsAsQuestion || hasConfusion) && !hasSelfCue) || isMetaRequest || (isProfileNarrative && !hasFocusedConcept)) {
     return {
       status: 'ignored',
       reason: 'question_or_command',
       issues: [],
-      checks: { ownWords, enoughSubstance, hasConceptUse, hasContextMatch, hasUncertainty },
+      checks: { ownWords, enoughSubstance, hasConceptUse, hasContextMatch, hasUncertainty, hasExample, hasBoundary, hasVerification },
     }
   }
   if (!ownWords || !enoughSubstance) {
@@ -178,7 +203,7 @@ function assessFeynmanExplanation(input: {
       status: 'ignored',
       reason: 'not_a_feynman_explanation',
       issues: [],
-      checks: { ownWords, enoughSubstance, hasConceptUse, hasContextMatch, hasUncertainty },
+      checks: { ownWords, enoughSubstance, hasConceptUse, hasContextMatch, hasUncertainty, hasExample, hasBoundary, hasVerification },
     }
   }
 
@@ -192,11 +217,11 @@ function assessFeynmanExplanation(input: {
     status,
     reason: status === 'accepted' ? 'accepted' : 'quality_gate',
     issues,
-    checks: { ownWords, enoughSubstance, hasConceptUse, hasContextMatch, hasUncertainty },
+    checks: { ownWords, enoughSubstance, hasConceptUse, hasContextMatch, hasUncertainty, hasExample, hasBoundary, hasVerification },
   }
 }
 
-async function buildRecentUserExplanation(sessionId: string): Promise<string | null> {
+async function buildRecentUserExplanation(sessionId: string, cardTitle: string): Promise<string | null> {
   const messages = await prisma.learningMessage.findMany({
     where: { sessionId, role: 'user' },
     orderBy: { timestamp: 'desc' },
@@ -206,10 +231,16 @@ async function buildRecentUserExplanation(sessionId: string): Promise<string | n
   const combined = messages
     .reverse()
     .map((message) => normalizeText(message.content))
-    .filter(Boolean)
+    .filter((message) => message && !PROFILE_NARRATIVE_RE.test(message) && !META_REQUEST_RE.test(message))
     .join('\n')
     .trim()
-  return combined || null
+  return combined && (combined.includes(cardTitle) || SELF_EXPLANATION_RE.test(combined)) ? combined : null
+}
+
+function mentionsConceptAnchor(title: string, content: string, text: string) {
+  if (title.trim() && text.includes(title.trim())) return true
+  const anchors = extractKeywords(`${title}\n${content}`).slice(0, 20)
+  return anchors.some((anchor) => text.includes(anchor))
 }
 
 function buildFeynmanEntry(input: {
@@ -227,19 +258,39 @@ function buildFeynmanEntry(input: {
     hour: '2-digit',
     minute: '2-digit',
   })
-  const quote = quoteMarkdown(truncate(input.explanation, 800))
   const statusText = input.assessment.status === 'accepted' ? '已通过' : '待修正'
   const issueText = input.assessment.issues.length > 0
     ? `\n- 待修正：${input.assessment.issues.join('；')}`
     : ''
+  const summary = buildFeynmanSummary(input.explanation, input.assessment)
+  const evidence = buildEvidenceSummary(input.explanation)
 
   return `<!-- ${input.marker} -->
 ### ${time} 费曼解释（${statusText}）
 
-${quote}
+${summary}
 
 - 校验：${input.assessment.status === 'accepted' ? '表达清晰，能对应当前卡片，可作为用户自己的理解记录。' : '先保留为待补全，不作为正确知识。'}${issueText}
-- 记录状态：自动保存成功；观察记录已更新；画像证据已新增。`
+- AI 提炼：以上内容是系统对用户解释的概念化归纳，不是用户原话搬运。
+- 用户原话证据摘要：${evidence}
+- 记录状态：自动保存成功；观察记录已更新；${input.assessment.status === 'accepted' ? '已形成阶段性理解证据，是否可晋级仍由完整审核决定。' : '暂不作为掌握证据。'}`
+}
+
+function buildFeynmanSummary(explanation: string, assessment: Assessment) {
+  const clean = normalizeInlineText(explanation, 140)
+  const uncertainty = assessment.checks.hasUncertainty || assessment.issues.length > 0
+  if (uncertainty) {
+    return `用户的解释已经暴露出一个待澄清点：他还没有把关键前提、因果链或适用边界讲完整。后续应继续追问“为什么成立、什么时候不成立、如何验证”。`
+  }
+  return `用户正在用自己的话解释当前概念，表达中已经出现了与卡片相关的因果、用途或边界线索。可沉淀为一条阶段性理解，但后续仍应继续补充例子、反例和验证方式。\n\n用户理解要点：${clean}`
+}
+
+function buildEvidenceSummary(explanation: string) {
+  const clean = normalizeInlineText(explanation, 120)
+  if (CONFUSION_RE.test(explanation)) {
+    return `用户明确暴露困惑：${clean}`
+  }
+  return `用户自述理解摘要：${clean}`
 }
 
 function appendToMarkdownSection(content: string, heading: string, entry: string) {
@@ -298,6 +349,14 @@ function countMatches(text: string, re: RegExp) {
 
 function quoteMarkdown(value: string) {
   return value.split('\n').map((line) => `> ${line}`).join('\n')
+}
+
+function normalizeInlineText(value: string, maxLength: number): string {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/^["“”'`]+|["“”'`]+$/g, '')
+    .trim()
+    .slice(0, maxLength)
 }
 
 function truncate(value: string, max: number) {

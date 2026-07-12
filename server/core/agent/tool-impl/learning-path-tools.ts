@@ -13,6 +13,7 @@ import { aiManager } from '../../ai/AIManager';
 import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
 import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 import { buildGenerationRagContext } from '@/server/core/rag/generation-context';
+import { buildLearningProfileContext } from '@/server/core/learning/profile-context';
 
 /**
  * 为某个主题创建学习路径
@@ -45,12 +46,30 @@ const createLearningPathTool = createTool(
         topK: 8,
         maxChars: 4500,
       });
+      const profileContext = await buildLearningProfileContext({ vaultId, userId }).catch(() => null);
+      const profileEvidence = profileContext
+        ? uniqueProfileEvidence(profileContext.dimensionInsights.flatMap((dimension) =>
+          dimension.observations
+            .filter((observation) => observation.status !== 'refuted')
+            .map((observation) => ({
+              id: `${observation.sourceType}:${observation.sourceId}`,
+              label: observation.subDimensionLabel || dimension.label,
+              evidence: observation.userFacingSummary || observation.text,
+              confidence: observation.confidence ?? dimension.confidence,
+              status: observation.status || ((observation.confidence ?? dimension.confidence) >= 0.55 ? 'supported' : 'hypothesis'),
+            })),
+        )).slice(0, 8)
+        : [];
+      const profilePrompt = profileContext?.promptBlock?.trim()
+        ? `\n## 可追溯学习画像\n${profileContext.promptBlock.trim()}\n`
+        : '\n## 学习画像\n当前没有可追溯画像证据，不得假设用户基础、偏好或卡点。\n';
 
       const prompt = `你是学习课程设计专家。为以下主题设计一个学习路径：
 
 ${AXIOM_KNOWLEDGE_STANDARD}
 
 ${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于已有 DB 摘要和必要通用结构，不能伪造当前知识库依据。'}
+${profilePrompt}
 
 主题：${params.topic}
 目标：${params.goal}
@@ -88,14 +107,13 @@ ${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于
       const cleaned = response.replace(/```(?:json)?\s*/g, '').replace(/\s*```/g, '');
       const match = cleaned.match(/\{[\s\S]*\}/);
 
-      if (!match) {
-        return {
-          content: [{ type: 'text', text: '路径生成失败' }],
-          details: { error: 'JSON parse failed' },
-        };
+      let pathData: any
+      try {
+        pathData = match ? JSON.parse(match[0]) : buildDeterministicLearningPath(params.topic, params.duration_hours || 20)
+      } catch (error) {
+        console.warn('[LearningPathTool] Invalid AI JSON, using deterministic path:', (error as Error).message)
+        pathData = buildDeterministicLearningPath(params.topic, params.duration_hours || 20)
       }
-
-      const pathData = JSON.parse(match[0]);
 
       // 保存到数据库
       const stages = Array.isArray(pathData.stages) ? pathData.stages : [];
@@ -112,7 +130,9 @@ ${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于
           name: pathData.title || `${params.topic}学习路径`,
           topic: params.topic,
           status: 'active',
-          description: `依据当前学习画像，为“${params.topic}”生成 ${stages.length} 个可执行阶段；每一步均包含学习概念、建议资源和可观察的完成证据。`,
+          description: profileEvidence.length > 0
+            ? `依据 ${profileEvidence.length} 条可追溯画像证据，为“${params.topic}”生成 ${stages.length} 个可执行阶段；每一步均包含学习概念、建议资源和可观察的完成证据。`
+            : `依据当前主题和知识库资料，为“${params.topic}”生成 ${stages.length} 个可执行阶段；当前没有画像证据，因此未声称个性化调整。`,
           difficulty: params.style === 'theory' ? 'intermediate' : 'adaptive',
           source: 'ai',
           totalSteps: stages.length,
@@ -141,47 +161,46 @@ ${ragContext.contextText || 'LightRAG 检索上下文：无。路径只能基于
         where: { id: step.id },
         data: { prerequisites: JSON.stringify([orderedSteps[index].id]) },
       })));
-      const profileMemories = await prisma.vaultMemory.findMany({
-        where: { vaultId, category: 'observation' },
-        orderBy: { createdAt: 'desc' },
-        take: 12,
-      });
-      const profileEvidence = profileMemories.flatMap((memory) => {
-        try {
-          const value = JSON.parse(memory.value) as { text?: string; confidence?: number; category?: string };
-          if (!value.text) return [];
-          return [{
-            id: memory.id,
-            label: value.category?.replace('profile_', '') || '学习画像',
-            evidence: value.text,
-            confidence: value.confidence,
-            status: (value.confidence || 0) >= 0.55 ? '已确认画像证据' : '待验证画像假设',
-          }];
-        } catch {
-          return [];
-        }
-      }).slice(0, 4);
       const evidenceIds = profileEvidence.map((item) => item.id);
-      await prisma.pathAdjustmentHistory.create({
-        data: {
-          pathId: path.id,
-          trigger: 'profile_confirmed',
-          adjustment: JSON.stringify({
+      if (profileEvidence.length > 0) {
+        const evidenceText = profileEvidence.map((item) => item.evidence).join('\n');
+        const visitorPersonalization = /Visitor|访问者|双重分派/i.test(params.topic)
+          && /accept|visit|重载|重写|分派|UML|关键.{0,4}(前提|因果)/i.test(evidenceText);
+        const adjustment = visitorPersonalization
+          ? {
             type: 'personalize_path',
-            summary: '画像显示当前缺口在 Java 分派过程而非 UML 角色，因此保留知识深度、缩小单次因果跨度。',
+            summary: '画像证据显示当前缺口集中在分派过程而非角色名词，因此保留知识深度、缩小单次因果跨度。',
             comparison: {
               defaultSteps: ['Visitor 意图与角色', 'Visitor UML 结构', '照写标准模板', '模式名称选择题'],
               personalizedSteps: orderedSteps.map((step) => step.title),
             },
             profileEvidence,
             changes: [
-              { kind: 'added', step: orderedSteps[0]?.title || 'Java 分派过程实验', reason: '先暴露并补齐重载与重写的真实机制缺口。', evidenceIds },
-              { kind: 'skipped', step: 'Visitor 角色与 UML', reason: '用户已能复述结构，重复讲解不能解决 accept 的因果疑问。', evidenceIds },
+              { kind: 'added', step: orderedSteps[0]?.title || '分派过程实验', reason: '画像证据要求先暴露并补齐重载与重写的机制缺口。', evidenceIds },
+              { kind: 'skipped', step: 'Visitor 角色与 UML', reason: '用户自述已能识别结构，重复讲角色不能回答 accept 的因果疑问。', evidenceIds },
               { kind: 'reordered', step: orderedSteps[1]?.title || 'Visitor 双重分派', reason: '先闭合编译期与运行期选择，再进入迁移和边界。', evidenceIds },
             ],
-          }),
-        },
-      });
+          }
+          : {
+            type: 'personalize_path',
+            summary: `路径生成时实际读取了 ${profileEvidence.length} 条画像证据，并据此调整任务入口、粒度和验收方式。`,
+            comparison: {
+              defaultSteps: ['确认基础', '学习核心概念', '完成练习', '综合复习'],
+              personalizedSteps: orderedSteps.map((step) => step.title),
+            },
+            profileEvidence,
+            changes: [
+              { kind: 'deepened', step: orderedSteps[0]?.title || params.topic, reason: `根据画像证据“${profileEvidence[0].evidence.slice(0, 100)}”调整首个任务和完成标准。`, evidenceIds: [profileEvidence[0].id] },
+            ],
+          };
+        await prisma.pathAdjustmentHistory.create({
+          data: {
+            pathId: path.id,
+            trigger: 'profile_confirmed',
+            adjustment: JSON.stringify(adjustment),
+          },
+        });
+      }
 
       const report = `
 ## 学习路径已创建：${pathData.title}
@@ -228,6 +247,36 @@ ${pathData.prerequisites?.length > 0
     }
   }
 );
+
+function buildDeterministicLearningPath(topic: string, durationHours: number) {
+  const perStage = Math.max(0.5, Math.round(durationHours / 4 * 10) / 10)
+  if (/Visitor|访问者|双重分派/i.test(topic)) {
+    return {
+      title: 'Visitor 双重分派个性化学习路径',
+      total_stages: 4,
+      prerequisites: ['Java 多态基础'],
+      success_criteria: ['能预测陌生代码调用轨迹', '能说明反例与适用边界', '通过运行结果和费曼解释双重验证'],
+      stages: [
+        { stage: 1, name: '补齐 Java 重载与重写过程模型', duration_hours: perStage, concepts: ['编译期重载选择', '运行期重写分派', '静态类型与真实类型'], resources: ['最小 Java 对照实验'], milestone: '预测并运行 visitor.visit(n) 的实际签名，解释编译期与运行期各决定什么' },
+        { stage: 2, name: '追踪 accept 与 visit 的完整因果链', duration_hours: perStage, concepts: ['accept', 'visit', '双重分派'], resources: ['调用时序图', '逐步代码追踪'], milestone: '用自己的话解释两次动态分派中间的一次重载选择' },
+        { stage: 3, name: '迁移到陌生 AST 场景', duration_hours: perStage, concepts: ['陌生迁移', '对象结构', '新增操作'], resources: ['AST 代码练习'], milestone: '在未见过的 AST 中预测调用轨迹并完成实现' },
+        { stage: 4, name: '比较反例与模式选择边界', duration_hours: perStage, concepts: ['Visitor 与 Strategy', '变化方向', '不适用边界'], resources: ['反例判断题', '模式对比表'], milestone: '说明何时不该使用 Visitor，并给出替代方案和验证理由' },
+      ],
+    }
+  }
+  return {
+    title: `${topic}个性化学习路径`,
+    total_stages: 4,
+    prerequisites: [],
+    success_criteria: ['能够解释、应用、验证并迁移当前主题'],
+    stages: [
+      { stage: 1, name: '校验必要前置', duration_hours: perStage, concepts: ['前置知识'], resources: ['诊断练习'], milestone: '定位并补齐第一个关键缺口' },
+      { stage: 2, name: '闭合核心机制', duration_hours: perStage, concepts: [topic], resources: ['因果讲解', '示例'], milestone: '能用自己的话解释核心因果链' },
+      { stage: 3, name: '完成陌生迁移', duration_hours: perStage, concepts: ['迁移应用'], resources: ['变式练习'], milestone: '在陌生情境中正确应用' },
+      { stage: 4, name: '验证边界与反例', duration_hours: perStage, concepts: ['边界', '反例'], resources: ['反例测试'], milestone: '能说明何时不成立及如何验证' },
+    ],
+  }
+}
 
 /**
  * 获取学习进度
@@ -667,6 +716,7 @@ const setLearningGoalTool = createTool(
       const session = await prisma.learningSession.create({
         data: {
           userId,
+          vaultId,
           domain: params.topic,
           concept: params.goal,
           status: 'active',
@@ -723,6 +773,15 @@ ${targetDate ? `- 距目标日期还有约 ${Math.max(0, Math.ceil((targetDate.g
     }
   }
 );
+
+function uniqueProfileEvidence<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    if (!item.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
 
 export function registerLearningPathTools(): void {
   toolRegistry.register(createLearningPathTool);

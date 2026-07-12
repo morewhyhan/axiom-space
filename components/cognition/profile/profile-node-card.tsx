@@ -307,6 +307,17 @@ export function ProfileNodeCard({
                 {node.evidenceTrace.verificationCriterion && (
                   <EvidenceField label="验证标准" value={node.evidenceTrace.verificationCriterion} />
                 )}
+                {node.evidenceTrace.interventionProtocol && (
+                  <>
+                    <EvidenceField
+                      label="执行顺序"
+                      value={node.evidenceTrace.interventionProtocol.executionSteps.map((step, index) => `${index + 1}. ${step}`).join('\n')}
+                    />
+                    <EvidenceField label="本轮禁止" value={node.evidenceTrace.interventionProtocol.forbiddenActions.join('\n')} />
+                    <EvidenceField label="失败后调整" value={node.evidenceTrace.interventionProtocol.failureBranch} />
+                    <EvidenceField label="停止条件" value={node.evidenceTrace.interventionProtocol.stopCondition} />
+                  </>
+                )}
                 {(node.evidenceTrace.scope || node.evidenceTrace.status) && (
                   <EvidenceField
                     label="这条结论目前适用于"

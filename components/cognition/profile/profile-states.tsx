@@ -14,8 +14,8 @@ export function ProfileEmptyState() {
   return (
     <aside className="cognition-workbench pointer-events-auto">
       <div className="profile-empty">
-        <p>当前没有可展示的画像。</p>
-        <p>完成一次 AI 工作台对话或创建学习路径后，这里会生成画像结构。</p>
+        <p>还没有可验证的学习画像。</p>
+        <p>完成初始画像对话，或在真实学习中留下可追溯的回答、测评和反馈后，这里才会显示结论。</p>
       </div>
     </aside>
   )

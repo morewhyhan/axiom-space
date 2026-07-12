@@ -8,6 +8,7 @@ import { prisma } from '@/lib/db'
 import { resolveAiConfig } from '@/lib/ai-config'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
+import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
 
 type EvidenceRef = {
   sourceObjectType: 'card' | 'cluster' | 'ragDocumentIndex' | 'learningSession' | 'vaultMemory' | 'derived'
@@ -135,13 +136,13 @@ const app = new Hono<{ Variables: { userId: string } }>()
     assessments,
     resourceJobs,
   ] = await Promise.all([
-    prisma.card.findMany({ where: { vaultId: vid }, select: { id: true, path: true, type: true, content: true, title: true, clusterId: true, tags: true, createdAt: true, cluster: { select: { name: true, color: true } } } }),
-    prisma.card.count({ where: { vaultId: vid, type: 'permanent' } }),
+    prisma.card.findMany({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH } }, select: { id: true, path: true, type: true, content: true, title: true, clusterId: true, tags: true, createdAt: true, cluster: { select: { name: true, color: true } } } }),
+    prisma.card.count({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH }, type: 'permanent' } }),
     prisma.edge.findMany({ where: { vaultId: vid }, select: { sourceId: true, targetId: true, type: true } }),
     prisma.cluster.findMany({ where: { vaultId: vid }, select: { id: true, name: true, color: true, cards: { select: { id: true, type: true, content: true, title: true, createdAt: true } } }, orderBy: { position: 'asc' } }),
-    prisma.card.count({ where: { vaultId: vid, content: { not: '' } } }),
-    prisma.card.findMany({ where: { vaultId: vid, tags: { not: null } }, select: { tags: true } }),
-    prisma.card.findMany({ where: { vaultId: vid }, orderBy: { createdAt: 'desc' }, take: 20, select: { createdAt: true } }),
+    prisma.card.count({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH }, content: { not: '' } } }),
+    prisma.card.findMany({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH }, tags: { not: null } }, select: { tags: true } }),
+    prisma.card.findMany({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH } }, orderBy: { createdAt: 'desc' }, take: 20, select: { createdAt: true } }),
     prisma.user.findUnique({ where: { id: userId }, select: { name: true, createdAt: true } }),
     prisma.learningSession.findMany({ where: { userId, vaultId: vid }, select: { id: true, status: true, createdAt: true } }),
     prisma.vaultCapability.findMany({ where: { vaultId: vid }, select: { concept: true, masteryLevel: true, status: true } }),
@@ -463,9 +464,12 @@ const app = new Hono<{ Variables: { userId: string } }>()
   const nextActions = nextActionItems.map((item) => item.text)
 
   let learningProfileContext: any = null;
+  let interventionRuns: unknown[] = [];
   try {
     const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context');
     learningProfileContext = await buildLearningProfileContext({ vaultId: vid, userId });
+    const { listProfileInterventionRuns } = await import('@/server/core/learning/profile-intervention-runtime');
+    interventionRuns = await listProfileInterventionRuns(vid, 12);
   } catch (error) {
     console.warn('[Cognition] Learning profile context failed, falling back to local stats:', error);
   }
@@ -494,6 +498,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     profileLoop: learningProfileContext?.profileLoop ?? profileLoop,
     dimensionInsights: learningProfileContext?.dimensionInsights ?? [],
     promptBlock: learningProfileContext?.promptBlock ?? '',
+    interventionRuns,
     assessmentTimeline: assessments.map((assessment) => ({
       id: assessment.id,
       concept: assessment.concept,
@@ -746,6 +751,13 @@ const routes = app
         PROFILE_PROMPT_SUMMARY_INSTRUCTION,
       } = await import('@/server/core/learning/profile-context')
       const learningProfileContext = await buildLearningProfileContext({ vaultId: vault.id, userId })
+      if (learningProfileContext.dimensionInsights.length === 0 || !learningProfileContext.promptBlock.trim()) {
+        return c.json({
+          success: false,
+          error: 'PROFILE_EVIDENCE_REQUIRED',
+          detail: '当前还没有可注入的画像证据。请先完成初始画像或留下可验证的学习证据。',
+        }, 409)
+      }
       const sourceContext = {
         profileSummary: learningProfileContext.profileSummary,
         knowledgeProfile: learningProfileContext.knowledgeProfile,

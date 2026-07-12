@@ -53,6 +53,7 @@ interface MermaidModule {
 // Mermaid 懒加载单例
 let mermaidModule: MermaidModule | null = null;
 let mermaidInitPromise: Promise<void> | null = null;
+let mermaidRenderSequence = 0;
 
 async function getMermaid(): Promise<MermaidModule> {
   if (mermaidModule) return mermaidModule;
@@ -78,7 +79,13 @@ async function getMermaid(): Promise<MermaidModule> {
       },
     });
   })();
-  await mermaidInitPromise;
+  try {
+    await mermaidInitPromise;
+  } catch (error) {
+    mermaidInitPromise = null;
+    mermaidModule = null;
+    throw error;
+  }
   return mermaidModule!;
 }
 
@@ -215,7 +222,8 @@ export async function renderMermaidBlocks(container: HTMLElement): Promise<void>
       const src = decodeURIComponent(div.getAttribute('data-mermaid-src') || '');
       if (!src) continue;
 
-      const id = div.getAttribute('data-mermaid-id') || stableMermaidId(src);
+      const baseId = div.getAttribute('data-mermaid-id') || stableMermaidId(src);
+      const id = `${baseId}-${++mermaidRenderSequence}`;
 
       try {
         const { svg } = await mermaid.render(id, src);
@@ -230,5 +238,18 @@ export async function renderMermaidBlocks(container: HTMLElement): Promise<void>
     }
   } catch (e) {
     console.warn('[Mermaid] module load failed:', e);
+    let shouldRetry = false;
+    for (const div of Array.from(mermaidDivs) as HTMLElement[]) {
+      const retries = Number(div.dataset.mermaidRetries || '0');
+      if (retries < 2) {
+        div.dataset.mermaidRetries = String(retries + 1);
+        shouldRetry = true;
+      }
+      div.innerHTML = '<div class="mermaid-error">图表组件加载失败，正在等待重试。</div>';
+      div.setAttribute('data-mermaid-src', div.getAttribute('data-mermaid-src') || '');
+    }
+    if (shouldRetry && container.isConnected) {
+      window.setTimeout(() => { void renderMermaidBlocks(container); }, 800);
+    }
   }
 }

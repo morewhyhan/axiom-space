@@ -9,7 +9,7 @@
  *   try { ... } catch (err) { handleError(err as Error) }
  */
 
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 
 /** Map technical error patterns to user-friendly Chinese messages */
 function translateError(message: string): string {

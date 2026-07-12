@@ -9,7 +9,7 @@ import {
   Search,
   Trash2,
 } from 'lucide-react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 import { useAgent, type SessionSummary } from '@/hooks/use-agent'
 import { useExecuteStep, useLearningPaths, type LearningPath, type LearningStep } from '@/hooks/use-learning'
 import { useGalaxyData } from '@/hooks/use-galaxy'

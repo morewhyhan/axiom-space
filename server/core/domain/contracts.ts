@@ -65,16 +65,19 @@ export type PermanentCardQualityResult = {
 
 export function validatePermanentCardContent(content: string): PermanentCardQualityResult {
   const text = content.trim()
+  // Empty scaffold headings describe what should be written; they are not evidence
+  // that the learner has actually supplied that content.
+  const semanticText = text.replace(/^#{1,6}\s+.*$/gm, '').trim()
   const checks = {
-    hasSubstantialContent: text.length >= 120,
-    hasDefinition: /定义|概念|是指|指的是|means|is a|refers to/i.test(text),
-    hasExamples: /例如|比如|举例|案例|example|for example|e\.g\./i.test(text),
+    hasSubstantialContent: semanticText.length >= 120,
+    hasDefinition: /定义.{0,8}[:：].{2,}|[^。\n]{1,40}(?:是指|指的是|是一种)|\b(?:means|is a|refers to)\b/i.test(semanticText),
+    hasExamples: /例如|比如|举例|案例|example|for example|e\.g\./i.test(semanticText),
     hasRelations: /\[\[.+?\]\]|关联|前置|依赖|对比|来源|关系|related|prerequisite/i.test(text),
-    hasApplications: /应用|使用|场景|用途|实践|落地|use case|apply|application/i.test(text),
-    hasBoundary: /不指|不是|不等于|不包括|边界|区别|反例|容易混淆|不要混同|not\s+(?:a|the|same)|counterexample/i.test(text),
-    hasPosition: /属于|归属|位置|父节点|上位|下位|路径|放在|连接|影响|current knowledge|belongs to/i.test(text) || /\[\[.+?\]\]/.test(text),
-    hasEvidence: /依据|证据|来源|来自|根据|资料|用户表达|领域定义|已有卡|because|source|evidence/i.test(text) || /\[\[.+?\]\]/.test(text),
-    hasNecessityReason: /必要|不可替代|删掉|缺少它|会丢掉|前置条件|证据链|学习步骤|改变理解|支持|导致|因为|所以|why it matters/i.test(text),
+    hasApplications: /应用|使用|场景|用途|实践|落地|use case|apply|application/i.test(semanticText),
+    hasBoundary: /不指|不是|不等于|不包括|边界|区别|反例|容易混淆|不要混同|not\s+(?:a|the|same)|counterexample/i.test(semanticText),
+    hasPosition: /属于|归属|位置|父节点|上位|下位|路径|放在|连接|影响|current knowledge|belongs to/i.test(semanticText) || /\[\[.+?\]\]/.test(text),
+    hasEvidence: /依据|证据|来源|来自|根据|资料|用户表达|领域定义|已有卡|because|source|evidence/i.test(semanticText) || /\[\[.+?\]\]/.test(text),
+    hasNecessityReason: /必要|不可替代|删掉|缺少它|会丢掉|前置条件|证据链|学习步骤|改变理解|支持|导致|因为|所以|why it matters/i.test(semanticText),
   }
   const labels: Record<keyof typeof checks, string> = {
     hasSubstantialContent: 'substantialContent',

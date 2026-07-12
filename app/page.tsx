@@ -12,7 +12,7 @@ import { useImportDocument, useLearningPaths, useLearningProfile, useMemorySearc
 import type { ImportFilePayload } from '@/lib/import-files'
 import { useDashboardStats } from '@/hooks/use-dashboard'
 import { client } from '@/lib/api-client'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 import type { GraphLayoutMode } from '@/stores/mode-store'
 import LandingPage from '@/components/landing/landing-page'
 import { Button } from '@/components/ui'
@@ -113,9 +113,9 @@ export default function Home() {
   }, [])
 
   // ── Onboarding ──
-  const hasCompletedOnboarding = useAppStore((s) => s.hasCompletedOnboarding)
   const setHasCompletedOnboarding = useAppStore((s) => s.setHasCompletedOnboarding)
   const [showOnboarding, setShowOnboarding] = useState(false)
+  const [initialProfileStarting, setInitialProfileStarting] = useState(false)
   const forgeLeftWidth = panelLayout.left.length > 0
     ? Math.max(...panelLayout.left.map((panel) => panelSizes[panel] ?? 300))
     : 0
@@ -153,17 +153,23 @@ export default function Home() {
 
   // Show onboarding after app loads for first-time users
   useEffect(() => {
-    if (!showApp || !selectedVault) return
-    if (!hasCompletedOnboarding) {
-      const t = setTimeout(() => setShowOnboarding(true), 800)
+    if (!showApp || !currentVaultId || !selectedVault) return
+    const vaultOnboardingSeen = typeof window !== 'undefined'
+      ? window.localStorage.getItem(`axiom-vault-initial-profile-onboarding:${currentVaultId}`) === '1'
+      : false
+    if (!vaultOnboardingSeen) {
+      const t = setTimeout(() => {
+        setShowOnboarding(true)
+        openModal('onboarding')
+      }, 800)
       return () => clearTimeout(t)
     }
-  }, [showApp, hasCompletedOnboarding, selectedVault])
+  }, [showApp, currentVaultId, selectedVault, openModal])
 
   const markCurrentVaultOnboardingSeen = useCallback(() => {
     const vaultId = useAppStore.getState().currentVaultId
     if (!vaultId || typeof window === 'undefined') return
-    window.localStorage.setItem(`axiom-vault-onboarding:${vaultId}`, '1')
+    window.localStorage.setItem(`axiom-vault-initial-profile-onboarding:${vaultId}`, '1')
   }, [])
 
   const handleCompleteOnboarding = () => {
@@ -173,33 +179,43 @@ export default function Home() {
   }
 
   const handleStartInitialProfile = async () => {
-    setShowOnboarding(false)
-    closeModal()
-    const appStore = useAppStore.getState()
-    appStore.clearSelectedNode()
-    appStore.setSelectedPathId(null)
-    appStore.setActiveLearningStepId(null)
-    appStore.setMode('forge')
-    appStore.setChatPanelOpen(true)
-    appStore.setPanelLayout({ left: ['sessionList'], right: [] })
+    if (initialProfileStarting) return
+    setInitialProfileStarting(true)
+    try {
+      const agentStore = useAgentStore.getState()
+      agentStore._abortStream()
+      const session = await agentStore.createTalkSession({
+        title: '初始画像构建',
+        purpose: 'initial_profile',
+      })
+      if (!session) {
+        toast.error('初始画像会话创建失败，请重试')
+        return
+      }
 
-    const agentStore = useAgentStore.getState()
-    agentStore._abortStream()
-    const session = await agentStore.createTalkSession({
-      title: '初始画像构建',
-      purpose: 'initial_profile',
-    })
-    if (!session) {
-      toast.error('初始画像会话创建失败')
-      return
+      const appStore = useAppStore.getState()
+      appStore.clearSelectedNode()
+      appStore.setSelectedPathId(null)
+      appStore.setActiveLearningStepId(null)
+      appStore.setMode('forge')
+      appStore.setForgeResourceView('context')
+      appStore.setChatPanelOpen(true)
+      appStore.setPanelLayout({ left: ['sessionList'], right: [] })
+      setShowOnboarding(false)
+      closeModal()
+      markCurrentVaultOnboardingSeen()
+      setHasCompletedOnboarding(true)
+      toast('已打开初始画像对话', {
+        description: '先回答几个必要问题，系统会据此调整后续教学、资源和推送。',
+        duration: 3200,
+        style: { fontSize: '11px', background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.28)' },
+      })
+    } catch (error) {
+      console.error('[Home] failed to start initial profile session:', error)
+      toast.error('初始画像会话创建失败，请重试')
+    } finally {
+      setInitialProfileStarting(false)
     }
-    markCurrentVaultOnboardingSeen()
-    setHasCompletedOnboarding(true)
-    toast('已打开初始画像对话', {
-      description: '先回答几个必要问题，系统会据此调整后续教学、资源和推送。',
-      duration: 3200,
-      style: { fontSize: '11px', background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.28)' },
-    })
   }
 
   // Auto-open onboarding modal
@@ -785,7 +801,7 @@ export default function Home() {
             importFileName={importFile?.originalFileName ?? null}
             oracleColors={oracleColors}
             userName={session?.user?.name}
-            nodeCount={galaxyData?.nodes.length ?? 0}
+            nodeCount={galaxyData?.nodes.filter((node) => !node.isRoot).length ?? 0}
             edgeCount={galaxyData?.edges.length ?? 0}
             orphanCount={dashStats?.orphanCount ?? 0}
             fleetingCount={dashStats?.fleeting ?? 0}
@@ -802,6 +818,7 @@ export default function Home() {
             onImportDocument={handleImportDocument}
             onSetOracle={(oracle) => useAppStore.getState().setOracle(oracle)}
             onStartInitialProfile={handleStartInitialProfile}
+            initialProfileStarting={initialProfileStarting}
             onCompleteOnboarding={handleCompleteOnboarding}
           />
         </>

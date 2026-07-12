@@ -60,9 +60,10 @@ export async function maybeCreateProfileQuestion(input: ProfileQuestionInput): P
   const candidates = chooseQuestionDimensions(intent, profile.dimensionInsights)
   if (candidates.length === 0) return null
 
-  // Take up to 3 dimensions that need updating (no time-based dedup —
-  // rely solely on confidence and evidence to decide whether to ask)
-  const dimensions = candidates.slice(0, 3)
+  // The UI asks one question, so the answer may update only that one dimension.
+  // Keeping extra hidden dimensions here would apply one answer to questions the
+  // user was never shown.
+  const dimensions = candidates.slice(0, 1)
   if (dimensions.length === 0) return null
 
   const question = buildProfileQuestion(intent, dimensions)

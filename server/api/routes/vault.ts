@@ -110,7 +110,8 @@ async function findPromotionEvidence(params: {
       if (
         parsed.sourceObjectId === params.cardId &&
         parsed.sourceObjectType === 'card' &&
-        parsed.feynmanStatus === 'accepted'
+        parsed.feynmanStatus === 'accepted' &&
+        parsed.promotionReady === true
       ) {
         return { ok: true, source: 'feynmanObservation', id: memory.id }
       }
@@ -662,6 +663,59 @@ ${content?.trim() || ''}
     success: true,
     links: { outgoing, incoming, dangling },
   })
+})
+
+// GET /api/vault/resolve-link — 按标题查找卡片（供点击 WikiLink 时导航用）
+.get('/resource-target', async (c) => {
+  const userId = c.get('userId') as string
+  const resourcePath = c.req.query('path')
+  const vaultId = c.req.query('vid') || c.req.query('vaultId')
+
+  if (!resourcePath) return c.json({ success: false, error: 'path required' }, 400)
+
+  let targetVaultId = vaultId
+  if (!targetVaultId) {
+    const vault = await prisma.vault.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'asc' },
+    })
+    if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
+    targetVaultId = vault.id
+  } else {
+    const vault = await prisma.vault.findUnique({ where: { id: targetVaultId } })
+    if (!vault || vault.userId !== userId) return c.json({ success: false, error: 'Forbidden' }, 403)
+  }
+
+  const escapedPath = resourcePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  const displayCard = await prisma.card.findFirst({
+    where: {
+      vaultId: targetVaultId,
+      path: { startsWith: 'literature/' },
+      content: { contains: `"path":"${escapedPath}"` },
+      tags: { contains: 'ai-generated-resource' },
+    },
+    orderBy: { updatedAt: 'desc' },
+    select: { id: true, title: true, type: true, path: true },
+  })
+  if (displayCard) return c.json({ success: true, card: displayCard })
+
+  const packCard = await prisma.card.findFirst({
+    where: {
+      vaultId: targetVaultId,
+      path: { startsWith: 'literature/' },
+      content: { contains: `"path":"${escapedPath}"` },
+      tags: { contains: 'ai-generated' },
+    },
+    orderBy: { updatedAt: 'desc' },
+    select: { id: true, title: true, type: true, path: true },
+  })
+  if (packCard) return c.json({ success: true, card: packCard })
+
+  const rawCard = await prisma.card.findUnique({
+    where: { vaultId_path: { vaultId: targetVaultId, path: resourcePath } },
+    select: { id: true, title: true, type: true, path: true },
+  })
+  return c.json({ success: true, card: rawCard })
 })
 
 // GET /api/vault/resolve-link — 按标题查找卡片（供点击 WikiLink 时导航用）

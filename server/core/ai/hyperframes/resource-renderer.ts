@@ -11,11 +11,14 @@
  */
 
 import { spawn } from 'node:child_process';
-import { writeFile, readFile, unlink, mkdtemp } from 'node:fs/promises';
+import { writeFile, readFile, unlink, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser } from 'puppeteer';
 import puppeteer from 'puppeteer';
+
+const DOCUMENT_RENDER_TIMEOUT_MS = 45_000;
+const PPTX_RENDER_TIMEOUT_MS = 60_000;
 
 // ── 统一的 HTML 转文档接口 ────────────────────────────────────────
 
@@ -64,11 +67,13 @@ export async function renderDocx(
     html: string,
     options?: Record<string, unknown>,
   ) => Promise<Buffer | ArrayBuffer>;
-  const buffer = await htmlToDocx(fullHtml, {
+  const buffer = await withTimeout(htmlToDocx(fullHtml, {
     orientation: 'portrait',
     margins: { top: 720, right: 720, bottom: 720, left: 720 },
-  });
-  return buffer as unknown as Buffer;
+  }), DOCUMENT_RENDER_TIMEOUT_MS, 'DOCX 渲染超时');
+  const result = Buffer.from(buffer as ArrayBuffer);
+  assertRenderedFile(result, 'docx');
+  return result;
 }
 
 // ── PDF ───────────────────────────────────────────────────────────
@@ -79,6 +84,7 @@ async function getPdfBrowser(): Promise<Browser> {
   if (!_pdfBrowser?.connected) {
     _pdfBrowser = await puppeteer.launch({
       headless: true,
+      timeout: DOCUMENT_RENDER_TIMEOUT_MS,
       args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
     });
   }
@@ -92,20 +98,26 @@ export async function renderPdf(
   const fullHtml = wrapForDocType(title, bodyHtml);
   const browser = await getPdfBrowser();
   const page = await browser.newPage();
-  await page.setContent(fullHtml, { waitUntil: 'networkidle0' as any });
-  const buf = await page.pdf({
-    format: 'A4',
-    margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
-    printBackground: true,
-    displayHeaderFooter: true,
-    headerTemplate: '<span></span>',
-    footerTemplate: `
-      <div style="width:100%;font-size:9px;color:#999;text-align:center;padding:4px 20px">
-        ${escapeHtml(title)} — 第 <span class="pageNumber"></span> 页
-      </div>`,
-  });
-  await page.close();
-  return Buffer.from(buf);
+  try {
+    page.setDefaultTimeout(DOCUMENT_RENDER_TIMEOUT_MS);
+    await page.setContent(fullHtml, { waitUntil: 'domcontentloaded', timeout: DOCUMENT_RENDER_TIMEOUT_MS });
+    const buf = await withTimeout(page.pdf({
+      format: 'A4',
+      margin: { top: '20mm', bottom: '20mm', left: '15mm', right: '15mm' },
+      printBackground: true,
+      displayHeaderFooter: true,
+      headerTemplate: '<span></span>',
+      footerTemplate: `
+        <div style="width:100%;font-size:9px;color:#999;text-align:center;padding:4px 20px">
+          ${escapeHtml(title)} — 第 <span class="pageNumber"></span> 页
+        </div>`,
+    }), DOCUMENT_RENDER_TIMEOUT_MS, 'PDF 渲染超时');
+    const result = Buffer.from(buf);
+    assertRenderedFile(result, 'pdf');
+    return result;
+  } finally {
+    await page.close().catch(() => {});
+  }
 }
 
 // ── PPT ───────────────────────────────────────────────────────────
@@ -145,20 +157,50 @@ export async function renderPptx(
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stderr = '';
+      const timer = setTimeout(() => {
+        proc.kill('SIGKILL');
+        reject(new Error(`PPTX 渲染超时（${PPTX_RENDER_TIMEOUT_MS / 1000} 秒）`));
+      }, PPTX_RENDER_TIMEOUT_MS);
       proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
       proc.on('close', (code: number | null) => {
+        clearTimeout(timer);
         if (code === 0) resolve();
         else reject(new Error(stderr.trim() || `mckinsey-pptx exited ${code}`));
       });
-      proc.on('error', reject);
+      proc.on('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
     });
 
     const buf = await readFile(pptxPath);
+    assertRenderedFile(buf, 'pptx');
     return buf;
   } finally {
-    // Cleanup temp files
-    unlink(jsonPath).catch(() => {});
-    unlink(pptxPath).catch(() => {});
+    await Promise.all([unlink(jsonPath).catch(() => {}), unlink(pptxPath).catch(() => {})]);
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+function assertRenderedFile(buffer: Buffer, type: 'docx' | 'pdf' | 'pptx'): void {
+  const minimumBytes = type === 'pdf' ? 1_000 : 2_000;
+  if (buffer.length < minimumBytes) throw new Error(`${type.toUpperCase()} 渲染结果过小：${buffer.length} bytes`);
+  const header = buffer.subarray(0, 4).toString('hex');
+  const expected = type === 'pdf' ? '25504446' : '504b0304';
+  if (header !== expected) throw new Error(`${type.toUpperCase()} 文件头无效：${header || 'empty'}`);
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${message}（${timeoutMs / 1000} 秒）`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
@@ -194,7 +236,10 @@ function stripTags(html: string): string {
 
 export async function closePdfRenderer(): Promise<void> {
   if (_pdfBrowser) {
-    await _pdfBrowser.close().catch(() => {});
+    const browser = _pdfBrowser;
     _pdfBrowser = null;
+    await withTimeout(browser.close(), 5_000, 'PDF 浏览器关闭超时').catch(() => {
+      browser.disconnect();
+    });
   }
 }

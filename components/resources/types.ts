@@ -3,6 +3,8 @@ export type GeneratedResourceItem = {
   title: string
   path: string
   ref?: string
+  rawPath?: string
+  rawRef?: string
   mp4Path?: string
   mp4Ref?: string
   fileName: string

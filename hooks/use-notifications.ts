@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '@/stores/mode-store'
 import { client } from '@/lib/api-client'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 
 export interface AppNotification {
   type: 'toast' | 'profile' | 'card' | 'skill' | 'graph' | 'quality'

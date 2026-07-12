@@ -23,6 +23,7 @@ import { ResourcePushEngine, type PushTrigger } from '@/server/core/agent/resour
 import { subscribeResourceProgress, emitResourceProgress } from '@/server/core/agent/notification-bus'
 import { LLMUsageTracker } from '@/server/core/agent/LLMUsageTracker'
 import { writeLiveAiArtifact } from './live-ai-artifacts'
+import { classifyObservedOutcome, scoreInterventionAlignment } from '@/server/core/learning/profile-intervention-runtime'
 
 const execFileAsync = promisify(execFile)
 const RUN_REAL_LIVE_AI = process.env.RUN_REAL_LIVE_AI === '1'
@@ -123,6 +124,26 @@ test('Agent runtime contracts from the 08 test plan are explicit and executable'
 
     unsubscribeA()
     unsubscribeB()
+  })
+
+  await t.test('profile interventions separate delivery, observed outcomes, and formal verification signals', () => {
+    const alignment = scoreInterventionAlignment(
+      '先让用户预测结果，再按时间线拆解因果，并用一个反例验证边界。',
+      '请先预测这段代码的结果。之后我们按时间线追踪每一步，最后再看一个反例。',
+    )
+    assert.ok(alignment > 0)
+    assert.equal(
+      classifyObservedOutcome(
+        '因为重载在编译期已经根据静态类型选择，所以这里会进入 visit(Node)；如果放进 accept，this 的具体类型会改变重载选择。',
+        '能够预测结果并解释中间因果。',
+      ),
+      'positive',
+    )
+    assert.equal(
+      classifyObservedOutcome('我还是不懂，无法解释为什么会这样。', '能够解释调用轨迹。'),
+      'negative',
+    )
+    assert.equal(classifyObservedOutcome('知道了', '能够完成陌生迁移。'), 'uncertain')
   })
 
   await t.test('LLM usage tracking records provider, model, tokens, and estimated cost', () => {

@@ -14,6 +14,7 @@ import type { UserProfile } from '@/server/core/learning/memory/profile-manager'
 import { assertCardType, validatePermanentCardContent } from '@/server/core/domain/contracts'
 import { emitDomainEvent, recordCardRevision } from '@/server/core/domain/events'
 import { BACKGROUND_ANALYSIS_PROMPT } from '@/server/core/ai/prompts'
+import type { InterventionProtocol } from '@/server/core/learning/intervention-protocol'
 import { PROFILE_DIMENSION_PROTOCOL } from '@/server/core/learning/profile-protocol'
 import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
 
@@ -44,6 +45,9 @@ function normalizeProfileMechanism(observation: ProfileObservationUpdate): Profi
     discriminatingEvidence: clean(observation.discriminatingEvidence),
     teachingIntervention: clean(observation.teachingIntervention),
     verificationCriterion: clean(observation.verificationCriterion),
+    interventionProtocol: observation.interventionProtocol && typeof observation.interventionProtocol === 'object'
+      ? observation.interventionProtocol
+      : undefined,
     scope: allowedScopes.has(observation.scope || '') ? observation.scope : 'current_topic',
     status: allowedStatuses.has(observation.status || '') ? observation.status : 'hypothesis',
   }
@@ -82,6 +86,7 @@ interface ProfileObservationUpdate {
   discriminatingEvidence?: string
   teachingIntervention?: string
   verificationCriterion?: string
+  interventionProtocol?: Partial<InterventionProtocol>
   scope?: 'current_topic' | 'domain_pattern' | 'cross_domain_pattern'
   status?: 'hypothesis' | 'supported' | 'confirmed' | 'weakened' | 'refuted' | 'improved' | 'needs_retest'
 }
@@ -90,6 +95,7 @@ type ProfileMechanism = Pick<ProfileObservationUpdate,
   'subDimensionKey' | 'subDimensionLabel' | 'userFacingSummary' |
   'observableBehavior' | 'mechanismHypothesis' | 'competingHypotheses' |
   'discriminatingEvidence' | 'teachingIntervention' | 'verificationCriterion' |
+  'interventionProtocol' |
   'scope' | 'status'>
 interface AnalysisResult {
   profile?: ProfileUpdate

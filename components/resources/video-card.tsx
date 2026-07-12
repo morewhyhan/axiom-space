@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Download, Maximize2, Play } from 'lucide-react'
 import { Button, HudPanel } from '@/components/ui'
 
@@ -11,6 +11,7 @@ type VideoCardProps = {
   duration: number
   topic: string
   thumbnail?: string
+  expanded?: boolean
 }
 
 export function VideoCard({
@@ -20,9 +21,11 @@ export function VideoCard({
   duration,
   topic,
   thumbnail,
+  expanded = false,
 }: VideoCardProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [videoFailed, setVideoFailed] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const iframeRef = useRef<HTMLIFrameElement>(null)
 
@@ -33,28 +36,38 @@ export function VideoCard({
   }
 
   const totalDuration = duration
+  const playableVideoUrl = videoFailed ? undefined : videoUrl
+
+  useEffect(() => {
+    setVideoFailed(false)
+  }, [videoUrl])
 
   return (
     <>
       <HudPanel as="div" className="mb-4 rounded-xl p-4">
-        <div className="flex gap-4">
+        <div className={`flex gap-4 ${expanded ? 'flex-col' : ''}`}>
           <div
-            className="flex-shrink-0 w-48 h-32 bg-black rounded-lg relative group cursor-pointer"
+            className={`${expanded ? 'h-[70vh] w-full' : 'h-32 w-48 flex-shrink-0'} bg-black rounded-lg relative group cursor-pointer overflow-hidden`}
             onClick={() => setIsPlaying(true)}
           >
-            {videoUrl ? (
+            {playableVideoUrl ? (
               <video
-                src={videoUrl}
-                className="w-full h-full object-cover rounded-lg"
+                src={playableVideoUrl}
+                className="w-full h-full object-contain rounded-lg"
                 poster={thumbnail}
                 muted
+                autoPlay={expanded}
+                loop={expanded}
+                playsInline
+                onError={() => setVideoFailed(true)}
               />
             ) : htmlContent ? (
               <iframe
                 srcDoc={htmlContent}
                 className="w-full h-full rounded-lg pointer-events-none"
-                style={{ border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left', width: '200%', height: '200%' }}
+                style={expanded ? { border: 'none' } : { border: 'none', transform: 'scale(0.5)', transformOrigin: 'top left', width: '200%', height: '200%' }}
                 title={title}
+                sandbox="allow-scripts"
               />
             ) : (
               <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-900/50 to-purple-900/50 rounded-lg">
@@ -89,11 +102,11 @@ export function VideoCard({
               >
                 <Play className="w-4 h-4" /> 播放
               </Button>
-              {videoUrl && (
+              {playableVideoUrl && (
                 <Button
                   onClick={() => {
                     const a = document.createElement('a')
-                    a.href = videoUrl
+                    a.href = playableVideoUrl
                     a.download = `${title.replace(/[\/\\:*?"<>|]/g, '-')}.mp4`
                     a.click()
                   }}
@@ -102,7 +115,7 @@ export function VideoCard({
                   <Download className="w-4 h-4" /> 下载 MP4
                 </Button>
               )}
-              {htmlContent && !videoUrl && (
+              {htmlContent && !playableVideoUrl && (
                 <Button
                   onClick={() => {
                     const blob = new Blob([htmlContent], { type: 'text/html' })
@@ -139,13 +152,14 @@ export function VideoCard({
             <Maximize2 className="w-6 h-6" />
           </Button>
 
-          {videoUrl ? (
+          {playableVideoUrl ? (
             <video
               ref={videoRef}
-              src={videoUrl}
+              src={playableVideoUrl}
               className={`${isFullscreen ? 'w-full h-full' : 'max-w-5xl max-h-[80vh]'} object-contain rounded-lg`}
               controls
               autoPlay
+              onError={() => setVideoFailed(true)}
             />
           ) : htmlContent ? (
             <iframe

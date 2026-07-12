@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from 'react'
 import { Check, FileText, Link2, PackageOpen, RefreshCcw, Route, X } from 'lucide-react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 import { Button } from '@/components/ui'
 import {
   useExecutePushSuggestion,

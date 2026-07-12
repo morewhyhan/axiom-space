@@ -1,7 +1,7 @@
 'use client'
 
-import type { ChangeEvent } from 'react'
-import { toast } from 'sonner'
+import { useEffect, type ChangeEvent } from 'react'
+import { toast } from '@/lib/ui-feedback'
 import { AxiomInput, AxiomTextarea, Button, FieldLabel, HudPanel, ListItemShell, MetricTile, Modal } from '@/components/ui'
 import { readImportFilePayload, type ImportFilePayload } from '@/lib/import-files'
 
@@ -59,6 +59,7 @@ type AppModalsProps<TCardType extends string> = {
   onImportDocument?: () => void | Promise<void>
   onSetOracle: (oracle: string) => void
   onStartInitialProfile: () => void | Promise<void>
+  initialProfileStarting?: boolean
   onCompleteOnboarding: () => void
 }
 
@@ -93,8 +94,13 @@ export function AppModals<TCardType extends string>({
   onImportDocument,
   onSetOracle,
   onStartInitialProfile,
+  initialProfileStarting = false,
   onCompleteOnboarding,
 }: AppModalsProps<TCardType>) {
+  useEffect(() => {
+    if (modal) toast.dismiss()
+  }, [modal])
+
   if (!modal) return null
 
   const handleImportFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -353,8 +359,8 @@ export function AppModals<TCardType extends string>({
       )}
 
       {modal === 'onboarding' && (
-        <Modal title="Welcome_to_AXIOM" onClose={() => { onClose(); onCompleteOnboarding() }} style={{ maxWidth: '520px' }}>
-          <div className="p-6 space-y-5">
+        <Modal title="Welcome_to_AXIOM" className="onboarding-modal" onClose={() => { onClose(); onCompleteOnboarding() }} style={{ maxWidth: '560px' }}>
+          <div className="onboarding-body p-6 space-y-5">
             <div>
               <h2 className="serif text-xl text-white/80 mb-2">欢迎来到 AXIOM 认知操作系统</h2>
               <p className="text-white/40 leading-relaxed" style={{ fontSize: 'var(--f10)' }}>
@@ -400,13 +406,15 @@ export function AppModals<TCardType extends string>({
                 ))}
               </div>
             </div>
-            <div className="space-y-2">
+            </div>
+          <div className="onboarding-actions space-y-2">
               <Button
                 variant="axiom-primary"
                 className="w-full text-center"
+                disabled={initialProfileStarting}
                 onClick={() => { void onStartInitialProfile() }}
               >
-                让 AI 先了解我
+                {initialProfileStarting ? '正在创建画像对话...' : '让 AI 先了解我'}
               </Button>
               <Button
                 variant="axiom"
@@ -416,7 +424,6 @@ export function AppModals<TCardType extends string>({
                 直接开始使用
               </Button>
             </div>
-          </div>
         </Modal>
       )}
     </div>

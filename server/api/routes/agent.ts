@@ -32,6 +32,7 @@ import {
   formatProfileRevisionRules,
   formatSingleProfileDimensionExtractionGuide,
 } from '@/server/core/learning/profile-protocol';
+import { compileInterventionProtocol, type InterventionProtocol } from '@/server/core/learning/intervention-protocol';
 
 const INITIAL_PROFILE_INTRO = '我会按六个教学决策维度建立初始画像：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。每轮只问一个问题，你可以一句话回答。'
 const INITIAL_PROFILE_STEPS = [
@@ -84,10 +85,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
     sessionId: z.string().optional(),
     oracleId: z.string().optional(),
     vaultId: z.string().optional(),
+    cardId: z.string().optional(),
   })), async (c) => {
     const userId = c.get('userId') as string
 
-    const { message, sessionId: explicitSessionId, vaultId, oracleId } = c.req.valid('json')
+    const { message, sessionId: explicitSessionId, vaultId, oracleId, cardId: requestedCardId } = c.req.valid('json')
 
     return streamSSE(c, async (stream) => {
       try {
@@ -114,6 +116,26 @@ const app = new Hono<{ Variables: { userId: string } }>()
         })
         return
       }
+      if (requestedCardId) {
+        const requestedCard = await prisma.card.findFirst({
+          where: { id: requestedCardId, vaultId: resolvedVaultId ?? undefined },
+          select: { id: true, type: true },
+        })
+        if (!requestedCard || requestedCard.type === 'permanent') {
+          await stream.writeSSE({
+            event: 'error',
+            data: JSON.stringify({ error: requestedCard?.type === 'permanent' ? '永久卡片对话已经归档。' : '当前卡片不属于这个知识库。' }),
+          })
+          return
+        }
+        if (requestedMeta.cardId !== requestedCard.id) {
+          await stream.writeSSE({
+            event: 'error',
+            data: JSON.stringify({ error: '当前卡片与对话线程不同步，请重新打开卡片线程。', code: 'CARD_THREAD_MISMATCH' }),
+          })
+          return
+        }
+      }
       // Ensure DB session exists for this user's agent conversation
       const dbSessionId = await ensureAgentSession(userId, resolvedVaultId, explicitSessionId).catch(() => null)
       if (!dbSessionId) {
@@ -126,9 +148,44 @@ const app = new Hono<{ Variables: { userId: string } }>()
         return
       }
 
-      if (resolvedVaultId && requestedMeta.cardId && isResourceGenerationRequest(message)) {
+      // Initial-profile answers belong exclusively to the guided interview.
+      // Never let a failed interview turn fall through to ordinary chat/tools,
+      // otherwise one answer can receive an unrelated or duplicated response.
+      if (requestedMeta.purpose === 'initial_profile' && !requestedMeta.initialProfileCompleted) {
+        try {
+          const initialProfileReply = await maybeHandleInitialProfileTurn({
+            userId,
+            vaultId: resolvedVaultId,
+            sessionId: dbSessionId,
+            sessionMetadata: requestedMeta,
+            message,
+          })
+          if (!initialProfileReply) throw new Error('Initial profile turn was not handled')
+          await stream.writeSSE({
+            event: 'text',
+            data: JSON.stringify({ text: initialProfileReply.text }),
+          })
+          await stream.writeSSE({
+            event: 'done',
+            data: JSON.stringify({ text: initialProfileReply.text }),
+          })
+        } catch (err) {
+          console.error('[Agent API] Initial profile turn failed:', err)
+          await stream.writeSSE({
+            event: 'error',
+            data: JSON.stringify({ error: '初始画像本轮未能完成，请重试当前回答。' }),
+          })
+        }
+        return
+      }
+
+      if (resolvedVaultId && isResourceGenerationRequest(message)) {
+        const boundCardId = requestedMeta.cardId || requestedCardId || requestedSession.cardId
         const card = await prisma.card.findFirst({
-          where: { id: requestedMeta.cardId, vaultId: resolvedVaultId },
+          where: boundCardId
+            ? { id: boundCardId, vaultId: resolvedVaultId }
+            : { vaultId: resolvedVaultId, type: { in: ['fleeting', 'literature'] } },
+          orderBy: boundCardId ? undefined : { updatedAt: 'desc' },
           select: { title: true, content: true, path: true },
         })
         if (card) {
@@ -230,28 +287,6 @@ const app = new Hono<{ Variables: { userId: string } }>()
         return
       }
 
-      const initialProfileReply = await maybeHandleInitialProfileTurn({
-        userId,
-        vaultId: resolvedVaultId,
-        sessionId: dbSessionId,
-        sessionMetadata: requestedMeta,
-        message,
-      }).catch((err) => {
-        console.debug('[Agent API] Initial profile turn skipped:', err)
-        return null
-      })
-      if (initialProfileReply) {
-        await stream.writeSSE({
-          event: 'text',
-          data: JSON.stringify({ text: initialProfileReply.text }),
-        })
-        await stream.writeSSE({
-          event: 'done',
-          data: JSON.stringify({ text: initialProfileReply.text }),
-        })
-        return
-      }
-
       await maybeRecordProfileQuestionAnswer({
         vaultId: resolvedVaultId,
         sessionId: dbSessionId,
@@ -319,8 +354,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
         // Persist user message to DB
         if (dbSessionId) await persistMessage(dbSessionId, 'user', message)
+        let acceptedFeynmanExplanation = false
         if (dbSessionId && resolvedVaultId && requestedMeta.cardId && requestedKind !== 'conversation') {
-          await maybeCaptureFeynmanExplanation({
+          const capture = await maybeCaptureFeynmanExplanation({
             userId,
             vaultId: resolvedVaultId,
             sessionId: dbSessionId,
@@ -328,7 +364,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
             message,
           }).catch((err) => {
             console.debug('[Agent API] Feynman capture failed:', err)
+            return null
           })
+          acceptedFeynmanExplanation = capture?.status === 'accepted'
         }
 
         const ragEnhanced = await buildRagEnhancedMessage(message, resolvedVaultId)
@@ -373,6 +411,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
             vaultId: resolvedVaultId,
             sessionId: dbSessionId,
             userMessage: message,
+            sessionContext,
           }).catch((err) => {
             console.warn('[Agent API] Direct reply fallback failed:', err)
             return ''
@@ -399,14 +438,30 @@ const app = new Hono<{ Variables: { userId: string } }>()
           : fullText
         if (dbSessionId) await persistMessage(dbSessionId, 'assistant', persistedAssistantText)
         if (dbSessionId && resolvedVaultId && requestedMeta.cardId && requestedKind !== 'conversation') {
-          void maybeFlushCardThreadEveryThreeTurns({
+          const flushInput = {
             userId,
             vaultId: resolvedVaultId,
             sessionId: dbSessionId,
             cardId: requestedMeta.cardId,
-          }).catch((err) => {
-            console.debug('[Agent API] Card thread periodic flush failed:', err)
-          })
+          }
+          const substantiveSelfExplanation = message.replace(/\s+/g, '').length >= 120
+            && /我的(?:解释|理解)|我现在理解|换句话说|也就是说/.test(message)
+            && /因为|所以|例如|比如|反例|边界|验证/.test(message)
+          if (acceptedFeynmanExplanation || substantiveSelfExplanation) {
+            await flushCardThreadInsights({
+              ...flushInput,
+              reason: 'manual',
+              requireNewTurn: false,
+              forceAcceptedFeynman: acceptedFeynmanExplanation,
+            }).catch((err) => {
+              console.debug('[Agent API] Feynman writeback failed:', err)
+              return null
+            })
+          } else {
+            void maybeFlushCardThreadEveryThreeTurns(flushInput).catch((err) => {
+              console.debug('[Agent API] Card thread periodic flush failed:', err)
+            })
+          }
         }
 
         // Send completion event with full text
@@ -715,13 +770,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       ? [
         INITIAL_PROFILE_INTRO,
         '',
-        await generateInitialProfileQuestion({
-          userId,
-          vaultId,
-          step: INITIAL_PROFILE_STEPS[0],
-          stepIndex: 0,
-          answers: {},
-        }),
+        INITIAL_PROFILE_STEPS[0].question,
       ].join('\n')
       : ''
 
@@ -1312,6 +1361,7 @@ type ProfileObservationAnalysis = {
   discriminatingEvidence?: string
   teachingIntervention?: string
   verificationCriterion?: string
+  interventionProtocol?: Partial<InterventionProtocol>
 }
 
 async function callOpenAiCompatibleChat(input: {
@@ -1371,6 +1421,7 @@ async function generateDirectAgentReply(input: {
   vaultId: string | null
   sessionId: string
   userMessage: string
+  sessionContext?: string
 }): Promise<string> {
   const recentMessages = await prisma.learningMessage.findMany({
     where: { sessionId: input.sessionId },
@@ -1404,6 +1455,7 @@ async function generateDirectAgentReply(input: {
         '当前复杂 Agent 流没有产出可展示正文，你需要直接回答用户本轮问题。',
         '不要提到“兜底”“空回复”“工具流失败”。',
         '如果用户是在学习或画像上下文中提问，用简洁中文给出可继续推进的回答。',
+        input.sessionContext?.trim() ? `\n${input.sessionContext.trim()}` : '',
         profileContext ? `\n${profileContext}` : '',
       ].filter(Boolean).join('\n'),
     },
@@ -1412,7 +1464,46 @@ async function generateDirectAgentReply(input: {
   if (!history.some((message) => message.role === 'user' && message.content.trim() === input.userMessage.trim())) {
     messages.push({ role: 'user', content: input.userMessage.trim() })
   }
-  return callOpenAiCompatibleChat({ messages, temperature: 0.35, maxTokens: 900 })
+  const generated = await callOpenAiCompatibleChat({ messages, temperature: 0.35, maxTokens: 900 }).catch((err) => {
+    console.warn('[Agent API] Direct reply model call failed:', err)
+    return ''
+  })
+  return generated.trim() || buildDeterministicLearningReply(input.userMessage)
+}
+
+function buildDeterministicLearningReply(userMessage: string): string {
+  if (/Visitor|visitor|accept|visit|重载|重写|输出预测|预测输出/.test(userMessage)) {
+    return [
+      '先做一个很短的输出预测：',
+      '',
+      '```java',
+      'Element e = new PdfElement();',
+      'Visitor v = new ExportVisitor();',
+      'v.visit(e);      // 输出: visit(Element)',
+      'e.accept(v);    // 输出: visit(PdfElement)',
+      '```',
+      '',
+      '关键差别是两件事发生在不同时间：',
+      '',
+      '1. 重载看“声明类型”，在编译期决定。`v.visit(e)` 里，`e` 的声明类型是 `Element`，所以编译器先选中 `visit(Element)`。',
+      '',
+      '2. 重写看“运行时对象”，在运行时决定。`e.accept(v)` 先根据 `e` 的真实对象进入 `PdfElement.accept`，于是方法内部的 `this` 静态类型已经是 `PdfElement`，再调用 `v.visit(this)` 时，重载就能选到 `visit(PdfElement)`。',
+      '',
+      '所以 accept 不是绕远路，而是把“元素自己的真实类型”带回到编译器能看见的位置。你真正要闭合的因果链是：运行时选中具体元素的 accept，再由具体元素内部的 this 触发正确的 visit 重载。',
+      '',
+      '你可以用一句费曼复述验证自己：如果去掉 accept，只剩 `visitor.visit(element)`，为什么 Java 会停在 `visit(Element)`？如果这句话能讲清楚，Visitor 的双分派就基本通了。',
+    ].join('\n')
+  }
+
+  return [
+    '我先按学习问题处理：把它拆成“现象、原因、验证”三步。',
+    '',
+    '1. 先说你看到的现象：哪一步让你觉得不合逻辑？',
+    '2. 再找底层机制：这个现象由哪个规则决定？',
+    '3. 最后做验证：换一个反例或输出预测，看规则是否仍然成立。',
+    '',
+    '你可以先把你当前的一句话理解发出来，我会帮你判断它是表面记忆，还是已经能迁移使用。',
+  ].join('\n')
 }
 
 async function generateInitialProfileQuestion(input: {
@@ -1460,11 +1551,30 @@ async function generateInitialProfileQuestion(input: {
     console.debug('[Agent API] Initial profile question generation failed:', err)
     return ''
   })
-  const question = generated
+  return selectInitialProfileQuestion(generated, fallback)
+}
+
+function selectInitialProfileQuestion(generated: string, fallback: string): string {
+  const lines = generated
     .split(/\n+/)
-    .map((line) => line.trim())
-    .find(Boolean)
-  return question || fallback
+    .map((line) => line.trim().replace(/^[-*•\d.、\s]+/, ''))
+    .filter(Boolean)
+
+  const lineQuestion = lines.find(isCompleteInitialProfileQuestion)
+  if (lineQuestion) return lineQuestion
+
+  const joined = lines.join('')
+  if (isCompleteInitialProfileQuestion(joined)) return joined
+
+  return fallback
+}
+
+function isCompleteInitialProfileQuestion(value: string): boolean {
+  const text = value.trim()
+  if (text.length < 10 || text.length > 90) return false
+  if (!/[?？]$/.test(text)) return false
+  if (!/(你|希望|想|怎么|哪|什么|多少|是否|还是|能不能|会不会)/.test(text)) return false
+  return true
 }
 
 async function analyzeProfileObservation(input: {
@@ -1575,6 +1685,9 @@ function parseProfileObservationAnalysis(raw: string, rawAnswer: string): Profil
     discriminatingEvidence: normalizeOptionalProfileField(parsed.discriminatingEvidence, 300),
     teachingIntervention: normalizeOptionalProfileField(parsed.teachingIntervention, 300),
     verificationCriterion: normalizeOptionalProfileField(parsed.verificationCriterion, 300),
+    interventionProtocol: parsed.interventionProtocol && typeof parsed.interventionProtocol === 'object' && !Array.isArray(parsed.interventionProtocol)
+      ? parsed.interventionProtocol as Partial<InterventionProtocol>
+      : undefined,
   }
 }
 
@@ -1702,7 +1815,7 @@ async function maybeHandleInitialProfileTurn(input: {
     : {}
   answers[answeredStep.key] = input.message.trim().slice(0, 1200)
   const normalizedAnswers = normalizeInitialProfileAnswers(answers)
-  await writeInitialProfileObservation({
+  const observationWrite = writeInitialProfileObservation({
     vaultId: input.vaultId,
     sessionId: input.sessionId,
     rawMemoryId: rawMemory.id,
@@ -1710,16 +1823,16 @@ async function maybeHandleInitialProfileTurn(input: {
     answer: input.message.trim(),
     answers: normalizedAnswers,
   })
-
-  const assistantText = nextStep
-    ? await generateInitialProfileQuestion({
+  const nextQuestion = nextStep
+    ? generateInitialProfileQuestion({
       userId: input.userId,
       vaultId: input.vaultId,
       step: nextStep,
       stepIndex: stepIndex + 1,
       answers: normalizedAnswers,
     })
-    : '收到，初始画像已经写入。后面我会按这六个维度调整讲解、资料、练习和追问；你也可以随时修正画像。现在可以直接发一个主题、材料或问题。'
+    : Promise.resolve('收到，初始画像已经写入。后面我会按这六个维度调整讲解、资料、练习和追问；你也可以随时修正画像。现在可以直接发一个主题、材料或问题。')
+  const [, assistantText] = await Promise.all([observationWrite, nextQuestion])
   await persistMessage(input.sessionId, 'assistant', assistantText)
 
   await updateInitialProfileCache({
@@ -1779,39 +1892,53 @@ async function persistInitialProfileHypotheses(input: {
     input.answers.stuckPattern,
     input.answers.bestExplanationPath,
   ].filter(Boolean).join('；').slice(0, 700)
+  const visitorEvidence = /Visitor|访问者|双重分派|accept\s*\(|visit\s*\(|重载|重写/i.test(evidence)
+  const causalGapEvidence = visitorEvidence || /关键.{0,6}(前提|原因|因果)|为什么.{0,20}(卡|停|想不明白)|没想明白|一直卡|跟不上|后面.{0,10}(听不懂|进不来)|越想.{0,8}越/i.test(
+    Object.values(input.answers).join('；'),
+  )
+  if (!causalGapEvidence) return
+  const topicLabel = input.answers.learningGoal?.trim() || '当前学习主题'
   const hypotheses = [
     {
       key: 'causal_process_gap',
-      title: 'H1 缺少编译期与运行期的过程模型',
-      claim: '当前困难更像关键因果前提缺失：学生能跟随结构名词，但没有闭合“编译期重载选择 + 运行时重写执行”的过程模型；这不是简单整体反应慢或基础差。',
-      prediction: '若该假设成立，补齐类型分派过程后，陌生代码预测、accept 解释和 Visitor 变化成本权衡会明显改善；重复讲 UML 不会显著改善。',
-      test: '用只改变变量声明类型的 Java 对照程序区分重载/重写，再进行陌生 AST 迁移和变化成本题。',
-      result: '待执行路径中的代码预测与迁移任务验证。',
+      title: visitorEvidence ? 'H1 关键分派过程模型尚未闭合' : 'H1 关键因果前提尚未闭合',
+      claim: visitorEvidence
+        ? '当前困难可能来自“编译期选择 + 运行时执行”的过程模型尚未闭合，而非简单整体反应慢或基础差。'
+        : `当前困难可能来自「${topicLabel.slice(0, 80)}」中的关键因果前提尚未闭合；这是待验证机制，不是对学生的固定标签。`,
+      prediction: visitorEvidence
+        ? '若该假设成立，补齐类型分派过程后，陌生代码预测、accept 解释和 Visitor 变化成本权衡会改善。'
+        : '若该假设成立，只补齐一个关键前提后，学生应能继续解释后续步骤并迁移到一个新例子；重复完整课程的收益较低。',
+      test: visitorEvidence
+        ? '用只改变变量声明类型的 Java 对照程序区分重载与重写，再进行陌生 AST 迁移。'
+        : '先定位第一个说不清“为什么”的步骤，只补该前提，再要求预测后续结果和迁移到新例子。',
+      result: '待后续学习行为验证。',
       status: 'pending',
-      confidenceBefore: 0.72,
-      confidenceAfter: 0.72,
+      confidenceBefore: 0.58,
+      confidenceAfter: 0.58,
     },
     {
       key: 'global_foundation_gap',
-      title: 'H2 Java 多态基础整体薄弱',
-      claim: '也可能不是单点机制缺口，而是重载、重写和静态类型基础整体不稳定。',
-      prediction: '若基础整体薄弱，重写接收者和重载参数两类小测都会失败，且分步讲解后仍不能迁移。',
-      test: '分别测试重写接收者与重载参数表达式，不把两者混成一道题；若只在重载参数题失败，则降低该假设。',
-      result: '待前置机制小测区分。',
+      title: visitorEvidence ? 'H2 Java 多态基础整体不稳定' : 'H2 相关前置基础整体不稳定',
+      claim: visitorEvidence
+        ? '也可能不是单点机制缺口，而是重载、重写和静态类型基础整体不稳定。'
+        : '也可能不是一个关键断点，而是多个前置概念都不稳定；需要用分离的小任务鉴别。',
+      prediction: '若基础整体不稳定，多个彼此独立的前置小测都会失败，补一个关键前提后仍不能迁移。',
+      test: '把相关前置拆成两个独立小任务分别验证；不能用一次自述直接确认该假设。',
+      result: '待前置小测区分。',
       status: 'pending',
       confidenceBefore: 0.35,
       confidenceAfter: 0.35,
     },
     {
-      key: 'structure_recall_gap',
-      title: 'H3 只是没有记熟 Visitor 结构',
-      claim: '还需排除学生只是忘记 UML 角色或标准模板的可能。',
-      prediction: '若只是记忆问题，复习 UML 后应能解释 accept 并预测调用结果。',
-      test: '跳过重复 UML 前先核对角色复述，再观察机制题是否仍失败。',
-      result: '待路径首轮任务验证。',
+      key: 'pace_or_recall_gap',
+      title: visitorEvidence ? 'H3 只是结构记忆不熟' : 'H3 主要是节奏或记忆问题',
+      claim: '还需排除学生只是没有记熟表层结构，或当前信息密度不合适的可能。',
+      prediction: '若只是记忆或节奏问题，降低信息密度或快速复习结构后，应能解释关键原因并完成迁移。',
+      test: '用一轮短复习与一轮因果补桥做对照，比较哪一种真正改善预测和迁移。',
+      result: '待对照任务验证。',
       status: 'pending',
-      confidenceBefore: 0.2,
-      confidenceAfter: 0.2,
+      confidenceBefore: 0.28,
+      confidenceAfter: 0.28,
     },
   ]
   await prisma.vaultMemory.deleteMany({
@@ -1838,25 +1965,35 @@ async function persistInitialProfileHypotheses(input: {
       key: `initial_${input.sessionId}_mechanism_observation`,
       category: 'observation',
       value: JSON.stringify({
-        text: '综合六问后的核心机制假设：学生不是整体反应慢或简单基础差，而是在关键因果前提没有闭合时会停下来深挖，后续信息进入失败；教学应保留知识深度，但缩小单次因果跨度，先用代码预测和运行验证补齐编译期重载与运行时重写的过程模型。',
+        text: visitorEvidence
+          ? '综合六问后的当前假设：阻塞可能集中在关键分派过程没有闭合；教学先缩小单次因果跨度，再用代码预测和运行结果验证。'
+          : `综合六问后的当前假设：在「${topicLabel.slice(0, 80)}」中可能存在关键因果前提断点；应先做小范围鉴别，再决定补前置、调节奏还是继续深入。`,
         category: 'profile_stuckPattern',
         confidence: 0.66,
         analysisMode: 'initial_profile_synthesis',
         subDimensionKey: 'causal_prerequisite_gap',
         subDimensionLabel: '核心阻塞机制',
-        userFacingSummary: '你并不是整体学得慢。当前证据更支持：关键原因还没有闭合时，后面的内容会暂时失去落点；系统会继续用迁移任务确认这个判断。',
-        observableBehavior: '学生能跟随 Visitor 的结构名词，但无法解释 accept(visitor) 后为何还要 visit(this)，并明确表示关键原因未闭合时会停下来深挖。',
-        mechanismHypothesis: '当前阻塞更可能来自“编译期重载选择 + 运行时重写执行”的过程模型未闭合；未解决的因果前提持续占用注意，使后续 UML、优缺点和适用场景难以进入。',
+        userFacingSummary: '当前只形成一个待验证判断：你可能不是整体学得慢，而是在关键原因没有闭合时，后面的内容暂时失去落点。系统会用后续任务继续确认或推翻它。',
+        observableBehavior: evidence || '来自首次画像自述，尚无独立学习行为证据。',
+        mechanismHypothesis: visitorEvidence
+          ? '当前阻塞可能来自“编译期选择 + 运行时执行”的过程模型未闭合；尚需与整体基础薄弱、结构记忆不熟区分。'
+          : '当前阻塞可能来自关键因果前提未闭合；尚需与整体前置薄弱、表层记忆不熟或信息密度不合适区分。',
         competingHypotheses: [
-          'Java 多态基础整体薄弱，而非单点过程模型缺口。',
-          '只是没有记熟 Visitor 的 UML 角色和标准结构。',
+          visitorEvidence ? 'Java 多态基础整体薄弱，而非单点过程模型缺口。' : '相关前置基础整体不稳定，而非单点断裂。',
+          visitorEvidence ? '只是没有记熟 Visitor 的 UML 角色和标准结构。' : '只是表层结构没有记熟。',
           '信息加工速度在所有任务中都偏慢，而非仅在因果前提缺失时停顿。',
         ],
-        discriminatingEvidence: '分别测试重写接收者与重载参数表达式；若只在重载参数选择失败，且补齐过程模型后能迁移到陌生 AST，则降低“整体基础差”和“全局反应慢”假设。',
-        teachingIntervention: '保持解释深度，但把单轮因果跨度缩短为一个节点：先预测静态类型选择的签名，再运行验证动态实现；确认后再进入 accept 与 visit 的第二次分派。',
-        verificationCriterion: '能预测只改变变量声明类型后的输出，解释编译期与运行期各决定什么，并迁移到陌生 AST 节点后用反例说明何时不需要 Visitor。',
+        discriminatingEvidence: visitorEvidence
+          ? '分别测试重写接收者与重载参数；若只在参数选择失败，且补齐过程模型后能迁移到陌生 AST，则降低整体基础差假设。'
+          : '分别做前置小测、关键因果补桥和节奏调整；以哪一种干预能改善预测与迁移来区分机制。',
+        teachingIntervention: visitorEvidence
+          ? '保持解释深度，但把单轮因果跨度缩短为一个节点：先预测静态类型选择的签名，再运行验证动态实现。'
+          : '保持必要深度，但一次只补一个因果节点；每补完立即让学生预测下一步，确认后再继续。',
+        verificationCriterion: visitorEvidence
+          ? '能预测只改变变量声明类型后的输出，解释编译期与运行期各决定什么，并迁移到陌生 AST。'
+          : '能解释关键前提、预测其后果、给出反例，并迁移到一个没有照搬原题表述的新场景。',
         scope: 'current_topic',
-        status: 'supported',
+        status: 'hypothesis',
         sourceObjectType: 'learningSession',
         sourceObjectId: input.sessionId,
         evidence: [{
@@ -2023,9 +2160,24 @@ async function writeInitialProfileObservation(input: {
     console.debug('[Agent API] Initial profile observation analysis failed:', err)
     return null
   })
-  const text = analysis?.claim || `用户在「${input.step.label}」维度提供了初始画像线索，需要后续对话继续确认。`
+  const fallback = buildInitialProfileFallback(input.step, answer)
+  const text = analysis?.claim || fallback.claim
   const confidence = analysis?.confidence ?? 0.28
-  const evidenceSummary = analysis?.evidence || `来自首次画像访谈的「${input.step.label}」回答，尚未形成强结论。`
+  const evidenceSummary = analysis?.evidence || fallback.evidence
+  const teachingIntervention = analysis?.teachingIntervention || fallback.intervention
+  const verificationCriterion = analysis?.verificationCriterion || fallback.verification
+  const interventionProtocol = compileInterventionProtocol({
+    dimensionKey: input.step.key,
+    dimensionLabel: input.step.label,
+    subDimensionLabel: analysis?.subDimensionLabel || fallback.label,
+    observableBehavior: analysis?.observableBehavior || fallback.observableBehavior,
+    mechanismHypothesis: analysis?.mechanismHypothesis || fallback.mechanism,
+    competingHypotheses: analysis?.competingHypotheses || fallback.competingHypotheses,
+    teachingIntervention,
+    verificationCriterion,
+    confidence,
+    protocol: analysis?.interventionProtocol,
+  })
 
   await prisma.vaultMemory.create({
     data: {
@@ -2038,14 +2190,15 @@ async function writeInitialProfileObservation(input: {
         confidence,
         analysisMode: analysis ? 'llm_context' : 'fallback_needs_confirmation',
         subDimensionKey: analysis?.subDimensionKey || `initial_${input.step.key}`,
-        subDimensionLabel: analysis?.subDimensionLabel || input.step.label,
-        userFacingSummary: analysis?.userFacingSummary || text,
-        observableBehavior: analysis?.observableBehavior,
-        mechanismHypothesis: analysis?.mechanismHypothesis,
-        competingHypotheses: analysis?.competingHypotheses,
-        discriminatingEvidence: analysis?.discriminatingEvidence,
-        teachingIntervention: analysis?.teachingIntervention,
-        verificationCriterion: analysis?.verificationCriterion,
+        subDimensionLabel: analysis?.subDimensionLabel || fallback.label,
+        userFacingSummary: analysis?.userFacingSummary || fallback.summary,
+        observableBehavior: analysis?.observableBehavior || fallback.observableBehavior,
+        mechanismHypothesis: analysis?.mechanismHypothesis || fallback.mechanism,
+        competingHypotheses: analysis?.competingHypotheses || fallback.competingHypotheses,
+        discriminatingEvidence: analysis?.discriminatingEvidence || fallback.discriminatingEvidence,
+        teachingIntervention,
+        verificationCriterion,
+        interventionProtocol,
         scope: 'current_topic',
         status: 'hypothesis',
         rawAnswer: answer,
@@ -2059,6 +2212,22 @@ async function writeInitialProfileObservation(input: {
       }),
     },
   })
+}
+
+function buildInitialProfileFallback(step: InitialProfileStep, answer: string) {
+  const evidence = answer.replace(/\s+/g, ' ').trim().slice(0, 220)
+  return {
+    claim: `用户已经对“${step.label}”提供了自述，但自动分析暂不可用；当前只保留为待确认线索，不据此形成稳定结论。`,
+    label: `${step.label}待确认`,
+    summary: '这部分回答已经记录，但在系统完成分析或后续行为验证前，不会被当作确定画像。',
+    observableBehavior: `用户在首次画像中的原始自述：${evidence}`,
+    mechanism: '现有证据不足以形成底层学习机制判断。',
+    competingHypotheses: ['该回答可能只适用于当前课程或当前状态。'],
+    discriminatingEvidence: '后续通过用户确认和真实学习任务，观察该自述是否稳定影响理解、预测或迁移。',
+    intervention: '下一轮只复述关键点并请求确认，不据此强制改变整体教学策略。',
+    verification: '获得用户确认，或在至少一次真实学习任务中出现一致行为后再提高置信度。',
+    evidence: `来自用户对“${step.label}”的主动自述；未生成额外推断。`,
+  }
 }
 
 async function updateInitialProfileCache(input: {
@@ -2084,31 +2253,23 @@ async function updateInitialProfileCache(input: {
     completed: input.completed,
     updatedAt: input.answeredAt,
   })
-  const currentEducationProfile = getProfileCacheEntry<Record<string, unknown>>(vault?.profileCache, 'educationProfile')?.data ?? {}
-  const nextEducationProfile = buildInitialEducationProfile({
-    current: currentEducationProfile,
-    userId: input.userId,
-    answers,
-    answeredStep: input.answeredStep,
-    updatedAt: input.answeredAt,
-  })
   const withAgentProfile = setProfileCacheEntry(vault?.profileCache, 'agentProfile', nextAgentProfile)
-  const withEducationProfile = setProfileCacheEntry(withAgentProfile, 'educationProfile', nextEducationProfile)
 
   await prisma.$transaction([
     prisma.vault.update({
       where: { id: input.vaultId },
       data: {
-        profileCache: withEducationProfile,
+        profileCache: withAgentProfile,
         updatedAt: input.answeredAt,
       },
     }),
     prisma.educationProfileHistory.create({
       data: {
         vaultId: input.vaultId,
-        profile: JSON.stringify(nextEducationProfile),
+        profile: JSON.stringify(nextAgentProfile),
         snapshot: JSON.stringify({
           source: 'initial_profile',
+          profileKey: 'agentProfile',
           sessionId: input.sessionId,
           dimension: input.answeredStep.key,
           completed: input.completed,
@@ -2165,71 +2326,6 @@ function buildInitialAgentProfile(input: {
       updatedAt: input.updatedAt.toISOString(),
       dimensions,
     },
-  }
-}
-
-function buildInitialEducationProfile(input: {
-  current: Record<string, unknown>
-  userId: string
-  answers: Record<string, string>
-  answeredStep: InitialProfileStep
-  updatedAt: Date
-}): Record<string, unknown> {
-  const dimensions = isRecord(input.current.dimensions) ? input.current.dimensions : {}
-  const nextDimensions = {
-    depth: mergeInitialDimension(dimensions.depth, input.answers.currentFoundation, '初始画像：当前基础'),
-    breadth: mergeInitialDimension(dimensions.breadth, input.answers.learningGoal, '初始画像：学习目标'),
-    connection: mergeInitialDimension(dimensions.connection, input.answers.stuckPattern, '初始画像：常见卡点'),
-    expression: mergeInitialDimension(dimensions.expression, input.answers.bestExplanationPath || input.answers.masteryCheck, '初始画像：讲法/掌握标准'),
-    application: mergeInitialDimension(dimensions.application, input.answers.masteryCheck, '初始画像：掌握标准'),
-    learning_pace: mergeInitialDimension(dimensions.learning_pace, input.answers.paceAndLoad, '初始画像：节奏负荷'),
-  }
-  const updateHistory = Array.isArray(input.current.updateHistory)
-    ? input.current.updateHistory
-    : []
-  const answeredKeys = Object.keys(input.answers)
-  return {
-    ...input.current,
-    userId: input.userId,
-    dimensions: nextDimensions,
-    updateHistory: [
-      ...updateHistory.slice(-20),
-      {
-        timestamp: input.updatedAt.getTime(),
-        trigger: 'manual',
-        dimensionsUpdated: [input.answeredStep.key],
-        changes: {},
-      },
-    ],
-    sessionCount: typeof input.current.sessionCount === 'number' ? input.current.sessionCount : 0,
-    totalLearningMinutes: typeof input.current.totalLearningMinutes === 'number' ? input.current.totalLearningMinutes : 0,
-    createdAt: typeof input.current.createdAt === 'number' ? input.current.createdAt : input.updatedAt.getTime(),
-    updatedAt: input.updatedAt.getTime(),
-    initialProfileEvidence: {
-      standard: 'six-dimension-teaching-profile',
-      answered: answeredKeys,
-      answers: input.answers,
-    },
-  }
-}
-
-function mergeInitialDimension(current: unknown, answer: string | undefined, evidenceLabel: string): {
-  score: number
-  confidence: number
-  evidence: string[]
-} {
-  const record = isRecord(current) ? current : {}
-  const currentScore = typeof record.score === 'number' && Number.isFinite(record.score) ? record.score : 0
-  const evidence = Array.isArray(record.evidence)
-    ? record.evidence.map(String)
-    : []
-  const nextEvidence = answer
-    ? uniqueStrings([...evidence, `${evidenceLabel}：${answer.slice(0, 120)}`])
-    : evidence
-  return {
-    score: answer ? Math.max(currentScore, 10) : currentScore,
-    confidence: Math.max(typeof record.confidence === 'number' ? record.confidence : 0, answer ? 0.56 : 0),
-    evidence: nextEvidence.slice(-8),
   }
 }
 

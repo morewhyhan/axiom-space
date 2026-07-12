@@ -50,15 +50,15 @@ export default function Header() {
   }
 
   return (
-    <header className="flex justify-between items-center pointer-events-auto flex-shrink-0" style={{ padding: `var(--header-py) var(--header-px)` }}>
-      <div className="relative z-20 flex min-w-0 items-center" style={{ gap: 'var(--header-gap)' }}>
-        <div className="flex flex-col">
+    <header className="app-header flex justify-between items-center pointer-events-auto flex-shrink-0" style={{ padding: `var(--header-py) var(--header-px)` }}>
+      <div className="app-header-primary relative z-20 flex items-center" style={{ gap: 'var(--header-gap)' }}>
+        <div className="app-brand flex flex-col">
           <h1 className="serif font-bold glow-text-purple uppercase leading-none" style={{ fontSize: 'var(--t-title)', letterSpacing: '0.5em' }}>Axiom</h1>
           <span className="mono opacity-40 mt-1 ml-1" style={{ fontSize: 'var(--f8)', letterSpacing: '0.4em' }}>COGNITIVE OPERATING SYSTEM</span>
         </div>
         <div className="w-[1px] bg-white/10" style={{ height: 'var(--divider-h)' }}></div>
         <nav
-          className="flex gap-4"
+          className="app-mode-nav flex gap-4"
           id="mode-nav"
           aria-label="主工作区模式导航"
           data-testid="mode-nav"
@@ -69,7 +69,7 @@ export default function Header() {
               <div className="w-px h-6 bg-white/10 self-center mx-1"></div>
               <div className="relative self-center" ref={vaultRef}>
                 <Button
-                  className="mono text-white/40 hover:text-white/60 transition-colors flex items-center gap-1.5"
+                  className="vault-selector-btn mono text-white/40 hover:text-white/60 transition-colors flex items-center gap-1.5"
                   style={{ fontSize: 'var(--f9)' }}
                   aria-expanded={vaultOpen}
                   aria-haspopup="listbox"
@@ -77,8 +77,8 @@ export default function Header() {
                   data-testid="vault-selector"
                   onClick={() => setVaultOpen(!vaultOpen)}
                 >
-                  <span className="opacity-30">◆</span>
-                  {vaults.find((v) => v.id === currentVaultId)?.name || 'Select Vault'}
+                  <span className="opacity-30 flex-shrink-0">◆</span>
+                  <span className="truncate">{vaults.find((v) => v.id === currentVaultId)?.name || 'Select Vault'}</span>
                 </Button>
                 <div
                   className={`absolute top-full mt-2 right-0 bg-[var(--glass-bg)] backdrop-blur-xl border border-white/10 rounded-xl py-1 min-w-[180px] ${vaultOpen ? '' : 'hidden'}`}
@@ -106,9 +106,9 @@ export default function Header() {
           )}
         </nav>
       </div>
-      <div className="relative z-10 flex shrink-0 items-center gap-5 mono text-xs">
+      <div className="app-header-meta relative z-10 flex shrink-0 items-center gap-5 mono text-xs">
         <Button
-          className="flex items-center gap-2 rounded-lg border border-white/5 bg-white/5 px-3 py-1.5 transition-colors hover:border-white/10 hover:bg-white/8"
+          className="app-header-search flex items-center gap-2 rounded-lg border border-white/5 bg-white/5 px-3 py-1.5 transition-colors hover:border-white/10 hover:bg-white/8"
           data-no-global-shortcuts
           onClick={handleOpenSearch}
           title="搜索节点"
@@ -116,7 +116,7 @@ export default function Header() {
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>⌘K</span>
           <span className="opacity-30" style={{ fontSize: 'var(--f10)' }}>搜索节点...</span>
         </Button>
-        <span className="mono text-white/20 tracking-wider" style={{ fontSize: 'var(--f8)' }}>
+        <span className="app-header-debug mono text-white/20 tracking-wider" style={{ fontSize: 'var(--f8)' }}>
           FPS <span id="cluster-fps">—</span> &nbsp;│&nbsp; CAM <span id="cluster-coords">0 / 0 / 0</span> &nbsp;│&nbsp; TGT <span id="cluster-target">0 / 0 / 0</span>
         </span>
         <div className="notif-bell relative" ref={notifRef}>

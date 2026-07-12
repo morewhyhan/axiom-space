@@ -29,6 +29,7 @@ import {
   safeConceptFileName,
 } from '@/server/core/domain/concept-graph'
 import { emitDomainEvent, recordAssessmentResult } from '@/server/core/domain/events'
+import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
 import { DocumentImportError, importDocumentToVault } from '@/server/core/learning/document-import-service'
 import { pushSuggestionEngine, type PushBoxType, type PushStatus } from '@/server/core/push/push-suggestion-engine'
 import {
@@ -244,8 +245,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
     const vid = vault.id
     const [totalCards, permanentCount, clusterData, recentSessions] = await Promise.all([
-      prisma.card.count({ where: { vaultId: vid } }),
-      prisma.card.count({ where: { vaultId: vid, type: 'permanent' } }),
+      prisma.card.count({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH } } }),
+      prisma.card.count({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH }, type: 'permanent' } }),
       prisma.cluster.findMany({
         where: { vaultId: vid },
         select: { id: true, name: true, color: true, _count: { select: { cards: true } } },
@@ -1058,6 +1059,11 @@ ${context.answer.slice(0, 2400)}
         // Read the card content for context
         const card = step.cardId ? await prisma.card.findUnique({ where: { id: step.cardId } }) : null
         const cardContent = card?.content?.slice(0, 1000) || step.title
+        const assessmentRubric = buildStepAssessmentRubric({
+          title: step.title,
+          concept: step.concept,
+          cardContent,
+        })
 
         // Read recent messages from the agent session
         const recentMessages = await prisma.learningMessage.findMany({
@@ -1107,16 +1113,13 @@ ${context.answer.slice(0, 2400)}
             sessionEvidence,
             clientEvidence,
           })
-          const deterministicCheck = clientEvidence.some((item) => /java-exit\s*:\s*0/i.test(item))
-            && clientEvidence.some((item) => /java-output\s*:/i.test(item))
-            ? 'passed'
-            : 'failed'
-          if (parsed.passed && deterministicCheck === 'failed') {
+          const deterministicCheck = evaluateDeterministicEvidence(clientEvidence, assessmentRubric)
+          if (parsed.passed && assessmentRubric.requiresExecutionEvidence && deterministicCheck === 'failed') {
             evaluation = {
               ...evaluation,
               passed: false,
               mastery: Math.min(evaluation.mastery, 59),
-              feedback: '语义解释基本成立，但缺少 Java 编译运行的确定性证据，暂不能通过。',
+              feedback: `语义解释基本成立，但缺少“${assessmentRubric.executionEvidenceLabel}”的确定性证据，暂不能通过。`,
             }
           }
           assessmentId = await recordAssessmentResult({
@@ -1132,7 +1135,7 @@ ${context.answer.slice(0, 2400)}
             feedback: evaluation.feedback,
             evidence: sessionEvidence.slice(0, 10),
             clientContext: {
-              rubricId: 'visitor-transfer-v1',
+              rubricId: assessmentRubric.id,
               deterministicCheck,
               checks: clientEvidence.slice(0, 10),
             },
@@ -1166,7 +1169,48 @@ ${context.answer.slice(0, 2400)}
         }
       } catch (err: unknown) {
         console.warn('[Learning] AI evaluation failed:', err instanceof Error ? err.message : String(err))
-        return c.json({ success: false, error: 'ASSESSMENT_UNAVAILABLE' }, 503)
+        const explanation = sessionEvidence.join('\n')
+        const assessmentRubric = buildStepAssessmentRubric({
+          title: step.title,
+          concept: step.concept,
+          cardContent: step.title,
+        })
+        const deterministicCheck = evaluateDeterministicEvidence(clientEvidence, assessmentRubric)
+        const explanationChecks = assessmentRubric.semanticChecks(explanation)
+        const semanticScore = explanationChecks.filter(Boolean).length
+        const passed = (!assessmentRubric.requiresExecutionEvidence || deterministicCheck === 'passed') && semanticScore >= 5
+        evaluation = buildStepEvaluationView({
+          stepTitle: step.title,
+          concept: step.concept,
+          parsed: {
+            passed,
+            mastery: passed ? Math.min(92, 70 + semanticScore * 3) : Math.min(55, 20 + semanticScore * 6),
+            feedback: passed
+              ? 'AI 评估暂时不可用；固定量规已确认解释、例子、边界、验证方法和 Java 运行证据齐全。'
+              : `固定量规未通过：当前满足 ${semanticScore}/6 项语义标准${assessmentRubric.requiresExecutionEvidence ? `，且${assessmentRubric.executionEvidenceLabel}为${deterministicCheck === 'passed' ? '已提供' : '未提供'}` : ''}。`,
+          },
+          sessionEvidence,
+          clientEvidence,
+        })
+        assessmentId = await recordAssessmentResult({
+          userId,
+          vaultId: path.vaultId,
+          pathId,
+          stepId,
+          cardId: step.cardId,
+          sessionId: effectiveSessionId,
+          concept: step.title,
+          passed: evaluation.passed,
+          mastery: evaluation.mastery,
+          feedback: evaluation.feedback,
+          evidence: sessionEvidence.slice(0, 10),
+          clientContext: {
+            rubricId: assessmentRubric.id,
+            deterministicCheck,
+            evaluator: 'deterministic_fallback',
+            checks: clientEvidence.slice(0, 10),
+          },
+        })
       }
       if (!evaluation) return c.json({ success: false, error: 'EVIDENCE_REQUIRED' }, 400)
       if (!evaluation.passed) {
@@ -1180,6 +1224,14 @@ ${context.answer.slice(0, 2400)}
         })
         return c.json({ success: false, error: 'ASSESSMENT_FAILED', evaluation }, 422)
       }
+      await updateInitialProfileHypothesesFromAssessment({
+        vaultId: path.vaultId,
+        concept: step.title,
+        assessmentId,
+        evaluation,
+      }).catch((error) => {
+        console.warn('[Learning] Failed to update initial profile hypotheses:', error)
+      })
     }
 
     // Update step
@@ -2325,6 +2377,7 @@ async function buildUnassignedTaskPath(vaultId: string, topic?: string) {
     where: {
       vaultId,
       type: 'fleeting',
+      path: { not: '__root__.md' },
       learningPathSteps: { none: {} },
       ...(topic ? {
         OR: [
@@ -2832,64 +2885,144 @@ function safeParseJsonObject(raw: string | null | undefined): Record<string, unk
   }
 }
 
-function repairInitialEducationProfile(profile: Record<string, unknown> | null): Record<string, unknown> | null {
-  if (!profile) return null
-  const initialEvidence = toRecord(profile.initialProfileEvidence)
-  const answers = toRecord(initialEvidence?.answers)
-  if (!answers) return profile
+type StepAssessmentRubric = {
+  id: 'visitor-transfer-v1' | 'code-execution-v1' | 'concept-transfer-v1'
+  requiresExecutionEvidence: boolean
+  executionEvidenceLabel: string
+  semanticChecks: (explanation: string) => boolean[]
+}
 
-  const dimensions = toRecord(profile.dimensions) ?? {}
-  const nextDimensions: Record<string, unknown> = { ...dimensions }
-  let changed = false
-
-  const applyAnswer = (dimensionKey: string, answerKey: string, evidenceLabel: string) => {
-    const answer = stringValue(answers[answerKey])
-    if (!answer) return
-
-    const current = toRecord(dimensions[dimensionKey]) ?? {}
-    const currentScore = numberValue(current.score)
-    const currentConfidence = numberValue(current.confidence)
-    const evidence = Array.isArray(current.evidence)
-      ? current.evidence.map(String).filter(Boolean)
-      : []
-    const evidenceEntry = `${evidenceLabel}：${answer.slice(0, 120)}`
-    const nextEvidence = uniqueStringList([...evidence, evidenceEntry]).slice(-8)
-    const nextScore = Math.max(currentScore, 10)
-    const nextConfidence = Math.max(currentConfidence, 0.22)
-
-    if (nextScore !== currentScore || nextConfidence !== currentConfidence || nextEvidence.length !== evidence.length) {
-      changed = true
-      nextDimensions[dimensionKey] = {
-        ...current,
-        score: nextScore,
-        confidence: nextConfidence,
-        evidence: nextEvidence,
-      }
+function buildStepAssessmentRubric(input: {
+  title: string
+  concept: string | null
+  cardContent: string
+}): StepAssessmentRubric {
+  const context = `${input.title}\n${input.concept || ''}\n${input.cardContent}`
+  const isVisitorDispatch = /Visitor|访问者|双重分派|accept\s*\(|visit\s*\(/i.test(context)
+  if (isVisitorDispatch) {
+    return {
+      id: 'visitor-transfer-v1',
+      requiresExecutionEvidence: true,
+      executionEvidenceLabel: 'Java 编译运行证据',
+      semanticChecks: (explanation) => [
+        explanation.replace(/\s+/g, '').length >= 160,
+        /编译期|静态类型|重载/.test(explanation),
+        /运行期|真实类型|重写|动态分派/.test(explanation),
+        /例如|比如|Node|PdfNode|AST/.test(explanation),
+        /反例|边界|不适合|如果/.test(explanation),
+        /验证|运行|核对|预测/.test(explanation),
+      ],
     }
   }
 
-  applyAnswer('depth', 'currentFoundation', '初始画像：当前基础')
-  applyAnswer('breadth', 'learningGoal', '初始画像：学习目标')
-  applyAnswer('connection', 'stuckPattern', '初始画像：常见卡点')
-  applyAnswer('expression', stringValue(answers.bestExplanationPath) ? 'bestExplanationPath' : 'masteryCheck', '初始画像：讲法/掌握标准')
-  applyAnswer('application', 'masteryCheck', '初始画像：掌握标准')
-  applyAnswer('learning_pace', 'paceAndLoad', '初始画像：节奏负荷')
+  const requiresExecutionEvidence = /(代码|编程|实现|调试|运行|实操|实验|Java|Python|TypeScript|算法)/i.test(context)
+  const anchors = `${input.title} ${input.concept || ''}`
+    .match(/[\u4e00-\u9fffA-Za-z0-9_]{2,}/g)
+    ?.filter((item) => !/^(学习|理解|掌握|任务|阶段|概念)$/.test(item))
+    .slice(0, 10) ?? []
+  return {
+    id: requiresExecutionEvidence ? 'code-execution-v1' : 'concept-transfer-v1',
+    requiresExecutionEvidence,
+    executionEvidenceLabel: '代码运行或测试证据',
+    semanticChecks: (explanation) => [
+      explanation.replace(/\s+/g, '').length >= 100,
+      /是指|指的是|是一种|是.{0,40}(?:概念|方法|过程|机制|规则|模式|做法)|因为|所以|核心|机制|作用|解决|意味着/.test(explanation),
+      /例如|比如|举例|案例|example/i.test(explanation),
+      /反例|边界|不适合|不成立|不等于|区别|如果/.test(explanation),
+      /验证|运行|核对|测试|预测|应用|迁移|实践/.test(explanation),
+      anchors.length === 0 || anchors.some((anchor) => explanation.includes(anchor)),
+    ],
+  }
+}
 
-  return changed ? { ...profile, dimensions: nextDimensions } : profile
+function evaluateDeterministicEvidence(
+  evidence: string[],
+  rubric: StepAssessmentRubric,
+): 'passed' | 'failed' | 'not_required' {
+  if (!rubric.requiresExecutionEvidence) return 'not_required'
+  const hasSuccessfulRun = evidence.some((item) =>
+    /(?:java|python|node|test|execution|program)-exit\s*:\s*0/i.test(item),
+  )
+  const hasObservableResult = evidence.some((item) =>
+    /(?:java|python|node|test|execution|program)-(output|result)\s*:/i.test(item),
+  )
+  return hasSuccessfulRun && hasObservableResult ? 'passed' : 'failed'
+}
+
+async function updateInitialProfileHypothesesFromAssessment(input: {
+  vaultId: string
+  concept: string
+  assessmentId: string | null
+  evaluation: StepEvaluation
+}) {
+  if (!input.evaluation.passed) return
+  const hypotheses = await prisma.vaultMemory.findMany({
+    where: { vaultId: input.vaultId, category: 'hypothesis', key: { startsWith: 'initial_' } },
+    orderBy: { createdAt: 'desc' },
+    take: 3,
+  })
+  for (const memory of hypotheses) {
+    const value = safeParseJsonObject(memory.value)
+    if (!value) continue
+    const isPrimary = memory.key.includes('causal_process_gap')
+    const before = typeof value.confidenceAfter === 'number'
+      ? value.confidenceAfter
+      : typeof value.confidenceBefore === 'number'
+        ? value.confidenceBefore
+        : 0.35
+    await prisma.vaultMemory.update({
+      where: { id: memory.id },
+      data: {
+        value: JSON.stringify({
+          ...value,
+          status: isPrimary ? 'supported' : 'weakened',
+          confidenceAfter: isPrimary ? Math.max(before, 0.74) : Math.max(0.12, before - 0.12),
+          result: isPrimary
+            ? `「${input.concept}」评估通过（掌握度 ${input.evaluation.mastery}%），关键干预后已经出现可观察改善；该机制得到本轮支持，但仍可被后续任务修正。`
+            : `同一轮评估在针对关键机制干预后通过，因此该竞争解释的相对权重下降；尚未被永久排除。`,
+          assessmentId: input.assessmentId,
+        }),
+      },
+    })
+  }
+
+  const mechanismObservation = await prisma.vaultMemory.findFirst({
+    where: {
+      vaultId: input.vaultId,
+      category: 'observation',
+      key: { startsWith: 'initial_', endsWith: '_mechanism_observation' },
+    },
+    orderBy: { createdAt: 'desc' },
+  })
+  if (!mechanismObservation) return
+  const observation = safeParseJsonObject(mechanismObservation.value)
+  if (!observation) return
+  await prisma.vaultMemory.update({
+    where: { id: mechanismObservation.id },
+    data: {
+      value: JSON.stringify({
+        ...observation,
+        status: 'supported',
+        confidence: Math.max(typeof observation.confidence === 'number' ? observation.confidence : 0, 0.74),
+        discriminatingEvidence: `「${input.concept}」在针对性干预后通过评估，掌握度 ${input.evaluation.mastery}%；这支持当前机制假设，但仍需跨主题复测。`,
+        sourceObjectType: input.assessmentId ? 'assessmentResult' : observation.sourceObjectType,
+        sourceObjectId: input.assessmentId || observation.sourceObjectId,
+      }),
+    },
+  })
+}
+
+function repairInitialEducationProfile(profile: Record<string, unknown> | null): Record<string, unknown> | null {
+  // Initial interview answers describe goals and teaching preferences. They do
+  // not prove ability scores such as depth, breadth, or application. Historical
+  // rows are returned as stored instead of manufacturing numeric dimensions.
+  return profile
 }
 
 function toRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
-}
-
-function numberValue(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
-function uniqueStringList(items: string[]): string[] {
-  return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)))
 }
 
 const EDUCATION_DIMENSION_LABELS: Record<string, string> = {

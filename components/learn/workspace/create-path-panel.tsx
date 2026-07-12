@@ -2,7 +2,7 @@
 
 import type { ChangeEvent } from 'react'
 import { FileText, Plus, Sparkles } from 'lucide-react'
-import { toast } from 'sonner'
+import { toast } from '@/lib/ui-feedback'
 import { Button, SegmentedControl } from '@/components/ui'
 import { readImportFilePayload, type ImportFilePayload } from '@/lib/import-files'
 import { CREATE_MODE_OPTIONS, LEVEL_OPTIONS } from './helpers'
