@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="color-scheme" content="light">
+  <title>AXIOM Space｜从一次答案到真正掌握</title>
+  <link rel="stylesheet" href="deck.css?v=17" data-deck-style>
+</head>
+<body class="director">
+  <main class="deck" id="deck" aria-label="AXIOM Space A3 黄金案例 V12 演示文稿">
+
+    <section class="slide v8-slide is-active" data-scene="01" data-kind="content" data-title="为什么答案还不够" data-narration="assets/audio/scene-01-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>01A · 为什么答案还不够</span><span>第一章 · 问题</span></header>
+        <div class="v8-page v8-hero">
+          <div class="v8-lead">
+            <p class="v8-kicker">库存只剩 1 件，两个人却都下单成功</p>
+            <h1 class="v8-title">通用 Agent 已经给出解法，<br><em>小林却仍可能没有学会</em></h1>
+          </div>
+          <div class="v8-contrast" aria-label="通用 Agent 与掌握学习的完成标准">
+            <article class="v8-card ordinary">
+              <small>通用 Agent 的完成</small>
+              <b>定义、代码、标准解法</b>
+              <span>答案已经交付</span>
+            </article>
+            <i class="v8-arrow">≠</i>
+            <article class="v8-card alert">
+              <small>小林脑中的真实模型</small>
+              <b>“A 买完，B 一定读到 0”</b>
+              <span>关键误解仍未暴露</span>
+            </article>
+          </div>
+          <div class="v8-verdict">
+            <b>答案解决眼前的问题</b>
+            <i>→</i>
+            <strong>AXIOM 继续确认：能否解释、迁移，并让证据改变下一步</strong>
+          </div>
+        </div>
+        <footer class="foot"><span>AXIOM 的目标 · 从答案交付走到可验证掌握</span><span>01 / 16</span></footer>
+        <aside class="notes">开场先讲清产品与通用 Agent 的完成标准不同：AXIOM 不在答案出现时结束，而要继续找到误解、验证迁移并改变后续学习。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="01" data-kind="video" data-status="verified" data-title="一次预测暴露误解" data-narration="assets/audio/scene-01-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>01B · 一次预测暴露误解</span><span>第一章 · 问题</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">让小林先预测，再对照真实运行结果</p>
+            <h2 class="v8-title">小林以为 B 会读到 0，结果 A、B 都先读到 1。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="第一次预测暴露隐藏误解的产品实录">
+              <source data-src="assets/videos/scene-02-diagnose-the-gap.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 01B · 小林案例实录</span>
+              <strong>预测与真实时间线发生冲突</strong>
+              <p>查看小林预测 → 展开两个请求的交错过程 → 定位错误时间线</p>
+              <code>assets/videos/scene-02-diagnose-the-gap.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>结果 · 隐藏在正确答案下面的错误理解被具体暴露</span><span>02 / 16</span></footer>
+        <aside class="notes">小林以为第二个请求会看到零，真实时间线却显示两个人都先读到一。系统因此定位到他把读取、判断和写回误当成了连续动作。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide" data-scene="02" data-kind="content" data-title="让证据改变教学" data-narration="assets/audio/scene-02-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>02A · 让证据改变教学</span><span>第一章 · 解法</span></header>
+        <div class="v8-page">
+          <div class="v8-lead compact">
+            <p class="v8-kicker">知道小林错在哪里以后，下一问就不该还是通用讲解</p>
+            <h2 class="v8-title">前台负责教，后台负责记；<br><em>学生说错一句，下一问立即改变</em></h2>
+          </div>
+          <div class="v8-causal-chain v11-agent-chain" aria-label="双 Agent 从原始回答到教学调整的因果链">
+            <div>
+              <small>AGENT1 · 前台教学</small>
+              <b>“第二个请求会读到 0”</b>
+              <span>让小林先说出自己的预测</span>
+            </div>
+            <i class="v8-arrow">→</i>
+            <div>
+              <small>AGENT2 · 后台取证</small>
+              <b>时间线建模薄弱</b>
+              <span>保留原话，更新具体卡点</span>
+            </div>
+            <i class="v8-arrow">→</i>
+            <div class="verified">
+              <small>AGENT1 · 调整教学</small>
+              <b>分步画时间线</b>
+              <span>一次只处理一个动作</span>
+            </div>
+          </div>
+          <div class="v11-profile-band" aria-label="六维动态学习画像">
+            <strong>六维画像</strong>
+            <span>学什么</span>
+            <span>会什么</span>
+            <span>怎么讲</span>
+            <span class="active">哪里会卡</span>
+            <span>一次讲多少</span>
+            <span>怎样算学会</span>
+          </div>
+          <div class="v8-proof"><b>个性化是否成立，只看一件事：</b><span>这份证据有没有让下一步真的不同。</span></div>
+        </div>
+        <footer class="foot"><span>解法 01 · 原始回答成为下一步教学参数</span><span>03 / 16</span></footer>
+        <aside class="notes">Agent1 负责当前教学，Agent2 在后台把小林原话转成画像证据。这条证据不只被保存，还直接把下一问改成分步画时间线。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="02" data-kind="video" data-status="verified" data-title="错误原话改写下一问" data-narration="assets/audio/scene-02-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>02B · 错误原话改写下一问</span><span>第一章 · 解法</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">同一句错误回答，同时留下证据并控制后续动作</p>
+            <h2 class="v8-title">“B 会读到 0”进入画像，教学随即改成分步画时间线。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="画像证据改变下一步教学的产品实录">
+              <source data-src="assets/videos/scene-03-profile-changes-teaching.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 02B · 小林案例实录</span>
+              <strong>画像证据控制下一问</strong>
+              <p>查看错误原话 → 核对画像判断 → 返回已经变化的教学动作</p>
+              <code>assets/videos/scene-03-profile-changes-teaching.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>结果 · 诊断不再停在报告里，而是变成真实教学动作</span><span>04 / 16</span></footer>
+        <aside class="notes">画像不是给小林贴标签。错误原话被保存以后，系统马上改变讲法、问题形式和节奏，专门处理他的时间线误解。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide" data-scene="03" data-kind="content" data-title="让旧知识重新工作" data-narration="assets/audio/scene-03-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>03A · 让旧知识重新工作</span><span>第二章 · 学习资产</span></header>
+        <div class="v8-page">
+          <div class="v8-lead compact">
+            <p class="v8-kicker">不是重开一段聊天，而是把当前学习与小林已有知识接起来</p>
+            <h2 class="v8-title">系统找回小林自己的旧卡，<br><em>用旧问题解释眼前的新问题</em></h2>
+          </div>
+          <div class="v8-analogy" aria-label="旧问题与当前问题共享同一种机制">
+            <article class="v8-card">
+              <small>小林的真实旧卡</small>
+              <b>在线表格覆盖</b>
+              <span>多人先读同一个旧值，再分别写回</span>
+            </article>
+            <div class="v8-bridge">
+              <span>共享机制</span>
+              <b>READ → DECIDE → WRITE</b>
+              <strong>共同依赖一份已经过期的状态</strong>
+            </div>
+            <article class="v8-card">
+              <small>当前学习问题</small>
+              <b>库存超卖</b>
+              <span>两个请求都先读到库存为 1</span>
+            </article>
+          </div>
+          <div class="v11-memory-stack" aria-label="事实源、快速语义召回与后台图谱增强">
+            <article><small>同一学习对象</small><b>课程 · 路径 · 卡片 · 对话</b><span>页面切换后仍知道当前在学什么</span></article>
+            <i>→</i>
+            <article class="fast"><small>快速召回</small><b>Qdrant</b><span>按机制找到真实相关旧卡</span></article>
+            <i>→</i>
+            <article><small>后台增强</small><b>LightRAG</b><span>继续补全实体与深层关系</span></article>
+          </div>
+          <div class="v8-proof"><b>结果：</b><span>过去形成的知识，在今天的判断里重新出现。</span></div>
+        </div>
+        <footer class="foot"><span>解法 02 · 长期记忆从“存过”变成“现在能用”</span><span>05 / 16</span></footer>
+        <aside class="notes">课程、路径、卡片和对话围绕同一学习对象保持连续。Qdrant 快速找回小林过去的真实旧卡，LightRAG 再在后台补全关系。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="03" data-kind="video" data-status="verified" data-title="真实旧卡参与新判断" data-narration="assets/audio/scene-03-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>03B · 真实旧卡参与新判断</span><span>第二章 · 学习资产</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">召回的不是临时生成的类比，而是小林过去真正写过的卡片</p>
+            <h2 class="v8-title">在线表格覆盖与库存超卖，共享“依据旧状态写回”的机制。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="真实旧卡参与当前判断的产品实录">
+              <source data-src="assets/videos/scene-05-recall-prior-knowledge.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 03B · 小林案例实录</span>
+              <strong>真实旧卡参与当前判断</strong>
+              <p>打开召回结果 → 核对旧卡内容与来源 → 对照共享旧状态机制</p>
+              <code>assets/videos/scene-05-recall-prior-knowledge.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>结果 · 旧知识不再只是归档，而是可复用的判断工具</span><span>06 / 16</span></footer>
+        <aside class="notes">系统召回小林以前写过的在线表格卡片，并说明它和库存超卖为什么相关。旧知识因此真正参与当前问题。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide" data-scene="04" data-kind="content" data-title="把理解变成自己的知识" data-narration="assets/audio/scene-04-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>04A · 把理解变成自己的知识</span><span>第二章 · 学习资产</span></header>
+        <div class="v8-page">
+          <div class="v8-lead compact">
+            <p class="v8-kicker">AI 可以整理结构，但不能替小林制造一份“已经成熟的理解”</p>
+            <h2 class="v8-title">原话先成为青色灵感卡，<br><em>审核通过后才进入紫色永久卡</em></h2>
+          </div>
+          <div class="v11-card-lifecycle" aria-label="文献卡、灵感卡、永久卡的知识生命周期">
+            <article class="literature">
+              <small>粉色 · #f472b6</small>
+              <b>文献卡</b>
+              <span>资料、引用与原始证据</span>
+            </article>
+            <i>→</i>
+            <article class="fleeting">
+              <small>青色 · #22d3ee</small>
+              <b>灵感卡</b>
+              <span>小林正在形成、仍可修改的理解</span>
+            </article>
+            <i>→</i>
+            <article class="permanent">
+              <small>紫色 · #a855f7</small>
+              <b>永久卡</b>
+              <span>通过质量审核的长期知识</span>
+            </article>
+          </div>
+          <div class="v11-galaxy-key" aria-label="Galaxy 知识图谱读图规则">
+            <strong>GALAXY</strong>
+            <span><i class="node-dot"></i>节点颜色 = 卡片类型</span>
+            <span><i class="cluster-dot"></i>所在星团 = 知识领域</span>
+            <span><i class="edge-line"></i>连线 = 证据或关系</span>
+          </div>
+          <div class="v11-assessment-levels" aria-label="知识卡质量审核与能力评估边界">
+            <strong>两道门</strong>
+            <span><b>清晰</b>对象、用途、边界</span>
+            <span><b>准确</b>判断能回到来源</span>
+            <span><b>必要</b>值得进入长期知识</span>
+          </div>
+          <div class="v8-proof"><b>重要边界：</b><span>紫色永久卡表示“值得长期保存”，不等于能力已经掌握。</span></div>
+        </div>
+        <footer class="foot"><span>解法 03 · 用户原话有来源、可修改、经审核后再长期保存</span><span>07 / 16</span></footer>
+        <aside class="notes">粉色文献卡保存证据，青色灵感卡保存形成中的理解，紫色永久卡保存通过审核的长期知识。Galaxy 使用同一颜色，永久卡与能力掌握严格分开。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="04" data-kind="video" data-status="verified" data-title="证据不足就不升级" data-narration="assets/audio/scene-04-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>04B · 证据不足就不升级</span><span>第二章 · 学习资产</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">说得顺不等于值得长期保存，第一次审核保留了真实的不完整</p>
+            <h2 class="v8-title">适用边界和证据不足，这张灵感卡没有被包装成永久知识。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="知识卡证据不足时拒绝升级的产品实录">
+              <source data-src="assets/videos/scene-07-review-rejects-card.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 04B · 小林案例实录</span>
+              <strong>第一次质量审核拒绝升级</strong>
+              <p>打开审核结果 → 查看缺失的边界与依据 → 核对卡片仍为灵感状态</p>
+              <code>assets/videos/scene-07-review-rejects-card.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>结果 · AI 不替用户伪造成熟，长期知识有独立质量门槛</span><span>08 / 16</span></footer>
+        <aside class="notes">小林的解释虽然流畅，却没有说清适用边界和证据依据。系统拒绝升级，并让这张卡继续保持可修改状态。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide" data-scene="05" data-kind="content" data-title="只补真正需要的资源" data-narration="assets/audio/scene-05-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>05A · 只补真正需要的资源</span><span>第二章 · 学习资产</span></header>
+        <div class="v8-page">
+          <div class="v8-lead compact">
+            <p class="v8-kicker">系统可以发现缺口，但不能替用户扩大需求或擅自写入知识库</p>
+            <h2 class="v8-title">用户明确要什么，就直接做什么；<br><em>系统主动建议时，先说明理由再等确认</em></h2>
+          </div>
+          <div class="v11-resource-paths" aria-label="用户请求与系统主动建议的两条资源链路">
+            <article class="direct-path">
+              <small>用户明确请求</small>
+              <b>指定一种，直接生成</b>
+              <span>1 个动画请求 → 1 个视频任务 → 1 个预览结果</span>
+            </article>
+            <article class="suggest-path">
+              <small>系统主动发现</small>
+              <b>说明依据，等待确认</b>
+              <span>候选资源进入推送盒，不直接写入知识库</span>
+            </article>
+          </div>
+          <div class="v11-capability-band" aria-label="产品能力、交付格式与本次真实意图">
+            <article><small>产品能力</small><b>6 类学习资源</b><span>讲解、导图、测验、代码、图解、视频</span></article>
+            <i>→</i>
+            <article><small>输出能力</small><b>10 种交付格式</b><span>文档、PPT、PDF、HTML、MP4 等</span></article>
+            <i>→</i>
+            <article class="selected"><small>本次意图</small><b>只做视频</b><span>其他能力不展开</span></article>
+          </div>
+          <div class="v8-proof"><b>原则：</b><span>能力属于系统，决定权仍属于用户。</span></div>
+        </div>
+        <footer class="foot"><span>解法 04 · 资源补充有依据、有边界、有用户确认</span><span>09 / 16</span></footer>
+        <aside class="notes">明确请求直接执行；系统主动发现的资源先说明依据，再等待用户确认。产品能力很多，但每一次交付只服从当前意图。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="05" data-kind="video" data-status="verified" data-title="一个请求只产生一个任务" data-narration="assets/audio/scene-05-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>05B · 一个请求只产生一个任务</span><span>第二章 · 学习资产</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">小林只要并发交错动画，任务列表里就只有这一项</p>
+            <h2 class="v8-title">一个动画请求，只产生一个视频任务和一个预览结果。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="一个资源请求只创建一个任务的产品实录">
+              <source data-src="assets/videos/scene-08-generate-only-video.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 05B · 小林案例实录</span>
+              <strong>一个请求对应一个任务和一个结果</strong>
+              <p>查看视频请求 → 核对任务列表 → 打开并发交错动画预览</p>
+              <code>assets/videos/scene-08-generate-only-video.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>结果 · 系统没有附加讲义、测验或其他未被请求的内容</span><span>10 / 16</span></footer>
+        <aside class="notes">小林只请求一个动画，系统就只创建一个视频任务。规划、生成和检查都围绕这一个意图完成，没有额外扩张交付范围。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide" data-scene="06" data-kind="content" data-title="用新题证明真的会了" data-narration="assets/audio/scene-06-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>06A · 用新题证明真的会了</span><span>第三章 · 证据闭环</span></header>
+        <div class="v8-page">
+          <div class="v8-lead compact">
+            <p class="v8-kicker">看过解释、卡片和动画以后，掌握状态仍然不能靠系统猜测</p>
+            <h2 class="v8-title">换成“最后一张优惠券”，<br><em>小林仍能独立讲清，才算真正掌握</em></h2>
+          </div>
+          <div class="v8-transfer" aria-label="从陌生迁移证据到路径变化">
+            <article class="v8-card alert">
+              <small>陌生题</small>
+              <b>最后一张优惠券</b>
+              <span>两个人同时点击领取</span>
+              <strong>不能照抄库存题</strong>
+            </article>
+            <i class="v8-arrow">→</i>
+            <article class="v8-card success">
+              <small>独立作答</small>
+              <b>重新建立交错过程</b>
+              <span>说清读取、判断、写回</span>
+              <strong>能力变为 mastered</strong>
+            </article>
+            <i class="v8-arrow">→</i>
+            <article class="v8-card">
+              <small>真实后果</small>
+              <b>路径被重写</b>
+              <span>跳过已会内容，进入锁边界</span>
+              <strong>下一步真的不同</strong>
+            </article>
+          </div>
+          <div class="v8-assessment">
+            <span><b>验证</b>陌生题独立迁移</span>
+            <span><b>跳过</b>已掌握的并发基础</span>
+            <span><b>继续</b>仍薄弱的方案边界</span>
+          </div>
+        </div>
+        <footer class="foot"><span>解法 05 · 独立迁移产生证据，证据再产生路径变化</span><span>11 / 16</span></footer>
+        <aside class="notes">只有在陌生的优惠券问题中仍能独立解释交错过程，能力才算掌握。同一份证据随后跳过已会内容，并把锁方案边界放进下一步。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="06" data-kind="video" data-status="verified" data-title="掌握证据重写路径" data-narration="assets/audio/scene-06-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>06B · 掌握证据重写路径</span><span>第三章 · 证据闭环</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">优惠券迁移通过以后，系统不再重复已经会的内容</p>
+            <h2 class="v8-title">并发基础被自动跳过，下一步直接进入锁方案的适用边界。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="掌握证据改变学习路径的产品实录">
+              <source data-src="assets/videos/scene-10-evidence-changes-next-step.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 06B · 小林案例实录</span>
+              <strong>评估结果真正改变下一步</strong>
+              <p>查看迁移通过 → 展开路径依据 → 核对跳过与新增练习</p>
+              <code>assets/videos/scene-10-evidence-changes-next-step.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>结果 · 评估决定接下来学什么，也决定什么不再重复</span><span>12 / 16</span></footer>
+        <aside class="notes">优惠券迁移通过后，已掌握的并发基础被跳过，仍薄弱的锁方案边界进入下一步。评估终于产生了真实下游变化。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide" data-scene="07" data-kind="content" data-title="让学习跨时间继续" data-narration="assets/audio/scene-07-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>07A · 让学习跨时间继续</span><span>第三章 · 证据闭环</span></header>
+        <div class="v8-page">
+          <div class="v8-lead compact">
+            <p class="v8-kicker">保存一串聊天记录还不够，下一次教学需要恢复完整学习状态</p>
+            <h2 class="v8-title">对话、卡片、评估和路径一起保留，<br><em>每个判断还能回到小林原话</em></h2>
+          </div>
+          <div class="v8-archive" aria-label="长期保存的四类学习状态">
+            <article class="active"><b>对话</b><span>小林原话与发生时间</span></article>
+            <article><b>卡片</b><span>来源、类型与审核状态</span></article>
+            <article><b>评估</b><span>任务、作答与判断依据</span></article>
+            <article><b>路径</b><span>当前步骤与变化原因</span></article>
+          </div>
+          <div class="v8-flow v8-check-strip" aria-label="从路径变化返回原始证据">
+            <strong>路径为什么改变</strong>
+            <i>→</i>
+            <span>打开正式评估</span>
+            <i>→</i>
+            <span>查看判断依据</span>
+            <i>→</i>
+            <span>返回小林原始回答</span>
+          </div>
+          <div class="v8-proof"><b>同一份长期状态同时解决两件事：</b><span>下次不用从零开始，判断错误时也能找到来路。</span></div>
+        </div>
+        <footer class="foot"><span>解法 06 · 学习能继续，系统判断也能被检查和纠正</span><span>13 / 16</span></footer>
+        <aside class="notes">对话、卡片、评估和路径共同构成长期学习状态。小林下次可以接着学，任何关键结论也能沿证据链回到原始回答。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="07" data-kind="video" data-status="verified" data-title="系统判断可以反向检查" data-narration="assets/audio/scene-07-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>07B · 系统判断可以反向检查</span><span>第三章 · 证据闭环</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">路径为什么改变，不需要靠一句“请相信系统”</p>
+            <h2 class="v8-title">从被跳过的步骤出发，可以一路回到评估依据和原始回答。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="从系统判断反向追溯到原始回答的产品实录">
+              <source data-src="assets/videos/scene-12-trace-evidence.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 07B · 小林案例实录</span>
+              <strong>一条结论可以回到原始记录</strong>
+              <p>打开路径依据 → 查看正式评估 → 返回工作台中的原始回答</p>
+              <code>assets/videos/scene-12-trace-evidence.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>结果 · 长期个性化不是黑箱，每一次主动判断都有来路</span><span>14 / 16</span></footer>
+        <aside class="notes">从路径调整可以打开触发它的正式评估，再回到小林当时的原始回答和发生时间。系统判断因此可以检查，也可以纠正。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide" data-scene="08" data-kind="content" data-title="我们已经完成什么" data-narration="assets/audio/scene-08-content.mp3">
+      <div class="frame">
+        <header class="chrome"><span>08A · 我们已经完成什么</span><span>第三章 · 阶段性交付</span></header>
+        <div class="v8-page">
+          <div class="v8-lead compact">
+            <p class="v8-kicker">一条可运行、可检查的掌握学习主链已经打通</p>
+            <h2 class="v8-title">我们完成的不是一个聊天界面，<br><em>而是一套会被学习证据持续改写的系统</em></h2>
+          </div>
+          <div class="v11-system-map" aria-label="AXIOM 已经连通的五组核心机制">
+            <article><small>发现缺口</small><b>双 Agent + 六维画像</b><span>原话改变下一问</span></article>
+            <article><small>形成知识</small><b>三类卡片 + Galaxy</b><span>有来源、可审核</span></article>
+            <article><small>复用知识</small><b>Qdrant + LightRAG</b><span>快速召回、后台增强</span></article>
+            <article><small>验证掌握</small><b>陌生迁移评估</b><span>新题独立作答</span></article>
+            <article><small>改变未来</small><b>动态路径 + 证据链</b><span>可继续、可追溯</span></article>
+          </div>
+          <div class="v11-completion-boundary">
+            <article class="done"><small>当前已经证明</small><b>核心机制可运行、可检查</b><span>小林案例已贯通产品主链</span></article>
+            <article><small>仍需真实验证</small><b>学习效果、长期留存与高校采用</b><span>不把产品实现夸大成教育结果</span></article>
+          </div>
+          <div class="v8-final-line">
+            <span>通用 Agent 交付一次答案。</span>
+            <strong>AXIOM 让真正学会的内容继续参与下一次学习。</strong>
+          </div>
+        </div>
+        <footer class="foot"><span>阶段性交付 · 核心闭环已经打通，效果边界保持诚实</span><span>15 / 16</span></footer>
+        <aside class="notes">用一张系统图收束已经完成的机制，并明确真实学习效果、长期留存与高校采用仍需要后续用户验证。</aside>
+      </div>
+    </section>
+
+    <section class="slide v8-slide video-slide" data-scene="08" data-kind="video" data-status="verified" data-title="一次学会成为下一次起点" data-narration="assets/audio/scene-08-video.mp3">
+      <div class="frame">
+        <header class="chrome"><span>08B · 一次学会成为下一次起点</span><span>第三章 · 阶段性交付</span></header>
+        <div class="v8-page v8-video-page">
+          <div class="v8-video-heading">
+            <p class="v8-kicker">故事的终点不是“回答正确”，而是新的学习已经从这里继续</p>
+            <h2 class="v8-title">小林学会的并发机制，正在支持锁选择与失败补偿。</h2>
+          </div>
+          <div class="v8-video-stage">
+            <video class="v8-video" controls playsinline preload="none" aria-label="已掌握知识参与下一次学习的产品实录">
+              <source data-src="assets/videos/scene-13-learning-compounds.mp4" type="video/mp4">
+              当前浏览器不支持 HTML5 视频。
+            </video>
+            <div class="v8-video-empty">
+              <span>SCENE 08B · 小林案例实录</span>
+              <strong>已经学会的机制成为新问题起点</strong>
+              <p>回看并发知识 → 进入下一条路径 → 继续锁选择与失败补偿</p>
+              <code>assets/videos/scene-13-learning-compounds.mp4</code>
+            </div>
+          </div>
+        </div>
+        <footer class="foot"><span>最终价值 · 通用 Agent 交付答案，AXIOM 让真正学会的内容继续工作</span><span>16 / 16</span></footer>
+        <aside class="notes">小林已经形成并验证的并发理解，继续支持锁方案选择和跨系统失败补偿。一次学习由此成为下一次学习的起点。</aside>
+      </div>
+    </section>
+
+  </main>
+
+  <nav class="controls" aria-label="演示控制">
+    <button id="prev" aria-label="上一页">←</button>
+    <span id="counter">01 / 16</span>
+    <button id="next" aria-label="下一页">→</button>
+    <button id="narration" aria-label="播放本页讲解" title="播放本页讲解">▶</button>
+    <span id="narrationStatus" class="narration-status" aria-live="polite">讲解</span>
+    <button id="notes" aria-label="演讲备注">备注</button>
+    <button id="fullscreen" aria-label="全屏">全屏</button>
+  </nav>
+  <div class="progress"><i id="progress"></i></div>
+  <aside class="notes-panel" id="notesPanel">
+    <div><span>演讲备注</span><button id="closeNotes" aria-label="关闭备注">×</button></div>
+    <h2 id="notesTitle"></h2>
+    <p id="notesText"></p>
+  </aside>
+  <script type="module" src="deck.js?v=17"></script>
+</body>
+</html>
