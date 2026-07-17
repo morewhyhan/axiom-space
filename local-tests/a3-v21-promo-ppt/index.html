@@ -1,0 +1,1659 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXIOM Space · 从答案到掌握</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,700&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@300;400;500;600&family=Noto+Serif+SC:wght@300;400;500;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* ============ 主题色(默认:🖋 墨水经典) ============
+       切换主题:从 references/themes.md 复制对应的 :root 块
+       整体替换这几行(--ink / --ink-rgb / --paper / --paper-rgb)
+       其他地方散落的 rgba() 都走 var(--ink-rgb) / var(--paper-rgb),无需逐处改 */
+    --ink:#1f1a14;
+    --ink-rgb:31,26,20;
+    --paper:#f0e6d2;
+    --paper-rgb:240,230,210;
+    --paper-tint:#e3d7bf;
+    --ink-tint:#2d2620;
+
+    /* ============ 字体(跨主题固定) ============ */
+    --mono:"IBM Plex Mono",ui-monospace,monospace;
+    --serif-en:"Playfair Display","Source Serif 4",Georgia,serif;
+    --serif-body-en:"Source Serif 4",Georgia,serif;
+    --serif-zh:"Noto Serif SC",source-han-serif-sc,serif;
+    --sans-zh:"Noto Sans SC",source-han-sans-sc,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:100%;height:100%;overflow:hidden;background:var(--ink);color:var(--paper);font-family:var(--sans-zh);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+
+  /* ============ WebGL 双背景 ============ */
+  canvas.bg{position:fixed;inset:0;width:100vw;height:100vh;z-index:0;display:block;transition:opacity 1.2s ease}
+  canvas#bg-light{opacity:0}
+  canvas#bg-dark{opacity:1}
+  body.light-bg canvas#bg-light{opacity:1}
+  body.light-bg canvas#bg-dark{opacity:0}
+  body.low-power canvas.bg{display:none!important}
+
+  /* ============ Deck 容器 + 翻页 ============ */
+  /* width: NSLIDES * 100vw，会在 JS 里动态矫正 */
+  #deck{position:fixed;inset:0;width:10000vw;height:100vh;display:flex;flex-wrap:nowrap;transition:transform .9s cubic-bezier(.77,0,.175,1);z-index:10;will-change:transform}
+  .slide{width:100vw;height:100vh;flex:0 0 100vw;position:relative;padding:6vh 6vw 10vh 6vw;display:flex;flex-direction:column;overflow:hidden}
+  .slide.light{color:var(--ink);background:var(--paper)}
+  .slide.dark{color:var(--paper);background:var(--ink)}
+
+  /* 默认页：遮罩较厚，保证文字可读 */
+  .slide::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;transition:background .7s ease}
+  .slide.light::before{background:rgba(var(--paper-rgb),.78);backdrop-filter:blur(3px)}
+  .slide.dark::before{background:rgba(var(--ink-rgb),.78);backdrop-filter:blur(3px)}
+  /* Hero 页：遮罩大幅降低，让 WebGL 背景明显透出 */
+  .slide.hero.light::before{background:rgba(var(--paper-rgb),.16);backdrop-filter:none}
+  .slide.hero.dark::before{background:rgba(var(--ink-rgb),.12);backdrop-filter:none}
+  /* Hero 页顶底微弱渐隐，保证 chrome/foot 区域可读 */
+  .slide.hero::after{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none}
+  .slide.hero.light::after{background:linear-gradient(180deg,rgba(var(--paper-rgb),.28) 0%,rgba(var(--paper-rgb),0) 14%,rgba(var(--paper-rgb),0) 86%,rgba(var(--paper-rgb),.28) 100%)}
+  .slide.hero.dark::after{background:linear-gradient(180deg,rgba(var(--ink-rgb),.32) 0%,rgba(var(--ink-rgb),0) 14%,rgba(var(--ink-rgb),0) 86%,rgba(var(--ink-rgb),.32) 100%)}
+
+  /* ============ Magazine chrome：顶部 meta + 底部 foot ============ */
+  .chrome{display:flex;justify-content:space-between;align-items:flex-start;font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;opacity:.7}
+  .chrome .left,.chrome .right{display:flex;gap:2.4em;align-items:center}
+  .chrome .sep{width:40px;height:1px;background:currentColor;opacity:.4}
+  .foot{margin-top:auto;display:flex;justify-content:space-between;align-items:flex-end;font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;opacity:.55}
+  .foot .title{font-family:var(--serif-zh);font-weight:400;letter-spacing:.05em;text-transform:none;opacity:.75;font-size:13px}
+
+  .tag{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;padding:6px 14px;border:1px solid currentColor;opacity:.85}
+  .rule{width:100%;height:1px;background:currentColor;opacity:.25;margin:3vh 0}
+  .rule.v{width:1px;height:100%;margin:0}
+
+  /* ============ 字体规则 ============
+     · 衬线（Noto Serif SC / Playfair）：大标题、重点金句、数字
+     · 非衬线（Noto Sans SC）：正文描述、body、补充说明
+     · 等宽（IBM Plex Mono）：kicker、meta 小标签、foot 右侧
+  */
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.3em;text-transform:uppercase;opacity:.6;margin-bottom:2.6vh}
+  .display{font-family:var(--serif-en);font-weight:700;font-size:11vw;line-height:.92;letter-spacing:-.025em}
+  .display-zh{font-family:var(--serif-zh);font-weight:700;font-size:7.8vw;line-height:1.04;letter-spacing:-.005em}
+  .h1-zh{font-family:var(--serif-zh);font-weight:700;font-size:4.6vw;line-height:1.12;letter-spacing:-.005em}
+  .h2-zh{font-family:var(--serif-zh);font-weight:600;font-size:3.2vw;line-height:1.2;letter-spacing:0}
+  .h3-zh{font-family:var(--serif-zh);font-weight:500;font-size:1.9vw;line-height:1.35}
+  .body-zh{font-family:var(--sans-zh);font-weight:400;font-size:max(15px,1.22vw);line-height:1.75;opacity:.82;letter-spacing:.01em}
+  .body-serif{font-family:var(--serif-zh);font-weight:400;font-size:max(15px,1.3vw);line-height:1.65;opacity:.88}
+  .lead{font-family:var(--serif-zh);font-weight:400;font-size:1.9vw;line-height:1.4;opacity:.85}
+  .meta{font-family:var(--mono);font-size:max(11px,.88vw);letter-spacing:.16em;text-transform:uppercase;opacity:.6}
+  .big-num{font-family:var(--serif-en);font-weight:800;font-size:10vw;line-height:.85;letter-spacing:-.03em;font-feature-settings:"tnum"}
+  .mid-num{font-family:var(--serif-en);font-weight:700;font-size:5.5vw;line-height:.88;letter-spacing:-.02em;font-feature-settings:"tnum"}
+  .ghost{font-family:var(--serif-en);font-weight:900;font-size:34vw;line-height:.8;opacity:.06;letter-spacing:-.04em;position:absolute;font-feature-settings:"tnum"}
+  em{font-style:italic;font-family:var(--serif-en)}
+  .en{font-family:var(--serif-en);font-style:italic;font-weight:500}
+
+  /* ============ 布局工具 ============ */
+  .col{display:flex;flex-direction:column;gap:2.4vh}
+  .row{display:flex;align-items:center;gap:3vw}
+  .grid-6{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:4vw 6vw;flex:1;align-content:center;padding:2vh 0}
+  .grid-9{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:3vh 4vw;flex:1;align-content:center}
+  .grid-4{display:grid;grid-template-columns:repeat(2,1fr);grid-template-rows:repeat(2,1fr);gap:4vh 6vw;flex:1;align-content:center}
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:4vw;flex:1;align-content:center}
+  .split{display:grid;grid-template-columns:1fr 1fr;gap:4vw;flex:1;align-items:center}
+  .split-55{display:grid;grid-template-columns:55fr 45fr;gap:5vw;flex:1;align-items:stretch}
+  .fill{flex:1}
+  .center{align-items:center;justify-content:center;text-align:center}
+  .bottom-left{position:absolute;left:6vw;bottom:9vh;max-width:50vw}
+  .bottom-right{position:absolute;right:6vw;bottom:9vh;max-width:50vw;text-align:right}
+  .top-right{position:absolute;right:6vw;top:6vh;text-align:right}
+
+  /* ============ Stat（数字矩阵） ============ */
+  .stat{display:flex;flex-direction:column;gap:1vh;align-items:flex-start}
+  .stat .n{font-family:var(--serif-en);font-weight:800;font-size:8vw;line-height:.88;letter-spacing:-.03em;font-feature-settings:"tnum"}
+  .stat .l{font-family:var(--sans-zh);font-size:max(13px,1.05vw);opacity:.7;margin-top:1vh;font-weight:400;line-height:1.5}
+  .stat .m{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;opacity:.5;margin-bottom:.2vh}
+
+  /* ============ Callout（引用框） ============ */
+  .callout{padding:3vh 2.4vw;border-left:3px solid currentColor;position:relative;font-family:var(--serif-zh);font-size:max(15px,1.2vw);line-height:1.55;opacity:.92}
+  .slide.light .callout{background:rgba(var(--ink-rgb),.05)}
+  .slide.dark .callout{background:rgba(var(--paper-rgb),.06)}
+  .callout .cite{display:block;margin-top:1.6vh;font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.6}
+  .callout .q-big{font-family:var(--serif-zh);font-weight:600;font-size:max(17px,1.6vw);line-height:1.42}
+
+  /* ============ Platform（平台卡） ============ */
+  .plat{display:flex;flex-direction:column;justify-content:flex-end;padding:2vh 0;border-top:1px solid currentColor;border-color:rgba(127,127,127,.35)}
+  .plat .name{font-family:var(--serif-zh);font-weight:700;font-size:1.8vw;margin-bottom:.6vh}
+  .plat .nb{font-family:var(--serif-en);font-weight:700;font-size:3.2vw;letter-spacing:-.02em;line-height:1;font-feature-settings:"tnum"}
+  .plat .sub{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;opacity:.55;margin-top:.6vh}
+  .plat .fill{font-family:var(--sans-zh);font-weight:300;font-size:2.4vw;opacity:.28;letter-spacing:-.01em;line-height:1}
+
+  /* ============ Rowline（表格行） ============ */
+  .rowline{display:grid;grid-template-columns:1fr 2fr 1fr;gap:2vw;padding:2.2vh 0;border-top:1px solid currentColor;align-items:center;border-color:rgba(127,127,127,.25)}
+  .rowline:last-child{border-bottom:1px solid currentColor;border-color:rgba(127,127,127,.25)}
+  .rowline .k{font-family:var(--serif-zh);font-weight:700;font-size:1.7vw}
+  .rowline .v{font-family:var(--sans-zh);font-weight:400;font-size:max(14px,1.2vw);opacity:.85;line-height:1.55}
+  .rowline .m{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;opacity:.6;justify-self:end}
+
+  /* ============ Pillar（支柱卡片） ============ */
+  .pillar{display:flex;flex-direction:column;gap:1.8vh}
+  .pillar .ic{font-family:var(--serif-en);font-style:italic;font-size:2.6vw;opacity:.45;font-weight:400}
+  .pillar .ic svg{width:2.8vw;height:2.8vw;stroke-width:1.2;opacity:.7}
+  .pillar .t{font-family:var(--serif-zh);font-weight:700;font-size:2.4vw;line-height:1.1}
+  .pillar .d{font-family:var(--sans-zh);font-weight:400;font-size:max(14px,1.1vw);opacity:.76;line-height:1.6}
+
+  /* ============ Signature / Highlight ============ */
+  .sign{font-family:var(--serif-en);font-style:italic;font-weight:500;font-size:2vw;opacity:.7}
+  .hi{position:relative;display:inline}
+  .slide.dark .hi::after{content:"";position:absolute;left:-.1em;right:-.1em;bottom:-.05em;height:.28em;background:rgba(var(--paper-rgb),.15);z-index:-1}
+  .slide.light .hi::after{content:"";position:absolute;left:-.1em;right:-.1em;bottom:-.05em;height:.28em;background:rgba(var(--ink-rgb),.08);z-index:-1}
+
+  /* ============ Icons（Lucide via CDN） ============ */
+  .ico{width:1em;height:1em;display:inline-block;vertical-align:-.12em;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+  .ico-lg,.ico-md,.ico-sm{fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round}
+  .ico-lg{width:2.6vw;height:2.6vw;stroke-width:1.2;display:inline-block}
+  .ico-md{width:1.8vw;height:1.8vw;stroke-width:1.3;display:inline-block;vertical-align:-.4em}
+  .ico-sm{width:1.1vw;height:1.1vw;stroke-width:1.4;display:inline-block;vertical-align:-.15em;opacity:.7}
+
+  /* ============ 图片占位（虚线框，提示设计师位置） ============ */
+  .img-slot{border:1.5px dashed rgba(127,127,127,.4);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:1vh;padding:2vh 2vw;font-family:var(--mono);font-size:10px;letter-spacing:.28em;text-transform:uppercase;opacity:.55;position:relative;aspect-ratio:16/9;width:100%;max-height:56vh;margin-inline:auto;box-sizing:border-box}
+  .img-slot::before{content:"";position:absolute;inset:8px;border:1px solid currentColor;opacity:.2}
+  .img-slot .plus{font-size:2vw;font-weight:300;opacity:.5;letter-spacing:0}
+  .img-slot .label{position:relative;z-index:2;text-align:center}
+  .img-slot.r-4x3{aspect-ratio:4/3}
+  .img-slot.r-3x2{aspect-ratio:3/2}
+  .img-slot.r-1x1{aspect-ratio:1/1}
+
+  /* ============ 图片实填框（关键：固定高度 + 只裁底部） ============
+     重要约束：高度用内联 height:Nvh 精确控制，不要用 aspect-ratio（会撑破布局）
+     object-position:top center 保证严禁裁剪顶部和左右，只裁剪底部
+  */
+  .frame-img{overflow:hidden;position:relative;background:rgba(0,0,0,.04);box-sizing:border-box;width:100%;border-radius:4px}
+  .slide.dark .frame-img{background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.12)}
+  .frame-img > img{width:100%;height:100%;object-fit:cover;object-position:top center;display:block}
+  .frame-img.fit-contain > img{object-fit:contain;object-position:center center}
+  .frame-img.r-16x9{aspect-ratio:16/9;max-height:64vh}
+  .frame-img.r-16x10{aspect-ratio:16/10;max-height:56vh}
+  .frame-img.r-4x3{aspect-ratio:4/3;max-height:56vh}
+  .frame-img.r-3x2{aspect-ratio:3/2;max-height:46vh}
+  .frame-img.r-3x4{aspect-ratio:3/4;max-height:60vh}
+  .frame-img.r-1x1{aspect-ratio:1/1;max-height:50vh}
+  .frame-img.h-16{height:16vh}
+  .frame-img.h-18{height:18vh}
+  .frame-img.h-22{height:22vh}
+  .frame-img.h-26{height:26vh}
+  .frame-img.h-28{height:28vh}
+  .frame-cap{display:flex;justify-content:space-between;align-items:baseline;gap:1vw;margin-top:.8vh;font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;opacity:.72}
+  .frame-cap .pf{font-family:var(--serif-zh);font-weight:600;font-size:max(13px,1vw);letter-spacing:.04em;text-transform:none;opacity:.94}
+  .frame-cap .nb{font-family:var(--serif-en);font-style:italic;font-size:max(15px,1.2vw);letter-spacing:.02em;text-transform:none;opacity:.88}
+  .frame-cap .idx{font-family:var(--mono);opacity:.5}
+  figure.tile{display:flex;flex-direction:column;margin:0;min-width:0}
+  figure.tile > .frame-img{flex:0 0 auto}
+
+  /* ============ 导航 ============ */
+  #nav{position:fixed;left:50%;bottom:2.6vh;transform:translateX(-50%);z-index:30;display:flex;gap:10px;padding:8px 14px;border-radius:999px;background:rgba(0,0,0,.18);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
+  #nav .dot{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.3);cursor:pointer;transition:all .3s ease;border:0;padding:0}
+  #nav .dot:hover{background:rgba(255,255,255,.5);transform:scale(1.15)}
+  #nav .dot.active{background:rgba(255,255,255,.95);width:22px;border-radius:999px}
+  body.light-bg #nav{background:rgba(255,255,255,.25)}
+  body.light-bg #nav .dot{background:rgba(var(--ink-rgb),.25)}
+  body.light-bg #nav .dot.active{background:rgba(var(--ink-rgb),.9)}
+  #hint{position:fixed;bottom:3vh;right:3vw;z-index:30;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;opacity:.4;mix-blend-mode:difference;color:#aaa}
+  body.low-power #hint{opacity:.72;color:var(--paper);mix-blend-mode:normal}
+  body.light-bg.low-power #hint{color:var(--ink)}
+
+  /* ============================================================
+     ============ LAYOUTS API · 面向 agent 的类（v2）============
+     所有 layouts.md 中的骨架都基于下面这套命名。
+     如果你在 layouts.md 里看到某个类，它必须在下面有定义。
+     ============================================================ */
+
+  /* ---------- .frame：每页主内容容器 ---------- */
+  .frame{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  /* 当 .frame 同时加了 grid 类时，grid 的 display:grid 覆盖 flex */
+  .frame.grid-2-7-5,
+  .frame.grid-2-6-6,
+  .frame.grid-2-8-4,
+  .frame.grid-3-3,
+  .frame.grid-6{display:grid}
+
+  /* ---------- 标题层级（API 名称，衬线为主） ---------- */
+  .h-hero{
+    font-family:var(--serif-zh);
+    font-weight:900;
+    font-size:10vw;
+    line-height:.96;
+    letter-spacing:-.02em;
+  }
+  .h-xl{
+    font-family:var(--serif-zh);
+    font-weight:700;
+    font-size:6.2vw;
+    line-height:1.08;
+    letter-spacing:-.01em;
+  }
+  .h-sub{
+    font-family:var(--serif-zh);
+    font-weight:500;
+    font-size:3.1vw;
+    line-height:1.25;
+    letter-spacing:0;
+    opacity:.7;
+  }
+  .h-md{
+    font-family:var(--serif-zh);
+    font-weight:600;
+    font-size:2.3vw;
+    line-height:1.3;
+  }
+  /* 英文标题专用（Playfair 衬线） */
+  .h-hero-en,.h-xl-en{font-family:var(--serif-en);letter-spacing:-.025em}
+
+  /* ---------- lead 引语 ---------- */
+  .lead{
+    font-family:var(--serif-zh);
+    font-weight:400;
+    font-size:1.75vw;
+    line-height:1.5;
+    opacity:.86;
+  }
+
+  /* ---------- meta-row 底部元数据 ---------- */
+  .meta-row{
+    display:flex;
+    gap:1.2em;
+    align-items:baseline;
+    flex-wrap:wrap;
+    font-family:var(--mono);
+    font-size:max(12px,.92vw);
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    opacity:.6;
+  }
+
+  /* ---------- stat-card（数据大字报用） ---------- */
+  .stat-card{
+    display:flex;
+    flex-direction:column;
+    gap:.8vh;
+    align-items:flex-start;
+    padding-top:1.6vh;
+    border-top:1px solid currentColor;
+    border-color:rgba(127,127,127,.3);
+  }
+  .stat-card .stat-label{
+    font-family:var(--mono);
+    font-size:max(10px,.78vw);
+    letter-spacing:.24em;
+    text-transform:uppercase;
+    opacity:.55;
+  }
+  .stat-card .stat-nb{
+    font-family:var(--serif-en);
+    font-weight:800;
+    font-size:5.8vw;
+    line-height:.9;
+    letter-spacing:-.03em;
+    font-feature-settings:"tnum";
+    margin-top:.4vh;
+  }
+  .stat-card .stat-nb .stat-unit{
+    font-family:var(--serif-zh);
+    font-weight:500;
+    font-size:.38em;
+    letter-spacing:0;
+    opacity:.72;
+    margin-left:.14em;
+  }
+  .stat-card .stat-note{
+    font-family:var(--sans-zh);
+    font-weight:400;
+    font-size:max(13px,1.05vw);
+    line-height:1.5;
+    opacity:.72;
+    margin-top:.6vh;
+  }
+  /* 当 stat-card 用于 grid-4（2x2），数字适度放大；若页面有标题+引文在上方，可内联 style 覆盖为更小值 */
+  .grid-4 .stat-card .stat-nb{font-size:5vw}
+  /* 当只有 3 个，字也可以稍大 */
+  .grid-3 .stat-card .stat-nb{font-size:6.8vw}
+
+  /* ---------- pipeline（流水线） ---------- */
+  .pipeline-section{
+    margin-top:4.4vh;
+    padding-top:2.8vh;
+    border-top:1px dashed rgba(127,127,127,.32);
+  }
+  .pipeline-section:first-of-type{
+    border-top:0;
+    padding-top:0;
+    margin-top:3vh;
+  }
+  .pipeline-label{
+    font-family:var(--mono);
+    font-size:max(11px,.85vw);
+    letter-spacing:.24em;
+    text-transform:uppercase;
+    opacity:.62;
+    margin-bottom:2.2vh;
+  }
+  .pipeline{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:1.2vw;
+  }
+  .pipeline[data-cols="3"]{grid-template-columns:repeat(3,1fr)}
+  .pipeline[data-cols="4"]{grid-template-columns:repeat(4,1fr)}
+  .pipeline[data-cols="6"]{grid-template-columns:repeat(6,1fr)}
+  .step{
+    display:flex;
+    flex-direction:column;
+    gap:.8vh;
+    padding-top:1.4vh;
+    border-top:1px solid currentColor;
+    border-color:rgba(127,127,127,.35);
+  }
+  .step-nb{
+    font-family:var(--serif-en);
+    font-style:italic;
+    font-weight:500;
+    font-size:1.15vw;
+    opacity:.45;
+  }
+  .step-title{
+    font-family:var(--sans-zh);
+    font-weight:700;
+    font-size:1.55vw;
+    letter-spacing:.01em;
+    line-height:1.2;
+  }
+  .step-desc{
+    font-family:var(--sans-zh);
+    font-weight:400;
+    font-size:max(12px,.95vw);
+    line-height:1.45;
+    opacity:.72;
+  }
+
+  /* ---------- 网格（layouts.md 所用） ---------- */
+  /* 这些类独立挂到任何容器上都能生效，不依赖 .frame 复合选择器 */
+  .grid-2-7-5{display:grid;grid-template-columns:7fr 5fr;gap:3vw 4vh;align-items:start}
+  .grid-2-6-6{display:grid;grid-template-columns:1fr 1fr;gap:3vw 4vh;align-items:start}
+  .grid-2-8-4{display:grid;grid-template-columns:8fr 4fr;gap:3vw 4vh;align-items:start}
+  .grid-3-3{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    grid-auto-rows:minmax(0,1fr);
+    gap:2.4vh 2vw;
+  }
+  /* grid-6 已在旧样式里定义为 3x2，这里仅补 align */
+
+  /* ---------- 图片 frame-img（layouts.md 主命名） ---------- */
+  /* 在旧样式里已定义，这里补 img-cap 命名别名与增强 */
+  figure.frame-img{margin:0;display:flex;flex-direction:column;min-width:0}
+  .img-cap{
+    display:block;
+    margin-top:.8vh;
+    font-family:var(--mono);
+    font-size:max(10px,.8vw);
+    letter-spacing:.22em;
+    text-transform:uppercase;
+    opacity:.6;
+  }
+  /* callout src 命名别名 */
+  .callout-src{
+    display:block;
+    margin-top:1.6vh;
+    font-family:var(--mono);
+    font-size:11px;
+    letter-spacing:.2em;
+    text-transform:uppercase;
+    opacity:.6;
+  }
+
+  /* ---------- chrome & foot 补位（layouts.md 简单写法） ---------- */
+  .chrome{font-family:var(--mono);font-size:max(11px,.78vw);letter-spacing:.2em;text-transform:uppercase;opacity:.62}
+  .foot{font-family:var(--mono);font-size:max(11px,.78vw);letter-spacing:.18em;text-transform:uppercase;opacity:.5}
+
+  /* ============ 动效系统(Motion One 驱动) ============
+     所有 [data-anim] 元素默认隐藏,进入页面时由 JS 逐个揭示。
+     - cascade(默认):按 DOM 顺序 stagger 120ms 淡入 + y:16→0
+     - hero(hero 页自动):慢一点的 stagger 180ms
+     - quote(含 [data-anim="line"]):逐行 600ms 淡入
+     - directional(含 [data-anim="left|right"]):左→分隔线→右
+     - pipeline(data-animate="pipeline"):Space/→ 手动推进
+     Motion One 没加载成功时(CDN 断 + 本地丢),所有 [data-anim] 会兜底显示。
+  */
+  [data-anim]{opacity:1}
+  body.motion-ready [data-anim]{opacity:0}
+  body.motion-ready [data-anim="left"]{transform:translateX(-24px)}
+  body.motion-ready [data-anim="right"]{transform:translateX(24px)}
+  body.motion-ready [data-anim="line"]{opacity:0;transform:translateY(10px)}
+  body.motion-ready [data-animate="pipeline"] [data-anim]{opacity:.15}
+  body.low-power #deck{transition:none!important}
+  body.low-power *,
+  body.low-power *::before,
+  body.low-power *::after{animation:none!important;transition:none!important}
+  body.low-power.motion-ready [data-anim],
+  body.low-power [data-anim]{opacity:1!important;transform:none!important}
+
+  /* ---------- 响应式降级 ---------- */
+  @media (max-width:900px){
+    .display{font-size:16vw}
+    .display-zh{font-size:12vw}
+    .h1-zh{font-size:7vw}
+    .h-hero{font-size:14vw}
+    .h-xl{font-size:9vw}
+    .pipeline{grid-template-columns:repeat(2,1fr)}
+    .grid-2-7-5,.grid-2-6-6,.grid-2-8-4{grid-template-columns:1fr}
+  }
+
+  /* ============ AXIOM V21：宣传片式叙事组件 ============ */
+  .axiom-copy{position:relative;z-index:3;display:flex;flex-direction:column;gap:2vh}
+  .axiom-copy.left{width:38vw;margin-top:auto;margin-bottom:auto}
+  .axiom-copy.right{width:30vw;margin-left:auto;margin-top:auto;margin-bottom:auto}
+  .axiom-copy.top{width:78vw;margin-top:5vh}
+  .axiom-copy.overlay{width:48vw;margin-top:11vh;margin-left:2vw}
+  .axiom-title{font-family:var(--serif-zh);font-size:clamp(34px,4.7vw,86px);font-weight:700;line-height:1.08;letter-spacing:-.025em}
+  .axiom-title.xl{font-size:clamp(44px,6.4vw,116px);line-height:1.03}
+  .axiom-title.compact{font-size:clamp(30px,3.65vw,66px)}
+  .axiom-sub{font-family:var(--sans-zh);font-size:clamp(15px,1.16vw,22px);line-height:1.65;max-width:48vw;opacity:.76}
+  .axiom-sub.strong{font-family:var(--serif-zh);font-size:clamp(18px,1.6vw,30px);line-height:1.45;opacity:.92}
+  .axiom-eyebrow{display:flex;align-items:center;gap:1.1vw;font-family:var(--mono);font-size:clamp(10px,.78vw,14px);letter-spacing:.22em;text-transform:uppercase;opacity:.62}
+  .axiom-eyebrow::before{content:"";width:2.8vw;height:1px;background:currentColor;opacity:.55}
+  .axiom-rule{width:min(12vw,180px);height:1px;background:currentColor;opacity:.38}
+  .axiom-note{font-family:var(--mono);font-size:clamp(10px,.76vw,14px);line-height:1.65;letter-spacing:.12em;text-transform:uppercase;opacity:.56}
+  .axiom-badge{display:inline-flex;align-items:center;gap:.65em;width:max-content;padding:.65vh .75vw;border:1px solid currentColor;border-radius:999px;font-family:var(--mono);font-size:clamp(9px,.66vw,12px);letter-spacing:.14em;text-transform:uppercase;opacity:.8}
+  .axiom-badge::before{content:"";width:5px;height:5px;background:currentColor;border-radius:50%}
+  .scene-count{font-family:var(--serif-en);font-size:16vw;font-weight:800;line-height:.8;position:absolute;right:4vw;bottom:8vh;opacity:.035;z-index:0}
+
+  .opening-grid{position:absolute;inset:0;pointer-events:none;opacity:.18}
+  .opening-grid::before,.opening-grid::after{content:"";position:absolute;background:currentColor;opacity:.28}
+  .opening-grid::before{width:1px;height:68vh;right:23vw;top:16vh}
+  .opening-grid::after{height:1px;width:58vw;right:6vw;top:34vh}
+  .opening-orbit{position:absolute;right:8vw;top:18vh;width:27vw;height:27vw;border:1px solid currentColor;border-radius:50%;opacity:.18}
+  .opening-orbit::before,.opening-orbit::after{content:"";position:absolute;border:1px solid currentColor;border-radius:50%}
+  .opening-orbit::before{inset:19%}
+  .opening-orbit::after{width:8px;height:8px;right:11%;top:30%;background:currentColor}
+  .opening-thesis{display:flex;align-items:baseline;gap:1.1vw;margin-top:2vh;font-family:var(--serif-zh);font-size:clamp(22px,2.5vw,46px);line-height:1.25}
+  .opening-thesis .muted{opacity:.42}
+  .opening-thesis .strike{position:relative}
+  .opening-thesis .strike::after{content:"";position:absolute;left:-.1em;right:-.1em;top:54%;height:1px;background:currentColor;opacity:.7}
+
+  .gap-layout{display:grid;grid-template-columns:46fr 8fr 46fr;gap:2.2vw;align-items:stretch;flex:1;margin:5vh 0 1vh}
+  .gap-side{display:flex;flex-direction:column;justify-content:center;gap:1.5vh}
+  .gap-row{display:grid;grid-template-columns:1.15fr 1fr;gap:1.4vw;padding:2.1vh 0;border-top:1px solid currentColor;border-color:rgba(127,127,127,.28)}
+  .gap-row:last-child{border-bottom:1px solid currentColor;border-color:rgba(127,127,127,.28)}
+  .gap-row strong{font-family:var(--serif-zh);font-size:clamp(17px,1.55vw,29px)}
+  .gap-row span{font-family:var(--sans-zh);font-size:clamp(12px,.92vw,17px);line-height:1.55;opacity:.62}
+  .gap-mark{display:flex;align-items:center;justify-content:center;position:relative}
+  .gap-mark::before{content:"";position:absolute;top:0;bottom:0;width:1px;background:currentColor;opacity:.22}
+  .gap-mark span{position:relative;padding:1.5vh .7vw;background:var(--paper);font-family:var(--mono);font-size:clamp(9px,.65vw,12px);letter-spacing:.16em;writing-mode:vertical-rl;text-transform:uppercase}
+  .gap-question{height:100%;display:flex;flex-direction:column;justify-content:center;padding:3vh 3vw;border-left:1px solid currentColor}
+  .gap-question .q{font-family:var(--serif-zh);font-size:clamp(36px,4.8vw,88px);font-weight:700;line-height:1.12}
+  .gap-question .micro{margin-top:3vh;font-family:var(--mono);font-size:clamp(10px,.75vw,14px);letter-spacing:.16em;line-height:1.8;opacity:.56}
+
+  .mastery-loop{display:grid;grid-template-columns:repeat(7,auto);align-items:center;justify-content:center;gap:1.1vw;margin-top:7vh}
+  .mastery-node{min-width:12vw;padding:2.3vh 1.7vw;border-top:1px solid currentColor;border-bottom:1px solid currentColor;text-align:center}
+  .mastery-node strong{display:block;font-family:var(--serif-zh);font-size:clamp(19px,1.8vw,34px)}
+  .mastery-node span{display:block;margin-top:.6vh;font-family:var(--mono);font-size:clamp(9px,.62vw,11px);letter-spacing:.14em;text-transform:uppercase;opacity:.5}
+  .mastery-arrow{font-family:var(--serif-en);font-size:2.2vw;opacity:.35}
+
+  .arch-stack{display:grid;grid-template-columns:repeat(5,1fr);gap:1.2vw;margin-top:5vh;width:82vw}
+  .arch-node{position:relative;min-height:19vh;padding:2.2vh 1.35vw;border-top:1px solid currentColor;display:flex;flex-direction:column;justify-content:space-between}
+  .arch-node::after{content:"";position:absolute;right:-1.05vw;top:46%;width:.8vw;height:1px;background:currentColor;opacity:.3}
+  .arch-node:last-child::after{display:none}
+  .arch-node .nb{font-family:var(--serif-en);font-size:1.5vw;font-style:italic;opacity:.36}
+  .arch-node strong{font-family:var(--serif-zh);font-size:clamp(17px,1.55vw,29px);line-height:1.25}
+  .arch-node small{font-family:var(--sans-zh);font-size:clamp(11px,.82vw,15px);line-height:1.45;opacity:.58}
+  .arch-node.core{border:1px solid currentColor;padding:2.2vh 1.5vw}
+  .memory-bed{width:65vw;margin-top:2.4vh;padding:1.7vh 1.4vw;border:1px solid currentColor;border-color:rgba(127,127,127,.32);display:flex;align-items:center;justify-content:space-between}
+  .memory-bed strong{font-family:var(--serif-zh);font-size:clamp(15px,1.2vw,22px)}
+  .memory-bed span{font-family:var(--mono);font-size:clamp(9px,.66vw,12px);letter-spacing:.12em;opacity:.55}
+
+  .state-legend{display:flex;gap:1vw;flex-wrap:wrap}
+  .state-item{min-width:8.7vw;padding:1.2vh 1vw;border-top:1px solid currentColor}
+  .state-item strong{display:block;font-family:var(--serif-zh);font-size:clamp(15px,1.18vw,22px)}
+  .state-item span{font-family:var(--sans-zh);font-size:clamp(10px,.72vw,13px);opacity:.56}
+  .role-tags{position:absolute;inset:0;z-index:3;pointer-events:none}
+  .role-tag{position:absolute;padding:1vh 1vw;border:1px solid currentColor;background:rgba(var(--ink-rgb),.72);color:var(--paper);font-family:var(--mono);font-size:clamp(9px,.7vw,13px);letter-spacing:.12em;text-transform:uppercase}
+  .role-tag.a{left:7vw;top:39vh}.role-tag.student{left:43vw;bottom:15vh}.role-tag.b{right:6.5vw;top:26vh}
+  .mode-strip{position:absolute;left:50%;bottom:12.5vh;transform:translateX(-50%);z-index:3;display:flex;gap:.6vw;padding:.7vh .7vw;background:rgba(var(--paper-rgb),.88);color:var(--ink);border:1px solid rgba(var(--ink-rgb),.16)}
+  .mode-strip span{padding:.65vh .9vw;font-family:var(--mono);font-size:clamp(9px,.65vw,12px);letter-spacing:.12em;text-transform:uppercase;border-right:1px solid rgba(var(--ink-rgb),.16)}
+  .mode-strip span:last-child{border-right:0}
+
+  .mechanism-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2.4vw;margin-top:5vh;width:76vw}
+  .mechanism{padding-top:2vh;border-top:1px solid currentColor}
+  .mechanism .nb{font-family:var(--serif-en);font-size:2.4vw;font-style:italic;opacity:.35}
+  .mechanism strong{display:block;margin-top:1.8vh;font-family:var(--serif-zh);font-size:clamp(22px,2.1vw,38px)}
+  .mechanism p{margin-top:1.2vh;font-family:var(--sans-zh);font-size:clamp(12px,.9vw,17px);line-height:1.58;opacity:.65}
+  .value-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4vw;margin-top:5vh}
+  .value-item{padding-top:2vh;border-top:1px solid currentColor}
+  .value-item .who{font-family:var(--mono);font-size:clamp(9px,.68vw,12px);letter-spacing:.2em;text-transform:uppercase;opacity:.55}
+  .value-item strong{display:block;margin-top:1.7vh;font-family:var(--serif-zh);font-size:clamp(20px,1.9vw,35px);line-height:1.35}
+  .data-band{display:grid;grid-template-columns:repeat(4,1fr);gap:2vw;margin-top:auto;padding:2.4vh 0;border-top:1px solid currentColor;border-bottom:1px solid currentColor}
+  .data-point strong{font-family:var(--serif-en);font-size:clamp(28px,3.6vw,66px);line-height:1}
+  .data-point span{display:block;margin-top:.4vh;font-family:var(--sans-zh);font-size:clamp(10px,.76vw,14px);opacity:.6}
+
+  .horizon{position:absolute;left:0;right:0;bottom:17vh;height:22vh;opacity:.26;overflow:hidden}
+  .horizon::before{content:"";position:absolute;left:-5%;width:110%;height:34vh;top:10vh;border-top:1px solid currentColor;border-radius:50% 50% 0 0}
+  .horizon::after{content:"";position:absolute;left:9%;right:9%;top:8vh;height:1px;background:currentColor;box-shadow:12vw -4vh 0 rgba(var(--ink-rgb),.14),31vw 3vh 0 rgba(var(--ink-rgb),.16),57vw -2vh 0 rgba(var(--ink-rgb),.12)}
+
+  /* ============ V21 内容升级：层级、机制与分时信息 ============ */
+  .gap-list{display:flex;flex-direction:column;gap:1.2vh;margin:2.2vh 0 2.8vh}
+  .gap-list span{display:block;padding:1.15vh 0;border-top:1px solid rgba(127,127,127,.24);font-family:var(--sans-zh);font-size:clamp(13px,1vw,18px);line-height:1.45}
+  .gap-question .q.small{font-size:clamp(30px,3.65vw,66px)}
+
+  .arch-layers{display:grid;gap:.7vh;width:72vw;margin-top:2.6vh}
+  .arch-layer{display:grid;grid-template-columns:16vw 1fr;gap:1.7vw;align-items:center;padding:1vh 1.1vw;border-top:1px solid rgba(127,127,127,.28)}
+  .arch-layer:last-child{border-bottom:1px solid rgba(127,127,127,.28)}
+  .arch-layer .name{font-family:var(--serif-zh);font-size:clamp(15px,1.18vw,22px);font-weight:700}
+  .arch-layer .desc{font-family:var(--sans-zh);font-size:clamp(11px,.82vw,15px);line-height:1.45;opacity:.68}
+  .arch-layer.harness{grid-template-columns:16vw 1fr;border:1px solid currentColor;background:rgba(var(--paper-rgb),.06);padding:1.25vh 1.1vw}
+  .harness-actions{display:flex;gap:.45vw;flex-wrap:wrap}
+  .harness-actions span{padding:.48vh .55vw;border:1px solid rgba(127,127,127,.35);font-family:var(--mono);font-size:clamp(8px,.58vw,11px);letter-spacing:.08em;white-space:nowrap}
+  .journey-rail{display:flex;align-items:center;gap:.65vw;width:72vw;margin-top:1.8vh;font-family:var(--mono);font-size:clamp(8px,.58vw,11px);letter-spacing:.08em;opacity:.62}
+  .journey-rail span{white-space:nowrap}.journey-rail i{flex:1;height:1px;background:currentColor;opacity:.28}
+
+  .question-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75vh .6vw;width:34vw;margin-top:.6vh}
+  .question-grid span{padding:.85vh .55vw;border-top:1px solid rgba(127,127,127,.34);font-family:var(--serif-zh);font-size:clamp(13px,1vw,18px);font-weight:600;text-align:center}
+  .evidence-chain{display:flex;flex-direction:column;gap:.65vh;margin-top:.6vh}
+  .evidence-step{display:grid;grid-template-columns:2.1vw 1fr;gap:.75vw;align-items:center;padding:.8vh 0;border-top:1px solid rgba(127,127,127,.3)}
+  .evidence-step b{font-family:var(--serif-en);font-size:clamp(14px,1.1vw,20px);font-style:italic;opacity:.42}
+  .evidence-step strong{font-family:var(--serif-zh);font-size:clamp(14px,1.06vw,20px)}
+  .evidence-step small{display:block;margin-top:.18vh;font-family:var(--sans-zh);font-size:clamp(10px,.7vw,13px);line-height:1.35;opacity:.58}
+  .data-layers{display:flex;flex-direction:column;gap:.55vh;margin-top:.4vh;width:31vw}
+  .data-layer{display:grid;grid-template-columns:8.6vw 1fr;gap:.75vw;padding:.85vh 0;border-top:1px solid rgba(127,127,127,.3)}
+  .data-layer strong{font-family:var(--serif-zh);font-size:clamp(13px,1vw,18px)}
+  .data-layer span{font-family:var(--sans-zh);font-size:clamp(10px,.7vw,13px);line-height:1.4;opacity:.62}
+  .focus-badge{display:grid;grid-template-columns:auto 1fr;gap:.9vw;align-items:center;width:max-content;max-width:32vw;padding:1.1vh 1vw;border:1px solid currentColor}
+  .focus-badge span{font-family:var(--mono);font-size:clamp(9px,.64vw,12px);letter-spacing:.12em;opacity:.58}
+  .focus-badge strong{font-family:var(--serif-zh);font-size:clamp(13px,1vw,18px)}
+
+  .review-criteria{display:grid;grid-template-columns:1fr 1fr;gap:1.2vw;width:76vw;margin-top:.4vh}
+  .review-tier{padding:1.05vh 1vw;border-top:1px solid currentColor;display:flex;align-items:baseline;gap:1vw}
+  .review-tier strong{font-family:var(--serif-zh);font-size:clamp(14px,1.08vw,20px)}
+  .review-tier span{font-family:var(--mono);font-size:clamp(9px,.64vw,12px);letter-spacing:.08em;opacity:.62}
+
+  .phase-stack{position:relative;min-width:0}
+  .phase-stack>.phase{position:absolute;inset:0;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .48s ease,transform .58s cubic-bezier(.22,1,.36,1);display:flex;flex-direction:column;gap:1vh}
+  .phase-stack>.phase:first-child{opacity:1;transform:none}
+  .phase-stack.has-active>.phase{opacity:0;transform:translateY(10px)}
+  .phase-stack.has-active>.phase.is-visible{opacity:1;transform:none;pointer-events:auto}
+  body.low-power .phase-stack>.phase{opacity:0!important;transform:none!important}
+  body.low-power .phase-stack>.phase[data-phase-summary],body.low-power .phase-stack>.phase:first-child{opacity:1!important}
+  .phase-label{font-family:var(--mono);font-size:clamp(9px,.64vw,12px);letter-spacing:.14em;text-transform:uppercase;opacity:.58}
+  .phase-title{font-family:var(--serif-zh);font-size:clamp(18px,1.5vw,28px);font-weight:700;line-height:1.3}
+  .phase-list{display:flex;flex-direction:column;gap:.55vh}
+  .phase-list span{padding:.7vh 0;border-top:1px solid rgba(127,127,127,.28);font-family:var(--sans-zh);font-size:clamp(11px,.82vw,15px);line-height:1.42}
+  .mini-flow{display:flex;align-items:center;gap:.5vw;font-family:var(--mono);font-size:clamp(8px,.57vw,11px);letter-spacing:.06em;white-space:nowrap}
+  .mini-flow i{width:1.1vw;height:1px;background:currentColor;opacity:.35}
+  .resource-uses{display:grid;grid-template-columns:repeat(2,1fr);gap:.55vh .75vw}
+  .resource-uses span{padding:.65vh 0;border-top:1px solid rgba(127,127,127,.3);font-family:var(--sans-zh);font-size:clamp(11px,.78vw,14px)}
+
+  .mode-reading{position:absolute;left:6vw;bottom:19vh;z-index:3;width:38vw;height:7vh}
+  .mode-question{display:grid!important;grid-template-columns:8vw 1fr;align-items:baseline;gap:1vw;padding-top:1vh;border-top:1px solid currentColor}
+  .mode-question strong{font-family:var(--serif-zh);font-size:clamp(17px,1.45vw,27px)}
+  .mode-question span{font-family:var(--sans-zh);font-size:clamp(12px,.9vw,17px);opacity:.7}
+  .mode-strip span.is-current{background:var(--ink);color:var(--paper)}
+
+  .innovation-stage{width:57vw;margin-top:2.6vh;height:34vh}
+  .harness-core{padding:1.5vh 1.2vw;border:1px solid currentColor}
+  .harness-core strong{display:block;font-family:var(--serif-zh);font-size:clamp(23px,2vw,37px)}
+  .harness-core .harness-actions{margin-top:1.2vh}
+  .outcome-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1vw;margin-top:1vh}
+  .outcome-row div{padding:1.1vh .8vw;border-top:1px solid currentColor}
+  .outcome-row strong{display:block;font-family:var(--serif-zh);font-size:clamp(15px,1.15vw,21px)}
+  .outcome-row span{font-family:var(--sans-zh);font-size:clamp(10px,.68vw,13px);opacity:.58}
+  .innovation-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2vw}
+  .innovation-chip{padding:1.1vh .85vw;border-top:1px solid currentColor}
+  .innovation-chip b{font-family:var(--serif-en);font-size:clamp(16px,1.2vw,22px);font-style:italic;opacity:.35}
+  .innovation-chip strong{display:block;margin-top:.35vh;font-family:var(--serif-zh);font-size:clamp(15px,1.12vw,21px)}
+  .innovation-chip span{display:block;margin-top:.25vh;font-family:var(--sans-zh);font-size:clamp(10px,.68vw,13px);line-height:1.35;opacity:.58}
+
+  .value-proof-stage{height:20vh;margin-top:1.4vh}
+  .proof-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2.2vw}
+  .proof-item{padding-top:1.1vh;border-top:1px solid currentColor}
+  .proof-item .who{font-family:var(--mono);font-size:clamp(9px,.64vw,12px);letter-spacing:.12em;opacity:.55}
+  .proof-item strong{display:block;margin-top:.7vh;font-family:var(--serif-zh);font-size:clamp(16px,1.3vw,24px);line-height:1.35}
+  .behavior-proof{display:grid;grid-template-columns:1.4fr 1fr;gap:2vw}
+  .behavior-proof div{padding:1.1vh 1vw;border-top:1px solid currentColor}
+  .behavior-proof strong{display:block;font-family:var(--serif-zh);font-size:clamp(16px,1.28vw,24px)}
+  .behavior-proof span{display:block;margin-top:.6vh;font-family:var(--sans-zh);font-size:clamp(11px,.78vw,14px);line-height:1.45;opacity:.62}
+  .perf-proof{display:flex;align-items:flex-end;gap:3vw}
+  .perf-proof .metric strong{font-family:var(--serif-en);font-size:clamp(34px,3.8vw,70px);line-height:.9}
+  .perf-proof .metric span{display:block;margin-top:.6vh;font-family:var(--sans-zh);font-size:clamp(11px,.76vw,14px);opacity:.62}
+  .perf-proof .condition{max-width:28vw;font-family:var(--mono);font-size:clamp(9px,.62vw,12px);line-height:1.55;letter-spacing:.08em;opacity:.52}
+  .vision-title{font-size:clamp(36px,4.65vw,84px)!important;max-width:88vw}
+  .vision-center{align-items:center;justify-content:center;text-align:center;max-width:82vw;margin:auto}
+  .vision-center .axiom-title{max-width:78vw}
+
+  /* ---------- 连续视频证据舞台：全程只有一个 video ---------- */
+  #continuityStage,.stage-proxy{--sx:92vw;--sy:86vh;--sw:2vw;--sh:2vh;left:var(--sx);top:var(--sy);width:var(--sw);height:var(--sh)}
+  #continuityStage{position:fixed;z-index:9;pointer-events:none;color:var(--paper);opacity:1;transform:translateZ(0) scale(1);transform-origin:center;transition:left .9s cubic-bezier(.77,0,.175,1),top .9s cubic-bezier(.77,0,.175,1),width .9s cubic-bezier(.77,0,.175,1),height .9s cubic-bezier(.77,0,.175,1),opacity .4s ease,transform .9s cubic-bezier(.77,0,.175,1);contain:layout paint style;will-change:left,top,width,height,transform,opacity}
+  #continuityStage[data-layout="off"]{opacity:0;transform:translateZ(0) scale(.94);visibility:hidden;transition:left .9s cubic-bezier(.77,0,.175,1),top .9s cubic-bezier(.77,0,.175,1),width .9s cubic-bezier(.77,0,.175,1),height .9s cubic-bezier(.77,0,.175,1),opacity .3s ease,transform .9s cubic-bezier(.77,0,.175,1),visibility 0s linear .9s}
+  #continuityStage:not([data-layout="off"]){visibility:visible}
+  :is(#continuityStage,.stage-proxy)[data-layout="seed"]{--sx:78vw;--sy:68vh;--sw:16vw;--sh:16vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="full"]{--sx:4vw;--sy:10vh;--sw:92vw;--sh:78vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="right"]{--sx:45vw;--sy:16vh;--sw:49vw;--sh:67vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="right-wide"]{--sx:39vw;--sy:14vh;--sw:55vw;--sh:70vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="wide"]{--sx:9vw;--sy:35vh;--sw:82vw;--sh:47vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="focus"]{--sx:36vw;--sy:14vh;--sw:58vw;--sh:70vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="left"]{--sx:6vw;--sy:17vh;--sw:58vw;--sh:65vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="left-wide"]{--sx:6vw;--sy:15vh;--sw:62vw;--sh:69vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="float"]{--sx:62vw;--sy:52vh;--sw:32vw;--sh:30vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="ribbon"]{--sx:6vw;--sy:17vh;--sw:88vw;--sh:24vh}
+  .cs-shell{width:100%;height:100%;display:grid;grid-template-rows:minmax(25px,4vh) 1fr minmax(24px,3.7vh);overflow:hidden;background:var(--ink-tint);border:1px solid rgba(var(--paper-rgb),.28);border-radius:6px}
+  .cs-top,.cs-bottom{display:flex;align-items:center;gap:1.1vw;padding:0 1vw;font-family:var(--mono);font-size:clamp(8px,.62vw,11px);letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;overflow:hidden}
+  .cs-top{justify-content:space-between;border-bottom:1px solid rgba(var(--paper-rgb),.13)}
+  .cs-bottom{border-top:1px solid rgba(var(--paper-rgb),.13)}
+  .cs-live{display:flex;align-items:center;gap:.55em;opacity:.72}.cs-live i{width:5px;height:5px;display:block;background:currentColor;border-radius:50%;animation:cs-live 1.8s ease-in-out infinite}
+  @keyframes cs-live{50%{opacity:.22;transform:scale(.72)}}
+  .cs-viewport{--media-scale:1;--media-origin:50% 50%;position:relative;min-height:0;overflow:hidden;background:var(--ink)}
+  #continuityVideo{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center;transform:scale(var(--media-scale));transform-origin:var(--media-origin);transition:transform .85s cubic-bezier(.22,1,.36,1);opacity:0}
+  #continuityStage.has-video #continuityVideo{opacity:1}
+  .cs-placeholder{position:absolute;inset:0;overflow:hidden;background:var(--ink);transition:opacity .4s ease}
+  #continuityStage.has-video .cs-placeholder{opacity:0}
+  .cs-grid{position:absolute;inset:0;opacity:.14;background-image:linear-gradient(rgba(var(--paper-rgb),.12) 1px,transparent 1px),linear-gradient(90deg,rgba(var(--paper-rgb),.12) 1px,transparent 1px);background-size:4.8vw 4.8vw}
+  .cs-scan{position:absolute;left:0;right:0;height:1px;top:8%;background:rgba(var(--paper-rgb),.5);animation:cs-scan 5.2s linear infinite}
+  @keyframes cs-scan{from{transform:translateY(0);opacity:0}12%{opacity:.55}88%{opacity:.55}to{transform:translateY(65vh);opacity:0}}
+  .cs-scene{position:absolute;inset:4% 3.2%;z-index:2;overflow:hidden}
+  .cs-caption{position:absolute;left:4%;bottom:5%;z-index:4;display:flex;flex-direction:column;gap:.55vh;max-width:58%}
+  .cs-caption span,.cs-caption small{font-family:var(--mono);font-size:clamp(8px,.6vw,11px);letter-spacing:.16em;text-transform:uppercase;opacity:.55}
+  .cs-caption strong{font-family:var(--serif-zh);font-size:clamp(16px,1.75vw,33px);font-weight:500;line-height:1.18}
+  .cs-progress{flex:1;height:1px;margin-left:auto;background:rgba(var(--paper-rgb),.2)}.cs-progress i{width:0;height:100%;display:block;background:var(--paper);transition:width .6s cubic-bezier(.22,1,.36,1)}
+  .cs-seek-veil{position:absolute;inset:0;z-index:6;opacity:0;background:rgba(var(--ink-rgb),.36);transition:opacity .18s ease}.is-seeking .cs-seek-veil{opacity:1}
+  .cs-time{font-variant-numeric:tabular-nums}
+
+  /* 占位视频里的产品场景，全部沿用主题色 */
+  .demo-browser{position:absolute;inset:2% 1%;border:1px solid rgba(var(--paper-rgb),.24);display:grid;grid-template-rows:7% 1fr;background:rgba(var(--ink-rgb),.8)}
+  .demo-top{border-bottom:1px solid rgba(var(--paper-rgb),.16);display:flex;align-items:center;justify-content:space-between;padding:0 2%;font-family:var(--mono);font-size:clamp(7px,.52vw,10px);letter-spacing:.14em;opacity:.58}
+  .demo-dots{display:flex;gap:5px}.demo-dots i{width:4px;height:4px;border:1px solid currentColor;border-radius:50%}
+  .demo-body{display:grid;grid-template-columns:18% 1fr;min-height:0}.demo-side{border-right:1px solid rgba(var(--paper-rgb),.14);padding:8% 10%;display:flex;flex-direction:column;gap:9%}.demo-side i{height:1px;background:currentColor;opacity:.24}.demo-side i:nth-child(2){width:72%}.demo-side i:nth-child(3){width:84%}.demo-side i:nth-child(4){width:60%}
+  .demo-main{position:relative;padding:4%;min-width:0;overflow:hidden}.demo-heading{font-family:var(--serif-zh);font-size:clamp(14px,1.25vw,24px);font-weight:600}.demo-meta{font-family:var(--mono);font-size:clamp(7px,.5vw,10px);letter-spacing:.12em;opacity:.48;margin-top:.6vh}
+  .demo-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:3%;margin-top:4%}.demo-card{min-height:8vh;border:1px solid rgba(var(--paper-rgb),.18);padding:8%;display:flex;flex-direction:column;justify-content:space-between}.demo-card strong{font-family:var(--serif-zh);font-size:clamp(10px,.86vw,16px)}.demo-card small{font-family:var(--mono);font-size:clamp(6px,.42vw,9px);letter-spacing:.1em;opacity:.48}
+  .demo-chat{display:grid;grid-template-columns:1fr 25%;gap:3%;height:100%}.chat-stream{display:flex;flex-direction:column;gap:3%;padding:2%}.bubble{max-width:78%;padding:2.7% 3%;border:1px solid rgba(var(--paper-rgb),.18);font-family:var(--sans-zh);font-size:clamp(8px,.66vw,12px);line-height:1.5;opacity:.72}.bubble.ai{align-self:flex-start}.bubble.me{align-self:flex-end;background:rgba(var(--paper-rgb),.08);opacity:.92}.evidence-rail{border-left:1px solid rgba(var(--paper-rgb),.18);padding:7%;display:flex;flex-direction:column;gap:5%}.evidence-rail strong{font-family:var(--serif-zh);font-size:clamp(10px,.82vw,15px)}.evidence-item{padding:7%;border-top:1px solid rgba(var(--paper-rgb),.2);font-family:var(--mono);font-size:clamp(6px,.46vw,9px);letter-spacing:.08em;opacity:.58}
+  .demo-profile{display:grid;grid-template-columns:32% 1fr;gap:4%;height:100%}.radar{position:relative;margin:auto;width:min(14vw,20vh);aspect-ratio:1;border:1px solid rgba(var(--paper-rgb),.3);border-radius:50%}.radar::before,.radar::after{content:"";position:absolute;inset:20%;border:1px solid rgba(var(--paper-rgb),.22);border-radius:50%}.radar::after{inset:42%}.radar i{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--paper);left:65%;top:22%;animation:radar-pulse 2s ease-in-out infinite}@keyframes radar-pulse{50%{transform:scale(1.7);opacity:.35}}
+  .profile-lines{display:flex;flex-direction:column;gap:4%;justify-content:center}.profile-line{display:grid;grid-template-columns:24% 1fr;gap:5%;padding:2.4% 0;border-top:1px solid rgba(var(--paper-rgb),.17);font-family:var(--sans-zh);font-size:clamp(8px,.68vw,13px)}.profile-line span{opacity:.48}
+  .import-flow{height:100%;display:grid;grid-template-columns:30% 1fr;gap:5%;align-items:center}.file-stack{position:relative;height:65%;margin-left:10%}.file-sheet{position:absolute;inset:8% 12%;border:1px solid rgba(var(--paper-rgb),.32);background:var(--ink)}.file-sheet:nth-child(2){transform:translate(8%,-8%)}.file-sheet:nth-child(3){transform:translate(16%,-16%)}.file-sheet::before{content:"PDF / SOURCE";position:absolute;left:10%;top:10%;font-family:var(--mono);font-size:clamp(6px,.48vw,9px);letter-spacing:.13em;opacity:.58}
+  .flow-rail{display:flex;flex-direction:column;gap:7%}.flow-step{display:grid;grid-template-columns:8% 1fr 20%;align-items:center;gap:4%;font-family:var(--sans-zh);font-size:clamp(9px,.72vw,13px)}.flow-step i{width:7px;height:7px;border:1px solid currentColor;border-radius:50%}.flow-step b{font-weight:500}.flow-step span{height:1px;background:currentColor;opacity:.28;position:relative}.flow-step span::after{content:"";display:block;width:var(--done,75%);height:100%;background:currentColor}
+  .graph-field{position:absolute;inset:2%;overflow:hidden}.graph-line{position:absolute;height:1px;background:rgba(var(--paper-rgb),.28);transform-origin:left center}.graph-node{position:absolute;width:clamp(9px,1vw,18px);height:clamp(9px,1vw,18px);border:1px solid rgba(var(--paper-rgb),.7);border-radius:50%;background:var(--ink);animation:node-drift 4s ease-in-out infinite}.graph-node.big{width:clamp(22px,2.4vw,44px);height:clamp(22px,2.4vw,44px)}.graph-node.selected{outline:1px solid rgba(var(--paper-rgb),.34);outline-offset:8px}@keyframes node-drift{50%{transform:translateY(-5px)}}
+  .review-track{height:100%;display:grid;grid-template-columns:1fr 5% 1fr 5% 1fr;align-items:center;gap:1.2%}.review-state{padding:6%;border:1px solid rgba(var(--paper-rgb),.24)}.review-state .stamp{font-family:var(--mono);font-size:clamp(8px,.58vw,11px);letter-spacing:.13em;opacity:.55}.review-state strong{display:block;margin-top:7%;font-family:var(--serif-zh);font-size:clamp(16px,1.55vw,29px)}.review-state p{margin-top:4%;font-family:var(--sans-zh);font-size:clamp(8px,.66vw,12px);line-height:1.5;opacity:.6}.review-arrow{text-align:center;font-family:var(--serif-en);font-size:2.4vw;opacity:.38}
+  .resource-grid{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(2,1fr);gap:3%;height:82%;margin-top:2%}.resource-tile{border:1px solid rgba(var(--paper-rgb),.2);padding:7%;display:flex;flex-direction:column;justify-content:space-between}.resource-tile strong{font-family:var(--serif-zh);font-size:clamp(10px,.92vw,17px)}.resource-tile small{font-family:var(--mono);font-size:clamp(6px,.45vw,9px);letter-spacing:.12em;opacity:.46}.resource-tile i{display:block;width:32%;height:1px;background:currentColor;opacity:.42}
+  .evidence-wall{display:grid;grid-template-columns:repeat(5,1fr);gap:2%;height:72%;align-items:end}.evidence-slice{border-top:1px solid rgba(var(--paper-rgb),.45);height:var(--h,65%);padding-top:8%;font-family:var(--serif-zh);font-size:clamp(9px,.72vw,13px);opacity:.72}
+  .value-reel{display:grid;grid-template-columns:repeat(4,1fr);gap:3%;height:100%;align-items:center}.value-reel div{border-left:1px solid rgba(var(--paper-rgb),.25);padding-left:10%}.value-reel strong{font-family:var(--serif-en);font-size:clamp(18px,2.3vw,44px)}.value-reel span{display:block;font-family:var(--sans-zh);font-size:clamp(7px,.56vw,10px);opacity:.5}
+
+  /* 舞台页透明，让同一个固定视频对象从页面下方透出 */
+  .slide.stage-slide{background:transparent!important}
+  .slide.stage-slide::before,.slide.stage-slide::after{z-index:0!important;backdrop-filter:none!important}
+  .slide.stage-slide>*{position:relative;z-index:2}
+  .slide.stage-slide>.mode-strip,.slide.stage-slide>.role-tags{position:absolute}
+  .slide.stage-slide[data-stage-layout="seed"]::before{background:rgba(var(--ink-rgb),.84)}
+  .slide.stage-slide[data-stage-layout="full"]::before{background:linear-gradient(180deg,rgba(var(--ink-rgb),.58) 0%,rgba(var(--ink-rgb),.08) 25%,rgba(var(--ink-rgb),.04) 72%,rgba(var(--ink-rgb),.62) 100%)}
+  .slide.light.stage-slide[data-stage-layout="full"]::before{background:linear-gradient(180deg,rgba(var(--paper-rgb),.72) 0%,rgba(var(--paper-rgb),.06) 28%,rgba(var(--paper-rgb),.02) 70%,rgba(var(--paper-rgb),.72) 100%)}
+  .slide.stage-slide[data-stage-layout="right"]::before,.slide.stage-slide[data-stage-layout="right-wide"]::before,.slide.stage-slide[data-stage-layout="focus"]::before{background:linear-gradient(90deg,rgba(var(--ink-rgb),.98) 0%,rgba(var(--ink-rgb),.94) 36%,rgba(var(--ink-rgb),.2) 48%,rgba(var(--ink-rgb),0) 64%)}
+  .slide.light.stage-slide[data-stage-layout="right"]::before,.slide.light.stage-slide[data-stage-layout="right-wide"]::before,.slide.light.stage-slide[data-stage-layout="focus"]::before{background:linear-gradient(90deg,rgba(var(--paper-rgb),.99) 0%,rgba(var(--paper-rgb),.96) 37%,rgba(var(--paper-rgb),.2) 49%,rgba(var(--paper-rgb),0) 64%)}
+  .slide.stage-slide[data-stage-layout="left"]::before,.slide.stage-slide[data-stage-layout="left-wide"]::before{background:linear-gradient(90deg,rgba(var(--ink-rgb),0) 0%,rgba(var(--ink-rgb),.1) 56%,rgba(var(--ink-rgb),.94) 68%,rgba(var(--ink-rgb),1) 100%)}
+  .slide.light.stage-slide[data-stage-layout="left"]::before,.slide.light.stage-slide[data-stage-layout="left-wide"]::before{background:linear-gradient(90deg,rgba(var(--paper-rgb),0) 0%,rgba(var(--paper-rgb),.1) 56%,rgba(var(--paper-rgb),.95) 69%,rgba(var(--paper-rgb),1) 100%)}
+  .slide.stage-slide[data-stage-layout="wide"]::before{background:linear-gradient(180deg,rgba(var(--ink-rgb),.98) 0%,rgba(var(--ink-rgb),.9) 25%,rgba(var(--ink-rgb),.08) 40%,rgba(var(--ink-rgb),0) 72%,rgba(var(--ink-rgb),.42) 100%)}
+  .slide.light.stage-slide[data-stage-layout="wide"]::before{background:linear-gradient(180deg,rgba(var(--paper-rgb),.99) 0%,rgba(var(--paper-rgb),.94) 25%,rgba(var(--paper-rgb),.08) 42%,rgba(var(--paper-rgb),0) 72%,rgba(var(--paper-rgb),.5) 100%)}
+  .slide.stage-slide[data-stage-layout="float"]::before{background:linear-gradient(90deg,rgba(var(--ink-rgb),.98) 0%,rgba(var(--ink-rgb),.94) 54%,rgba(var(--ink-rgb),.34) 68%,rgba(var(--ink-rgb),.12) 100%)}
+  .slide.light.stage-slide[data-stage-layout="ribbon"]::before{background:linear-gradient(180deg,rgba(var(--paper-rgb),.76) 0%,rgba(var(--paper-rgb),.24) 43%,rgba(var(--paper-rgb),.96) 48%,rgba(var(--paper-rgb),1) 100%)}
+  #continuityStage[data-layout="full"] .cs-caption,#continuityStage[data-layout="ribbon"] .cs-caption{display:none}
+  #continuityStage.is-quiet .cs-top,#continuityStage.is-quiet .cs-bottom{opacity:.34}
+  #continuityStage.is-quiet .cs-caption{display:none}
+  #continuityStage.is-quiet .cs-scene{opacity:.2;filter:blur(1.5px) saturate(.72)}
+  #continuityStage.is-quiet #continuityVideo{opacity:.2!important;filter:blur(1.5px) saturate(.72)}
+  #continuityStage.is-quiet .cs-grid{opacity:.08}
+  #continuityStage.is-overview-hidden{opacity:0!important}
+  .stage-proxy{position:absolute!important;display:none;pointer-events:none;color:var(--paper);z-index:1}
+  #overview .stage-proxy{display:block!important;opacity:1!important;transition:none!important}
+  #overview [data-anim]{opacity:1!important;transform:none!important}
+  body.low-power #continuityStage,body.low-power #continuityVideo,body.low-power .cs-placeholder,body.low-power .cs-progress i{transition:none!important}
+  body.low-power .cs-scan,body.low-power .cs-live i{display:none!important}
+
+  #scene-01 .axiom-title.xl{font-size:clamp(44px,5.35vw,100px);max-width:72vw}
+  #scene-01 .opening-thesis{font-size:clamp(22px,2.2vw,42px)}
+  #scene-14 .axiom-copy{margin-top:11vh!important;margin-left:2vw;color:var(--paper);text-shadow:0 2px 24px rgba(var(--ink-rgb),.34)}
+  #scene-14 .mode-strip{bottom:18vh}
+
+  @media (max-width:900px){
+    .axiom-copy.left,.axiom-copy.right,.axiom-copy.top,.axiom-copy.overlay{width:86vw;max-width:86vw}
+    .gap-layout{grid-template-columns:1fr}.gap-mark{display:none}.mastery-loop{grid-template-columns:1fr 1fr}.mastery-arrow{display:none}
+    .arch-stack{grid-template-columns:1fr 1fr;width:88vw}.mechanism-grid,.value-grid{grid-template-columns:1fr 1fr;width:88vw}
+  }
+</style>
+</head>
+<body>
+<script>
+  (function(){
+    const KEY = 'guizang-ppt-low-power';
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const stored = localStorage.getItem(KEY);
+    window.__lowPowerMode = stored === '1' || (stored === null && reduced);
+    function updateHint(){
+      const hint = document.getElementById('hint');
+      if(hint) hint.textContent = `← → 翻页 · B ${window.__lowPowerMode ? '动态' : '静态'} · ESC 索引`;
+    }
+    window.__setLowPowerMode = function(on, opts={}){
+      window.__lowPowerMode = !!on;
+      document.body.classList.toggle('low-power', window.__lowPowerMode);
+      if(opts.persist !== false) localStorage.setItem(KEY, window.__lowPowerMode ? '1' : '0');
+      if(window.__lowPowerMode && document.getAnimations){
+        document.getAnimations().forEach(a=>a.cancel());
+      }
+      updateHint();
+      dispatchEvent(new CustomEvent('ppt-low-power-change', {detail:{on:window.__lowPowerMode}}));
+      if(window.__playSlide) window.__playSlide(window.__currentSlideIndex || 0);
+    };
+    document.body.classList.toggle('low-power', window.__lowPowerMode);
+    addEventListener('DOMContentLoaded', updateHint, {once:true});
+  })();
+</script>
+
+<canvas id="bg-dark" class="bg"></canvas>
+<canvas id="bg-light" class="bg"></canvas>
+
+<!-- 连续演示母片：录屏完成后只需替换 ./media/axiom-one-take.mp4 -->
+<div id="continuityStage" data-layout="off" data-scene="vault" aria-hidden="true">
+  <div class="cs-shell">
+    <div class="cs-top">
+      <span>AXIOM SPACE / PRODUCT JOURNEY</span>
+      <span class="cs-live"><i></i><span data-stage-kicker>CONTINUOUS PRODUCT EVIDENCE</span></span>
+    </div>
+    <div class="cs-viewport">
+      <video id="continuityVideo" data-src="./media/axiom-one-take.mp4" muted playsinline preload="metadata"></video>
+      <div class="cs-placeholder" aria-hidden="true">
+        <div class="cs-grid"></div>
+        <div class="cs-scene" id="continuityScene"></div>
+        <span class="cs-scan"></span>
+        <div class="cs-caption">
+          <span>LIVE PRODUCT FILM</span>
+          <strong data-stage-title>AXIOM 连续学习旅程</strong>
+          <small>PROFILE → KNOWLEDGE → OUTPUT → MASTERY</small>
+        </div>
+      </div>
+      <div class="cs-seek-veil"></div>
+    </div>
+    <div class="cs-bottom">
+      <span data-stage-scene>SCENE 05</span>
+      <span data-stage-caption>进入学习仓库</span>
+      <span class="cs-progress"><i data-stage-progress></i></span>
+      <span class="cs-time" data-stage-time>00:00</span>
+    </div>
+  </div>
+
+  <template id="tpl-architecture">
+    <div class="demo-browser"><div class="demo-top"><span>MASTER LOOP / SYSTEM MAP</span><span class="demo-dots"><i></i><i></i><i></i></span></div><div class="demo-main" style="grid-column:1/-1"><div class="demo-heading">从架构进入真实仓库</div><div class="demo-cards"><div class="demo-card"><small>01</small><strong>认识学生</strong></div><div class="demo-card"><small>02</small><strong>组织输出</strong></div><div class="demo-card"><small>03</small><strong>审核掌握</strong></div></div></div></div>
+  </template>
+  <template id="tpl-vault">
+    <div class="demo-browser"><div class="demo-top"><span>COURSE VAULT / 数据结构</span><span class="demo-dots"><i></i><i></i><i></i></span></div><div class="demo-body"><div class="demo-side"><i></i><i></i><i></i><i></i><i></i></div><div class="demo-main"><div class="demo-heading">认知科学 · 学习仓库</div><div class="demo-meta">PROFILE / MATERIAL / CARDS / GRAPH</div><div class="demo-cards"><div class="demo-card"><small>LEARNER</small><strong>认知画像</strong></div><div class="demo-card"><small>KNOWLEDGE</small><strong>知识节点</strong></div><div class="demo-card"><small>MASTERY</small><strong>掌握证据</strong></div></div></div></div></div>
+  </template>
+  <template id="tpl-profile-chat">
+    <div class="demo-browser"><div class="demo-top"><span>INITIAL PROFILE / DIALOGUE</span><span>HYPOTHESIS · NOT LABEL</span></div><div class="demo-main" style="grid-column:1/-1"><div class="demo-chat"><div class="chat-stream"><div class="bubble ai">遇到抽象概念时，你通常怎样确认自己真的理解了？</div><div class="bubble me">我会尝试举例，但有时只是复述定义。</div><div class="bubble ai">那下一轮先用你自己的例子解释，再用新情境验证。</div></div><div class="evidence-rail"><strong>六项教学假设</strong><div class="evidence-item">目标 / 基础</div><div class="evidence-item">讲法 / 卡点</div><div class="evidence-item">节奏 / 验收</div><div class="evidence-item">状态：等待验证</div></div></div></div></div>
+  </template>
+  <template id="tpl-profile-insight">
+    <div class="demo-browser"><div class="demo-top"><span>COGNITIVE INSIGHT / EVIDENCE</span><span>TRACEABLE · CORRECTABLE</span></div><div class="demo-main" style="grid-column:1/-1"><div class="demo-profile"><div class="radar"><i></i></div><div class="profile-lines"><div class="profile-line"><span>学生原话</span><strong>“我会举例，但有时只是复述定义”</strong></div><div class="profile-line"><span>当前判断</span><strong>容易把熟悉感当作掌握</strong></div><div class="profile-line"><span>教学干预</span><strong>先举例，再用迁移任务验收</strong></div><div class="profile-line"><span>后续验证</span><strong>可增强、削弱、推翻或由学生纠正</strong></div></div></div></div></div>
+  </template>
+  <template id="tpl-import">
+    <div class="demo-browser"><div class="demo-top"><span>MATERIAL PIPELINE / SOURCE TO NODE</span><span>FAST FRONT · DEEP BACKGROUND</span></div><div class="demo-main" style="grid-column:1/-1"><div class="import-flow"><div class="file-stack"><div class="file-sheet"></div><div class="file-sheet"></div><div class="file-sheet"></div></div><div class="flow-rail"><div class="flow-step"><i></i><b>原文先保存</b><span style="--done:100%"></span></div><div class="flow-step"><i></i><b>提取知识节点</b><span style="--done:86%"></span></div><div class="flow-step"><i></i><b>前台可搜索</b><span style="--done:72%"></span></div><div class="flow-step"><i></i><b>后台补关系</b><span style="--done:44%"></span></div></div></div></div></div>
+  </template>
+  <template id="tpl-dashboard">
+    <div class="demo-browser"><div class="demo-top"><span>DASHBOARD / KNOWLEDGE STATE</span><span>CARD · EDGE · CLUSTER</span></div><div class="demo-body"><div class="demo-side"><div class="demo-card"><small>SOURCE</small><strong>文献卡 · 从哪里来</strong></div><div class="demo-card"><small>OPEN</small><strong>灵感卡 · 尚未掌握</strong></div><div class="demo-card"><small>MASTERED</small><strong>永久卡 · 已经掌握</strong></div></div><div class="demo-main"><div class="graph-field"><span class="graph-line" style="left:18%;top:35%;width:42%;transform:rotate(18deg)"></span><span class="graph-line" style="left:55%;top:48%;width:27%;transform:rotate(-28deg)"></span><span class="graph-line" style="left:31%;top:67%;width:31%;transform:rotate(-42deg)"></span><i class="graph-node big" style="left:44%;top:39%"></i><i class="graph-node" style="left:18%;top:31%"></i><i class="graph-node" style="left:68%;top:26%"></i><i class="graph-node" style="left:78%;top:57%"></i><i class="graph-node" style="left:28%;top:69%"></i><i class="graph-node" style="left:56%;top:72%"></i></div></div></div></div>
+  </template>
+  <template id="tpl-focus">
+    <div class="demo-browser"><div class="demo-top"><span>FLEETING CARD / OPEN IN WORKBENCH</span><span>NOT MASTERED</span></div><div class="demo-main" style="grid-column:1/-1"><div class="graph-field"><span class="graph-line" style="left:18%;top:52%;width:28%;transform:rotate(-8deg)"></span><span class="graph-line" style="left:53%;top:49%;width:27%;transform:rotate(20deg)"></span><i class="graph-node" style="left:15%;top:48%"></i><i class="graph-node big selected" style="left:47%;top:38%"></i><i class="graph-node" style="left:79%;top:61%"></i><div class="demo-card" style="position:absolute;right:5%;top:9%;width:31%;min-height:16vh"><small>FLEETING / 尚未掌握</small><strong>认知负荷为什么会影响迁移？</strong><span class="axiom-note">OPEN → WORKBENCH</span></div></div></div></div>
+  </template>
+  <template id="tpl-workbench">
+    <div class="demo-browser"><div class="demo-top"><span>DUAL AGENT WORKBENCH</span><span>OUTPUT REQUIRED</span></div><div class="demo-main" style="grid-column:1/-1"><div class="demo-chat"><div class="chat-stream"><div class="bubble ai">如果不能引用原定义，你会怎样向同学解释它？</div><div class="bubble me">我理解它像工作记忆的带宽：任务越复杂，留给迁移的空间越少。</div><div class="bubble ai">很好。请再给一个反例，说明什么时候“复杂”却不一定导致失败。</div></div><div class="evidence-rail"><strong>Agent B · 原话留证</strong><div class="evidence-item">学生类比：带宽</div><div class="evidence-item">已出现：因果解释</div><div class="evidence-item">仍缺：反例与迁移</div><div class="evidence-item">旧永久卡：脚手架效应</div></div></div></div></div>
+  </template>
+  <template id="tpl-review">
+    <div class="demo-browser"><div class="demo-top"><span>MASTERY REVIEW / SAME KNOWLEDGE NODE</span><span>OUTPUT → REVIEW → CORRECTION → PASS</span></div><div class="demo-main" style="grid-column:1/-1"><div class="review-track"><div class="review-state"><span class="stamp">01 · 未通过</span><strong>缺边界与反例</strong><p>卡片仍是灵感卡。</p></div><div class="review-arrow">→</div><div class="review-state"><span class="stamp">02 · 针对性打磨</span><strong>只追问缺口</strong><p>补反例，再换情境解释。</p></div><div class="review-arrow">→</div><div class="review-state"><span class="stamp">03 · 通过</span><strong>升级为永久卡</strong><p>达到本次掌握标准。</p></div></div></div></div>
+  </template>
+  <template id="tpl-resources">
+    <div class="demo-browser"><div class="demo-top"><span>PERSONALIZED RESOURCE / GOVERNED SUGGESTION</span><span>WHY THIS · WHY NOW · USER CONFIRMS</span></div><div class="demo-main" style="grid-column:1/-1"><div class="resource-grid"><div class="resource-tile"><i></i><strong>文档</strong><small>讲解</small></div><div class="resource-tile"><i></i><strong>导图</strong><small>梳理</small></div><div class="resource-tile"><i></i><strong>题目</strong><small>验证</small></div><div class="resource-tile"><i></i><strong>代码</strong><small>实操</small></div><div class="resource-tile"><i></i><strong>图示</strong><small>说明</small></div><div class="resource-tile"><i></i><strong>视频</strong><small>演示</small></div></div></div></div>
+  </template>
+  <template id="tpl-graph">
+    <div class="demo-browser"><div class="demo-top"><span>KNOWLEDGE GRAPH / MULTIPLE VIEWS</span><span>SAME EVIDENCE</span></div><div class="demo-main" style="grid-column:1/-1"><div class="graph-field"><span class="graph-line" style="left:12%;top:43%;width:32%;transform:rotate(12deg)"></span><span class="graph-line" style="left:39%;top:49%;width:36%;transform:rotate(-24deg)"></span><span class="graph-line" style="left:44%;top:53%;width:31%;transform:rotate(35deg)"></span><span class="graph-line" style="left:22%;top:72%;width:24%;transform:rotate(-49deg)"></span><i class="graph-node big selected" style="left:41%;top:40%"></i><i class="graph-node" style="left:11%;top:38%"></i><i class="graph-node" style="left:24%;top:73%"></i><i class="graph-node" style="left:73%;top:18%"></i><i class="graph-node" style="left:76%;top:75%"></i><i class="graph-node" style="left:62%;top:53%"></i></div></div></div>
+  </template>
+  <template id="tpl-innovation">
+    <div class="demo-browser"><div class="demo-top"><span>EVIDENCE → MECHANISM</span><span>SEVEN VERIFIED MECHANISMS</span></div><div class="demo-main" style="grid-column:1/-1"><div class="evidence-wall" style="grid-template-columns:repeat(7,1fr)"><div class="evidence-slice" style="--h:88%">Harness</div><div class="evidence-slice" style="--h:72%">掌握授权</div><div class="evidence-slice" style="--h:58%">证据画像</div><div class="evidence-slice" style="--h:78%">双 Agent</div><div class="evidence-slice" style="--h:52%">资源治理</div><div class="evidence-slice" style="--h:66%">双速语义</div><div class="evidence-slice" style="--h:82%">认知图谱</div></div></div></div>
+  </template>
+  <template id="tpl-value">
+    <div class="value-reel"><div><strong>学生</strong><span>知道哪里没会、为什么</span></div><div><strong>教师干预</strong><span>看到原话、追问与依据</span></div><div><strong>课程</strong><span>积累知识、资源与证据</span></div><div><strong>下一次</strong><span>从已有理解继续</span></div></div>
+  </template>
+</div>
+<div id="hint">← → 翻页 · B 静态 · ESC 索引</div>
+
+<div id="deck">
+
+<!-- ============================================================
+     SLIDES 插入区 · 在此处填充所有 <section class="slide ..."> 页面
+     每页模板参考 references/page-patterns.md
+     页面组件参考 references/components.md
+     ============================================================ -->
+
+<!-- 01 / 开篇：产品主语必须第一眼可见 -->
+<section id="scene-01" class="slide dark hero" data-theme="dark" data-stage="off" data-video-play="false" data-animate="hero" aria-label="01 开篇">
+  <div class="chrome"><div class="left"><span>AXIOM SPACE</span><span class="sep"></span><span>A3 GOLDEN CASE</span></div><div class="right"><span>01 / 17</span></div></div>
+  <div class="axiom-copy" style="margin-top:13vh;width:76vw">
+    <div class="axiom-eyebrow" data-anim>FOR UNIVERSITY STUDENTS</div>
+    <h1 class="axiom-title xl" data-anim>给高校学生使用的<br>AI 掌握学习系统</h1>
+    <div class="opening-thesis" data-anim><span class="muted strike">AI 给出答案</span><span>不等于学生真正学会</span></div>
+    <div class="axiom-badge" data-anim>AXIOM SPACE</div>
+  </div>
+  <div class="foot"><span class="title">把学生输出，变成可追溯的掌握证据</span><span>OPENING / 00:00—00:12</span></div>
+</section>
+
+<!-- 02 / 痛点：不否定现有工具，指出仍未解决的缺口 -->
+<section id="scene-02" class="slide light" data-theme="light" data-animate="directional" aria-label="02 行业痛点">
+  <div class="chrome"><div class="left"><span>WHY AXIOM</span><span class="sep"></span><span>LEARNING GAP</span></div><div class="right"><span>02 / 17</span></div></div>
+  <div class="axiom-copy top" style="margin-top:3.8vh">
+    <div class="axiom-eyebrow" data-anim="left">知识输入已经足够容易</div>
+    <h2 class="axiom-title compact" data-anim="left">现有工具让知识更容易获得<br><span class="hi">却很难证明学生是否掌握</span></h2>
+  </div>
+  <div class="gap-layout">
+    <div class="gap-side">
+      <div class="gap-row" data-anim="left"><strong>通用 AI</strong><span>解释、问答、生成</span></div>
+      <div class="gap-row" data-anim="left"><strong>课程平台</strong><span>组织内容与任务</span></div>
+      <div class="gap-row" data-anim="left"><strong>笔记工具</strong><span>保存资料与笔记</span></div>
+    </div>
+    <div class="gap-mark" data-anim><span>THE MISSING EVIDENCE</span></div>
+    <div class="gap-question" data-anim="right">
+      <div class="gap-list"><span>输出没有形成可追溯的系统证据</span><span>掌握缺少明确审核门槛</span><span>下一步很少由掌握证据动态改写</span></div>
+      <div class="q small">学生凭什么<br>算学会？</div>
+    </div>
+  </div>
+  <div class="foot"><span class="title">AXIOM 要解决的不是“答得快”，而是“学生是否学会”</span><span>PAIN / 00:12—00:32</span></div>
+</section>
+
+<!-- 03 / 定位：一句话说明 AXIOM 的回答 -->
+<section id="scene-03" class="slide light hero" data-theme="light" data-animate="hero" aria-label="03 产品定位">
+  <div class="chrome"><div class="left"><span>AXIOM'S ANSWER</span><span class="sep"></span><span>VERIFIABLE LEARNING</span></div><div class="right"><span>03 / 17</span></div></div>
+  <div class="axiom-copy center" style="margin:auto;width:88vw">
+    <div class="axiom-eyebrow" data-anim>AXIOM 的产品定位</div>
+    <h2 class="axiom-title xl" style="font-size:clamp(40px,5.55vw,100px)" data-anim>不替学生完成学习<br><span class="hi">组织一次可验证的学习</span></h2>
+    <p class="axiom-sub strong" data-anim>高校学生的 AI 掌握学习系统</p>
+    <div class="mastery-loop">
+      <div class="mastery-node" data-anim><strong>学生输出</strong><span>EXPLAIN</span></div><div class="mastery-arrow" data-anim>→</div>
+      <div class="mastery-node" data-anim><strong>证据审核</strong><span>VERIFY</span></div><div class="mastery-arrow" data-anim>→</div>
+      <div class="mastery-node" data-anim><strong>确认掌握</strong><span>MASTER</span></div><div class="mastery-arrow" data-anim>→</div>
+      <div class="mastery-node" data-anim><strong>改变下一步</strong><span>ADAPT</span></div>
+    </div>
+  </div>
+  <div class="foot"><span class="title">一条证据链，连接输出、审核、掌握与下一步</span><span>POSITIONING / 00:32—00:45</span></div>
+</section>
+
+<!-- 04 / 架构：纯机制页，母视频从下一页正式开始 -->
+<section id="scene-04" class="slide dark" data-theme="dark" data-animate="cascade" aria-label="04 整体架构">
+  <div class="chrome"><div class="left"><span>SYSTEM</span><span class="sep"></span><span>MASTERY LOOP</span></div><div class="right"><span>04 / 17</span></div></div>
+  <div class="axiom-copy top" style="margin-top:3.5vh">
+    <div class="axiom-eyebrow" data-anim>一次学习怎样被系统接住</div>
+    <h2 class="axiom-title compact" data-anim>AXIOM 的系统架构：<br><span class="hi">把一次学习变成可追踪的掌握闭环</span></h2>
+  </div>
+  <div class="arch-layers">
+    <div class="arch-layer" data-anim><span class="name">学生＋课程资料</span><span class="desc">真实学习输入与课程边界</span></div>
+    <div class="arch-layer" data-anim><span class="name">长期学习工作台</span><span class="desc">仓库｜画像｜Learn｜Forge｜Galaxy｜资源</span></div>
+    <div class="arch-layer harness" data-anim><span class="name">AXIOM Agent Harness</span><span class="harness-actions"><span>对象绑定</span><span>上下文装配</span><span>工具治理</span><span>证据路由</span><span>状态写回</span></span></div>
+    <div class="arch-layer" data-anim><span class="name">掌握学习核心</span><span class="desc">苏格拉底追问 → 学生费曼输出 → 审核 → 反馈</span></div>
+    <div class="arch-layer" data-anim><span class="name">长期学习状态</span><span class="desc">卡片｜画像｜评估｜图谱｜路径｜资源</span></div>
+  </div>
+  <div class="journey-rail" data-anim><span>认识学生</span><i></i><span>资料变成知识</span><i></i><span>学生亲自讲清</span><i></i><span>审核确认掌握</span><i></i><span>证据改变下一步</span></div>
+  <div class="foot"><span class="title">Harness 不是大模型：它统一学习对象、工具边界、证据流向与状态写回</span><span>ARCHITECTURE / 00:45—01:17</span></div>
+</section>
+
+<!-- 05 / 进入仓库 -->
+<section id="scene-05" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 01" data-stage-key="vault" data-stage-title="进入学习仓库" data-stage-caption="一门课程 · 一份跨页面不断裂的学习状态" data-stage-progress="0.08" data-video-time="77" data-video-play="true" data-animate="hero" aria-label="05 进入仓库">
+  <div class="chrome"><div class="left"><span>STEP 01</span><span class="sep"></span><span>ENTER THE VAULT</span></div><div class="right"><span>05 / 17</span></div></div>
+  <div class="axiom-copy overlay">
+    <div class="axiom-eyebrow" data-anim>进入仓库</div>
+    <h2 class="axiom-title" data-anim>每门课程，都有一个<br>持续生长的学习仓库</h2>
+    <p class="axiom-sub strong" data-anim>同一门课程、同一份学习状态，在不同页面之间不断裂。</p>
+    <div class="axiom-note" data-anim>资料 · 画像 · 卡片 · 图谱 · 路径</div>
+  </div>
+  <div class="foot"><span class="title">保存的不是聊天历史，而是下一次学习可调用的状态</span><span>LIVE / 01:17—01:27</span></div>
+</section>
+
+<!-- 06 / 初次画像 -->
+<section id="scene-06" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="right" data-stage-scene="SCENE 02" data-stage-key="profile-chat" data-stage-title="对话式建立初始画像" data-stage-caption="上一轮回答 → 改变下一轮提问" data-stage-progress="0.17" data-video-time="87" data-video-play="true" data-animate="directional" aria-label="06 初次画像">
+  <div class="chrome"><div class="left"><span>STEP 02</span><span class="sep"></span><span>INITIAL PROFILE</span></div><div class="right"><span>06 / 17</span></div></div>
+  <div class="axiom-copy left">
+    <div class="axiom-eyebrow" data-anim="left">个性化从真实对话开始</div>
+    <h2 class="axiom-title compact" data-anim="left">六项教学假设<br>来自一段真实对话</h2>
+    <div class="question-grid" data-anim="left"><span>学什么</span><span>会什么</span><span>怎么讲</span><span>哪里卡</span><span>讲多少</span><span>怎么算会</span></div>
+    <p class="axiom-sub strong" data-anim="left">这只是待验证的初始画像。</p>
+  </div>
+  <div class="foot"><span class="title">画像先形成假设，再由学生的真实输出持续校正</span><span>LIVE / 01:27—01:50</span></div>
+</section>
+
+<!-- 07 / 画像变化 -->
+<section id="scene-07" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="left" data-stage-scene="SCENE 03" data-stage-key="profile-insight" data-stage-title="查看画像变化" data-stage-caption="学生原话 → 当前判断 → 教学干预 → 后续验证" data-stage-progress="0.25" data-video-time="110" data-video-play="true" data-stage-zoom="1.06" data-stage-origin="72% 45%" data-stage-focus-delay="1800" data-animate="directional" aria-label="07 查看画像变化">
+  <div class="chrome"><div class="left"><span>STEP 03</span><span class="sep"></span><span>COGNITIVE INSIGHT</span></div><div class="right"><span>07 / 17</span></div></div>
+  <div class="axiom-copy right">
+    <div class="axiom-eyebrow" data-anim="right">AI 的判断也要接受检查</div>
+    <h2 class="axiom-title compact" data-anim="right">每一条画像都有出处<br>也能被学生纠正</h2>
+    <div class="evidence-chain">
+      <div class="evidence-step" data-anim="right"><b>01</b><div><strong>学生原话</strong><small>判断从哪条真实表达得出</small></div></div>
+      <div class="evidence-step" data-anim="right"><b>02</b><div><strong>当前判断</strong><small>依据强弱与变化记录可见</small></div></div>
+      <div class="evidence-step" data-anim="right"><b>03</b><div><strong>教学干预</strong><small>改变起点、例子、节奏或验收</small></div></div>
+      <div class="evidence-step" data-anim="right"><b>04</b><div><strong>后续验证</strong><small>可增强、削弱、推翻或纠正</small></div></div>
+    </div>
+  </div>
+  <div class="foot"><span class="title">来源可见｜依据强弱可见｜学生可以纠正</span><span>LIVE / 01:50—02:06</span></div>
+</section>
+
+<!-- 08 / 导入资料 -->
+<section id="scene-08" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="right-wide" data-stage-scene="SCENE 04" data-stage-key="import" data-stage-title="导入学习资料" data-stage-caption="原文先保存 → 前台可搜索 → 后台补关系" data-stage-progress="0.34" data-video-time="126" data-video-play="true" data-animate="directional" aria-label="08 导入资料">
+  <div class="chrome"><div class="left"><span>STEP 04</span><span class="sep"></span><span>MATERIAL TO KNOWLEDGE</span></div><div class="right"><span>08 / 17</span></div></div>
+  <div class="axiom-copy left" style="width:31vw">
+    <div class="axiom-eyebrow" data-anim="left">资料先可用，关系再增强</div>
+    <h2 class="axiom-title compact" data-anim="left">一份课程资料<br>先成为可信对象，再进入知识网络</h2>
+    <div class="data-layers">
+      <div class="data-layer" data-anim="left"><strong>业务事实源</strong><span>原文、卡片、路径不丢失</span></div>
+      <div class="data-layer" data-anim="left"><strong>快速语义层</strong><span>相关旧知先可被召回</span></div>
+      <div class="data-layer" data-anim="left"><strong>后台图谱层</strong><span>实体与深层关系继续增强</span></div>
+    </div>
+  </div>
+  <div class="foot"><span class="title">原文先保存｜知识点可召回｜深层关系后台增强</span><span>LIVE / 02:06—02:24</span></div>
+</section>
+
+<!-- 09 / 仪表盘与三种卡片 -->
+<section id="scene-09" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 05" data-stage-key="dashboard" data-stage-title="仪表盘与三色卡片" data-stage-caption="卡片看状态 · 连线看关系 · 星团看主题" data-stage-progress="0.43" data-video-time="144" data-video-play="true" data-stage-zoom="1.09" data-stage-origin="18% 52%" data-stage-focus-delay="2600" data-phase-duration="4200" data-animate="hero" aria-label="09 仪表盘与三色卡片">
+  <div class="chrome"><div class="left"><span>STEP 05</span><span class="sep"></span><span>DASHBOARD</span></div><div class="right"><span>09 / 17</span></div></div>
+  <div class="axiom-copy" style="margin-top:4vh;width:63vw">
+    <div class="axiom-eyebrow" data-anim>知识结构与学习状态合在一张图里</div>
+    <h2 class="axiom-title compact" data-anim>在同一张图上<br>看见课程结构，也看见掌握状态</h2>
+  </div>
+  <div class="phase-stack" style="position:absolute;right:7vw;bottom:13.5vh;width:31vw;height:17vh">
+    <div class="phase">
+      <div class="state-legend"><div class="state-item"><strong>文献卡</strong><span>资料从哪里来</span></div><div class="state-item"><strong>灵感卡</strong><span>尚未掌握</span></div><div class="state-item"><strong>永久卡</strong><span>已经掌握</span></div></div>
+    </div>
+    <div class="phase">
+      <div class="phase-list"><span><strong>卡片</strong>回答：知识处于什么状态</span><span><strong>连线</strong>回答：知识之间是什么关系</span><span><strong>星团</strong>回答：知识属于哪个主题</span></div>
+    </div>
+  </div>
+  <div class="foot"><span class="title">借鉴卢曼卡片盒的原子化、连接与长期沉淀思想</span><span>LIVE / 02:24—02:51</span></div>
+</section>
+
+<!-- 10 / 打开灵感卡 -->
+<section id="scene-10" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="focus" data-stage-scene="SCENE 06" data-stage-key="focus" data-stage-title="从图谱打开灵感卡" data-stage-caption="同一知识点：图谱 → 工作台 → 审核 → 再回到图谱" data-stage-progress="0.51" data-video-time="171" data-video-play="true" data-stage-zoom="1.08" data-stage-origin="58% 48%" data-stage-focus-delay="1200" data-animate="directional" aria-label="10 打开灵感卡">
+  <div class="chrome"><div class="left"><span>STEP 06</span><span class="sep"></span><span>OPEN FLEETING CARD</span></div><div class="right"><span>10 / 17</span></div></div>
+  <div class="axiom-copy left" style="width:31vw">
+    <div class="axiom-eyebrow" data-anim="left">点开灵感卡</div>
+    <h2 class="axiom-title compact" data-anim="left">就是进入一处<br>尚未掌握的知识</h2>
+    <div class="focus-badge" data-anim="left"><span>CURRENT FOCUS</span><strong>当前仓库｜当前路径｜当前卡片</strong></div>
+  </div>
+  <div class="foot"><span class="title">对象没有换：后续提问、回答、记录与审核都围绕同一张卡</span><span>LIVE / 02:51—03:01</span></div>
+</section>
+
+<!-- 11 / 双 Agent 与向量旧知 -->
+<section id="scene-11" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 07" data-stage-key="workbench" data-stage-title="双 Agent 工作台" data-stage-caption="苏格拉底追问 · 学生费曼输出 · Agent B 原话留证" data-stage-progress="0.62" data-video-time="181" data-video-play="true" data-stage-zoom="1.05" data-stage-origin="58% 47%" data-stage-focus-delay="1800" data-phase-duration="4200" data-animate="hero" aria-label="11 双 Agent 工作台">
+  <div class="chrome"><div class="left"><span>STEP 07</span><span class="sep"></span><span>DUAL AGENT WORKBENCH</span></div><div class="right"><span>11 / 17</span></div></div>
+  <div class="axiom-copy" style="position:absolute;left:6vw;top:16vh;width:56vw">
+    <div class="axiom-eyebrow" data-anim>通用 AI 帮你输入，AXIOM 要求你输出</div>
+    <h2 class="axiom-title compact" data-anim>AI 可以解释<br>真正的理解必须由学生说出来</h2>
+  </div>
+  <div class="role-tags">
+    <div class="role-tag a" data-anim>AGENT A · 苏格拉底式追问</div>
+    <div class="role-tag student" data-anim>学生 · 费曼式输出</div>
+    <div class="role-tag b" data-anim>AGENT B · 原话与证据</div>
+  </div>
+  <div class="phase-stack" style="position:absolute;left:6vw;bottom:18.5vh;width:48vw;height:6.5vh">
+    <div class="phase"><div class="mode-question"><strong>画像注入</strong><span>按当前基础、卡点与验收方式追问</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>旧知召回</strong><span>旧永久卡为当前问题搭桥，但不能替代审核</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>证据写回</strong><span>只保存学生真正说过的话</span></div></div>
+  </div>
+  <div class="foot"><span class="title">预测｜为什么｜例子｜反例｜边界</span><span>LIVE / 03:01—03:43</span></div>
+</section>
+
+<!-- 12 / 掌握审核 -->
+<section id="scene-12" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="wide" data-stage-scene="SCENE 08" data-stage-key="review" data-stage-title="同一张灵感卡的掌握审核" data-stage-caption="未通过 → 只追问缺口 → 换情境作答 → 通过" data-stage-progress="0.73" data-video-time="223" data-video-play="true" data-animate="cascade" aria-label="12 掌握审核">
+  <div class="chrome"><div class="left"><span>STEP 08</span><span class="sep"></span><span>MASTERY REVIEW</span></div><div class="right"><span>12 / 17</span></div></div>
+  <div class="axiom-copy top" style="margin-top:3.2vh">
+    <div class="axiom-eyebrow" data-anim>失败不是瑕疵，而是下一步的证据</div>
+    <h2 class="axiom-title compact" data-anim>没讲清，就不能算掌握</h2>
+    <div class="review-criteria" data-anim>
+      <div class="review-tier"><strong>知识质量</strong><span>清晰｜准确｜必要</span></div>
+      <div class="review-tier"><strong>掌握证据</strong><span>学生解释｜反例与边界｜陌生情境迁移</span></div>
+    </div>
+    <p class="axiom-sub strong" data-anim>这份知识值得留下，学生换个情境仍然会用，才算通过。</p>
+  </div>
+  <div class="foot"><span class="title">永久卡＝达到本次审核标准的已掌握；灵感卡＝仍需继续打磨</span><span>LIVE / 03:43—04:33</span></div>
+</section>
+
+<!-- 13 / 个性化资源 -->
+<section id="scene-13" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="left-wide" data-stage-scene="SCENE 09" data-stage-key="resources" data-stage-title="受学习证据约束的个性化资源" data-stage-caption="发现缺口 → 形成候选 → 说明理由 → 学生确认" data-stage-progress="0.82" data-video-time="273" data-video-play="true" data-phase-duration="4300" data-animate="directional" aria-label="13 个性化资源">
+  <div class="chrome"><div class="left"><span>STEP 09</span><span class="sep"></span><span>PERSONALIZED RESOURCES</span></div><div class="right"><span>13 / 17</span></div></div>
+  <div class="axiom-copy right" style="width:27vw">
+    <div class="axiom-eyebrow" data-anim="right">先判断需要，再决定生成</div>
+    <h2 class="axiom-title compact" data-anim="right">缺口决定补什么<br>偏好决定怎么补</h2>
+    <div class="mini-flow" data-anim="right"><span>发现缺口</span><i></i><span>形成候选</span><i></i><span>说明理由</span><i></i><span>学生确认</span></div>
+    <div class="phase-stack" style="height:22vh;width:28vw">
+      <div class="phase"><div class="phase-label">01 · 先判断要不要生成</div><div class="phase-list"><span>已掌握或已有等价资源 → 不重复生成</span><span>旧知相关但不等价 → 只用于类比</span><span>确有学习缺口 → 再选择资源与任务</span></div></div>
+      <div class="phase"><div class="phase-label">02 · 两种触发方式</div><div class="phase-list"><span><strong>学生主动请求</strong>：我知道自己想要什么</span><span><strong>系统提出建议</strong>：我还不知道该补什么</span></div></div>
+      <div class="phase"><div class="phase-label">03 · 受治理的建议</div><div class="phase-list"><span>来源｜理由｜证据强度｜预期结果</span><span>学生只选择：接受 / 忽略</span></div></div>
+      <div class="phase"><div class="phase-label">04 · 六类学习用途</div><div class="resource-uses"><span>文档＝讲解</span><span>导图＝梳理</span><span>题目＝验证</span><span>代码＝实操</span><span>图示＝说明</span><span>视频＝演示</span></div></div>
+    </div>
+  </div>
+  <div class="foot"><span class="title">价值不在生成更多，而在补得必要、补得合适、不污染长期知识库</span><span>LIVE / 04:33—05:10</span></div>
+</section>
+
+<!-- 14 / 图谱多视角 -->
+<section id="scene-14" class="slide light hero stage-slide" data-theme="light" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 10" data-stage-key="graph" data-stage-title="知识图谱的六个真实视角" data-stage-caption="同一仓库 · 同一节点 · 同一组学习证据" data-stage-progress="0.91" data-video-time="310" data-video-play="true" data-stage-zoom="1.06" data-stage-origin="48% 48%" data-stage-focus-delay="1600" data-phase-duration="3300" data-animate="hero" aria-label="14 知识图谱视角">
+  <div class="chrome"><div class="left"><span>STEP 10</span><span class="sep"></span><span>MULTI-VIEW GRAPH</span></div><div class="right"><span>14 / 17</span></div></div>
+  <div class="axiom-copy" style="margin-top:3.8vh;width:58vw">
+    <div class="axiom-eyebrow" data-anim>图谱不是 3D 装饰</div>
+    <h2 class="axiom-title compact" data-anim>同一份学习证据<br>可以从不同问题来读</h2>
+  </div>
+  <div class="phase-stack mode-reading">
+    <div class="phase"><div class="mode-question"><strong>星系</strong><span>我整体学了什么</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>平面</strong><span>哪些知识真实相关</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>邻域</strong><span>这个概念周围有什么</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>任务</strong><span>下一步应该怎么走</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>地形</strong><span>哪里尚未掌握、哪里已经掌握</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>证据</strong><span>这个结论凭什么可信</span></div></div>
+  </div>
+  <div class="mode-strip" data-anim><span>星系</span><span>平面</span><span>邻域</span><span>任务</span><span>地形</span><span>证据</span></div>
+  <div class="foot"><span class="title">看结构｜查证据｜定下一步</span><span>LIVE / 05:10—05:37</span></div>
+</section>
+
+<!-- 15 / 从视频证据归纳技术创新 -->
+<section id="scene-15" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="float" data-stage-scene="EVIDENCE" data-stage-key="innovation" data-stage-title="刚才看见的产品证据" data-stage-caption="从真实动作归纳七项机制" data-stage-progress="0.95" data-video-time="337" data-video-play="false" data-phase-duration="5200" data-animate="cascade" aria-label="15 技术创新">
+  <div class="chrome"><div class="left"><span>WHY IT WORKS</span><span class="sep"></span><span>MECHANISM INNOVATION</span></div><div class="right"><span>15 / 17</span></div></div>
+  <div class="axiom-copy top" style="margin-top:4vh;width:78vw">
+    <div class="axiom-eyebrow" data-anim>七项机制都已在前面的真实动作中出现</div>
+    <h2 class="axiom-title compact" data-anim>创新不在“接入大模型”<br>而在让学习判断可追溯、可验证、可复用</h2>
+  </div>
+  <div class="phase-stack innovation-stage">
+    <div class="phase">
+      <div class="harness-core"><span class="phase-label">01 · 自研垂直学习运行框架</span><strong>AXIOM Agent Harness</strong><div class="harness-actions"><span>对象绑定</span><span>上下文装配</span><span>工具治理</span><span>证据路由</span><span>状态写回</span></div></div>
+      <div class="outcome-row"><div><strong>可验证</strong><span>学生输出必须经过审核</span></div><div><strong>可解释</strong><span>判断、推荐与关系都有来源</span></div><div><strong>可继续</strong><span>证据改变下一次学习</span></div></div>
+    </div>
+    <div class="phase"><div class="innovation-grid">
+      <div class="innovation-chip"><b>02</b><strong>掌握授权</strong><span>输出证据先过审核</span></div>
+      <div class="innovation-chip"><b>03</b><strong>证据画像</strong><span>画像真正改变教学</span></div>
+      <div class="innovation-chip"><b>04</b><strong>前台教学＋后台分析</strong><span>教学与记录不互相打断</span></div>
+    </div></div>
+    <div class="phase"><div class="innovation-grid">
+      <div class="innovation-chip"><b>05</b><strong>克制型资源与推送</strong><span>先判断需要，再由学生确认</span></div>
+      <div class="innovation-chip"><b>06</b><strong>业务真源＋双速语义</strong><span>事实可回源，旧知快召回，关系后增强</span></div>
+      <div class="innovation-chip"><b>07</b><strong>认知图谱与行动反馈</strong><span>看结构、查来源、定下一步</span></div>
+    </div></div>
+  </div>
+  <div class="foot"><span class="title">普通 Agent 主要解决怎样回答；AXIOM Harness 还决定在哪学、能做什么、留下什么证据、下一步怎样改变</span><span>INNOVATION / 05:37—06:12</span></div>
+</section>
+
+<!-- 16 / 价值与案例数据 -->
+<section id="scene-16" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="ribbon" data-stage-scene="CASE DATA" data-stage-key="value" data-stage-title="真实仓库留下的长期状态" data-stage-caption="行为证明与运行证明，不偷换为学习效果结论" data-stage-progress="1" data-video-time="372" data-video-play="false" data-phase-duration="5200" data-animate="cascade" aria-label="16 落地价值">
+  <div class="chrome"><div class="left"><span>WHAT CHANGES</span><span class="sep"></span><span>APPLICATION VALUE</span></div><div class="right"><span>16 / 17</span></div></div>
+  <div style="margin-top:36vh;position:relative;z-index:3">
+    <div class="axiom-eyebrow" data-anim>落地价值</div>
+    <h2 class="axiom-title compact" data-anim>AXIOM 保存的不是聊天记录<br>而是可以继续工作的学习状态</h2>
+    <div class="phase-stack value-proof-stage">
+      <div class="phase"><div class="proof-grid">
+        <div class="proof-item"><span class="who">STUDENT / 学生</span><strong>知道哪里没掌握，也知道为什么</strong></div>
+        <div class="proof-item"><span class="who">TEACHER INTERVENTION / 教师干预</span><strong>获得原始误解、追问过程与通过依据</strong></div>
+        <div class="proof-item"><span class="who">COURSE / 课程</span><strong>保留可复用的知识、资源与学习证据</strong></div>
+      </div></div>
+      <div class="phase"><div class="behavior-proof">
+        <div><strong>行为证明</strong><span>同一知识点真实驳回 → 针对缺口修正 → 再次审核通过</span></div>
+        <div><strong>长期连续</strong><span>旧知识跨会话回到原卡；资源与路径随证据改变</span></div>
+      </div></div>
+      <div class="phase"><div class="perf-proof">
+        <div class="metric"><strong>312</strong><span>张卡片 · 长期黄金仓库规模背景</span></div>
+        <div class="metric"><strong>81.25s</strong><span>96 张真实卡片快速索引及验证</span></div>
+        <div class="metric"><strong>0.25s</strong><span>热模型语义查询</span></div>
+        <div class="condition">本机 bge-m3 单并发历史实测；最终录制前复测。数据仅证明工程链路可用与反馈及时，不等于学习效果提升。</div>
+      </div></div>
+    </div>
+  </div>
+  <div class="foot"><span class="title">三方价值、行为证明与运行数据分时出现，不把规模冒充学习效果</span><span>VALUE / 06:12—06:47</span></div>
+</section>
+
+<!-- 17 / 浅色愿景收束，避免黑屏 -->
+<section id="scene-17" class="slide light hero" data-theme="light" data-animate="hero" aria-label="17 愿景">
+  <div class="horizon" data-anim></div><span class="scene-count">∞</span>
+  <div class="chrome"><div class="left"><span>AXIOM SPACE</span><span class="sep"></span><span>VISION</span></div><div class="right"><span>17 / 17</span></div></div>
+  <div class="axiom-copy vision-center">
+    <div class="axiom-eyebrow" data-anim>AXIOM Space｜高校学生的 AI 掌握学习系统</div>
+    <h2 class="axiom-title vision-title" data-anim>通用 AI 让答案更容易获得<br><span class="hi">AXIOM 让真正学会<br>可验证、可积累、可继续</span></h2>
+    <p class="axiom-sub strong" style="max-width:66vw" data-anim>让每个学生，都更容易获得高质量、个性化、可持续的学习反馈。</p>
+    <div class="axiom-note" data-anim>AXIOM SPACE 团队</div>
+  </div>
+  <div class="foot"><span class="title">让学生输出成为证据，让每一次学习成为下一次起点</span><span>VISION / 06:47—07:07</span></div>
+</section>
+
+</div>
+
+<script>
+/* =============== 单一连续视频舞台 ===============
+   第 04—16 页只改变同一个 video 的几何状态；不创建分页视频。
+   占位阶段按 data-stage-key 切换品牌化产品场景。
+*/
+(function(){
+  const stage=document.getElementById('continuityStage');
+  const video=document.getElementById('continuityVideo');
+  const viewport=stage.querySelector('.cs-viewport');
+  const sceneRoot=document.getElementById('continuityScene');
+  const liveTitle=stage.querySelector('[data-stage-title]');
+  const liveScene=stage.querySelector('[data-stage-scene]');
+  const liveCaption=stage.querySelector('[data-stage-caption]');
+  const liveKicker=stage.querySelector('[data-stage-kicker]');
+  const liveProgress=stage.querySelector('[data-stage-progress]');
+  const liveTime=stage.querySelector('[data-stage-time]');
+  let focusTimer=0,currentSlide=null,overviewOpen=false;
+
+  function clamp01(n){return Math.max(0,Math.min(1,Number(n)||0));}
+  function formatTime(n){n=Math.max(0,Number(n)||0);return String(Math.floor(n/60)).padStart(2,'0')+':'+String(Math.floor(n%60)).padStart(2,'0');}
+  function setText(node,value,fallback){if(node)node.textContent=value||fallback||'';}
+  function renderScene(key){
+    const tpl=document.getElementById('tpl-'+key)||document.getElementById('tpl-vault');
+    sceneRoot.replaceChildren(tpl.content.cloneNode(true));
+    stage.dataset.scene=key||'vault';
+  }
+  function seekVideo(time,shouldPlay){
+    const target=Number(time)||0;
+    liveTime.textContent=formatTime(target);
+    if(!video.src)return;
+    const apply=function(){
+      try{
+        const duration=Number(video.duration);
+        const maxTarget=Number.isFinite(duration)&&duration>0?Math.max(0,duration-.35):target;
+        if(Number.isFinite(duration)&&target>maxTarget){
+          video.pause();stage.classList.remove('has-video');stage.dataset.videoFallback='out-of-range';return;
+        }
+        stage.dataset.videoFallback='';
+        if(video.readyState>=2)stage.classList.add('has-video');
+        if(Math.abs((video.currentTime||0)-target)>3.5){stage.classList.add('is-seeking');video.currentTime=Math.min(target,maxTarget);}
+        if(shouldPlay&&!window.__lowPowerMode&&!overviewOpen){video.play().catch(function(){});}else{video.pause();}
+      }finally{setTimeout(function(){stage.classList.remove('is-seeking');},220);}
+    };
+    if(video.readyState>=1)apply();else video.addEventListener('loadedmetadata',apply,{once:true});
+  }
+
+  window.__morphStage=function(slide,context){
+    context=context||{};currentSlide=slide;clearTimeout(focusTimer);
+    const enabled=!!(slide&&slide.dataset.stage==='on'&&slide.dataset.stageLayout);
+    const layout=enabled?slide.dataset.stageLayout:'off';
+    stage.dataset.layout=layout;
+    stage.classList.toggle('is-quiet',enabled&&slide.id==='scene-01');
+    stage.dataset.direction=(context.direction||0)<0?'prev':'next';
+    stage.setAttribute('aria-hidden',enabled?'false':'true');
+    if(!enabled){video.pause();return;}
+    renderScene(slide.dataset.stageKey||'vault');
+    setText(liveTitle,slide.dataset.stageTitle,'AXIOM 连续学习旅程');
+    setText(liveScene,slide.dataset.stageScene,'LIVE SCENE');
+    setText(liveCaption,slide.dataset.stageCaption,'LIVE PRODUCT EVIDENCE');
+    setText(liveKicker,slide.dataset.stageKicker,'CONTINUOUS PRODUCT EVIDENCE');
+    liveProgress.style.width=(clamp01(slide.dataset.stageProgress)*100)+'%';
+    const origin=slide.dataset.stageOrigin||'50% 50%';
+    const zoom=Math.max(1,Number(slide.dataset.stageZoom)||1);
+    const delay=Math.max(0,Number(slide.dataset.stageFocusDelay)||0);
+    viewport.style.setProperty('--media-origin',origin);
+    viewport.style.setProperty('--media-scale','1');
+    if(zoom>1&&!window.__lowPowerMode){focusTimer=setTimeout(function(){viewport.style.setProperty('--media-scale',String(zoom));},delay);}
+    seekVideo(slide.dataset.videoTime,slide.dataset.videoPlay!=='false');
+  };
+
+  window.__setStageOverview=function(on){
+    overviewOpen=!!on;stage.classList.toggle('is-overview-hidden',overviewOpen);
+    if(overviewOpen){video.pause();}
+    else if(currentSlide){window.__morphStage(currentSlide,{direction:0});}
+  };
+
+  const source=(video.dataset.src||'').trim();
+  if(source){video.src=source;video.load();}
+  video.addEventListener('loadeddata',function(){if(currentSlide)window.__morphStage(currentSlide,{direction:0});});
+  ['error','stalled','abort','emptied','ended'].forEach(function(type){video.addEventListener(type,function(){stage.classList.remove('has-video');});});
+  video.addEventListener('seeked',function(){
+    const target=Number(currentSlide&&currentSlide.dataset.videoTime)||0;
+    const duration=Number(video.duration);
+    if(!Number.isFinite(duration)||target<=Math.max(0,duration-.35))stage.classList.add('has-video');
+  });
+  video.addEventListener('timeupdate',function(){if(stage.classList.contains('has-video'))liveTime.textContent=formatTime(video.currentTime);});
+
+  document.querySelectorAll('.slide[data-stage="on"]').forEach(function(slide){
+    const proxy=document.createElement('div');
+    proxy.className='stage-proxy';proxy.dataset.layout=slide.dataset.stageLayout||'off';
+    proxy.innerHTML='<div class="cs-shell"><div class="cs-top"><span>AXIOM SPACE</span><span>PRODUCT JOURNEY</span></div><div class="cs-viewport"><div class="cs-placeholder"><div class="cs-grid"></div><div class="cs-caption"><span>'+(slide.dataset.stageScene||'')+'</span><strong>'+(slide.dataset.stageTitle||'')+'</strong><small>'+(slide.dataset.stageCaption||'')+'</small></div></div></div><div class="cs-bottom"><span>'+(slide.dataset.stageScene||'')+'</span><span class="cs-progress"><i style="width:'+(clamp01(slide.dataset.stageProgress)*100)+'%"></i></span></div></div>';
+    var proxyScene=document.createElement('div');proxyScene.className='cs-scene';
+    var proxyTemplate=document.getElementById('tpl-'+(slide.dataset.stageKey||'vault'))||document.getElementById('tpl-vault');
+    proxyScene.appendChild(proxyTemplate.content.cloneNode(true));
+    proxy.querySelector('.cs-placeholder').insertBefore(proxyScene,proxy.querySelector('.cs-caption'));
+    slide.insertBefore(proxy,slide.firstChild);
+  });
+
+  addEventListener('ppt-low-power-change',function(e){
+    clearTimeout(focusTimer);
+    if(e.detail.on){video.pause();viewport.style.setProperty('--media-scale','1');}
+    else if(currentSlide&&!overviewOpen){window.__morphStage(currentSlide,{direction:0});}
+  });
+})();
+</script>
+
+<script>
+/* =============== 分时信息编排 ===============
+   页面只保留一个主旨；同页的机制、证据和资源状态按顺序替换，避免同时堆满。
+*/
+(function(){
+  let phaseTimer=0,currentPhaseSlide=null;
+  function resetStack(stack,index){
+    const phases=[...stack.querySelectorAll(':scope > .phase')];
+    if(!phases.length)return 0;
+    stack.classList.add('has-active');
+    phases.forEach((phase,i)=>phase.classList.toggle('is-visible',i===index));
+    return phases.length;
+  }
+  function resetAll(){
+    clearTimeout(phaseTimer);
+    document.querySelectorAll('.phase-stack').forEach(stack=>{
+      stack.classList.remove('has-active');
+      stack.querySelectorAll(':scope > .phase').forEach(phase=>phase.classList.remove('is-visible'));
+    });
+    document.querySelectorAll('.mode-strip span').forEach(span=>span.classList.remove('is-current'));
+  }
+  function run(slide){
+    resetAll();currentPhaseSlide=slide;
+    if(!slide)return;
+    const stacks=[...slide.querySelectorAll('.phase-stack')];
+    if(!stacks.length)return;
+    let index=0;
+    const max=Math.max(...stacks.map(stack=>resetStack(stack,0)));
+    const modeLabels=[...slide.querySelectorAll('.mode-strip span')];
+    if(modeLabels[0])modeLabels[0].classList.add('is-current');
+    if(window.__lowPowerMode||max<2)return;
+    const duration=Math.max(2400,Number(slide.dataset.phaseDuration)||4200);
+    const tick=function(){
+      if(currentPhaseSlide!==slide)return;
+      index=(index+1)%max;
+      stacks.forEach(stack=>resetStack(stack,index%Math.max(1,stack.querySelectorAll(':scope > .phase').length)));
+      modeLabels.forEach((label,i)=>label.classList.toggle('is-current',i===index%modeLabels.length));
+      phaseTimer=setTimeout(tick,duration);
+    };
+    phaseTimer=setTimeout(tick,duration);
+  }
+  window.__runSlidePhases=run;
+  addEventListener('ppt-low-power-change',function(){run(currentPhaseSlide);});
+})();
+</script>
+
+<div id="nav"></div>
+
+<script>
+/* =============== WebGL 双背景 ===============
+   深色页：Holographic Dispersion（全息色散 · 钛金暗流）—— 彩虹微扰、鼠标径向涟漪
+   浅色页：Spiral Vortex（旋转涡流 · 银色珍珠）—— domain-warp 流动、无中心
+   修改风格请参考 references/webgl-backgrounds.md
+*/
+const VS = `attribute vec2 position;void main(){gl_Position=vec4(position,0.0,1.0);}`;
+
+const FS_DARK = `precision highp float;
+uniform vec2 u_resolution;uniform float u_time;uniform vec2 u_mouse;
+vec3 palette(float t,vec3 a,vec3 b,vec3 c,vec3 d){return a+b*cos(6.28318*(c*t+d));}
+void main(){
+  vec2 uv=gl_FragCoord.xy/u_resolution.xy;
+  vec2 p=uv*2.0-1.0;p.x*=u_resolution.x/u_resolution.y;
+  vec2 m=u_mouse*2.0-1.0;m.x*=u_resolution.x/u_resolution.y;
+  float md=length(p-m);
+  float mr=sin(md*15.0-u_time*4.0)*exp(-md*3.0);p+=mr*0.08;
+  vec2 p0=p;
+  for(float i=1.0;i<4.0;i++){
+    p.x+=0.1/i*sin(i*3.0*p.y+u_time*0.4)+0.05;
+    p.y+=0.1/i*cos(i*2.0*p.x+u_time*0.3)-0.05;
+  }
+  float r=length(p);float ang=atan(p.y,p.x);
+  vec3 a=vec3(0.12,0.12,0.13);
+  vec3 b=vec3(0.03,0.04,0.05);
+  vec3 c=vec3(1.0,1.0,1.0);
+  vec3 d=vec3(0.1,0.2,0.4);
+  vec3 col=palette(r*1.5+p0.x*0.5+u_time*0.1,a,b,c,d);
+  float disp=sin(r*25.0-u_time*1.5+ang*2.0)*0.5+0.5;
+  col+=vec3(disp*0.015,disp*0.01,disp*0.02);
+  float hi=pow(sin(p.x*4.0+p.y*3.0+u_time)*0.5+0.5,8.0);
+  col+=hi*0.08;
+  vec3 base=vec3(0.05,0.05,0.06);
+  col=mix(base,col,0.85);
+  gl_FragColor=vec4(col,1.0);
+}`;
+
+const FS_LIGHT = `precision highp float;
+uniform vec2 u_resolution;uniform float u_time;uniform vec2 u_mouse;
+float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float noise(vec2 p){
+  vec2 i=floor(p),f=fract(p);
+  float a=hash(i),b=hash(i+vec2(1,0));
+  float c=hash(i+vec2(0,1)),d=hash(i+vec2(1,1));
+  vec2 u=f*f*(3.0-2.0*f);
+  return mix(a,b,u.x)+(c-a)*u.y*(1.0-u.x)+(d-b)*u.x*u.y;
+}
+float fbm(vec2 p){
+  float v=0.0,a=0.5;
+  mat2 m=mat2(0.80,0.60,-0.60,0.80);
+  for(int i=0;i<5;i++){v+=a*noise(p);p=m*p*2.02;a*=0.5;}
+  return v;
+}
+void main(){
+  vec2 uv=gl_FragCoord.xy/u_resolution.xy;
+  vec2 p=uv;p.x*=u_resolution.x/u_resolution.y;
+  vec2 m=u_mouse;m.x*=u_resolution.x/u_resolution.y;
+  vec2 md=p-m;float dl=length(md);
+  p+=normalize(md+vec2(0.0001))*exp(-dl*5.0)*0.03;
+  vec2 q=vec2(fbm(p*1.8+u_time*0.07),fbm(p*1.8+vec2(5.2,1.3)+u_time*0.06));
+  vec2 r=vec2(fbm(p*2.0+q*1.3+vec2(1.7,9.2)+u_time*0.05),
+              fbm(p*2.0+q*1.3+vec2(8.3,2.8)+u_time*0.04));
+  float f=fbm(p*2.2+r*1.5);
+  vec3 silverDark=vec3(0.86,0.85,0.84);
+  vec3 paper=vec3(0.955,0.945,0.925);
+  vec3 col=mix(silverDark,paper,f);
+  float ph=r.x*2.2+u_time*0.35;
+  col+=vec3(0.78,0.62,0.92)*sin(ph)*0.055;
+  col+=vec3(0.55,0.72,0.95)*sin(ph*0.8+2.0)*0.05;
+  float hl=smoothstep(0.48,0.92,f);
+  col+=hl*0.06;
+  gl_FragColor=vec4(col,1.0);
+}`;
+
+const mouse={x:0.5,y:0.5};
+addEventListener('mousemove',e=>{mouse.x=e.clientX/innerWidth;mouse.y=e.clientY/innerHeight});
+
+function bootGL(canvasId, fsSrc){
+  const canvas=document.getElementById(canvasId);
+  const gl=canvas.getContext('webgl',{alpha:false,antialias:true});
+  if(!gl) return ()=>false;
+  const mk=(t,s)=>{const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);return sh};
+  const prog=gl.createProgram();
+  gl.attachShader(prog,mk(gl.VERTEX_SHADER,VS));
+  gl.attachShader(prog,mk(gl.FRAGMENT_SHADER,fsSrc));
+  gl.linkProgram(prog);gl.useProgram(prog);
+  const buf=gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+  gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+  const pos=gl.getAttribLocation(prog,'position');
+  gl.enableVertexAttribArray(pos);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);
+  const lRes=gl.getUniformLocation(prog,'u_resolution');
+  const lT=gl.getUniformLocation(prog,'u_time');
+  const lM=gl.getUniformLocation(prog,'u_mouse');
+  const resize=()=>{
+    const d=Math.min(window.devicePixelRatio||1,2);
+    canvas.width=innerWidth*d;canvas.height=innerHeight*d;
+    gl.viewport(0,0,canvas.width,canvas.height);
+  };
+  addEventListener('resize',resize);resize();
+  return (tSec)=>{
+    gl.uniform2f(lRes,canvas.width,canvas.height);
+    gl.uniform1f(lT,tSec);
+    gl.uniform2f(lM,mouse.x,1-mouse.y);
+    gl.drawArrays(gl.TRIANGLES,0,6);
+    return true;
+  };
+}
+let drawDark=null, drawLight=null, glRAF=0, glT0=Date.now();
+function startGL(){
+  if(window.__lowPowerMode || glRAF) return;
+  if(!drawDark) drawDark=bootGL('bg-dark',FS_DARK);
+  if(!drawLight) drawLight=bootGL('bg-light',FS_LIGHT);
+  glT0=Date.now();
+  function loop(){
+    if(window.__lowPowerMode){glRAF=0;return;}
+    const t=(Date.now()-glT0)/1000;
+    drawDark(t);drawLight(t);
+    glRAF=requestAnimationFrame(loop);
+  }
+  glRAF=requestAnimationFrame(loop);
+}
+function stopGL(){
+  if(glRAF) cancelAnimationFrame(glRAF);
+  glRAF=0;
+}
+startGL();
+addEventListener('ppt-low-power-change', e=>{e.detail.on ? stopGL() : startGL();});
+
+// =============== 导航（翻页 / 圆点 / 键盘 / 滚轮 / 触屏） ===============
+const deck=document.getElementById('deck');
+const slides=deck.querySelectorAll('.slide');
+const nav=document.getElementById('nav');
+let idx=0,total=slides.length,lock=false;
+
+// 关键：矫正 deck 宽度为 total * 100vw，否则翻页会错位
+deck.style.width=(total*100)+'vw';
+
+slides.forEach((s,i)=>{
+  const b=document.createElement('button');
+  b.className='dot';b.dataset.i=i;b.setAttribute('aria-label','Page '+(i+1));
+  b.onclick=()=>go(i);
+  nav.appendChild(b);
+});
+
+function go(n){
+  if(lock)return;
+  const previous=idx;
+  idx=Math.max(0,Math.min(total-1,n));
+  window.__currentSlideIndex = idx;
+  deck.style.transform=`translateX(${-idx*100}vw)`;
+  nav.querySelectorAll('.dot').forEach((d,i)=>d.classList.toggle('active',i===idx));
+  /* 主题切换：优先读 data-theme，其次从 class（light/dark）推断 */
+  const el=slides[idx];
+  slides.forEach((slide,i)=>slide.classList.toggle('is-active',i===idx));
+  const th=el.dataset.theme || (el.classList.contains('light')?'light':(el.classList.contains('dark')?'dark':'dark'));
+  document.body.classList.toggle('light-bg',th==='light');
+  window.__morphStage?.(el,{from:previous,to:idx,direction:Math.sign(idx-previous)});
+  window.__runSlidePhases?.(el);
+  if(el.id&&location.hash!=='#'+el.id)history.replaceState(null,'','#'+el.id);
+  /* 动效：翻页过渡中段触发当前页的入场动画（由 motion-boot 注册） */
+  if(window.__playSlide) setTimeout(()=>window.__playSlide(idx), 450);
+  lock=true;setTimeout(()=>lock=false,700);
+}
+
+/* =============== ESC 索引视图 =============== */
+let overviewOn=false;
+const ov=document.createElement('div');
+ov.id='overview';
+ov.style.cssText='position:fixed;inset:0;z-index:100;background:rgba(var(--ink-rgb),.92);backdrop-filter:blur(12px);display:none;overflow-y:auto;padding:4vh 4vw';
+document.body.appendChild(ov);
+
+function buildOverview(){
+  ov.innerHTML='';
+  const grid=document.createElement('div');
+  grid.style.cssText='display:grid;grid-template-columns:repeat(4,1fr);gap:2vh 1.6vw;max-width:90vw;margin:0 auto';
+  slides.forEach((s,i)=>{
+    const card=document.createElement('div');
+    card.style.cssText='cursor:pointer;border-radius:6px;overflow:hidden;border:2px solid '+(i===idx?'rgba(var(--paper-rgb),.8)':'rgba(var(--paper-rgb),.15)')+';transition:border-color .2s';
+    card.onmouseenter=()=>card.style.borderColor='rgba(var(--paper-rgb),.6)';
+    card.onmouseleave=()=>card.style.borderColor=i===idx?'rgba(var(--paper-rgb),.8)':'rgba(var(--paper-rgb),.15)';
+    const wrap=document.createElement('div');
+    wrap.style.cssText='width:100%;aspect-ratio:16/9;overflow:hidden;position:relative;pointer-events:none;background:'+(s.classList.contains('light')?'var(--paper)':'var(--ink)');
+    const clone=s.cloneNode(true);
+    clone.style.cssText='width:100vw;height:100vh;transform:scale('+(1/4.5)+');transform-origin:top left;position:absolute;top:0;left:0;pointer-events:none';
+    wrap.appendChild(clone);
+    const label=document.createElement('div');
+    label.style.cssText='padding:6px 10px;font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--paper);opacity:.7';
+    label.textContent=(i+1)+' / '+total;
+    card.appendChild(wrap);
+    card.appendChild(label);
+    card.onclick=()=>{toggleOverview();go(i)};
+    grid.appendChild(card);
+  });
+  ov.appendChild(grid);
+}
+
+function toggleOverview(){
+  overviewOn=!overviewOn;
+  if(overviewOn){buildOverview();ov.style.display='block';}
+  else{ov.style.display='none';}
+  window.__setStageOverview?.(overviewOn);
+}
+
+addEventListener('keydown',e=>{
+  if(e.key==='Escape'){e.preventDefault();toggleOverview();return;}
+  if(e.key && e.key.toLowerCase()==='b' && !e.metaKey && !e.ctrlKey && !e.altKey){
+    e.preventDefault();
+    window.__setLowPowerMode(!window.__lowPowerMode);
+    return;
+  }
+  if(overviewOn)return;
+  if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '||e.key==='ArrowDown'){
+    if(window.__pipeAdvance && window.__pipeAdvance()) return;
+    go(idx+1);
+    return;
+  }
+  if(e.key==='ArrowLeft'||e.key==='PageUp'||e.key==='ArrowUp')go(idx-1);
+  if(e.key==='Home')go(0);
+  if(e.key==='End')go(total-1);
+});
+
+let wheelTO=null,wheelAcc=0;
+addEventListener('wheel',e=>{
+  wheelAcc+=e.deltaY+e.deltaX;
+  if(Math.abs(wheelAcc)>50){
+    if(wheelAcc>0 && window.__pipeAdvance && window.__pipeAdvance()){
+      wheelAcc=0;
+    }else{
+      go(idx+(wheelAcc>0?1:-1));wheelAcc=0;
+    }
+  }
+  clearTimeout(wheelTO);wheelTO=setTimeout(()=>wheelAcc=0,150);
+},{passive:true});
+
+let tx=0,ty=0;
+addEventListener('touchstart',e=>{tx=e.touches[0].clientX;ty=e.touches[0].clientY},{passive:true});
+addEventListener('touchend',e=>{
+  const dx=(e.changedTouches[0].clientX-tx);
+  const dy=(e.changedTouches[0].clientY-ty);
+  if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy)){
+    if(dx<0 && window.__pipeAdvance && window.__pipeAdvance()) return;
+    go(idx+(dx<0?1:-1));
+  }
+},{passive:true});
+
+function indexFromHash(){
+  const match=(location.hash||'').match(/^#scene-(\d{2})$/);
+  if(!match)return 0;
+  return Math.max(0,Math.min(total-1,Number(match[1])-1));
+}
+addEventListener('hashchange',function(){
+  const next=indexFromHash();
+  if(next===idx)return;
+  lock=false;go(next);
+});
+go(indexFromHash());
+</script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>lucide.createIcons();</script>
+
+<!-- ============ Motion One 动效引擎（本地优先,CDN 兜底） ============
+     加载策略:先 ./assets/motion.min.js(本地,离线可用),失败 fallback 到 jsDelivr CDN
+     加载完成后挂 window.__playSlide / window.__pipeAdvance,
+     导航脚本会在翻页中段调用 __playSlide(idx),键盘/滚轮/触屏会在翻页前调用 __pipeAdvance()
+     双双失败时会兜底把所有 [data-anim] 设为可见,不让动效破坏阅读
+-->
+<script type="module">
+let motion;
+try {
+  motion = await import('./assets/motion.min.js');
+} catch(e1) {
+  try {
+    motion = await import('https://cdn.jsdelivr.net/npm/motion@11.11.17/+esm');
+  } catch(e2) {
+    console.warn('[motion] local + CDN both failed, disabling animations', e1, e2);
+    document.querySelectorAll('[data-anim]').forEach(el=>{el.style.opacity='1';el.style.transform='none'});
+    document.querySelectorAll('[data-animate="pipeline"] [data-anim]').forEach(el=>el.style.opacity='1');
+  }
+}
+
+if(motion){
+  const { animate, stagger } = motion;
+  document.body.classList.add('motion-ready');
+  const EASE = [.22, 1, .36, 1];
+  const slides = [...document.querySelectorAll('.slide')];
+  let pipeStep = -1;
+  let lastIdx = -1;
+
+  function resetAnims(slide){
+    slide.querySelectorAll('[data-anim]').forEach(el=>{
+      el.style.opacity='';
+      el.style.transform='';
+    });
+  }
+
+  function revealStatic(slide){
+    resetAnims(slide);
+    document.getAnimations?.().forEach(a=>a.cancel());
+    slide.querySelectorAll('[data-anim]').forEach(el=>{
+      el.style.opacity='1';
+      el.style.transform='none';
+    });
+  }
+
+  function playSlide(i){
+    const slide = slides[i];
+    if(!slide) return;
+    lastIdx = i;
+    const recipe = slide.dataset.animate || (slide.classList.contains('hero') ? 'hero' : 'cascade');
+
+    if(window.__lowPowerMode){
+      revealStatic(slide);
+      return;
+    }
+
+    if(recipe === 'pipeline'){
+      pipeStep = -1;
+      slide.querySelectorAll('[data-anim]').forEach(el=>{
+        el.style.opacity='0.15';
+        el.style.transform='none';
+      });
+      return;
+    }
+
+    resetAnims(slide);
+    const all = [...slide.querySelectorAll('[data-anim]')];
+    if(!all.length) return;
+
+    if(recipe === 'directional'){
+      const lefts  = all.filter(el=>el.dataset.anim==='left');
+      const divs   = all.filter(el=>el.dataset.anim==='divider');
+      const rights = all.filter(el=>el.dataset.anim==='right');
+      const others = all.filter(el=>!['left','right','divider'].includes(el.dataset.anim));
+      if(others.length) animate(others, {opacity:[0,1], y:[12,0]}, {duration:.6, delay:stagger(.1, {start:.15}), easing:EASE});
+      if(lefts.length)  animate(lefts,  {opacity:[0,1], x:[-24,0]}, {duration:.8, delay:.35, easing:EASE});
+      if(divs.length)   animate(divs,   {opacity:[0,.25]},          {duration:.5, delay:.9});
+      if(rights.length) animate(rights, {opacity:[0,1], x:[24,0]},  {duration:.8, delay:1.0, easing:EASE});
+      return;
+    }
+
+    if(recipe === 'quote'){
+      const lines = all.filter(el=>el.dataset.anim==='line');
+      const others = all.filter(el=>el.dataset.anim!=='line');
+      if(others.length) animate(others, {opacity:[0,1], y:[8,0]},    {duration:.6, delay:stagger(.12, {start:.2}), easing:EASE});
+      if(lines.length)  animate(lines,  {opacity:[.35,1], y:[10,0]}, {duration:.8, delay:stagger(.55, {start:.5}), easing:EASE});
+      return;
+    }
+
+    if(recipe === 'hero'){
+      animate(all, {opacity:[0,1], y:[14,0]}, {duration:.9, delay:stagger(.16, {start:.2}), easing:EASE});
+      return;
+    }
+
+    // default: cascade
+    animate(all, {opacity:[0,1], y:[16,0]}, {duration:.75, delay:stagger(.1, {start:.15}), easing:EASE});
+  }
+
+  function pipeAdvance(){
+    if(window.__lowPowerMode) return false;
+    const slide = slides[lastIdx];
+    if(!slide || slide.dataset.animate !== 'pipeline') return false;
+    const steps  = [...slide.querySelectorAll('[data-anim="step"]')];
+    const arrows = [...slide.querySelectorAll('[data-anim="arrow"]')];
+    if(pipeStep >= steps.length - 1) return false;
+    pipeStep++;
+    animate(steps[pipeStep], {opacity:[0.15,1], y:[8,0]}, {duration:.5, easing:EASE});
+    if(pipeStep > 0 && arrows[pipeStep-1]){
+      animate(arrows[pipeStep-1], {opacity:[0.15,.7]}, {duration:.3, delay:.15});
+    }
+    return true;
+  }
+
+  window.__playSlide = playSlide;
+  window.__pipeAdvance = pipeAdvance;
+
+  // go() 可能已按 hash 打开任意页面；补播当前页，避免异步加载后内容被隐藏。
+  playSlide(window.__currentSlideIndex || 0);
+}
+</script>
+</body>
+</html>
