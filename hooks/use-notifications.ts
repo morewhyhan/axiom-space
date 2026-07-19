@@ -43,7 +43,19 @@ export function useNotifications() {
       .then((res: Response) => res.json())
       .then((data: { success?: boolean; notifications?: AppNotification[] }) => {
         if (cancelled || !Array.isArray(data.notifications)) return
-        const loaded = data.notifications.filter((item): item is AppNotification => !!item && typeof item.id === 'string')
+        const loaded = data.notifications.flatMap((item) => {
+          if (!item || typeof item.id !== 'string') return []
+          const legacy = item as AppNotification & { title?: string; body?: string }
+          return [{
+            ...legacy,
+            type: isNotificationType(legacy.type) ? legacy.type : 'toast',
+            message: typeof legacy.message === 'string' && legacy.message.trim()
+              ? legacy.message
+              : legacy.title || '系统记录已更新',
+            detail: legacy.detail || legacy.body,
+            timestamp: Number.isFinite(legacy.timestamp) ? legacy.timestamp : Date.now(),
+          } satisfies AppNotification]
+        })
         loaded.forEach((item) => seenIdsRef.current.add(item.id))
         setNotifications(loaded.slice(0, 100))
       })
@@ -100,6 +112,10 @@ export function useNotifications() {
   }, [currentVaultId, notifications])
 
   return { notifications, unreadCount, dismissAll }
+}
+
+function isNotificationType(value: unknown): value is AppNotification['type'] {
+  return value === 'toast' || value === 'profile' || value === 'card' || value === 'skill' || value === 'graph' || value === 'quality'
 }
 
 function announceNotification(notification: AppNotification) {

@@ -1,5 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Allow CI/manual verification to build beside a running dev server without
+  // both processes corrupting the same webpack cache.
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   reactStrictMode: true,
   transpilePackages: ['three'],
   experimental: {

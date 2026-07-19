@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { client } from '@/lib/api-client'
+import { useAgentStore } from '@/stores/agent-store'
 import { useAppStore } from '@/stores/mode-store'
 
 export interface CognitiveDimensions {
@@ -107,6 +108,8 @@ export interface CognitionData {
   }
   dimensionInsights?: ProfileDimensionInsight[]
   promptBlock?: string
+  promptVersion?: string
+  promptOverrideActive?: boolean
   assessmentTimeline?: Array<{
     id: string
     concept: string
@@ -188,12 +191,15 @@ export interface ProfileDimensionInsight {
     mechanismHypothesis?: string
     competingHypotheses?: string[]
     discriminatingEvidence?: string
+    controlVariable?: string
     teachingIntervention?: string
     verificationCriterion?: string
+    failureBranch?: string
+    stopCondition?: string
     interventionProtocol?: InterventionProtocol
     scope?: string
     status?: string
-    sourceType: 'vaultMemory' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
+    sourceType: 'vaultMemory' | 'learningSession' | 'learningMessage' | 'assessmentResult' | 'card' | 'edge' | 'vaultCapability' | 'learningPath' | 'resourceGenerationJob'
     sourceId: string
   }>
   userFeedback?: {
@@ -246,11 +252,84 @@ export interface KnowledgeGap {
 
 export interface ProfilePromptSummary {
   promptBlock: string
+  promptVersion?: string
   generatorPrompt?: string
   generationMode?: 'ai' | 'fallback'
   generatedAt: string
   dimensionCount: number
   evidenceCount: number
+}
+
+export type ProfileEvidenceSourceType = ProfileDimensionInsight['observations'][number]['sourceType']
+
+export type ProfileEvidenceNavigation = {
+  target: 'session' | 'card'
+  sessionId?: string
+  card?: { id: string; title: string; type: string }
+}
+
+async function resolveProfileEvidenceSource(input: {
+  vaultId: string
+  sourceType: ProfileEvidenceSourceType
+  sourceId: string
+}): Promise<ProfileEvidenceNavigation | null> {
+  const res = await (client.api.cognition as any)['evidence-source'].$get({
+    query: {
+      vid: input.vaultId,
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+    },
+  })
+  const data = await res.json() as {
+    success: boolean
+    navigation?: ProfileEvidenceNavigation | null
+    error?: string
+  }
+  if (!res.ok || !data.success) throw new Error(data.error || '证据来源解析失败')
+  return data.navigation ?? null
+}
+
+export function canNavigateProfileEvidenceSource(sourceType: ProfileEvidenceSourceType): boolean {
+  return sourceType === 'learningSession'
+    || sourceType === 'learningMessage'
+    || sourceType === 'assessmentResult'
+    || sourceType === 'card'
+}
+
+export function useOpenProfileEvidenceSource() {
+  const currentVaultId = useAppStore((state) => state.currentVaultId)
+
+  return useMutation({
+    mutationFn: async (input: { sourceType: ProfileEvidenceSourceType; sourceId: string }) => {
+      if (!currentVaultId) throw new Error('尚未选择知识库')
+      if (!canNavigateProfileEvidenceSource(input.sourceType)) {
+        throw new Error('这类证据目前没有可打开的页面')
+      }
+      const navigation = await resolveProfileEvidenceSource({
+        vaultId: currentVaultId,
+        ...input,
+      })
+      if (!navigation) throw new Error('原始证据已不存在或不属于当前知识库')
+      const app = useAppStore.getState()
+      const agent = useAgentStore.getState()
+      if (navigation.target === 'session' && navigation.sessionId) {
+        const sessions = await agent.loadSessions()
+        if (!sessions.some((session) => session.id === navigation.sessionId)) {
+          throw new Error('来源对话已不存在或无法打开')
+        }
+        await useAgentStore.getState().switchSession(navigation.sessionId)
+        app.setMode('forge')
+        return navigation
+      }
+      if (navigation.target === 'card' && navigation.card) {
+        await agent.openCardThread(navigation.card, { openChat: true })
+        app.setRightPanelView('read')
+        app.setMode('forge')
+        return navigation
+      }
+      throw new Error('这条证据没有可打开的来源')
+    },
+  })
 }
 
 async function fetchCognition(vaultId?: string | null): Promise<CognitionData | null> {
@@ -283,6 +362,8 @@ async function fetchCognition(vaultId?: string | null): Promise<CognitionData | 
     profileLoop: data.profileLoop as CognitionData['profileLoop'],
     dimensionInsights: data.dimensionInsights as ProfileDimensionInsight[] | undefined,
     promptBlock: data.promptBlock as string | undefined,
+    promptVersion: data.promptVersion as string | undefined,
+    promptOverrideActive: data.promptOverrideActive as boolean | undefined,
     assessmentTimeline: data.assessmentTimeline as CognitionData['assessmentTimeline'] ?? [],
     hypothesisTimeline: data.hypothesisTimeline as CognitionData['hypothesisTimeline'] ?? [],
     interventionRuns: data.interventionRuns as ProfileInterventionRun[] ?? [],
@@ -313,9 +394,9 @@ async function summarizeProfilePrompt(vaultId?: string | null): Promise<ProfileP
   const res = await (client.api.cognition as any)['summarize-prompt'].$post({
     query: vaultId ? { vid: vaultId } : {},
   })
-  const data = await res.json() as { success: boolean; error?: string } & Partial<ProfilePromptSummary>
+  const data = await res.json() as { success: boolean; error?: string; detail?: string } & Partial<ProfilePromptSummary>
   if (!res.ok || !data.success) {
-    throw new Error(data.error || '提示词汇总失败')
+    throw new Error(data.detail || data.error || '提示词汇总失败')
   }
   return {
     promptBlock: data.promptBlock ?? '',
@@ -327,6 +408,30 @@ async function summarizeProfilePrompt(vaultId?: string | null): Promise<ProfileP
   }
 }
 
+async function saveProfilePrompt(vaultId: string | null | undefined, promptBlock: string) {
+  const res = await (client.api.cognition as any)['save-prompt'].$post({
+    query: vaultId ? { vid: vaultId } : {},
+    json: { promptBlock },
+  })
+  const data = await res.json() as {
+    success: boolean
+    error?: string
+    promptBlock?: string
+    promptVersion?: string
+    promptOverrideActive?: boolean
+    savedAt?: string
+  }
+  if (!res.ok || !data.success) {
+    throw new Error(data.error || '保存提示词失败')
+  }
+  return {
+    promptBlock: data.promptBlock ?? '',
+    promptVersion: data.promptVersion,
+    promptOverrideActive: data.promptOverrideActive ?? true,
+    savedAt: data.savedAt ?? new Date().toISOString(),
+  }
+}
+
 export function useCognition() {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const query = useQuery({
@@ -334,6 +439,7 @@ export function useCognition() {
     queryFn: () => fetchCognition(currentVaultId),
     enabled: !!currentVaultId,
     staleTime: 15 * 1000,
+    refetchOnMount: 'always',
     gcTime: 15 * 60 * 1000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -413,6 +519,17 @@ export function useSummarizeProfilePrompt() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () => summarizeProfilePrompt(currentVaultId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+    },
+  })
+}
+
+export function useSaveProfilePrompt() {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (promptBlock: string) => saveProfilePrompt(currentVaultId, promptBlock),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
     },

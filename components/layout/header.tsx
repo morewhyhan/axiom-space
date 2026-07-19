@@ -134,8 +134,9 @@ export default function Header() {
             </div>
             {realNotifs.length > 0 ? realNotifs.map((n) => {
               const dotMap: Record<string, string> = { toast: 'cyan', profile: 'purple', card: 'pink', skill: 'purple', graph: 'cyan', quality: 'pink' }
-              const dot = dotMap[n.type] || 'purple'
-              const label = n.type.charAt(0).toUpperCase() + n.type.slice(1)
+              const notificationType = n.type || 'toast'
+              const dot = dotMap[notificationType] || 'purple'
+              const label = notificationType.charAt(0).toUpperCase() + notificationType.slice(1)
               const time = new Date(n.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
               return (
                 <div key={n.id} className="notif-item"><span className={`notif-dot ${dot}`}></span><div><div className="text-white/70" style={{ fontSize: 'var(--f10)' }}>{label}</div><div className="mono opacity-35 mt-0.5" style={{ fontSize: 'var(--f7)' }}>{n.message} · {time}</div>{n.detail && <div className="mono opacity-30 mt-1 line-clamp-2" style={{ fontSize: 'var(--f7)' }}>{n.detail}</div>}</div></div>

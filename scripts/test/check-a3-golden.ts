@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/db'
+import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
 import { buildLearningProfileContext } from '@/server/core/learning/profile-context'
 import { isInterventionProtocolComplete, type InterventionProtocol } from '@/server/core/learning/intervention-protocol'
 
@@ -94,7 +95,13 @@ async function main() {
     assert(observations.every((item) => typeof item.mechanismHypothesis === 'string'), `${dimensionKey} has an observation without analysis`)
     assert(observations.every((item) => typeof item.teachingIntervention === 'string'), `${dimensionKey} has an observation without intervention`)
     assert(observations.every((item) => typeof item.verificationCriterion === 'string'), `${dimensionKey} has an observation without verification`)
+    assert(observations.every((item) => typeof item.controlVariable === 'string'), `${dimensionKey} has an observation without a single control variable`)
+    assert(observations.every((item) => typeof item.failureBranch === 'string'), `${dimensionKey} has an observation without a failure branch`)
+    assert(observations.every((item) => typeof item.stopCondition === 'string'), `${dimensionKey} has an observation without a stop condition`)
+    assert(observations.every((item) => Array.isArray(item.evidence) && item.evidence.length >= 2), `${dimensionKey} has a long-term node without multiple evidence references`)
   }
+  assert(matureProfileObservations.length >= 20, 'Long-term learning-system profile needs at least twenty mechanism nodes')
+  assert(!matureProfileObservations.some((item) => /已掌握概念|完成\s*\d+\/\d+|生成过.+资源/.test(String(item.userFacingSummary || item.text))), 'Profile cards must not become knowledge or activity lists')
   const observationIds = new Set(mature.vaultMemories.filter((memory) => memory.category === 'observation').map((memory) => memory.id))
   assert(interventionRuns.length >= 3, 'Golden profile needs multiple intervention runs')
   for (const status of ['verified', 'observed', 'needs_adjustment']) {
@@ -126,11 +133,13 @@ async function main() {
   assert(/当前分析:/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain mechanism analysis')
   assert(/本轮干预:/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain teaching intervention')
   assert(/验证动作:/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain verification action')
-  assert(/【唯一主干预】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain an executable primary intervention')
-  assert(/【执行顺序】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain ordered execution steps')
-  assert(/【禁止事项】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain forbidden actions')
-  assert(/【失败分支】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain a failure branch')
-  assert(/【停止条件】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain a stop condition')
+  assert(/【这次只调整】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain one concrete teaching change')
+  assert(/【具体顺序】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain ordered execution steps')
+  assert(/【不要这样做】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain forbidden actions')
+  assert(/【如果没效果】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain a fallback action')
+  assert(/【什么时候停止】/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not contain a stop condition')
+  assert(/画像版本：lsp_[a-f0-9]{12}/.test(matureProfileContext.promptBlock), 'Injected profile prompt is missing an automatically refreshed version')
+  assert(!/已掌握概念:|薄弱概念:|缺失前置:/.test(matureProfileContext.promptBlock), 'Injected profile prompt leaks a concrete knowledge checklist')
   assert(/\[.+\]/.test(matureProfileContext.promptBlock), 'Injected profile prompt does not preserve dynamic sub-dimension labels')
 
   const dimensionKeys = new Set(clean.vaultMemories.flatMap((memory) => {
@@ -168,8 +177,8 @@ async function main() {
   }
   const cleanFoundation = cleanProfileObservations.find((item) => item.dimensionKey === 'currentFoundation')
   assert(cleanFoundation, 'Clean currentFoundation profile observation is missing')
-  assert(cleanFoundation.subDimensionKey === 'knowledge_boundary_summary', 'Current foundation should be a knowledge-boundary summary, not a concept checklist')
-  assert(/知识图谱/.test(String(cleanFoundation.text)) || /图谱/.test(String(cleanFoundation.teachingIntervention)), 'Current foundation must delegate detailed concept mastery to the knowledge graph')
+  assert(cleanFoundation.subDimensionKey === 'self_judgment_boundary', 'Current foundation should explain how reliable self-judgment is, not list learned concepts')
+  assert(!/已掌握|未掌握|知识点清单/.test(String(cleanFoundation.userFacingSummary)), 'Current foundation must not become a concept mastery checklist')
 
   const cleanPath = clean.learningPaths.find((path) => path.name.includes('Visitor'))
   assert(cleanPath, 'Clean vault Visitor path is missing')
@@ -200,6 +209,11 @@ async function main() {
     acc[card.type] = (acc[card.type] ?? 0) + 1
     return acc
   }, {})
+  const visibleMatureCards = mature.cards.filter((card) => card.path !== ROOT_CARD_PATH)
+  const visibleMatureTypeCounts = visibleMatureCards.reduce<Record<string, number>>((acc, card) => {
+    acc[card.type] = (acc[card.type] ?? 0) + 1
+    return acc
+  }, {})
   assert(mature.cards.length >= 300, `Mature vault needs a semester-scale graph, got ${mature.cards.length} cards`)
   assert((matureTypeCounts.permanent ?? 0) >= 70, 'Mature vault needs enough permanent cards to feel long-term')
   assert((matureTypeCounts.fleeting ?? 0) >= 85, 'Mature vault needs enough fleeting observations from long-term use')
@@ -216,8 +230,24 @@ async function main() {
   const suggestionBoxTypes = new Set(mature.pushSuggestions.map((item) => item.boxType))
   const suggestionItemTypes = new Set(mature.pushSuggestions.map((item) => item.itemType))
   assert(suggestionBoxTypes.has('link') && suggestionBoxTypes.has('resource'), 'Push suggestions must populate both link and resource boxes')
-  for (const itemType of ['link', 'card', 'resource', 'task_group']) {
+  for (const itemType of ['link', 'card', 'resource']) {
     assert(suggestionItemTypes.has(itemType), `Push suggestions need a saveable ${itemType} item`)
+  }
+  assert(!suggestionItemTypes.has('task_group'), 'Learning task groups must not leak into either push box')
+  for (const suggestion of mature.pushSuggestions) {
+    assert(
+      suggestion.boxType === 'link'
+        ? suggestion.itemType === 'link'
+        : suggestion.itemType === 'card' || suggestion.itemType === 'resource',
+      `${suggestion.title} violates the push-box boundary`,
+    )
+    const evidence = JSON.parse(suggestion.evidence) as unknown[]
+    const payload = JSON.parse(suggestion.payload) as { recommendationBoundary?: string; acceptanceCriteria?: unknown[]; evidencePolicy?: string }
+    assert(evidence.length >= 2, `${suggestion.title} needs at least two evidence items`)
+    assert(suggestion.confidence >= 0.7, `${suggestion.title} is below the display confidence threshold`)
+    assert(payload.recommendationBoundary, `${suggestion.title} is missing its recommendation boundary`)
+    assert((payload.acceptanceCriteria?.length ?? 0) >= 3, `${suggestion.title} needs explicit acceptance criteria`)
+    assert(payload.evidencePolicy === 'assessment_pass_required_for_mastery_claim', `${suggestion.title} is missing the mastery evidence policy`)
   }
   assert(mature.pushRecords.length >= 1, 'Long-term push records are missing')
   for (const record of mature.pushRecords) {
@@ -252,7 +282,17 @@ async function main() {
   assert(new Set(resourceManifest.map((item) => item.type)).size >= 6, 'Resource pack must expose all six resource types')
   assert(resourceManifest.every((item) => item.sourceObjectId && item.contentHash), 'Every visible resource needs a database ID and content hash')
   assert(/<!--\s*axiom-orchestration:/.test(resourcePack.content), 'Visible multi-agent orchestration evidence is missing')
-  assert(mature.pushSuggestions.some((item) => item.reason.includes('不再重复推送基础 UML')), 'Personalized next recommendation is missing')
+  const semesterResourcePack = mature.cards.find((card) => card.title === '软件设计模式长期资源包')
+  assert(semesterResourcePack, 'Semester resource pack is missing')
+  const semesterManifestMatch = semesterResourcePack.content.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
+  assert(semesterManifestMatch?.[1], 'Semester resource manifest is missing')
+  const semesterManifest = JSON.parse(semesterManifestMatch[1]) as Array<Record<string, unknown>>
+  assert(semesterManifest.length >= 6, 'Semester resource pack must expose all six resources')
+  assert(
+    semesterManifest.every((item) => item.kind && item.format && item.ref && item.status === 'ready' && item.sourceObjectId && item.contentHash),
+    'Every semester resource must satisfy the preview manifest contract',
+  )
+  assert(mature.pushSuggestions.some((item) => /不(?:再)?重复(?:推送)?基础 UML/.test(item.reason)), 'Personalized next recommendation is missing')
   assert(mature.educationProfileHistory.length >= 3, 'Long-term profile needs baseline, midterm, and current snapshots')
   const profileStages = mature.educationProfileHistory
     .map((item) => item.snapshot ? JSON.parse(item.snapshot) as { stage?: string; summary?: string; learningEvents?: number } : {})
@@ -267,25 +307,70 @@ async function main() {
     assert(typeof hypothesis.confidenceBefore === 'number' && typeof hypothesis.confidenceAfter === 'number', 'Every hypothesis needs before/after confidence')
   }
 
-  assert(mature.learningSessions.length >= 6, 'Long-term archive needs multiple cross-topic learning sessions')
-  assert(mature.learningSessions.every((session) => session.outcome && session.messages.length >= 3), 'Every golden learning session needs an outcome and dialogue evidence')
+  assert(mature.learningSessions.length >= 10, 'Long-term archive needs onboarding, learning, resource, push, project, and retest conversations')
+  const completedGoldenSessions = mature.learningSessions.filter((session) => session.status === 'completed')
+  assert(completedGoldenSessions.length >= 10, 'Long-term archive needs enough completed process conversations')
+  assert(completedGoldenSessions.every((session) => session.outcome && session.messages.length >= 3), 'Every completed golden session needs an outcome and dialogue evidence')
+  const dialogueCorpus = completedGoldenSessions.flatMap((session) => session.messages.map((message) => message.content)).join('\n')
+  for (const trace of ['画像初始化完成', '认知洞察', '只生成视频', '主进度 100%', '后台转码', '六类资源', '右侧预览', '需要你确认', '不要再给我推 Visitor 基础 UML']) {
+    assert(dialogueCorpus.includes(trace), `Long-term dialogue is missing process trace: ${trace}`)
+  }
+  const permanentCards = mature.cards.filter((card) => card.type === 'permanent')
+  const sessionTraces = mature.learningSessions.map((session) => {
+    let metadata: Record<string, unknown> = {}
+    try { metadata = session.metadata ? JSON.parse(session.metadata) as Record<string, unknown> : {} } catch {}
+    return { session, metadata }
+  })
+  const ordinaryConversations = sessionTraces.filter(({ metadata }) => metadata.sessionKind === 'conversation' && metadata.seededFor === 'A3 golden ordinary conversation')
+  assert(ordinaryConversations.length >= 20, 'Long-term archive needs a realistic history of unbound ordinary conversations')
+  for (const { session, metadata } of ordinaryConversations) {
+    assert(!('cardId' in metadata) && !('relatedCardIds' in metadata) && !('producedCardId' in metadata), `${session.concept} must remain an unbound ordinary conversation`)
+    assert(session.phase === 'conversation' && session.messages.length >= 4, `${session.concept} is an incomplete ordinary conversation`)
+    assert(session.messages.some((message) => message.role === 'user') && session.messages.some((message) => message.role === 'assistant'), `${session.concept} needs both roles`)
+  }
+  for (const card of permanentCards) {
+    const cardThread = sessionTraces.find(({ metadata }) => metadata.sessionKind === 'card-thread' && metadata.cardId === card.id)
+    assert(cardThread, `Permanent card ${card.title || card.path} is missing its internal card conversation`)
+    assert(cardThread.session.phase === 'archived' && cardThread.session.messages.length >= 5, `Permanent card ${card.title || card.path} has an incomplete internal conversation`)
+    assert(cardThread.session.messages.some((message) => message.role === 'user') && cardThread.session.messages.some((message) => message.role === 'assistant'), `Permanent card ${card.title || card.path} internal conversation needs both roles`)
+
+    const sourceConversation = ordinaryConversations.find(({ session }) => session.id === cardThread.metadata.sourceConversationId)
+    assert(sourceConversation, `Permanent card ${card.title || card.path} has no traceable ordinary learning context`)
+  }
   assert(mature.agentSessions.length >= 1, 'Persisted agent session is missing')
-  assert(auditLogs.length >= 6, 'Agent audit history is too thin')
+  const agentDialogue = mature.agentSessions.flatMap((session) => {
+    try {
+      return (JSON.parse(session.messages) as Array<{ content?: string }>).map((message) => message.content || '')
+    } catch {
+      return []
+    }
+  }).join('\n')
+  assert(/只生成一个.*视频/.test(agentDialogue), 'Persisted AI workspace dialogue is missing the clean single-video request')
+  assert(/需要先得到你的同意/.test(agentDialogue), 'Persisted AI workspace dialogue is missing proactive-generation consent')
+  assert(auditLogs.length >= 12, 'Agent audit history is too thin')
   assert(auditLogs.some((item) => item.event === 'promotion_blocked'), 'Audit history must include a meaningful blocked action')
-  assert(domainEvents.length >= 8, 'Domain event timeline is too thin')
+  for (const event of ['resource_request_parsed', 'resource_generation_progress', 'resource_preview_opened', 'proactive_resource_confirmation_requested', 'push_suggestion_accepted', 'push_suggestion_rejected']) {
+    assert(auditLogs.some((item) => item.event === event), `Audit history is missing ${event}`)
+  }
+  assert(domainEvents.length >= 14, 'Domain event timeline is too thin')
   assert(new Set(domainEvents.map((item) => item.eventType)).has('LearningPathReplanned'), 'Path replanning domain event is missing')
+  for (const eventType of ['ResourceRequestRecognized', 'ResourcePrimaryProgressCompleted', 'ResourcePreviewOpened', 'PushSuggestionConsentRequested', 'PushSuggestionAccepted', 'PushSuggestionRejected']) {
+    assert(domainEvents.some((item) => item.eventType === eventType), `Domain event timeline is missing ${eventType}`)
+  }
   assert(cardRevisions.length >= 2, 'Permanent knowledge needs visible revision history')
   assert(promotionAttempts.some((item) => item.status === 'rejected') && promotionAttempts.some((item) => item.status === 'accepted'), 'Promotion history must show both rejection and later acceptance')
   assert(sourceDocuments.length >= 4, 'Semester archive needs multiple traceable source documents')
   assert(sourceDocuments.every((item) => item.chunks.length >= 1), 'Every source document needs traceable chunks')
-  assert(mature.ragDocumentIndexes.length >= 40, 'Long-term archive needs visible RAG index coverage')
-  assert(mature.ragDocumentIndexes.every((item) => item.status === 'indexed' && item.indexedAt), 'Golden RAG records must have completed processing evidence')
+  const semanticIndexes = mature.ragDocumentIndexes.filter((item) => item.provider === 'qdrant')
+  assert(semanticIndexes.length >= 40, 'Long-term archive needs visible fast semantic index coverage')
+  assert(semanticIndexes.every((item) => item.status === 'indexed' && item.indexedAt), 'Golden semantic index records must have completed processing evidence')
   assert(mature.notificationReceipts.some((item) => item.readAt), 'Notification consumption history is missing')
   assert(confirmationTokens.some((item) => item.usedAt && item.toolName === 'create_permanent_card'), 'High-risk confirmation history is missing')
 
   console.log('A3 golden case verified')
   console.log(`clean: cards=${clean.cards.length}, dimensions=${dimensionKeys.size}, steps=${cleanPath.steps.length}`)
-  console.log(`mature: cards=${mature.cards.length}, permanent=${matureTypeCounts.permanent ?? 0}, fleeting=${matureTypeCounts.fleeting ?? 0}, literature=${matureTypeCounts.literature ?? 0}, clusters=${mature.clusters.length}, edges=${mature.edges.length}, sessions=${mature.learningSessions.length}, assessments=${assessments.length}, capabilities=${mature.vaultCapabilities.length}, skills=${mature.vaultSkills.length}, rag=${mature.ragDocumentIndexes.length}, resources=${mature.resourceGenerationJobs.length}, pushes=${mature.pushSuggestions.length}`)
+  console.log(`mature-visible: cards=${visibleMatureCards.length}, permanent=${visibleMatureTypeCounts.permanent ?? 0}, fleeting=${visibleMatureTypeCounts.fleeting ?? 0}, literature=${visibleMatureTypeCounts.literature ?? 0}, clusters=${mature.clusters.length}, edges=${mature.edges.length}, sessions=${mature.learningSessions.length}, assessments=${assessments.length}, capabilities=${mature.vaultCapabilities.length}, skills=${mature.vaultSkills.length}, semantic=${semanticIndexes.length}, resources=${mature.resourceGenerationJobs.length}, pushes=${mature.pushSuggestions.length}`)
+  console.log(`mature-internal: cards=${mature.cards.length} (includes ${ROOT_CARD_PATH})`)
 }
 
 function assertResourceRenderable(type: string, content: string) {

@@ -17,6 +17,7 @@ import { BACKGROUND_ANALYSIS_PROMPT } from '@/server/core/ai/prompts'
 import type { InterventionProtocol } from '@/server/core/learning/intervention-protocol'
 import { PROFILE_DIMENSION_PROTOCOL } from '@/server/core/learning/profile-protocol'
 import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
+import { refreshLearningProfilePromptSnapshot } from '@/server/core/learning/profile-context'
 
 const ANALYSIS_PROMPT = BACKGROUND_ANALYSIS_PROMPT.system;
 
@@ -29,7 +30,7 @@ interface SkillUpdate {
 
 function normalizeProfileMechanism(observation: ProfileObservationUpdate): ProfileMechanism {
   const allowedScopes = new Set(['current_topic', 'domain_pattern', 'cross_domain_pattern'])
-  const allowedStatuses = new Set(['hypothesis', 'supported', 'confirmed', 'weakened', 'refuted', 'improved', 'needs_retest'])
+  const allowedStatuses = new Set(['hypothesis', 'supported', 'confirmed', 'weakened', 'refuted', 'improved', 'needs_retest', 'stale'])
   const clean = (value: unknown, max = 500) => typeof value === 'string' && value.trim()
     ? value.trim().slice(0, max)
     : undefined
@@ -43,8 +44,11 @@ function normalizeProfileMechanism(observation: ProfileObservationUpdate): Profi
       ? uniqueStrings(observation.competingHypotheses.filter((item): item is string => typeof item === 'string')).slice(0, 4)
       : undefined,
     discriminatingEvidence: clean(observation.discriminatingEvidence),
+    controlVariable: clean(observation.controlVariable),
     teachingIntervention: clean(observation.teachingIntervention),
     verificationCriterion: clean(observation.verificationCriterion),
+    failureBranch: clean(observation.failureBranch),
+    stopCondition: clean(observation.stopCondition),
     interventionProtocol: observation.interventionProtocol && typeof observation.interventionProtocol === 'object'
       ? observation.interventionProtocol
       : undefined,
@@ -84,17 +88,21 @@ interface ProfileObservationUpdate {
   mechanismHypothesis?: string
   competingHypotheses?: string[]
   discriminatingEvidence?: string
+  controlVariable?: string
   teachingIntervention?: string
   verificationCriterion?: string
+  failureBranch?: string
+  stopCondition?: string
   interventionProtocol?: Partial<InterventionProtocol>
   scope?: 'current_topic' | 'domain_pattern' | 'cross_domain_pattern'
-  status?: 'hypothesis' | 'supported' | 'confirmed' | 'weakened' | 'refuted' | 'improved' | 'needs_retest'
+  status?: 'hypothesis' | 'supported' | 'confirmed' | 'weakened' | 'refuted' | 'improved' | 'needs_retest' | 'stale'
 }
 
 type ProfileMechanism = Pick<ProfileObservationUpdate,
   'subDimensionKey' | 'subDimensionLabel' | 'userFacingSummary' |
   'observableBehavior' | 'mechanismHypothesis' | 'competingHypotheses' |
-  'discriminatingEvidence' | 'teachingIntervention' | 'verificationCriterion' |
+  'discriminatingEvidence' | 'controlVariable' | 'teachingIntervention' | 'verificationCriterion' |
+  'failureBranch' | 'stopCondition' |
   'interventionProtocol' |
   'scope' | 'status'>
 interface AnalysisResult {
@@ -220,6 +228,7 @@ export class BackgroundAnalyzer {
       }
 
       // ── Write observations from LLM. Prefer six-dimension profile observations. ──
+      let profileObservationWritten = false
       if (result.observations && result.observations.length > 0) {
         for (const observation of result.observations) {
           if (typeof observation === 'string' && observation.trim().length > 0) {
@@ -257,6 +266,7 @@ export class BackgroundAnalyzer {
             normalizeProfileMechanism(observation),
           )
           if (dimensionKey) {
+            profileObservationWritten = true
             const baVaultId = getCurrentVaultId()
             if (baVaultId) {
               const label = PROFILE_DIMENSION_LABELS[dimensionKey] ?? dimensionKey
@@ -274,6 +284,16 @@ export class BackgroundAnalyzer {
               })
             }
           }
+        }
+      }
+      if (profileObservationWritten) {
+        const baVaultId = getCurrentVaultId()
+        if (baVaultId) {
+          void refreshLearningProfilePromptSnapshot({
+            vaultId: baVaultId,
+            userId: getCurrentUserId(),
+            reason: 'runtime_observation_batch',
+          }).catch((error) => console.debug('[BackgroundAnalyzer] Prompt refresh failed:', error))
         }
       }
 
@@ -637,7 +657,27 @@ export class BackgroundAnalyzer {
       const { getCurrentVaultId } = await import('@/server/core/agent/agent-context')
       const vid = getCurrentVaultId()
       if (!vid) return null
+      const userId = getCurrentUserId()
       const sourceObjectId = `background:${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+      const evidenceRefs = await Promise.all(evidence.map(async (item, index) => {
+        const excerpt = item.replace(/\s+/g, ' ').trim().slice(0, 120)
+        const sourceMessage = userId && excerpt.length >= 12
+          ? await prisma.learningMessage.findFirst({
+            where: {
+              role: 'user',
+              content: { contains: excerpt },
+              session: { userId, vaultId: vid },
+            },
+            orderBy: { timestamp: 'desc' },
+            select: { id: true },
+          }).catch(() => null)
+          : null
+        return {
+          sourceObjectType: sourceMessage ? 'learningMessage' : 'derived',
+          sourceObjectId: sourceMessage?.id || `${sourceObjectId}:message:${index}`,
+          summary: item,
+        }
+      }))
       const memory = await prisma.vaultMemory.create({
         data: {
           vaultId: vid,
@@ -650,11 +690,7 @@ export class BackgroundAnalyzer {
             sourceObjectType: 'derived',
             sourceObjectId,
             ...mechanism,
-            evidence: evidence.map((item, index) => ({
-              sourceObjectType: 'derived',
-              sourceObjectId: `${sourceObjectId}:message:${index}`,
-              summary: item,
-            })),
+            evidence: evidenceRefs,
           }),
           category: 'observation',
         },

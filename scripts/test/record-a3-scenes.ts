@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
-import { access, mkdir, rename, rm } from 'node:fs/promises'
+import { mkdir, rename, rm } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test'
 import { PrismaClient } from '@prisma/client'
 
 const BASE_URL = process.env.A3_RECORD_URL || 'http://127.0.0.1:3000'
+const RECORD_WIDTH = Number(process.env.A3_RECORD_WIDTH || 1440)
+const RECORD_HEIGHT = Number(process.env.A3_RECORD_HEIGHT || 810)
 const EMAIL = process.env.A3_RECORD_EMAIL || 'demo@axiom.space'
 const PASSWORD = process.env.A3_RECORD_PASSWORD || 'demo123456'
 const CLEAN_VAULT = '设计模式黄金案例'
@@ -40,7 +42,7 @@ async function moveClick(page: Page, locator: Locator, waitAfter = 1100) {
   } else {
     const x = box.x + box.width / 2
     const y = box.y + box.height / 2
-    await page.mouse.move(x, y, { steps: 18 })
+    await page.mouse.move(x, y, { steps: 8 })
     await pause(page, 240)
     await locator.click({ timeout: 60_000 })
   }
@@ -82,7 +84,9 @@ async function addRecordingCursor(context: BrowserContext) {
 }
 
 async function gotoHome(page: Page) {
-  await page.goto(BASE_URL, { waitUntil: 'commit', timeout: 300_000 })
+  const target = new URL(BASE_URL)
+  target.searchParams.set('recording', '1')
+  await page.goto(target.toString(), { waitUntil: 'commit', timeout: 300_000 })
   await page.waitForLoadState('domcontentloaded', { timeout: 300_000 })
   await pause(page, 2200)
 }
@@ -162,6 +166,7 @@ async function convertToMp4(input: string, output: string) {
   await new Promise<void>((resolve, reject) => {
     const child = spawn('ffmpeg', [
       '-y', '-i', input,
+      '-vf', 'scale=1920:1080:flags=lanczos,fps=30',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '25',
       '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-an', output,
     ], { stdio: 'inherit' })
@@ -258,21 +263,25 @@ async function sceneImport(page: Page) {
 }
 
 async function openCardFromGalaxy(page: Page, title: string) {
-  await switchMode(page, 'galaxy', 5200)
-  const node = page.getByText(title, { exact: true }).first()
-  await moveClick(page, node, 3600)
-  if (!await visible(page.getByTestId('forge-resource-panel-context'))) {
-    await switchMode(page, 'forge', 3600)
-  }
+  // Galaxy nodes are drawn on WebGL canvas and therefore have no reliable DOM
+  // locator. Open the same real card through Forge's searchable card library;
+  // the card id, bound thread and preview are identical to a Galaxy selection.
+  await switchMode(page, 'forge', 3400)
+  await moveClick(page, page.getByTestId('forge-activity-cards'), 1400)
+  const search = page.getByTestId('forge-left-search-cards')
+  await search.fill(title)
+  await pause(page, 1100)
+  const card = page.getByTestId('forge-left-card-row').filter({ hasText: title }).first()
+  await moveClick(page, card, 3600)
 }
 
 async function sceneForge(page: Page) {
   await openWorkspace(page, CLEAN_VAULT)
   await openCardFromGalaxy(page, 'Visitor 双重分派')
-  await page.getByTestId('forge-resource-panel-context').waitFor({ state: 'visible', timeout: 90_000 })
-  await moveClick(page, page.getByTestId('forge-left-tab-talks'), 1700)
-  const talk = page.getByText('苏格拉底 × 费曼学习演示', { exact: true }).first()
-  await moveClick(page, talk, 3500)
+  // Opening the card restores its bound thread directly. This is distinct
+  // from the ordinary, unbound conversations shown in the context panel.
+  await page.locator('.forge-message-scroll').first().waitFor({ state: 'visible', timeout: 90_000 })
+  await pause(page, 2200)
   const messageScroll = page.locator('.forge-message-scroll').first()
   await messageScroll.hover().catch(() => {})
   await page.mouse.wheel(0, -900)
@@ -347,11 +356,11 @@ async function sceneMatureVault(page: Page) {
 
 async function recordScene(browser: Browser, scene: Scene, useStorageState: boolean) {
   const context = await browser.newContext({
-    viewport: { width: 1920, height: 1080 },
+    viewport: { width: RECORD_WIDTH, height: RECORD_HEIGHT },
     deviceScaleFactor: 1,
     colorScheme: 'dark',
     ...(useStorageState ? { storageState: storageStatePath } : {}),
-    recordVideo: { dir: artifactDir, size: { width: 1920, height: 1080 } },
+    recordVideo: { dir: artifactDir, size: { width: RECORD_WIDTH, height: RECORD_HEIGHT } },
   })
   await context.addInitScript(`
     try {
@@ -361,6 +370,10 @@ async function recordScene(browser: Browser, scene: Scene, useStorageState: bool
         if (saved && saved.state) saved.state.hasCompletedOnboarding = true;
         localStorage.setItem('axiom-store', JSON.stringify(saved));
       }
+    } catch (error) {}
+    try {
+      localStorage.setItem('axiom-recording-performance', '1');
+      document.documentElement.dataset.recordingPerformance = 'true';
     } catch (error) {}
   `)
   await addRecordingCursor(context)
@@ -395,7 +408,7 @@ async function recordScene(browser: Browser, scene: Scene, useStorageState: bool
 }
 
 async function prepareStorageState(browser: Browser) {
-  const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, colorScheme: 'dark' })
+  const context = await browser.newContext({ viewport: { width: RECORD_WIDTH, height: RECORD_HEIGHT }, colorScheme: 'dark' })
   const page = await context.newPage()
   page.setDefaultTimeout(150_000)
   try {
@@ -419,11 +432,33 @@ async function main() {
     { number: 5, slug: 'galaxy', run: sceneGalaxy },
     { number: 6, slug: 'mature-vault', run: sceneMatureVault },
   ]
+  const requestedScenes = new Set(
+    (process.env.A3_RECORD_SCENES || '')
+      .split(',')
+      .map((value) => Number(value.trim()))
+      .filter((value) => Number.isFinite(value)),
+  )
+  const selectedScenes = requestedScenes.size
+    ? scenes.filter((scene) => requestedScenes.has(scene.number))
+    : scenes
 
-  const browser = await chromium.launch({ headless: true })
+  const browser = await chromium.launch({
+    headless: process.env.A3_RECORD_HEADED !== '1',
+    args: [
+      '--enable-gpu',
+      '--ignore-gpu-blocklist',
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-features=CalculateNativeWinOcclusion',
+    ],
+  })
   try {
-    await access(storageStatePath).catch(() => prepareStorageState(browser))
-    for (const scene of scenes) {
+    // Always refresh auth/local state for the active recording origin. Reusing
+    // an older 127.0.0.1/localhost or port-specific state silently sends every
+    // scene back through login and makes the recording look stalled.
+    await prepareStorageState(browser)
+    for (const scene of selectedScenes) {
       await recordScene(browser, scene, true)
     }
   } finally {

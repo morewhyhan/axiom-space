@@ -1,3 +1,5 @@
 export { LearningResourcePanel } from './learning-resource-panel'
 export { VideoCard } from './video-card'
+export { ResourcePreview } from './resource-preview'
+export { PureResourceViewer } from './pure-resource-viewer'
 export type { GeneratedResourceItem } from './types'

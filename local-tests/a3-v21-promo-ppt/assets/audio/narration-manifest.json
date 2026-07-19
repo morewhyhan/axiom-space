@@ -1,0 +1,183 @@
+{
+  "success": true,
+  "externalService": "Microsoft Edge neural TTS",
+  "engine": "Microsoft Edge neural TTS",
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "-4%",
+  "pitch": "-2Hz",
+  "volume": "+0%",
+  "slides": 17,
+  "totalSeconds": 429.744,
+  "report": [
+    {
+      "id": "scene-01",
+      "title": "开篇：学生凭什么算真正学会",
+      "fileName": "scene-01-opening.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-01-opening.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-01-opening.vtt",
+      "seconds": 10.104,
+      "targetSeconds": 12,
+      "text": "AXIOM Space 是给高校学生使用的 AI 掌握学习系统。今天只回答一个问题：学生凭什么算真正学会？"
+    },
+    {
+      "id": "scene-02",
+      "title": "行业痛点：输入容易，掌握不可见",
+      "fileName": "scene-02-learning-gap.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-02-learning-gap.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-02-learning-gap.vtt",
+      "seconds": 21.48,
+      "targetSeconds": 20,
+      "text": "通用 AI 解释和生成，课程平台组织任务，笔记工具保存资料。它们让知识更容易输入，却很少把学生原话、掌握门槛和下一步串成证据链。真正的缺口不是没有答案，而是看不见哪里不会，也无法据此改变教学。"
+    },
+    {
+      "id": "scene-03",
+      "title": "产品定位：组织一次可验证的学习",
+      "fileName": "scene-03-positioning.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-03-positioning.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-03-positioning.vtt",
+      "seconds": 14.808,
+      "targetSeconds": 13,
+      "text": "AXIOM 不替学生完成学习。它让学生亲自输出，保留证据，审核确认掌握，再让结果改变下一步。交付的不是漂亮回答，而是一次可验证的学习。"
+    },
+    {
+      "id": "scene-04",
+      "title": "系统架构：Harness 接住一次学习",
+      "fileName": "scene-04-architecture.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-04-architecture.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-04-architecture.vtt",
+      "seconds": 32.232,
+      "targetSeconds": 32,
+      "text": "一次学习动作经产品界面和类型安全网关，进入 AXIOM Agent Harness。Harness 不是模型，而是学习控制平面：绑定学生、仓库和卡片，识别意图，装配画像、旧知与路径，只开放必要工具，再把可信证据写回长期状态。业务库保存事实，向量记忆快速召回，图谱索引后台补关系。模型可以更换，证据边界不会断。"
+    },
+    {
+      "id": "scene-05",
+      "title": "进入仓库：长期课程状态",
+      "fileName": "scene-05-vault.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-05-vault.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-05-vault.vtt",
+      "seconds": 12.096,
+      "targetSeconds": 10,
+      "text": "小林先选定课程仓库。这里长期保存这门课的资料、画像、卡片和图谱；切换页面，处理的仍是同一份学习状态。"
+    },
+    {
+      "id": "scene-06",
+      "title": "初次画像：六项教学假设",
+      "fileName": "scene-06-profile-dialogue.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-06-profile-dialogue.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-06-profile-dialogue.vtt",
+      "seconds": 24.192,
+      "targetSeconds": 23,
+      "text": "第一次进入仓库，系统不是让小林勾选固定标签，而是通过连续对话判断六件事：学什么、会什么、怎么讲、哪里卡、一次讲多少、怎样才算会。上一次回答会改变下一次提问。这些不是人格结论，而是等待后续学习表现校正的教学假设。"
+    },
+    {
+      "id": "scene-07",
+      "title": "画像证据：真实影响下一轮教学",
+      "fileName": "scene-07-profile-evidence.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-07-profile-evidence.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-07-profile-evidence.vtt",
+      "seconds": 21.192,
+      "targetSeconds": 16,
+      "text": "认知洞察能把画像追到具体对话和学生原话，再压缩成下一轮教学提示词。提示词会真实注入对话，改变 AI 的起点、讲法和验收标准；学生也可以纠正。个性化因此是一套可检查、会影响教学的规则。"
+    },
+    {
+      "id": "scene-08",
+      "title": "导入资料：可信事实进入知识网络",
+      "fileName": "scene-08-import.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-08-import.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-08-import.vtt",
+      "seconds": 18,
+      "targetSeconds": 18,
+      "text": "导入时，AXIOM 先保存原文和来源，抽取失败也不丢事实；再生成知识节点，让内容先可被语义召回，深层关系由后台增强。资料从此开始参与对话、图谱、路径和资源。"
+    },
+    {
+      "id": "scene-09",
+      "title": "仪表盘：三色卡片表达掌握状态",
+      "fileName": "scene-09-dashboard.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-09-dashboard.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-09-dashboard.vtt",
+      "seconds": 24.312,
+      "targetSeconds": 27,
+      "text": "回到仪表盘，资料已变成知识节点。三色卡片表达学习状态：文献卡说明来源，灵感卡代表尚未掌握，永久卡只代表学生输出已经通过本次审核。卡片看状态，连线看关系，星团看主题。它们会被 Agent、路径和资源共同读取。"
+    },
+    {
+      "id": "scene-10",
+      "title": "对象连续：同一张卡进入工作台",
+      "fileName": "scene-10-current-focus.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-10-current-focus.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-10-current-focus.vtt",
+      "seconds": 12.336,
+      "targetSeconds": 10,
+      "text": "从图谱点开灵感卡，Harness 同时绑定仓库、路径和卡片。进入工作台后还是同一知识点，不必重新解释学习上下文。"
+    },
+    {
+      "id": "scene-11",
+      "title": "双 Agent：强制学生向外输出",
+      "fileName": "scene-11-dual-agent.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-11-dual-agent.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-11-dual-agent.vtt",
+      "seconds": 45.264,
+      "targetSeconds": 42,
+      "text": "在工作台里，Agent A 不急着给标准答案，而是用苏格拉底式追问，倒逼小林用自己的话完成费曼输出。Agent B 在后台同步保留学生原话、更新卡片和相关画像，不打断学习。Harness 还会注入刚才的教学规则，并从向量记忆召回已经掌握的旧卡，为当前问题搭桥。边界非常明确：旧知只能辅助理解，Agent B 只能记录证据，它们都不能替学生制造“我的理解”。通用 Agent 往往在完成知识输入后结束，AXIOM 强制学生向外输出，才得到可审核的掌握证据。"
+    },
+    {
+      "id": "scene-12",
+      "title": "掌握审核：失败指向下一步",
+      "fileName": "scene-12-mastery-review.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-12-mastery-review.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-12-mastery-review.vtt",
+      "seconds": 37.776,
+      "targetSeconds": 50,
+      "text": "永久卡代表已经掌握，因此不能由 AI 随手生成。画面中第一次审核发现，这张灵感卡虽然有基本解释，却缺少反例、边界或陌生情境迁移，所以系统明确驳回，并保留具体失败原因。审核失败后，Agent A 只追问这个缺口；学生补充并重新作答，达到清晰、准确、必要和迁移标准，才允许升级为永久卡。失败不是扣分动画，而是系统知道下一步究竟该补什么的证据。"
+    },
+    {
+      "id": "scene-13",
+      "title": "个性化资源：证据约束生成",
+      "fileName": "scene-13-resources.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-13-resources.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-13-resources.vtt",
+      "seconds": 34.728,
+      "targetSeconds": 37,
+      "text": "资源不是越多越好。系统先检查是否已掌握、是否已有等价内容，再依据缺口和偏好形成候选。学生可以主动点单；系统提出建议时，必须说明来源、理由、范围和预期结果，由学生确认后执行。它能生成讲解、导图、题目、代码、图示和动画。创新不在格式多，而在生成受真实学习证据约束，补得必要，也不污染长期知识库。"
+    },
+    {
+      "id": "scene-14",
+      "title": "知识图谱：六种认知问题",
+      "fileName": "scene-14-graph-views.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-14-graph-views.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-14-graph-views.vtt",
+      "seconds": 26.976,
+      "targetSeconds": 27,
+      "text": "最后回到同一张知识图谱。星系看整体知识域，平面看真实关系，邻域看当前概念周围；任务看下一步，地形看哪里未掌握、哪里已掌握，证据模式回答这个结论凭什么可信。视角在变，底层节点和学习证据没有变。图谱因此不只展示已经有什么，还能暴露下一步缺什么。"
+    },
+    {
+      "id": "scene-15",
+      "title": "Harness：从一句话到长期状态",
+      "fileName": "scene-15-harness.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-15-harness.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-15-harness.vtt",
+      "seconds": 38.688,
+      "targetSeconds": 35,
+      "text": "这条管线说明 AXIOM 不是 Prompt 包装。请求先校验身份与结构，再绑定学生、仓库和卡片；意图路由选择任务，规划器设置步骤与确认点；上下文装配画像、资料、旧知与路径；教学 Agent 追问，助手 Agent 后台观察。工具调用受权限、作用域和审计约束，可信证据才写回卡片、画像、图谱和向量记忆。普通 Agent 交付回答；AXIOM Harness 交付一次会改变下一步的受控学习行动。"
+    },
+    {
+      "id": "scene-16",
+      "title": "落地价值：三方可用的学习状态",
+      "fileName": "scene-16-value.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-16-value.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-16-value.vtt",
+      "seconds": 36,
+      "targetSeconds": 35,
+      "text": "这些机制沉淀为三方可用的学习状态。学生知道哪里没掌握、为什么；教师干预能看到原始误解、追问和通过依据；课程保留可复用的知识、资源与证据。当前黄金仓库已有三百一十一张可见卡片、三百五十七条关系、一百三十三次会话和十二次正式评估。这些数字只证明闭环真实运行，不把规模冒充学习效果；真正的价值，是下一次学习能从已有理解继续。"
+    },
+    {
+      "id": "scene-17",
+      "title": "愿景：让真正学会可以持续发生",
+      "fileName": "scene-17-vision.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-17-vision.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-v21-promo-ppt/assets/audio/scene-17-vision.vtt",
+      "seconds": 19.56,
+      "targetSeconds": 20,
+      "text": "AXIOM 不以生成更多答案为终点。它让学生输出，让掌握有证据，再让证据改变下一次学习。通用 AI 让答案更容易获得，AXIOM 希望让真正学会变得可验证、可积累、可继续。谢谢大家。"
+    }
+  ]
+}

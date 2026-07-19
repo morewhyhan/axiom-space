@@ -44,7 +44,7 @@ export interface DocumentStructurePlanInput {
 
 const extractionContract = {
   id: 'document.import-extraction',
-  version: '1.0.0',
+  version: '1.1.0',
   name: 'Document Import Extraction',
   purpose: 'Parse imported literature into source-backed concepts, fleeting cards, relations, and digest.',
   whenToUse: [
@@ -178,7 +178,7 @@ const structurePlanContract = {
   id: 'document.import-necessary-structure',
   version: '1.0.0',
   name: 'Imported Document Necessary Structure',
-  purpose: 'Plan sufficient-and-necessary child nodes under the selected parent concept before imported material is written into the graph.',
+  purpose: 'Plan a stable topic -> domain category -> knowledge node hierarchy before imported material is written into the graph.',
   whenToUse: [
     'A document import has produced source material and extracted draft cards.',
     'The system must decide the direct child conditions under the parent/root concept.',
@@ -186,18 +186,21 @@ const structurePlanContract = {
   whenNotToUse: [
     'Do not use to summarize the document as a reading outline.',
     'Do not use to create arbitrary keyword clusters.',
-    'Do not create children that are merely examples, citations, or document section headings unless they are direct necessary conditions.',
+    'Do not use a literature/source card as the parent or as a domain category.',
+    'Do not promote individual extracted concepts to the same level as broad domain categories.',
+    'Do not create children that are merely examples, citations, or document section headings unless the heading is a stable semantic category.',
   ],
   input: [
     'Parent/root concept title and current content.',
     'Imported document title, topic, extracted concepts, draft card titles, and document excerpt.',
   ],
   process: [
-    'Interpret the parent concept as the thing that must be fully explained.',
-    'List direct child nodes that are individually necessary and collectively sufficient for understanding or establishing the parent.',
+    'Interpret the parent concept as the topic that must be fully explained.',
+    'First create 3-7 stable, mutually distinguishable domain categories directly under the topic.',
+    'Then assign every extracted concept or draft card below exactly one most-relevant domain category.',
     'Use document evidence first; if the document is incomplete, add missing child nodes and mark them as ai_generated.',
-    'Assign every extracted concept or draft card to the most relevant child condition.',
-    'Avoid duplicates, section-heading outlines, and one giant catch-all node.',
+    'Keep the source document as citation evidence only; it must not replace the topic or category hierarchy.',
+    'Avoid duplicates, leaf concepts disguised as categories, and one giant catch-all node.',
   ],
   output: [
     'Strict JSON with conditions, assignments, and coverageCheck.',
@@ -208,12 +211,15 @@ const structurePlanContract = {
     'assignments[] maps extracted card titles to one condition title.',
   ],
   correct: [
-    'Creates 4-10 direct child conditions for a non-trivial parent.',
+    'Creates 3-7 domain categories for a non-trivial parent.',
     'Every child is necessary; the set is collectively sufficient.',
-    'Imported cards are grouped under condition nodes, not directly flattened under the parent.',
+    'The real vault-name root directly contains domain nodes; imported knowledge cards are grouped beneath those domains.',
+    'For a design-pattern import, connects the vault root directly to 创建型模式、结构型模式、行为型模式, then maps Factory/Adapter/Strategy and other concrete patterns beneath them.',
   ],
   incorrect: [
     'Only creates one vague child node.',
+    'Inserts an extra 设计模式 topic node between the vault root and 创建型模式、结构型模式、行为型模式.',
+    'Connects the vault root to the literature card as if the literature were a knowledge subdivision.',
     'Uses document sections as children without testing necessity.',
     'Leaves extracted cards unassigned.',
     'Creates overlapping child nodes that mean the same thing.',
@@ -224,7 +230,7 @@ export const DOCUMENT_STRUCTURE_PLAN_PROMPT = definePrompt<DocumentStructurePlan
   ...structurePlanContract,
   outputMode: 'json',
   system: buildSystemPrompt({
-    role: '你是 AXIOM 的知识结构规划专家。你负责把导入资料放进根节点/父节点下面的充分必要条件结构，而不是做普通摘要。',
+    role: '你是 AXIOM 的知识结构规划专家。你负责把导入资料整理为“真实仓库名根节点—领域分类—具体知识节点”的分层图谱；文献只作为证据，不参与替代知识层级。',
     contract: structurePlanContract,
     standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, CARD_WORKFLOW_STANDARD, GRAPH_EDGE_STANDARD, JSON_OUTPUT_STANDARD],
     extra: `Return strict JSON:
@@ -254,10 +260,16 @@ export const DOCUMENT_STRUCTURE_PLAN_PROMPT = definePrompt<DocumentStructurePlan
 }
 
 硬性要求：
-- conditions 必须是父节点的直接因果/构成条件，不是资料章节。
-- 非空资料下不要只给 1 个 conditions；通常 4-10 个。
+- parentTitle 是真实仓库名，对应白色一级根节点；不要再生成一张同名或主题中间卡。
+- conditions 必须是仓库根节点直接连接的二级领域分类或构成维度，不是文献卡、例子，也不是具体叶子知识点。
+- conditions.title 不得与 conceptNames 或 fleetingTitles 中任何标题相同。
+- 非空资料下不要只给 1 个 conditions；通常 3-7 个。
+- assignments 表达第三层关系：每个具体知识点归属到哪个二级领域分类。
+- 文献只提供证据，不得成为 conditions，也不得替代父节点。
 - assignments 必须覆盖所有 conceptNames 和 fleetingTitles，除非标题重复。
-- 如果资料没有覆盖父节点的全部必要条件，必须补 ai_generated 条件。`,
+- 如果资料没有覆盖父节点的全部必要领域，必须补 ai_generated 条件。
+
+示例：导入主题为“设计模式”时，parentTitle 仍然是当前真实仓库名。仓库根节点应直接连接“创建型模式 / 结构型模式 / 行为型模式”，再把工厂方法、适配器、策略、观察者、Visitor 等具体模式分配到对应领域。不要额外插入“设计模式”节点，也不要把文献标题放在知识主干里。`,
   }),
   buildUserMessage: (input) => `父节点：${input.parentTitle}
 父节点当前内容：

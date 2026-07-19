@@ -33,38 +33,40 @@ import {
   formatSingleProfileDimensionExtractionGuide,
 } from '@/server/core/learning/profile-protocol';
 import { compileInterventionProtocol, type InterventionProtocol } from '@/server/core/learning/intervention-protocol';
+import { isResourceGenerationRequest, parseRequestedResourceTypes, parseResourcePlan } from '@/server/core/agent/resource-request';
+import { analyzeSemanticLearningNeed } from '@/server/core/learning/semantic-learning-decision';
 
-const INITIAL_PROFILE_INTRO = '我会按六个教学决策维度建立初始画像：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。每轮只问一个问题，你可以一句话回答。'
+const INITIAL_PROFILE_INTRO = '我会把你作为一个会持续变化的学习系统来建立初始画像：目标与动力、当前状态、信息编码、主要阻塞、执行负荷、反馈校准。每轮只问一个问题；这里记录的是可修正假设，不是能力标签。'
 const INITIAL_PROFILE_STEPS = [
   {
     key: 'learningGoal',
-    label: '学什么',
-    question: '先确定目标：这个知识库主要想帮你学什么？最好带上使用场景，比如考试、项目、面试、写作或纯理解。',
+    label: '愿景与动力',
+    question: '先不列知识点：你希望学习最终把你带到什么状态？什么现实结果会让你愿意长期投入？',
   },
   {
     key: 'currentFoundation',
-    label: '会什么',
-    question: '再确认基础：你对这个主题现在大概到哪一步了？可以说会哪些、不会哪些、最近卡在哪里。',
+    label: '我现在在哪',
+    question: '当你判断自己“学得还行”或“没学进去”时，通常依据什么信号？你的自我判断在哪些时候容易失真？',
   },
   {
     key: 'bestExplanationPath',
-    label: '怎么讲',
-    question: '讲法偏好：同一个知识点，你更希望我先用例子、图解流程、代码/案例，还是先给整体框架？',
+    label: '怎样更容易理解',
+    question: '新信息用什么方式最容易在你脑中形成结构并能被重新讲出来？也请说一种会让你觉得噪声很大的讲法。',
   },
   {
     key: 'stuckPattern',
-    label: '哪里会卡',
-    question: '常见卡点：你学习这个领域时最容易出现哪种卡住？比如术语看不懂、题会听不会做、知识点连不起来、容易忘。',
+    label: '为什么会卡住',
+    question: '回想一次没学好的过程：真正让系统失灵的是目标不清、前提断裂、情绪压力、外部打断，还是没有及时反馈？',
   },
   {
     key: 'paceAndLoad',
-    label: '一次讲多少',
-    question: '节奏负荷：每次你希望我推多少内容？短快概览、一步一步细讲，还是直接练习推进？',
+    label: '怎样更容易行动',
+    question: '从“知道该学”到真正开始行动，最常卡在哪一步？怎样的任务粒度、提示和反馈最容易让你持续执行？',
   },
   {
     key: 'masteryCheck',
-    label: '怎么算学会',
-    question: '掌握标准：你希望我怎么判断你真的学会了？复述、做题、改错、做项目，还是产出一张总结卡？',
+    label: '怎样确认有效',
+    question: '什么可观察结果才说明一次干预真的有效？如果无效，你希望系统怎样纠偏，又在什么条件下停止干预？',
   },
 ] as const
 type InitialProfileStep = typeof INITIAL_PROFILE_STEPS[number]
@@ -94,7 +96,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     return streamSSE(c, async (stream) => {
       try {
       const resolvedVaultId = await resolveAgentVaultId(userId, vaultId)
-      await runWithAgentContext({ userId, ...(resolvedVaultId ? { vaultId: resolvedVaultId } : {}) }, async () => {
+      await runWithAgentContext({ userId, sessionId: explicitSessionId, ...(resolvedVaultId ? { vaultId: resolvedVaultId } : {}) }, async () => {
       if (!explicitSessionId) {
         await stream.writeSSE({
           event: 'error',
@@ -165,6 +167,27 @@ const app = new Hono<{ Variables: { userId: string } }>()
             event: 'text',
             data: JSON.stringify({ text: initialProfileReply.text }),
           })
+          if (initialProfileReply.completed) {
+            await stream.writeSSE({
+              event: 'workspace_action',
+              data: JSON.stringify({
+                type: 'workspace_action',
+                actions: [{ type: 'refresh_workspace' }],
+              }),
+            })
+            await stream.writeSSE({
+              event: 'message_actions',
+              data: JSON.stringify({
+                type: 'message_actions',
+                actions: [{
+                  id: 'view-cognition-insights',
+                  label: '查看认知洞察',
+                  type: 'navigate',
+                  mode: 'cognition',
+                }],
+              }),
+            })
+          }
           await stream.writeSSE({
             event: 'done',
             data: JSON.stringify({ text: initialProfileReply.text }),
@@ -180,14 +203,19 @@ const app = new Hono<{ Variables: { userId: string } }>()
       }
 
       if (resolvedVaultId && isResourceGenerationRequest(message)) {
-        const boundCardId = requestedMeta.cardId || requestedCardId || requestedSession.cardId
-        const card = await prisma.card.findFirst({
+        const boundCardId = requestedMeta.cardId || requestedCardId
+        const matchedCard = await prisma.card.findFirst({
           where: boundCardId
             ? { id: boundCardId, vaultId: resolvedVaultId }
             : { vaultId: resolvedVaultId, type: { in: ['fleeting', 'literature'] } },
           orderBy: boundCardId ? undefined : { updatedAt: 'desc' },
           select: { title: true, content: true, path: true },
         })
+        const card = matchedCard ?? {
+          title: extractResourceTopic(message),
+          content: '',
+          path: '',
+        }
         if (card) {
           await persistMessage(dbSessionId, 'user', message)
           registerBuiltinTools()
@@ -203,15 +231,34 @@ const app = new Hono<{ Variables: { userId: string } }>()
             event: 'tool_start',
             data: JSON.stringify({ type: 'tool_start', tool: 'push_resource' }),
           })
-          const result = await tool.execute('direct-resource-generation', {
-            topic: card.title || message.slice(0, 60),
-            literatureTitle: card.title || card.path || '当前卡片',
-            literatureContent: [
-              `用户请求：${message}`,
-              `当前卡片路径：${card.path || ''}`,
-              card.content || '',
-            ].filter(Boolean).join('\n\n').slice(0, 8000),
+          let directProgressWrites = Promise.resolve()
+          const unsubscribeDirectProgress = subscribeResourceProgress(resolvedVaultId, (event) => {
+            directProgressWrites = directProgressWrites.then(() => stream.writeSSE({
+              event: 'resource_progress',
+              data: JSON.stringify({ type: 'resource_progress', ...event }),
+            })).catch(() => {})
           })
+          let result: Awaited<ReturnType<NonNullable<typeof tool.execute>>>
+          try {
+            const explicitTopic = /(?:关于|围绕|针对|[“"])/.test(message)
+              ? extractResourceTopic(message)
+              : ''
+            result = await tool.execute('direct-resource-generation', {
+              topic: explicitTopic || card.title || extractResourceTopic(message),
+              literatureTitle: card.title || card.path || '当前卡片',
+              literatureContent: [
+                `用户请求：${message}`,
+                `当前卡片路径：${card.path || ''}`,
+                card.content || '',
+              ].filter(Boolean).join('\n\n').slice(0, 8000),
+              formats: parseRequestedResourceTypes(message).join(',') || undefined,
+              resourcePlan: JSON.stringify(parseResourcePlan(message)),
+              userRequested: true,
+            })
+          } finally {
+            unsubscribeDirectProgress()
+            await directProgressWrites
+          }
           const toolText = extractToolResultText(result).trim()
           const details = (result as { details?: unknown } | null)?.details
           const workspaceActions = extractWorkspaceActions(details)
@@ -297,12 +344,13 @@ const app = new Hono<{ Variables: { userId: string } }>()
       })
 
       const agent = await getAgentForUser(userId, oracleId, resolvedVaultId)
+      let progressWrites = Promise.resolve()
       const unsubscribeProgress = resolvedVaultId
         ? subscribeResourceProgress(resolvedVaultId, (event) => {
-          stream.writeSSE({
+          progressWrites = progressWrites.then(() => stream.writeSSE({
             event: 'resource_progress',
             data: JSON.stringify({ type: 'resource_progress', ...event }),
-          }).catch(() => {})
+          })).catch(() => {})
         })
         : null
 
@@ -369,7 +417,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
           acceptedFeynmanExplanation = capture?.status === 'accepted'
         }
 
-        const ragEnhanced = await buildRagEnhancedMessage(message, resolvedVaultId)
+        const ragEnhanced = await buildRagEnhancedMessage(message, resolvedVaultId, userId)
         if (ragEnhanced.references.length > 0) {
           await stream.writeSSE({
             event: 'rag_context',
@@ -436,7 +484,14 @@ const app = new Hono<{ Variables: { userId: string } }>()
         const persistedAssistantText = toolSummaries.length > 0 && !toolFallbackText
           ? [fullText.trim(), ...toolSummaries].filter(Boolean).join('\n\n')
           : fullText
-        if (dbSessionId) await persistMessage(dbSessionId, 'assistant', persistedAssistantText)
+        if (dbSessionId) {
+          await persistMessage(
+            dbSessionId,
+            'assistant',
+            persistedAssistantText,
+            ragEnhanced.references.length > 0 ? { ragReferences: ragEnhanced.references } : undefined,
+          )
+        }
         if (dbSessionId && resolvedVaultId && requestedMeta.cardId && requestedKind !== 'conversation') {
           const flushInput = {
             userId,
@@ -448,7 +503,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
             && /我的(?:解释|理解)|我现在理解|换句话说|也就是说/.test(message)
             && /因为|所以|例如|比如|反例|边界|验证/.test(message)
           if (acceptedFeynmanExplanation || substantiveSelfExplanation) {
-            await flushCardThreadInsights({
+            const flushResult = await flushCardThreadInsights({
               ...flushInput,
               reason: 'manual',
               requireNewTurn: false,
@@ -457,10 +512,33 @@ const app = new Hono<{ Variables: { userId: string } }>()
               console.debug('[Agent API] Feynman writeback failed:', err)
               return null
             })
+            if (flushResult?.status === 'updated' && flushResult.cardId) {
+              await stream.writeSSE({
+                event: 'card_updated',
+                data: JSON.stringify({
+                  type: 'card_updated',
+                  cardId: flushResult.cardId,
+                  sessionId: flushResult.sessionId,
+                  reason: flushResult.reason,
+                }),
+              })
+            }
           } else {
-            void maybeFlushCardThreadEveryThreeTurns(flushInput).catch((err) => {
+            const flushResult = await maybeFlushCardThreadEveryThreeTurns(flushInput).catch((err) => {
               console.debug('[Agent API] Card thread periodic flush failed:', err)
+              return null
             })
+            if (flushResult?.status === 'updated' && flushResult.cardId) {
+              await stream.writeSSE({
+                event: 'card_updated',
+                data: JSON.stringify({
+                  type: 'card_updated',
+                  cardId: flushResult.cardId,
+                  sessionId: flushResult.sessionId,
+                  reason: flushResult.reason,
+                }),
+              })
+            }
           }
         }
 
@@ -504,6 +582,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
         })
       } finally {
         unsubscribeProgress?.()
+        await progressWrites
       }
       })
       } catch (err: unknown) {
@@ -886,8 +965,14 @@ const app = new Hono<{ Variables: { userId: string } }>()
 
     const session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
     const metadata = parseSessionMetadata(session?.metadata)
-    if (!session || !isOwnedAgentSession(session, userId, vaultId) || !isUsableAgentSession(session, metadata)) {
+    if (!session || !isOwnedAgentSession(session, userId, vaultId)) {
       return c.json({ success: false, error: 'Not found' }, 404)
+    }
+    if (!isUsableAgentSession(session, metadata)) {
+      return c.json({
+        success: true,
+        result: { status: 'skipped', reason: 'inactive_thread', sessionId },
+      })
     }
 
     const kind = resolveSessionKind(session, metadata)
@@ -1010,7 +1095,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     if (sessionId) {
       session = await prisma.learningSession.findUnique({ where: { id: sessionId } })
       const metadata = session ? parseSessionMetadata(session.metadata) : {}
-      if (!session || !isOwnedAgentSession(session, userId, vaultId) || !isUsableAgentSession(session, metadata)) {
+      if (!session || !isOwnedAgentSession(session, userId, vaultId) || resolveSessionKind(session, metadata) === 'unknown') {
         return c.json({ success: true, messages: [], sessionId: null })
       }
     } else {
@@ -1042,7 +1127,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const messages = await prisma.learningMessage.findMany({
       where: { sessionId: session.id, role: { in: ['user', 'assistant'] } },
       orderBy: { timestamp: 'asc' },
-      select: { role: true, content: true, timestamp: true },
+      select: { role: true, content: true, timestamp: true, metadata: true },
     })
 
     const visibleMessages = messages.filter((message) => isVisibleAgentMessage(message.role, message.content))
@@ -1053,6 +1138,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
         role: m.role,
         content: m.content,
         timestamp: m.timestamp,
+        ragReferences: readPersistedRagReferences(m.metadata),
       })),
     })
   })
@@ -1084,7 +1170,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
       registerBuiltinTools()
       const registeredTool = toolRegistry.get(tool)
       if (!registeredTool) return c.json({ success: false, error: `Tool not registered: ${tool}` }, 500)
-      if (!requiresConfirmation(tool)) return c.json({ success: false, error: `Tool does not support confirmation: ${tool}` }, 400)
+      if (!requiresConfirmation(tool) && tool !== 'push_resource') {
+        return c.json({ success: false, error: `Tool does not support confirmation: ${tool}` }, 400)
+      }
 
       const affectedCard = tool === 'delete_card'
         ? await findCardByAgentTarget(resolvedVaultId, target)
@@ -1359,8 +1447,11 @@ type ProfileObservationAnalysis = {
   mechanismHypothesis?: string
   competingHypotheses?: string[]
   discriminatingEvidence?: string
+  controlVariable?: string
   teachingIntervention?: string
   verificationCriterion?: string
+  failureBranch?: string
+  stopCondition?: string
   interventionProtocol?: Partial<InterventionProtocol>
 }
 
@@ -1439,9 +1530,9 @@ async function generateDirectAgentReply(input: {
   let profileContext = ''
   if (input.vaultId) {
     try {
-      const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context')
+      const { buildLearningProfileContext, buildLearningProfileInjection } = await import('@/server/core/learning/profile-context')
       const profile = await buildLearningProfileContext({ vaultId: input.vaultId, userId: input.userId })
-      profileContext = profile.promptBlock.trim()
+      profileContext = buildLearningProfileInjection(profile.promptBlock)
     } catch (err) {
       console.debug('[Agent API] Direct reply profile context skipped:', err)
     }
@@ -1530,7 +1621,7 @@ async function generateInitialProfileQuestion(input: {
         content: [
           '你是 AXIOM 的学习画像访谈员。',
           '目标：基于六维教学画像标准，生成下一轮只问一个问题的中文提问。',
-          '六维标准：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。',
+          '六个方面：愿景与动力、我现在在哪、怎样更容易理解、为什么会卡住、怎样更容易行动、怎样确认有效。',
           '首次画像只建立低成本初始假设，不追求一次填满；剩余细节会在真实使用中逐步提取。',
           '硬性要求：只输出一个问题；不要编号；不要列多个问题；不要寒暄；不要解释标准；不超过 60 个汉字。',
           '问题要自然，结合已有回答，避免生硬模板。',
@@ -1609,9 +1700,10 @@ async function analyzeProfileObservation(input: {
           '禁止把用户原话、问题标题或“维度：回答”直接当作画像；要综合上下文后写成分析结论。',
           '禁止人格化、情绪化、过度诊断；不要把一次回答写成高确定性长期标签。',
           '只分析当前维度，不要扩写到其他维度。',
-          '优秀画像不是标签，而是“可观察学习行为 → 底层机制假设 → 下一步教学控制”的压缩结论。',
+          '优秀画像不是标签，而是用通俗语言说清“看到了什么 → 目前怎样理解 → 下一步怎样改变 → 如何确认”。',
           '如果用户表现为“想得深所以慢”，必须区分：全局反应慢、关键前提缺口、已掌握内容被重复讲解导致低效，这三者不能混为一谈。',
           '首次画像只建立低成本初始画像：用户明确自述的目标、基础、偏好、卡点和掌握方式可以给中等置信；需要由后续真实学习行为验证的能力判断必须低置信。',
+          '所有面向用户的文字都用自然、通俗的中文，不要出现目标函数、状态估计、控制变量、扰动、信噪比、观测量、闭环、反馈采样等理论术语。',
           '只输出严格 JSON，不要 Markdown，不要解释。',
         ].join('\n'),
       },
@@ -1628,7 +1720,7 @@ async function analyzeProfileObservation(input: {
           `本轮原始回答：${rawAnswer}`,
           '',
           '请输出 JSON：',
-          '{"subDimensionKey":"可供多轮合并的稳定语义键","subDimensionLabel":"2-8字、用户看得懂的子维度名","claim":"45-160字的可校验结论；证据不足则为空字符串","userFacingSummary":"让用户看得懂且感到被理解的当前总结；避免定型，说明结论可继续修正","evidence":"一句话说明依据，不能照抄原文","observableBehavior":"用户可观察的回答或学习行为","mechanismHypothesis":"可证伪的底层学习机制假设，不能写人格标签","competingHypotheses":["至少一个仍需排除的解释"],"discriminatingEvidence":"已经排除什么，或下一步如何鉴别","teachingIntervention":"下一轮具体改变讲解顺序、因果跨度、信息剂量或校验动作","verificationCriterion":"预测、反例、改错、迁移或卡片产出等可观察标准","confidence":0.35}',
+          '{"subDimensionKey":"可供多轮合并的稳定语义键","subDimensionLabel":"2-8字、用户看得懂的子维度名","claim":"45-160字的可校验结论；证据不足则为空字符串","userFacingSummary":"让用户看得懂且感到被理解的当前总结；避免定型，说明结论可继续修正","evidence":"一句话说明依据，不能照抄原文","observableBehavior":"用户可观察的回答或学习行为","mechanismHypothesis":"可证伪的底层学习机制假设，不能写人格标签","competingHypotheses":["至少一个仍需排除的解释"],"discriminatingEvidence":"已经排除什么，或下一步如何鉴别","controlVariable":"本轮允许改变的一个教学变量","teachingIntervention":"下一轮具体改变讲解顺序、因果跨度、信息剂量或校验动作","verificationCriterion":"可观察反馈变量与通过标准","failureBranch":"干预无效时如何换方案","stopCondition":"何时撤除干预","confidence":0.35}',
           '同一教学决策的多条线索必须复用同一个 subDimensionKey；不要因为措辞不同创建重复子维度。只有会改变下一轮教学的内容才能进入画像。',
           input.mode === 'initial_profile'
             ? 'confidence 规则：用户明确自述且会影响教学策略 0.52-0.68；弱推断或需要行为验证的能力判断 0.22-0.42；首次画像不要超过 0.68。'
@@ -1683,8 +1775,11 @@ function parseProfileObservationAnalysis(raw: string, rawAnswer: string): Profil
         .slice(0, 4)
       : undefined,
     discriminatingEvidence: normalizeOptionalProfileField(parsed.discriminatingEvidence, 300),
+    controlVariable: normalizeOptionalProfileField(parsed.controlVariable, 180),
     teachingIntervention: normalizeOptionalProfileField(parsed.teachingIntervention, 300),
     verificationCriterion: normalizeOptionalProfileField(parsed.verificationCriterion, 300),
+    failureBranch: normalizeOptionalProfileField(parsed.failureBranch, 300),
+    stopCondition: normalizeOptionalProfileField(parsed.stopCondition, 300),
     interventionProtocol: parsed.interventionProtocol && typeof parsed.interventionProtocol === 'object' && !Array.isArray(parsed.interventionProtocol)
       ? parsed.interventionProtocol as Partial<InterventionProtocol>
       : undefined,
@@ -1777,7 +1872,7 @@ async function maybeHandleInitialProfileTurn(input: {
   sessionId: string
   sessionMetadata: ReturnType<typeof parseSessionMetadata>
   message: string
-}): Promise<{ text: string } | null> {
+}): Promise<{ text: string; completed: boolean } | null> {
   if (!input.vaultId) return null
   if (input.sessionMetadata.purpose !== 'initial_profile') return null
   if (input.sessionMetadata.initialProfileCompleted) return null
@@ -1831,7 +1926,7 @@ async function maybeHandleInitialProfileTurn(input: {
       stepIndex: stepIndex + 1,
       answers: normalizedAnswers,
     })
-    : Promise.resolve('收到，初始画像已经写入。后面我会按这六个维度调整讲解、资料、练习和追问；你也可以随时修正画像。现在可以直接发一个主题、材料或问题。')
+    : Promise.resolve('收到，初始画像已经完成。后面我会按这六个维度调整讲解、资料、练习和追问；你也可以随时修正画像。你可以点击下方按钮查看完整的认知洞察。')
   const [, assistantText] = await Promise.all([observationWrite, nextQuestion])
   await persistMessage(input.sessionId, 'assistant', assistantText)
 
@@ -1850,16 +1945,11 @@ async function maybeHandleInitialProfileTurn(input: {
       sessionId: input.sessionId,
       answers: normalizedAnswers,
     })
-    void emitNotification(input.vaultId, {
-      type: 'profile',
-      message: '初始学习画像已完成',
-      detail: [
-        '六个教学决策维度已经写入：学什么、会什么、怎么讲、哪里会卡、一次讲多少、怎么算学会。',
-        '这些内容会作为低置信初始假设注入后续教学，后续会由真实对话、卡片打磨、测评和用户校准继续修正。',
-      ].join('\n'),
-      targetId: input.sessionId,
-      action: 'initial_profile_completed',
-      severity: 'info',
+    await ensureInitialProfileReadable({
+      vaultId: input.vaultId,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      answers: normalizedAnswers,
     })
   }
 
@@ -1879,7 +1969,21 @@ async function maybeHandleInitialProfileTurn(input: {
     },
   })
 
-  return { text: assistantText }
+  if (!nextStep) {
+    void emitNotification(input.vaultId, {
+      type: 'profile',
+      message: '初始学习画像已完成',
+      detail: [
+        '六个方面已经完成初步分析并通过读取校验：愿景与动力、我现在在哪、怎样更容易理解、为什么会卡住、怎样更容易行动、怎样确认有效。',
+        '认知洞察已刷新；这些结论会作为可修正的初始假设注入后续教学。',
+      ].join('\n'),
+      targetId: input.sessionId,
+      action: 'initial_profile_completed',
+      severity: 'info',
+    })
+  }
+
+  return { text: assistantText, completed: !nextStep }
 }
 
 async function persistInitialProfileHypotheses(input: {
@@ -2004,6 +2108,11 @@ async function persistInitialProfileHypotheses(input: {
       }),
     },
   })
+  const { refreshLearningProfilePromptSnapshot } = await import('@/server/core/learning/profile-context')
+  await refreshLearningProfilePromptSnapshot({
+    vaultId: input.vaultId,
+    reason: 'initial_profile_synthesis',
+  }).catch((error) => console.debug('[Agent API] Initial profile prompt refresh failed:', error))
 }
 
 const PROFILE_QUESTION_ANSWER_SKIP_RE = /(跳过|先跳过|不用|不回答|以后再说|别问|不要问|无需|直接做|先做)/
@@ -2162,7 +2271,7 @@ async function writeInitialProfileObservation(input: {
   })
   const fallback = buildInitialProfileFallback(input.step, answer)
   const text = analysis?.claim || fallback.claim
-  const confidence = analysis?.confidence ?? 0.28
+  const confidence = analysis?.confidence ?? 0.52
   const evidenceSummary = analysis?.evidence || fallback.evidence
   const teachingIntervention = analysis?.teachingIntervention || fallback.intervention
   const verificationCriterion = analysis?.verificationCriterion || fallback.verification
@@ -2188,7 +2297,7 @@ async function writeInitialProfileObservation(input: {
         text,
         category: `profile_${input.step.key}`,
         confidence,
-        analysisMode: analysis ? 'llm_context' : 'fallback_needs_confirmation',
+        analysisMode: analysis ? 'llm_context' : 'deterministic_initial_profile',
         subDimensionKey: analysis?.subDimensionKey || `initial_${input.step.key}`,
         subDimensionLabel: analysis?.subDimensionLabel || fallback.label,
         userFacingSummary: analysis?.userFacingSummary || fallback.summary,
@@ -2196,8 +2305,11 @@ async function writeInitialProfileObservation(input: {
         mechanismHypothesis: analysis?.mechanismHypothesis || fallback.mechanism,
         competingHypotheses: analysis?.competingHypotheses || fallback.competingHypotheses,
         discriminatingEvidence: analysis?.discriminatingEvidence || fallback.discriminatingEvidence,
+        controlVariable: analysis?.controlVariable || interventionProtocol.primaryIntervention,
         teachingIntervention,
         verificationCriterion,
+        failureBranch: analysis?.failureBranch || interventionProtocol.failureBranch,
+        stopCondition: analysis?.stopCondition || interventionProtocol.stopCondition,
         interventionProtocol,
         scope: 'current_topic',
         status: 'hypothesis',
@@ -2214,20 +2326,148 @@ async function writeInitialProfileObservation(input: {
   })
 }
 
+async function ensureInitialProfileReadable(input: {
+  vaultId: string
+  userId: string
+  sessionId: string
+  answers: Record<string, string>
+}): Promise<void> {
+  const existing = await prisma.vaultMemory.findMany({
+    where: { vaultId: input.vaultId, category: 'observation' },
+    select: { value: true },
+  })
+  const categories = new Set(existing.flatMap((memory) => {
+    const parsed = parseMaybeJsonRecord(memory.value)
+    return typeof parsed?.category === 'string' ? [parsed.category] : []
+  }))
+
+  for (const step of INITIAL_PROFILE_STEPS) {
+    if (categories.has(`profile_${step.key}`)) continue
+    const answer = input.answers[step.key]?.trim()
+    if (!answer) throw new Error(`初始画像缺少“${step.label}”回答，不能标记完成。`)
+    const fallback = buildInitialProfileFallback(step, answer)
+    const confidence = 0.52
+    const interventionProtocol = compileInterventionProtocol({
+      dimensionKey: step.key,
+      dimensionLabel: step.label,
+      subDimensionLabel: fallback.label,
+      observableBehavior: fallback.observableBehavior,
+      mechanismHypothesis: fallback.mechanism,
+      competingHypotheses: fallback.competingHypotheses,
+      teachingIntervention: fallback.intervention,
+      verificationCriterion: fallback.verification,
+      confidence,
+    })
+    await prisma.vaultMemory.create({
+      data: {
+        vaultId: input.vaultId,
+        key: `observation_initial_profile_recovered_${step.key}_${input.sessionId}`,
+        category: 'observation',
+        value: JSON.stringify({
+          text: fallback.claim,
+          category: `profile_${step.key}`,
+          confidence,
+          analysisMode: 'deterministic_initial_profile_recovery',
+          subDimensionKey: `initial_${step.key}`,
+          subDimensionLabel: fallback.label,
+          userFacingSummary: fallback.summary,
+          observableBehavior: fallback.observableBehavior,
+          mechanismHypothesis: fallback.mechanism,
+          competingHypotheses: fallback.competingHypotheses,
+          discriminatingEvidence: fallback.discriminatingEvidence,
+          teachingIntervention: fallback.intervention,
+          verificationCriterion: fallback.verification,
+          interventionProtocol,
+          scope: 'current_topic',
+          status: 'hypothesis',
+          rawAnswer: answer,
+          sourceObjectType: 'learningSession',
+          sourceObjectId: input.sessionId,
+          evidence: [{
+            sourceObjectType: 'learningSession',
+            sourceObjectId: input.sessionId,
+            summary: fallback.evidence,
+          }],
+        }),
+      },
+    })
+  }
+
+  const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context')
+  const context = await buildLearningProfileContext({ vaultId: input.vaultId, userId: input.userId })
+  const readable = new Set(context.dimensionInsights.map((dimension) => dimension.key))
+  const missing = INITIAL_PROFILE_STEPS.filter((step) => !readable.has(step.key))
+  if (missing.length > 0 || !context.promptBlock.trim()) {
+    throw new Error(`初始画像读取校验失败：${missing.map((step) => step.label).join('、') || '提示词为空'}`)
+  }
+}
+
 function buildInitialProfileFallback(step: InitialProfileStep, answer: string) {
   const evidence = answer.replace(/\s+/g, ' ').trim().slice(0, 220)
-  return {
-    claim: `用户已经对“${step.label}”提供了自述，但自动分析暂不可用；当前只保留为待确认线索，不据此形成稳定结论。`,
-    label: `${step.label}待确认`,
-    summary: '这部分回答已经记录，但在系统完成分析或后续行为验证前，不会被当作确定画像。',
+  const common = {
     observableBehavior: `用户在首次画像中的原始自述：${evidence}`,
-    mechanism: '现有证据不足以形成底层学习机制判断。',
-    competingHypotheses: ['该回答可能只适用于当前课程或当前状态。'],
-    discriminatingEvidence: '后续通过用户确认和真实学习任务，观察该自述是否稳定影响理解、预测或迁移。',
-    intervention: '下一轮只复述关键点并请求确认，不据此强制改变整体教学策略。',
-    verification: '获得用户确认，或在至少一次真实学习任务中出现一致行为后再提高置信度。',
-    evidence: `来自用户对“${step.label}”的主动自述；未生成额外推断。`,
+    competingHypotheses: ['该偏好可能只适用于当前课程或当前阶段，仍需用真实学习行为校验。'],
+    discriminatingEvidence: '在下一次真实学习任务中执行该策略，并观察解释、预测、改错或迁移表现是否改善。',
+    evidence: `来自用户对“${step.label}”的主动自述；结论保持为可修正的初始假设。`,
   }
+  const byDimension: Record<InitialProfileStep['key'], {
+    claim: string
+    label: string
+    summary: string
+    mechanism: string
+    intervention: string
+    verification: string
+  }> = {
+    learningGoal: {
+      claim: `当前首要学习目标和使用场景由用户明确自述决定；后续内容应围绕“${evidence || '当前目标'}”收束，避免生成与目标无关的知识。`,
+      label: '目标与场景',
+      summary: `系统会把“${evidence || '当前目标'}”作为选择讲解范围、资源和学习路径的第一约束。`,
+      mechanism: '明确的使用场景会改变知识筛选标准：考试偏重可辨析与可复述，项目偏重判断、实现和迁移。',
+      intervention: '每次讲解或生成资源前先检查是否直接服务当前目标，并优先给出最接近使用场景的任务。',
+      verification: '用户能说明当前阶段要解决什么问题，并判断一项新内容是否与该目标相关。',
+    },
+    currentFoundation: {
+      claim: `用户对当前基础作出了明确边界描述；教学不能把“听过或认识概念”直接当作“能够独立解释和应用”，需要分开校验识别、机制理解与迁移。`,
+      label: '已有基础边界',
+      summary: `你并非从零开始；下一步会减少重复讲解，把时间用于验证“${evidence || '现有基础'}”能否真正调用。`,
+      mechanism: '熟悉感、可复述和可迁移是不同层级；应用困难往往来自过程模型、选择条件或边界没有闭合。',
+      intervention: '先用一个最短预测或应用任务定位断点，只补缺失前提，不从头重复整章内容。',
+      verification: '能在没有照搬示例的情况下解释原因、完成一个小应用，并说明何时不该使用。',
+    },
+    bestExplanationPath: {
+      claim: `用户已明确更有效的解释入口；后续应把“${evidence || '用户偏好的解释顺序'}”转成稳定教学顺序，而不是只改变表面文风。`,
+      label: '高效解释入口',
+      summary: `后续会按照你更容易理解的入口组织内容，并用一次小任务验证这种讲法是否真的有效。`,
+      mechanism: '解释入口影响新信息能否挂接到已有结构；例子、整体框架、图解和代码承担的是不同认知功能。',
+      intervention: '按用户自述的顺序进入主题，每推进一个关键点就要求预测、复述或举例，避免连续堆叠定义。',
+      verification: '采用该解释顺序后，用户能更快复述因果链并迁移到一个新例子。',
+    },
+    stuckPattern: {
+      claim: `用户报告的主要阻塞不是简单“不努力”，而是“${evidence || '特定学习断点'}”；后续教学应先鉴别是前置缺口、概念连接断裂、任务复杂度还是记忆提取问题。`,
+      label: '阻塞模式',
+      summary: `系统会优先定位你卡住的具体环节，不会把一次卡顿概括成能力不足。`,
+      mechanism: '未闭合的前提或关系会占用工作记忆，使后续新概念缺少挂接位置；但仍需排除整体基础和任务负荷因素。',
+      intervention: '卡住时暂停扩展新概念，分别用前置小测、关系复述和简化任务定位唯一主断点。',
+      verification: '修补被定位的断点后，用户能继续解释下一步并在相邻问题中保持正确。',
+    },
+    paceAndLoad: {
+      claim: `用户对信息节奏的要求是“${evidence || '控制单轮信息负荷'}”；系统应控制每轮关键概念数量和确认频率，而不是机械地把所有回答写得更长。`,
+      label: '单轮信息负荷',
+      summary: `后续会按你能消化的节奏推进：先建立必要结构，再逐步展开并及时确认。`,
+      mechanism: '一次输入的概念和因果跨度超过当前工作记忆负荷时，即使每句话都听懂，也可能无法形成整体结构。',
+      intervention: '每轮只推进一个主要认知动作；完成复述或预测后再进入下一层，并保留随时加速的能力。',
+      verification: '用户能在本轮结束时准确说出新增的一个关键关系，同时没有丢失整体位置。',
+    },
+    masteryCheck: {
+      claim: `用户认可的掌握标准是“${evidence || '可观察的学习输出'}”；后续不能用“看完、听懂或点完成”代替真实掌握证据。`,
+      label: '掌握判据',
+      summary: `系统会用你认可的输出方式判断是否学会，而不是只根据阅读次数或主观熟悉感。`,
+      mechanism: '主动提取、解释、改错和迁移比重复阅读更能区分短期熟悉感与可调用知识。',
+      intervention: '在关键节点安排用户认可的掌握检查，并保存原始作答、反馈和下一步修正证据。',
+      verification: '用户能在无提示条件下完成约定的复述、题目、改错、项目或迁移任务。',
+    },
+  }
+  return { ...common, ...byDimension[step.key] }
 }
 
 async function updateInitialProfileCache(input: {
@@ -2529,15 +2769,52 @@ globalForSessions.__agentSessionMap = agentSessionMap
  * Persist a single chat message to the database.
  * Awaits the write to guarantee the message is saved.
  */
-async function persistMessage(sessionId: string, role: 'user' | 'assistant' | 'system', content: string): Promise<void> {
+async function persistMessage(
+  sessionId: string,
+  role: 'user' | 'assistant' | 'system',
+  content: string,
+  metadata?: Record<string, unknown>,
+): Promise<void> {
   if (!isVisibleAgentMessage(role, content)) return
   try {
     await prisma.learningMessage.create({
-      data: { sessionId, role, content },
+      data: {
+        sessionId,
+        role,
+        content,
+        ...(metadata && Object.keys(metadata).length > 0 ? { metadata: JSON.stringify(metadata) } : {}),
+      },
     })
   } catch (err: unknown) {
     console.error('[Agent API] Failed to persist message:', err instanceof Error ? err.message : String(err))
   }
+}
+
+function readPersistedRagReferences(metadata?: string | null): Array<{
+  referenceId: string
+  filePath: string
+  cardId: string | null
+  vaultId: string | null
+  title: string | null
+  type: string | null
+}> {
+  const raw = parseMetadataRecord(metadata).ragReferences
+  if (!Array.isArray(raw)) return []
+  return raw.flatMap((item, index) => {
+    if (!item || typeof item !== 'object') return []
+    const value = item as Record<string, unknown>
+    const filePath = typeof value.filePath === 'string' ? value.filePath : ''
+    const cardId = typeof value.cardId === 'string' ? value.cardId : null
+    if (!filePath && !cardId) return []
+    return [{
+      referenceId: typeof value.referenceId === 'string' ? value.referenceId : String(index + 1),
+      filePath,
+      cardId,
+      vaultId: typeof value.vaultId === 'string' ? value.vaultId : null,
+      title: typeof value.title === 'string' ? value.title : null,
+      type: typeof value.type === 'string' ? value.type : null,
+    }]
+  }).slice(0, 12)
 }
 
 async function findCardByAgentTarget(vaultId: string, target: string): Promise<{
@@ -2607,7 +2884,7 @@ async function buildAgentSessionContext(input: {
   if (!card) return ''
 
   const isPathThread = input.kind === 'path-step-thread'
-  const coachingMode = inferCardCoachingMode(card.title || card.path, card.content || '')
+  const coachingMode = inferCardCoachingMode(card.title || card.path, card.content || '', card.type)
   return [
     '<session-boundary>',
     `会话类型：${isPathThread ? '学习路径任务卡片线程' : '卡片打磨线程'}`,
@@ -2630,14 +2907,30 @@ async function buildAgentSessionContext(input: {
   ].filter(Boolean).join('\n')
 }
 
-function inferCardCoachingMode(title: string, content: string): string {
+function inferCardCoachingMode(title: string, content: string, cardType?: string | null): string {
   const text = `${title}\n${content}`
   const isClarificationCard = /学生当前误区|当前要解决的问题|understanding-card|misconception|clarification|profile-gap|误区|澄清|待补全/.test(text)
+  const isFleetingCard = cardType === 'fleeting'
+  const masteryProtocol = [
+    '【掌握打磨协议｜硬约束】',
+    isFleetingCard
+      ? '当前卡片是“灵感卡片”：它只代表用户还没有掌握，必须通过对话打磨与可检查输出，不能直接当成已掌握知识。'
+      : '当前线程仍按“先确认用户理解，再补充最小解释”的学习打磨方式推进。',
+    '用户说“开始学这张卡 / 学习这个 / 打磨这张卡 / 继续”时，默认立刻进入苏格拉底式提问；不要要求用户再说明“请用苏格拉底式提问”。',
+    '第一反应不是讲答案，而是先提出一个能暴露理解漏洞的问题；每轮只问一个主要问题。',
+    '禁止在用户第一次尝试输出前，直接给完整标准答案、完整教程或长篇解释。',
+    '必须倒逼用户用自己的话解释、举例、反例、预测或迁移；这就是费曼式输出，但不要要求用户知道“费曼学习法”这个术语。',
+    '用户回答后，先判断：哪里已经说对，哪里仍然含混，缺哪条因果链或边界条件；然后继续追问一个最关键缺口。',
+    '只有当用户已经尝试回答、明确答不出来、或明确要求直接讲解时，才给“最小充分解释”，并马上回到追问。',
+    'Agent B/助教记录口径：用户自己的有效表述、反例、边界判断和修正过程，才是可写入右侧卡片预览的学习证据；不要把主 Agent 直接给出的标准答案伪装成用户已掌握。',
+    '当你认为用户的表达已经足够清楚时，可以提示“这段已经形成可记录的理解证据”，但最终是否升级为永久卡，仍应交给掌握审核机制。',
+  ].join('\n')
   if (!isClarificationCard) {
-    return '互动要求：默认优先通过追问、反例、边界比较来推动用户表达；不要一上来输出长篇标准答案。'
+    return masteryProtocol
   }
 
   return [
+    masteryProtocol,
     '互动要求：这是澄清误区/理解检查型卡片。',
     '如果用户让你“解释”、说“为什么”、或询问当前概念，不要直接把标准答案完整说完。',
     '先要求用户用自己的话解释一次，或先给一个自己的例子/反例。',
@@ -2736,7 +3029,7 @@ function normalizeSessionTitle(raw: string): string | null {
   return title.slice(0, 24)
 }
 
-async function buildRagEnhancedMessage(message: string, vaultId: string | null): Promise<{
+async function buildRagEnhancedMessage(message: string, vaultId: string | null, userId?: string | null): Promise<{
   message: string
   references: Array<{ referenceId: string; filePath: string; cardId: string | null; vaultId: string | null; title: string | null; type: string | null }>
 }> {
@@ -2748,6 +3041,16 @@ async function buildRagEnhancedMessage(message: string, vaultId: string | null):
     mode: 'mix',
     topK: Number(process.env.LIGHTRAG_CHAT_TOP_K || 8),
   })
+  const semanticDecision = await analyzeSemanticLearningNeed({
+    vaultId,
+    userId,
+    topic: message,
+    vectorContext: context,
+    judgeSemantics: false,
+  }).catch((error) => {
+    console.debug('[SemanticLearning] chat decision unavailable:', error instanceof Error ? error.message : String(error))
+    return null
+  })
   if (!context.answer.trim()) {
     if (context.error) console.debug('[LightRAG] chat context unavailable:', context.error)
     return { message, references: [] }
@@ -2756,6 +3059,10 @@ async function buildRagEnhancedMessage(message: string, vaultId: string | null):
   return {
     references: context.references,
     message: `请优先参考下面的 LightRAG 知识库检索结果回答用户问题；如果检索结果不足或不相关，请明确说明，并结合当前对话继续回答。
+
+${semanticDecision?.promptContext || ''}
+
+教学决策要求：已经掌握的语义等价概念不要从头再教；存在已掌握的相似机制时，优先用它做中转类比，同时明确相同点与关键差异。
 
 【LightRAG 检索上下文】
 ${context.answer.slice(0, Number(process.env.LIGHTRAG_CHAT_CONTEXT_LIMIT || 6000))}
@@ -2822,21 +3129,26 @@ function extractWorkspaceActions(details: unknown): unknown[] {
   return Array.isArray(value.workspaceActions) ? value.workspaceActions : []
 }
 
-function isResourceGenerationRequest(message: string): boolean {
-  const text = message.trim()
-  if (!text) return false
-  const asksGeneration = /(生成|整理|做|创建|产出|准备|推送|补充).{0,12}(学习资源|学习资料|资料|资源|练习|讲解|文档|思维导图|代码实操|视频|动画|resource)/i.test(text)
-    || /(学习资源|学习资料|资源包|五类资源|多模态资料)/i.test(text)
-  const contextBound = /(这张卡|当前卡|这个误区|这个问题|刚导入|讲义|资料|文献|画像|缺口|薄弱点|基于)/i.test(text)
-  return asksGeneration && contextBound
-}
-
 function isLearningPathCreationRequest(message: string): boolean {
   const text = message.trim()
   if (!text) return false
   const asksForPath = /(create_learning_path|学习路径|学习计划|学习路线|路径规划|可执行路径)/i.test(text)
   const asksToPersist = /(创建|生成|制定|规划|写入|保存|立即调用|真正)/i.test(text)
   return asksForPath && asksToPersist
+}
+
+function extractResourceTopic(message: string): string {
+  const quoted = message.match(/[“"]([^”"]{2,80})[”"]/)?.[1]?.trim()
+  if (quoted) return quoted
+  const about = message.match(/(?:关于|围绕|针对)([^，。；\n]{2,80})/)?.[1]?.trim()
+  if (about) return about.replace(/(?:的)?(?:全部|全套)?(?:学习)?(?:资料|资源).*/, '').trim() || about
+  return message
+    .replace(/(?:请|现在|帮我|给我|生成|制作|创建|产出|整理|一份|一套|全部|全套)/g, ' ')
+    .replace(/(?:讲解文档|学习文档|思维导图|知识导图|题库|练习题|代码练习|代码实操|教学视频|视频|动画|SVG|图表|流程图|PPTX?|DOCX?|PDF|学习资料|学习资源)/gi, ' ')
+    .replace(/[，、,。；;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80) || '当前学习主题'
 }
 
 function extractLearningPathTopic(message: string): string {
@@ -2852,6 +3164,7 @@ function buildConfirmedToolParams(tool: string, target: string, confirmationToke
   if (tool === 'bash') return { command: target, confirmationToken }
   if (tool === 'delete_skill') return { skillName: target, force: true, confirmationToken }
   if (tool === 'extract_cards') return { literatureTitle: target, literatureContent: '', auto: true, confirmationToken }
+  if (tool === 'push_resource') return { topic: target, confirmationToken }
   if (tool === 'cleanup_broken_links') return { dry_run: false, auto_fix: true, confirmationToken }
   if (tool === 'merge_duplicate_cards') {
     const match = target.match(/^merge_duplicate_cards:([^:]+):([^:]+):(keep|merge)$/)

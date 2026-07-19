@@ -7,7 +7,7 @@ import { useAgentStore } from '@/stores/agent-store'
 import { client } from '@/lib/api-client'
 import { toast } from '@/lib/ui-feedback'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
-import { LearningResourcePanel, VideoCard, type GeneratedResourceItem } from '@/components/resources/resource-cards'
+import { LearningResourcePanel, PureResourceViewer, VideoCard, type GeneratedResourceItem } from '@/components/resources/resource-cards'
 import { HudPanel } from '@/components/ui'
 import {
   EditorEmptyState,
@@ -33,10 +33,22 @@ import {
 export default function ForgeEditor() {
   const rightPanelView = useAppStore((state) => state.rightPanelView)
   const setRightPanelView = useAppStore((state) => state.setRightPanelView)
+  const previewFullscreen = useAppStore((state) => state.previewFullscreen)
+  const setPreviewFullscreen = useAppStore((state) => state.setPreviewFullscreen)
   const editorMode: 'live' | 'read' = rightPanelView === 'read' ? 'read' : 'live'
   const setEditorMode = useCallback((mode: 'live' | 'read') => {
     setRightPanelView(mode === 'read' ? 'read' : 'editor')
-  }, [setRightPanelView])
+    if (mode !== 'read') setPreviewFullscreen(false)
+  }, [setPreviewFullscreen, setRightPanelView])
+
+  useEffect(() => {
+    if (!previewFullscreen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setPreviewFullscreen(false)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [previewFullscreen, setPreviewFullscreen])
   const [cardContent, setCardContent] = useState('')
   const [cardTitle, setCardTitle] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -176,6 +188,7 @@ export default function ForgeEditor() {
     () => parseOrchestrationManifest(cardContent),
     [cardContent, parseOrchestrationManifest],
   )
+  const pureResourceCard = /source_type:\s*ai-resource/i.test(cardContent)
 
   // Detect axiom-video marker in card content and fetch video HTML
   useEffect(() => {
@@ -261,6 +274,8 @@ export default function ForgeEditor() {
           }
           return {
             type: item.type,
+            kind: item.kind,
+            format: item.format,
             title: item.title,
             path: item.path,
             ref: item.ref,
@@ -268,6 +283,8 @@ export default function ForgeEditor() {
             rawRef: item.rawRef,
             mp4Path: resolvedMp4Path || item.mp4Path,
             mp4Ref: item.mp4Ref,
+            previewPath: item.previewPath,
+            previewRef: item.previewRef,
             fileName: item.fileName,
             status: item.status,
             source: item.source,
@@ -279,6 +296,14 @@ export default function ForgeEditor() {
             generatedAt: item.generatedAt,
             content: data.success ? data.content : undefined,
             videoUrl,
+            previewContent: item.previewPath
+              ? await client.api.vault.read.$get({
+                  query: { path: item.previewPath, vid: currentVaultId || undefined },
+                }).then(async (response) => {
+                  const preview = await response.json() as { success: boolean; content?: string }
+                  return preview.success ? preview.content : undefined
+                }).catch(() => undefined)
+              : undefined,
           } satisfies GeneratedResourceItem
         }))
         if (!cancelled) setResourceItems(loaded)
@@ -934,6 +959,7 @@ export default function ForgeEditor() {
   }, [editorMode, cardContent])
 
   const handleClose = async () => {
+    setPreviewFullscreen(false)
     await saveCurrentCard({ silent: true })
     clearSelectedNode()
   }
@@ -1013,8 +1039,8 @@ export default function ForgeEditor() {
 
   return (
     <aside
-      className="side-slot visible forge-panel forge-paper-panel flex-1 flex-col pointer-events-auto"
-      style={{ maxWidth: 'var(--panel-xl)', minWidth: 'var(--panel-lg)' }}
+      className={`side-slot visible forge-panel forge-paper-panel flex-1 flex-col pointer-events-auto ${previewFullscreen ? 'is-preview-fullscreen' : ''}`}
+      style={previewFullscreen ? undefined : { maxWidth: 'var(--panel-xl)', minWidth: 'var(--panel-lg)' }}
     >
       <div className="glass-panel workspace-surface forge-paper-surface rounded-2xl flex-1 flex flex-col overflow-hidden">
         <EditorHeader
@@ -1024,6 +1050,8 @@ export default function ForgeEditor() {
           onModeChange={handleModeChange}
           onDelete={handleDeleteCard}
           onClose={handleClose}
+          fullscreen={previewFullscreen}
+          onFullscreenChange={setPreviewFullscreen}
         />
 
         {!hasCard ? (
@@ -1107,32 +1135,33 @@ export default function ForgeEditor() {
             ) : (
               <div
                 ref={readContainerRef}
-                className="forge-paper-read flex-1 p-8 overflow-y-auto no-scrollbar forge-reader"
+                className={`forge-paper-read flex-1 overflow-y-auto no-scrollbar forge-reader ${previewFullscreen ? 'p-4 sm:p-6' : 'p-8'}`}
               >
-                <div className="max-w-2xl mx-auto">
-                  <div
-                    className="mono text-cyan-300/75 uppercase mb-2"
-                    style={{ fontSize: 'var(--f8)' }}
-                  >
-                    Markdown Preview
-                  </div>
-                  <div
-                    className="markdown-body text-white/80 leading-relaxed"
-                    style={{ fontSize: 'var(--f10)' }}
-                    dangerouslySetInnerHTML={{
-                      __html: cardContent
-                        ? parseMD(cardContent)
-                        : '<p style="color:var(--text-dim);font-style:italic;">（空内容）</p>',
-                    }}
-                  />
+                <div className={pureResourceCard ? `mx-auto w-full max-w-none ${previewFullscreen ? 'h-full min-h-0' : ''}` : 'max-w-2xl mx-auto'}>
+                  {!pureResourceCard && (
+                    <>
+                      <div className="mono text-cyan-300/75 uppercase mb-2" style={{ fontSize: 'var(--f8)' }}>
+                        Markdown Preview
+                      </div>
+                      <div
+                        className="markdown-body text-white/80 leading-relaxed"
+                        style={{ fontSize: 'var(--f10)' }}
+                        dangerouslySetInnerHTML={{
+                          __html: cardContent
+                            ? parseMD(cardContent)
+                            : '<p style="color:var(--text-dim);font-style:italic;">（空内容）</p>',
+                        }}
+                      />
+                    </>
+                  )}
 
                   {/* 教学视频播放器 */}
-                  {videoLoading && (
+                  {!pureResourceCard && videoLoading && (
                     <HudPanel as="div" className="mt-6 p-6 rounded-xl text-center">
                       <div className="animate-pulse text-gray-400">加载教学视频...</div>
                     </HudPanel>
                   )}
-                  {(videoHtml || videoUrl) && !videoLoading && (
+                  {!pureResourceCard && (videoHtml || videoUrl) && !videoLoading && (
                     <div className="mt-6">
                       <VideoCard
                         title={`${videoTopic || '教学视频'}`}
@@ -1144,11 +1173,16 @@ export default function ForgeEditor() {
                     </div>
                   )}
 
-                  <LearningResourcePanel
-                    resources={resourceItems}
-                    loading={resourceLoading}
-                  />
-                  <AgentOrchestrationPanel orchestration={orchestrationManifest} resources={resourceItems} />
+                  {pureResourceCard && resourceItems.length > 0 ? (
+                    <PureResourceViewer resources={resourceItems} fullscreen={previewFullscreen} />
+                  ) : pureResourceCard ? (
+                    <HudPanel as="div" className="p-6 text-center text-sm text-white/40">正在加载资源...</HudPanel>
+                  ) : (
+                    <>
+                      <LearningResourcePanel resources={resourceItems} loading={resourceLoading} />
+                      <AgentOrchestrationPanel orchestration={orchestrationManifest} resources={resourceItems} />
+                    </>
+                  )}
                 </div>
               </div>
             )}

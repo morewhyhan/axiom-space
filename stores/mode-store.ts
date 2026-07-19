@@ -34,6 +34,7 @@ export interface VaultInfo {
   id: string
   name: string
   cardCount: number
+  initialProfileCompleted?: boolean
 }
 
 export type GraphLayoutMode =
@@ -83,6 +84,8 @@ interface AppStore {
   setRightPanelOpen: (open: boolean) => void
   rightPanelView: 'editor' | 'read'
   setRightPanelView: (view: 'editor' | 'read') => void
+  previewFullscreen: boolean
+  setPreviewFullscreen: (fullscreen: boolean) => void
   forgeResourceView: ForgeResourceView
   setForgeResourceView: (view: ForgeResourceView) => void
   forgeContextTab: ForgeContextTab
@@ -162,6 +165,8 @@ export const useAppStore = create<AppStore>()(
       setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
       rightPanelView: 'editor',
       setRightPanelView: (view) => set({ rightPanelView: view }),
+      previewFullscreen: false,
+      setPreviewFullscreen: (previewFullscreen) => set({ previewFullscreen }),
       forgeResourceView: 'context',
       setForgeResourceView: (view) => set({ forgeResourceView: view }),
       forgeContextTab: 'tasks',

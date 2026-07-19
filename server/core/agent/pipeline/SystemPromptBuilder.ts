@@ -173,12 +173,12 @@ export class SystemPromptBuilder {
     let unifiedLearningProfileInjected = false;
     try {
       const { getCurrentVaultId } = await import('../agent-context');
-      const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context');
+      const { buildLearningProfileContext, buildLearningProfileInjection } = await import('@/server/core/learning/profile-context');
       const vaultId = getCurrentVaultId();
       if (vaultId) {
         const learningProfile = await buildLearningProfileContext({ vaultId });
         if (learningProfile.promptBlock.trim()) {
-          prompt += '\n\n' + learningProfile.promptBlock;
+          prompt += '\n\n' + buildLearningProfileInjection(learningProfile.promptBlock);
           unifiedLearningProfileInjected = true;
         }
       }

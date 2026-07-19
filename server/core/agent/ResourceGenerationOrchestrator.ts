@@ -4,7 +4,7 @@ import {
   RESOURCE_FILE_MAP,
   type ResourceType,
 } from './ResourceGenerationState';
-import { hyperframesHTMLBuilder } from '../ai/hyperframes/generator';
+import { hyperframesHTMLBuilder, normalizeHyperFramesConfig } from '../ai/hyperframes/generator';
 import type { HyperFramesConfig } from '../ai/hyperframes/generator';
 import { renderDocx, renderPdf, renderPptx } from '../ai/hyperframes/resource-renderer';
 import { hyperframesRenderer } from '../ai/hyperframes/renderer';
@@ -116,6 +116,13 @@ function validateResource(type: ResourceType, content: string): string | null {
         if (!config.scenes || !Array.isArray(config.scenes)) return 'Missing scenes array';
         if (config.scenes.length < 3) return `Need at least 3 scenes, got ${config.scenes.length}`;
         if (!config.width || !config.height || !config.fps) return 'Missing width/height/fps';
+        const weakScene = config.scenes.findIndex((scene: any) => {
+          const teachingText = [scene.title, scene.subtitle, scene.narration, ...(scene.elements || []).map((element: any) => element.content || element.code || '')].join(' ').trim();
+          return !scene.title || !scene.narration || teachingText.length < 45;
+        });
+        if (weakScene >= 0) return `Scene ${weakScene + 1} lacks a meaningful title, introduction, or narration`;
+        const visualCount = config.scenes.reduce((sum: number, scene: any) => sum + (Array.isArray(scene.elements) ? scene.elements.length : 0), 0);
+        if (visualCount < config.scenes.length * 2) return `Need at least two visual elements per scene on average, got ${visualCount}`;
       } catch { return 'Video config is not valid JSON'; }
       break;
     }
@@ -174,7 +181,7 @@ export class ResourceGenerationOrchestrator {
     literatureContent?: string,
     formats?: string[],
     ragContext?: { contextText: string; references: string[] },
-    profileContext?: { contextText: string; evidence: ResourceGenerationInput['profileEvidence'] },
+    profileContext?: { contextText: string; evidence?: ResourceGenerationInput['profileEvidence'] },
   ): Promise<GenerationResult[]> {
     const results: GenerationResult[] = [];
     const types = formats && formats.length > 0
@@ -226,6 +233,9 @@ export class ResourceGenerationOrchestrator {
           content = this.buildFallbackSvg(topic);
         }
         let cleaned = this.cleanOutput(type, content);
+        if (type === 'video') {
+          cleaned = JSON.stringify(normalizeHyperFramesConfig(JSON.parse(cleaned) as HyperFramesConfig));
+        }
 
         this.deps.onProgress?.({
           type,
@@ -288,6 +298,7 @@ export class ResourceGenerationOrchestrator {
           }
           case 'docx': {
             this.deps.onProgress?.({ type, status: 'rendering', progress: 70, message: '正在渲染 Word 文档' });
+            await this.deps.saveResourceFile?.(literatureTitle, 'document.preview.html', cleaned);
             const buf = await renderDocx(topic, cleaned);
             cleaned = `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${buf.toString('base64')}`;
             break;
@@ -316,6 +327,11 @@ export class ResourceGenerationOrchestrator {
                 return { type: 'executive_summary_paragraph', title: slideTitle, paragraphs: [stripHtmlTags(html).slice(0, 400)] };
               });
             }
+            await this.deps.saveResourceFile?.(
+              literatureTitle,
+              'presentation.preview.html',
+              buildPptPreviewHtml(topic, slideSpecs),
+            );
             const buf = await renderPptx(topic, slideSpecs);
             cleaned = `data:application/vnd.openxmlformats-officedocument.presentationml.presentation;base64,${buf.toString('base64')}`;
             break;
@@ -548,6 +564,23 @@ export class ResourceGenerationOrchestrator {
   private resourceDir(literatureTitle: string): string {
     return `resources/${literatureTitle.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')}`;
   }
+}
+
+function buildPptPreviewHtml(title: string, slides: Record<string, unknown>[]): string {
+  const safeTitle = escapeXml(title);
+  const renderedSlides = slides.map((slide, index) => {
+    const slideTitle = escapeXml(String(slide.title || slide.eyebrow || `${title} · ${index + 1}`));
+    const candidates = [slide.subtitle, slide.body, slide.paragraphs, slide.key_points, slide.next_steps]
+      .flatMap((value) => Array.isArray(value) ? value : value == null ? [] : [value])
+      .map((value) => escapeXml(String(value)))
+      .filter(Boolean);
+    return `<section class="slide"><div class="counter">${index + 1} / ${slides.length}</div><h2>${slideTitle}</h2>${candidates.map((line) => `<p>${line}</p>`).join('')}</section>`;
+  }).join('');
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>${safeTitle}</title><style>
+    *{box-sizing:border-box}body{margin:0;padding:32px;background:#08111f;color:#eaf1ff;font-family:Inter,"Microsoft YaHei",sans-serif}
+    .deck{display:grid;gap:28px;max-width:1120px;margin:auto}.slide{position:relative;aspect-ratio:16/9;padding:7% 8%;border:1px solid #29405f;border-radius:18px;background:linear-gradient(145deg,#0d1b31,#111f36);box-shadow:0 24px 70px #0008;overflow:auto}
+    h1{max-width:1120px;margin:0 auto 24px;font-size:28px}h2{font-size:clamp(24px,3.2vw,48px);line-height:1.18;margin:0 0 6%;color:#fff}p{font-size:clamp(14px,1.55vw,23px);line-height:1.65;color:#cbd8eb;margin:12px 0}.counter{position:absolute;right:5%;bottom:5%;font:12px monospace;color:#6f89aa}
+  </style></head><body><h1>${safeTitle}</h1><main class="deck">${renderedSlides}</main></body></html>`;
 }
 
 function validateQuizQuestion(question: any, index: number): string | null {

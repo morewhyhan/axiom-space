@@ -1,4 +1,4 @@
-import { A3_STORY } from './story.js?v=17'
+import { A3_STORY } from './story.js?v=23a'
 
 async function ensureDeckStyles() {
   const link = document.querySelector('link[data-deck-style]')
@@ -12,7 +12,7 @@ async function ensureDeckStyles() {
 
   if (stylesheetLoaded) return
 
-  const response = await fetch(link?.href || './deck.css?v=17', { cache: 'no-store' })
+  const response = await fetch(link?.href || './deck.css?v=23a', { cache: 'no-store' })
   if (!response.ok) throw new Error(`Unable to load deck styles: ${response.status}`)
 
   const style = document.createElement('style')
@@ -25,12 +25,26 @@ async function ensureDeckStyles() {
 await ensureDeckStyles();
 
 (() => {
-  const EXPECTED_SLIDE_COUNT = 16
-  const allSlides = [...document.querySelectorAll('.slide')]
+  const EXPECTED_SLIDE_COUNT = 27
+  const deck = document.getElementById('deck')
+  const domSlides = [...document.querySelectorAll('.slide')]
+  const slideById = new Map(domSlides.map(slide => [
+    `${slide.dataset.scene}-${slide.dataset.kind}`,
+    slide,
+  ]))
+  const allSlides = A3_STORY
+    .map(item => slideById.get(item.id))
+    .filter(Boolean)
+
+  // Keep the proven visual system while the visible order follows the real
+  // first-use journey declared in story.js.
+  const activeSlides = new Set(allSlides)
+  domSlides.filter(slide => !activeSlides.has(slide)).forEach(slide => slide.remove())
+  allSlides.forEach(slide => deck?.append(slide))
 
   if (!allSlides.length) return
   if (allSlides.length !== EXPECTED_SLIDE_COUNT) {
-    console.warn(`AXIOM V12 预期 ${EXPECTED_SLIDE_COUNT} 页，当前读取到 ${allSlides.length} 页。`)
+    console.warn(`AXIOM 演示稿预期 ${EXPECTED_SLIDE_COUNT} 页，当前读取到 ${allSlides.length} 页。`)
   }
 
   const storyById = new Map(A3_STORY.map(item => [item.id, item]))
@@ -51,7 +65,8 @@ await ensureDeckStyles();
 
     const headerParts = slide.querySelectorAll('.chrome > span')
     const pageSuffix = story.kind === 'content' ? 'A' : 'B'
-    if (headerParts[0]) headerParts[0].textContent = `${story.scene}${pageSuffix} · ${story.shortTitle}`
+    const pageCode = story.pageCode || `${story.scene}${pageSuffix}`
+    if (headerParts[0]) headerParts[0].textContent = `${pageCode} · ${story.shortTitle}`
     if (headerParts[1]) headerParts[1].textContent = story.phase
 
     const kicker = slide.querySelector('.v8-kicker')

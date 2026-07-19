@@ -1,0 +1,281 @@
+{
+  "success": true,
+  "slides": 27,
+  "totalSeconds": 473.03999999999996,
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "-4%",
+  "pitch": "-2Hz",
+  "volume": "+0%",
+  "report": [
+    {
+      "id": "01-content",
+      "scene": "01",
+      "kind": "content",
+      "fileName": "scene-01-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-content.vtt",
+      "seconds": 17.496,
+      "text": "小林学过并发，也看过标准答案，却仍可能判断错真实执行顺序。普通 AI 往往在答案出现时结束，AXIOM 从这里才开始：找到误解，再用新的表现确认他是否真正掌握。"
+    },
+    {
+      "id": "01-video",
+      "scene": "01",
+      "kind": "video",
+      "fileName": "scene-01-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-video.vtt",
+      "seconds": 17.064,
+      "text": "标准答案已经出现，但能力仍保持待验证。小林预测 B 会读到零，真实结果却是两边都先读到一。这个冲突暴露了误解：他把读取、判断和写回想成了连续动作。"
+    },
+    {
+      "id": "22-video",
+      "scene": "22",
+      "kind": "video",
+      "fileName": "scene-22-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-22-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-22-video.vtt",
+      "seconds": 16.536,
+      "text": "登录以后，小林选择自己的课程知识库。这个 Vault 会长期保存课程资料、画像、卡片、图谱、对话和学习路径。注册登录只是入口，真正的使用从这里开始。"
+    },
+    {
+      "id": "23-content",
+      "scene": "23",
+      "kind": "content",
+      "fileName": "scene-23-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-23-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-23-content.vtt",
+      "seconds": 19.032,
+      "text": "首次进入时，系统邀请小林完成初始画像对话。Agent 每轮只问一个必要问题，了解目标、基础、信息编码、主要阻塞、执行负荷和反馈习惯。这些只是等待后续表现检验的初始假设。"
+    },
+    {
+      "id": "24-video",
+      "scene": "24",
+      "kind": "video",
+      "fileName": "scene-24-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-24-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-24-video.vtt",
+      "seconds": 16.896,
+      "text": "对话完成后，小林进入认知洞察，查看当前画像、判断依据和后续教学调整。证据不足的判断不能冒充事实；用户可以确认或纠正，后续真实表现还会继续更新它。"
+    },
+    {
+      "id": "19-video",
+      "scene": "19",
+      "kind": "video",
+      "fileName": "scene-19-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-19-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-19-video.vtt",
+      "seconds": 16.512,
+      "text": "小林导入一份课程讲义，并标明所属主题。AXIOM 保存原始来源，再把资料解析成文献卡、理解草稿、关系边和可以执行的学习路径，而不是只把文件放进收藏夹。"
+    },
+    {
+      "id": "25-video",
+      "scene": "25",
+      "kind": "video",
+      "fileName": "scene-25-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-25-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-25-video.vtt",
+      "seconds": 16.92,
+      "text": "回到 Dashboard，AXIOM 用节点和连线展示课程知识结构。三种颜色采用统一口径：粉色文献卡保存资料来源，青色灵感卡代表还没有掌握，紫色永久卡代表已经掌握。"
+    },
+    {
+      "id": "04-content",
+      "scene": "04",
+      "kind": "content",
+      "fileName": "scene-04-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-content.vtt",
+      "seconds": 18.048,
+      "text": "三色卡片直接表达学习状态。粉色文献卡提供资料来源；青色灵感卡记录学生正在形成、但尚未掌握的理解；只有通过输出和审核，才会升级为紫色永久卡，代表学生已经掌握。"
+    },
+    {
+      "id": "16-video",
+      "scene": "16",
+      "kind": "video",
+      "fileName": "scene-16-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-16-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-16-video.vtt",
+      "seconds": 17.616,
+      "text": "小林先用自己的话解释因果过程。Agent B 把这段输出写回青色灵感卡，并保留对话来源。此时它只代表正在形成的理解，还没有掌握，更不能被 AI 直接包装成永久卡。"
+    },
+    {
+      "id": "04-video",
+      "scene": "04",
+      "kind": "video",
+      "fileName": "scene-04-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-video.vtt",
+      "seconds": 17.184,
+      "text": "第一次提交时，小林没有讲清适用边界，系统拒绝升级，所以它仍是代表尚未掌握的灵感卡。补足解释并通过审核后，才会转化为永久卡；在 AXIOM 里，永久卡就是掌握。"
+    },
+    {
+      "id": "21-video",
+      "scene": "21",
+      "kind": "video",
+      "fileName": "scene-21-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-21-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-21-video.vtt",
+      "seconds": 16.368,
+      "text": "在 Galaxy 中，用户可以按课程星团看整体结构，按关系看知识连接，按卡片类型区分来源与理解。视角改变，节点身份、卡片颜色和知识来路都不会丢。"
+    },
+    {
+      "id": "15-video",
+      "scene": "15",
+      "kind": "video",
+      "fileName": "scene-15-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-15-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-15-video.vtt",
+      "seconds": 15.72,
+      "text": "小林从课程路径选择“并发库存超卖”，再进入工作台。Forge 中的对话、卡片、资料和任务始终绑定同一个知识节点；用户不是在几个互不相干的页面之间跳转。"
+    },
+    {
+      "id": "10-content",
+      "scene": "10",
+      "kind": "content",
+      "fileName": "scene-10-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-10-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-10-content.vtt",
+      "seconds": 17.856,
+      "text": "Agent A 面向小林，负责提问、解释和工具协调；Agent B 不抢占对话，而是在每轮之后提取证据、更新画像、写回卡片并反馈路径。两条通道共同维护同一份学习状态。"
+    },
+    {
+      "id": "02-content",
+      "scene": "02",
+      "kind": "content",
+      "fileName": "scene-02-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-content.vtt",
+      "seconds": 17.616,
+      "text": "通用 Agent 擅长解释和输入知识，却无法保证学生能够向外输出。AXIOM 用苏格拉底式追问，要求小林预测、解释、举例和反驳，再用费曼学习法把因果过程讲给别人听。"
+    },
+    {
+      "id": "02-video",
+      "scene": "02",
+      "kind": "video",
+      "fileName": "scene-02-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-video.vtt",
+      "seconds": 17.856,
+      "text": "系统没有给小林贴标签，而是提出一个可以被推翻的判断：他可能把动作想成顺序执行。下一问因此改成排列时间线。初始画像不是终点，真实回答继续修正系统对他的理解。"
+    },
+    {
+      "id": "03-content",
+      "scene": "03",
+      "kind": "content",
+      "fileName": "scene-03-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-content.vtt",
+      "seconds": 16.824,
+      "text": "AXIOM 的长期价值不是保存聊天记录。向量数据库会从过去的卡片、学生解释和学习记录中，检索与当前问题语义相近的内容，再把已经学会的相同机制迁移到新的知识上。"
+    },
+    {
+      "id": "03-video",
+      "scene": "03",
+      "kind": "video",
+      "fileName": "scene-03-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-video.vtt",
+      "seconds": 16.68,
+      "text": "面对库存超卖，系统从向量数据库找回小林过去掌握的在线表格覆盖问题。两者都包含先读取旧状态、再分别写回的结构；旧卡因此成为理解新问题的迁移桥梁。"
+    },
+    {
+      "id": "05-content",
+      "scene": "05",
+      "kind": "content",
+      "fileName": "scene-05-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-content.vtt",
+      "seconds": 17.736,
+      "text": "资源生成不是统一发放资料。知识图谱判断小林缺少什么，画像和个人偏好判断他更适合视频、导图、题目还是代码。AXIOM 再自动生成最适合当前学习任务的资源。"
+    },
+    {
+      "id": "05-video",
+      "scene": "05",
+      "kind": "video",
+      "fileName": "scene-05-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-video.vtt",
+      "seconds": 16.896,
+      "text": "小林的画像显示，他更容易通过分步可视化理解动作顺序。系统因此自动生成一段并发时间线动画，并交付可以直接打开的预览。这是个性化资源生成的一次实际结果。"
+    },
+    {
+      "id": "20-video",
+      "scene": "20",
+      "kind": "video",
+      "fileName": "scene-20-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-20-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-20-video.vtt",
+      "seconds": 18.216,
+      "text": "视频只是其中一种。根据知识缺口、学习画像和用户偏好，AXIOM 还可以生成文档、导图、题目、代码和图示。用户需要什么形式，就生成什么形式，并且每一种都能真实预览。"
+    },
+    {
+      "id": "06-content",
+      "scene": "06",
+      "kind": "content",
+      "fileName": "scene-06-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-content.vtt",
+      "seconds": 19.296,
+      "text": "灵感卡只代表还在形成中的理解，不能宣布掌握。AXIOM 把库存问题换成陌生的优惠券场景，要求小林独立重建因果过程；通过这次输出与迁移审核后，卡片才升级为永久卡，也就代表已经掌握。"
+    },
+    {
+      "id": "17-video",
+      "scene": "17",
+      "kind": "video",
+      "fileName": "scene-17-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-17-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-17-video.vtt",
+      "seconds": 19.176,
+      "text": "库存换成优惠券，小林仍能重新建立并发交错过程。题目、原始作答和审核依据全部保留。通过这次陌生迁移审核，原来的灵感卡升级为永久卡，并明确代表这部分知识已经掌握。"
+    },
+    {
+      "id": "06-video",
+      "scene": "06",
+      "kind": "video",
+      "fileName": "scene-06-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-video.vtt",
+      "seconds": 17.784,
+      "text": "卡片升级为永久卡后，并发基础被确认为已经掌握，系统自动跳过这部分；仍然薄弱的锁方案边界进入下一步。永久卡不是收藏标签，而是一条会真正改变后续学习路径的掌握结论。"
+    },
+    {
+      "id": "07-content",
+      "scene": "07",
+      "kind": "content",
+      "fileName": "scene-07-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-07-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-07-content.vtt",
+      "seconds": 19.056,
+      "text": "一次学习成为下一次学习的起点，不只是因为系统记住了进度。向量数据库持续沉淀对话、卡片和学生自己的解释；学习新内容时，AI 会主动找回相同模式，形成跨知识点的迁移反馈。"
+    },
+    {
+      "id": "18-video",
+      "scene": "18",
+      "kind": "video",
+      "fileName": "scene-18-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-18-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-18-video.vtt",
+      "seconds": 16.704,
+      "text": "重新进入以后，小林不必重新交代背景。旧对话和卡片恢复只是表面；更重要的是，向量数据库能在新的学习任务中再次调用这些理解，让过去学会的模式继续发挥作用。"
+    },
+    {
+      "id": "08-content",
+      "scene": "08",
+      "kind": "content",
+      "fileName": "scene-08-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-08-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-08-content.vtt",
+      "seconds": 17.208,
+      "text": "AXIOM 与通用 Agent 的核心区别，不是多几个功能。通用 Agent 主要帮助学生输入知识；AXIOM 强制学生用自己的话输出，再把通过验证的理解变成永久卡，并在未来继续迁移。"
+    },
+    {
+      "id": "13-content",
+      "scene": "13",
+      "kind": "content",
+      "fileName": "scene-13-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-13-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-13-content.vtt",
+      "seconds": 18.744,
+      "text": "我们的长期愿景，是让每个学生都拥有一个真正理解他、要求他输出、并能陪伴知识持续生长的 AI 学习系统。让高质量的个性化反馈更普及，让学习效率来自真正掌握，而不是更快看完答案。"
+    }
+  ]
+}

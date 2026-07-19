@@ -98,6 +98,20 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
   useEffect(() => {
     if (!containerRef.current) return;
 
+    // Playwright's built-in recorder captures Chromium's compositor stream and
+    // becomes extremely expensive when the full bloom/particle stack is active.
+    // `?recording=1` keeps the graph truthful and interactive, while removing
+    // decorative work that is invisible to the learning evidence being filmed.
+    const recordingPerformanceMode = (() => {
+      try {
+        return new URLSearchParams(window.location.search).get('recording') === '1'
+          || window.localStorage.getItem('axiom-recording-performance') === '1'
+      } catch {
+        return false
+      }
+    })()
+    if (recordingPerformanceMode) document.documentElement.dataset.recordingPerformance = 'true'
+
     let scene: THREE.Scene;
     let camera: THREE.PerspectiveCamera;
     let renderer: THREE.WebGLRenderer;
@@ -233,20 +247,23 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
       const createCloudTexture = (color: number) => {
         const canvas = document.createElement('canvas');
-        canvas.width = 256; canvas.height = 256;
+        const textureSize = recordingPerformanceMode ? 128 : 256;
+        const center = textureSize / 2;
+        canvas.width = textureSize; canvas.height = textureSize;
         const ctx = canvas.getContext('2d')!;
-        const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+        const grad = ctx.createRadialGradient(center, center, 0, center, center, center);
         const c = new THREE.Color(color);
         grad.addColorStop(0, `rgba(${Math.round(c.r*255)},${Math.round(c.g*255)},${Math.round(c.b*255)}, 0.15)`);
         grad.addColorStop(0.4, `rgba(${Math.round(c.r*255)},${Math.round(c.g*255)},${Math.round(c.b*255)}, 0.05)`);
         grad.addColorStop(1, 'rgba(0,0,0,0)');
         ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 256, 256);
+        ctx.fillRect(0, 0, textureSize, textureSize);
         return new THREE.CanvasTexture(canvas);
       };
 
       const nebulaColors = [0x4422ff, 0xff2266, 0x22eeff, 0xa855f7];
-      for(let i=0; i<12; i++) {
+      const cloudCount = recordingPerformanceMode ? 4 : 12;
+      for(let i=0; i<cloudCount; i++) {
         const tex = createCloudTexture(nebulaColors[i % nebulaColors.length]);
         const mat = new THREE.SpriteMaterial({
           map: tex,
@@ -593,6 +610,8 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       if (edgeType === 'counter') return 0xff5c7a;
       if (edgeType === 'prerequisite') return 0xfbbf24;
       if (edgeType === 'derived') return 0x34d399;
+      if (edgeType === 'contains') return 0x67e8f9;
+      if (edgeType === 'supports') return 0xf472b6;
       if (edgeType === 'wikilink') return 0x8bd3ff;
       if (edgeType === 'evidence' || edgeType === 'citation') return 0xf472b6;
       return fallback;
@@ -1514,15 +1533,17 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         nodesGroup.add(node);
       });
 
-      // Create edges from real data (concept-to-concept connections)
-      // Real wiki-link edges are always visible regardless of cluster.
+      // Create every real card-to-card edge, including `contains`. Cluster suns
+      // are only a visual overview scaffold; the semantic graph must be built
+      // from persisted relations so root -> topic -> domain -> concept remains
+      // visible and interactive in relationship-driven layouts.
       edgesData.forEach(edge => {
-        if (edge.type === 'contains') return;
         const sourceNode = allNodes.find(n => n.userData.id === edge.sourceId);
         const targetNode = allNodes.find(n => n.userData.id === edge.targetId);
         if (sourceNode && targetNode) {
           const edgeColor = sourceNode.userData.trueColor || sourceNode.userData.clusterColor || 0xffffff;
-          createCurve(sourceNode, targetNode, edgeColor, 0.5, false, edgeColor, true, edge.type, edge.weight || 1);
+          const opacity = edge.type === 'contains' ? 0.72 : edge.type === 'supports' ? 0.3 : 0.5;
+          createCurve(sourceNode, targetNode, edgeColor, opacity, false, edgeColor, true, edge.type, edge.weight || 1);
         }
       });
     }
@@ -1679,6 +1700,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     }
 
     function getTargetRendererPixelRatio(): number {
+      if (recordingPerformanceMode) return 1;
       const nativeRatio = Math.max(1, window.devicePixelRatio || 1);
       const cap = galaxyPerformanceTier === 'dense' ? 1 : galaxyPerformanceTier === 'large' ? 1.25 : 1.5;
       return Math.min(nativeRatio, cap);
@@ -3396,7 +3418,12 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     );
     camera.position.copy(DEFAULT_CAMERA_POSITION);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer = new THREE.WebGLRenderer({
+      antialias: !recordingPerformanceMode,
+      alpha: true,
+      powerPreference: 'high-performance',
+      failIfMajorPerformanceCaveat: false,
+    });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(getTargetRendererPixelRatio());
     currentRendererPixelRatio = getTargetRendererPixelRatio();
@@ -3412,8 +3439,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       0.85
     );
     bloomPass.threshold = 0.08;
-    bloomPass.strength = 1.4;
+    bloomPass.strength = recordingPerformanceMode ? 0 : 1.4;
     bloomPass.radius = 0.6;
+    bloomPass.enabled = !recordingPerformanceMode;
     composer.addPass(bloomPass);
     applyRendererPerformanceBudget();
 
@@ -3457,11 +3485,12 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
       }
     });
 
-    // --- Far stars (10000 points) ---
+    // --- Far stars ---
+    const farStarCount = recordingPerformanceMode ? 1800 : 10000;
     const farStarGeo = new THREE.BufferGeometry();
-    const farStarPos = new Float32Array(30000);
-    const farStarColors = new Float32Array(30000);
-    for (let i = 0; i < 10000; i++) {
+    const farStarPos = new Float32Array(farStarCount * 3);
+    const farStarColors = new Float32Array(farStarCount * 3);
+    for (let i = 0; i < farStarCount; i++) {
       const r = 2000 + Math.random() * 3000;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(Math.random() * 2 - 1);
@@ -3502,10 +3531,11 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
     );
     scene.add(starField);
 
-    // --- Bright stars (200 points) ---
+    // --- Bright stars ---
+    const brightStarCount = recordingPerformanceMode ? 60 : 200;
     const brightStarGeo = new THREE.BufferGeometry();
-    const brightStarPos = new Float32Array(600);
-    for (let i = 0; i < 200; i++) {
+    const brightStarPos = new Float32Array(brightStarCount * 3);
+    for (let i = 0; i < brightStarCount; i++) {
       const r = 800 + Math.random() * 2000;
       const theta = Math.random() * Math.PI * 2;
       const phi = Math.acos(Math.random() * 2 - 1);
@@ -3531,7 +3561,7 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
 
     // --- Milky Way band (6000 particles) ---
     const milkyWayGeo = new THREE.BufferGeometry();
-    const milkyCount = 6000;
+    const milkyCount = recordingPerformanceMode ? 1200 : 6000;
     const milkyPos = new Float32Array(milkyCount * 3);
     const milkyColors = new Float32Array(milkyCount * 3);
     for (let i = 0; i < milkyCount; i++) {
@@ -4233,8 +4263,9 @@ const GalaxyCanvas = forwardRef<GalaxyCanvasHandle, GalaxyCanvasProps>(function 
         nodesGroup.rotation.y += baseSpeed * Math.max(0, controls.autoRotateSpeed || 0.2);
         syncGraphGroupRotation();
       }
-      composer.render();
-      renderLabels();
+      if (recordingPerformanceMode) renderer.render(scene, camera);
+      else composer.render();
+      if (!recordingPerformanceMode || frames % 3 === 0) renderLabels();
 
       // Dynamic Nebula Rotation
       if (nebulaGroup) {

@@ -9,8 +9,8 @@ import {
   getLightRAGStatus,
   queryLightRAGContext,
   syncCardToLightRAG,
-  syncVaultToLightRAG,
 } from '@/server/core/rag/lightrag-service'
+import { syncCardToSemanticIndex, syncVaultWorkingSetToSemanticIndex } from '@/server/core/rag/semantic-index-service'
 import {
   applyHiddenRelationSuggestion,
   discoverHiddenRelationsWithRag,
@@ -58,8 +58,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vault = await resolveVault(userId, c.req.query('vid'))
     if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
 
-    const summary = await syncVaultToLightRAG(vault.id, limit ?? 200)
-    return c.json({ success: true, summary })
+    const summary = await syncVaultWorkingSetToSemanticIndex(vault.id, Math.min(limit ?? 96, 96))
+    return c.json({ success: true, summary, graph: { status: 'deferred', message: '深度图谱增强将在后台逐步补齐' } })
   })
   .post('/card/:id/sync', zValidator('query', vaultQuerySchema), async (c) => {
     const userId = c.get('userId') as string
@@ -73,7 +73,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
       return c.json({ success: false, error: 'Card not found' }, 404)
     }
 
-    const result = await syncCardToLightRAG(cardId)
+    const result = await syncCardToSemanticIndex(cardId)
+    if (result.status === 'indexed') void syncCardToLightRAG(cardId, { waitForCompletion: false })
     return c.json({ success: result.status === 'indexed' || result.status === 'disabled', result })
   })
   .get('/card/:id/status', zValidator('query', vaultQuerySchema), async (c) => {

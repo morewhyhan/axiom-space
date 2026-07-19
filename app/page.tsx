@@ -157,7 +157,7 @@ export default function Home() {
     const vaultOnboardingSeen = typeof window !== 'undefined'
       ? window.localStorage.getItem(`axiom-vault-initial-profile-onboarding:${currentVaultId}`) === '1'
       : false
-    if (!vaultOnboardingSeen) {
+    if (!vaultOnboardingSeen && !selectedVault.initialProfileCompleted) {
       const t = setTimeout(() => {
         setShowOnboarding(true)
         openModal('onboarding')
@@ -236,7 +236,7 @@ export default function Home() {
     ;(async () => {
       try {
         const vaultsRes = await client.api.vaults.$get()
-        const vaultsData = await vaultsRes.json() as { success: boolean; vaults: Array<{ id: string; name: string; cardCount: number }> }
+        const vaultsData = await vaultsRes.json() as { success: boolean; vaults: Array<{ id: string; name: string; cardCount: number; initialProfileCompleted?: boolean }> }
         if (cancelled) return
         if (!vaultsRes.ok || !vaultsData.success) throw new Error('加载知识库失败')
 
@@ -608,6 +608,7 @@ export default function Home() {
     try {
       const topic = newCardTitle.trim()
       const result = await importDocument.mutateAsync({
+        jobId: globalThis.crypto.randomUUID(),
         ...(newCardContent.trim() ? { document: newCardContent.trim() } : {}),
         ...(importFile?.fileText ? { fileText: importFile.fileText } : {}),
         ...(importFile?.fileBase64 ? { fileBase64: importFile.fileBase64 } : {}),

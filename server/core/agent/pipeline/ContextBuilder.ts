@@ -101,10 +101,10 @@ export class ContextBuilder {
       const vaultId = getCurrentVaultId();
       if (!vaultId) return '';
 
-      const { buildLearningProfileContext } = await import('@/server/core/learning/profile-context');
+      const { buildLearningProfileContext, buildLearningProfileInjection } = await import('@/server/core/learning/profile-context');
       const learningProfile = await buildLearningProfileContext({ vaultId });
       if (learningProfile.promptBlock.trim()) {
-        return learningProfile.promptBlock;
+        return buildLearningProfileInjection(learningProfile.promptBlock);
       }
 
       const vault = await prisma.vault.findUnique({
@@ -262,7 +262,8 @@ export class ContextBuilder {
           }
         }
 
-        // Inject user's mastered concepts from permanent cards
+        // Permanent cards are reusable knowledge objects, not proof that the
+        // learner has mastered the represented capability.
         if (vaultData?.permanent && vaultData.permanent.length > 0) {
           const conceptNames = vaultData.permanent
             .map((c: any) => c.title || '')
@@ -270,7 +271,7 @@ export class ContextBuilder {
             .slice(0, 15);
           if (conceptNames.length > 0) {
             blocks.push(
-              `<mastered-concepts>\n用户已掌握的概念。重要：在回复相关话题时，必须主动提及这些已掌握的概念来建立关联，展示学习的连续性:\n${conceptNames.map((n: string) => `- ${n}`).join('\n')}\n</mastered-concepts>`,
+              `<reusable-knowledge>\n以下永久卡可以作为已有知识引用和类比，但不能因为它们存在就声称用户已经掌握。掌握必须另外引用通过的评估证据:\n${conceptNames.map((n: string) => `- ${n}`).join('\n')}\n</reusable-knowledge>`,
             );
           }
         }

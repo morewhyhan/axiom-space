@@ -112,12 +112,15 @@ export const BACKGROUND_ANALYSIS_PROMPT = definePrompt<BackgroundAnalysisInput>(
       "mechanismHypothesis": "为什么会出现该行为；无法判断时留空",
       "competingHypotheses": ["仍然可能成立的其他解释"],
       "discriminatingEvidence": "本轮证据排除了什么，或还需什么任务才能区分",
+      "controlVariable": "本轮只允许改变的一个教学变量，如信息块、表示方式、提示强度或反馈频率",
       "teachingIntervention": "下一轮教学因此具体改变什么",
       "verificationCriterion": "用什么可观察结果验证判断和干预",
+      "failureBranch": "干预无效时撤销什么假设、改查什么竞争解释",
+      "stopCondition": "达到什么条件后撤除干预，避免过度控制",
       "interventionProtocol": {
         "currentLearningObject": "本轮唯一处理的学习对象",
         "judgmentBoundary": "当前判断不意味着什么，以及仍未排除什么",
-        "primaryIntervention": "本轮唯一主干预",
+        "primaryIntervention": "本轮只改变的一种教学做法",
         "executionSteps": ["第一步", "第二步", "验证步骤"],
         "forbiddenActions": ["本轮明确不能做什么", "不能用什么方式虚假判定掌握"],
         "verificationTask": "用户必须完成的可观察任务",
@@ -153,10 +156,13 @@ Rules:
 - In ordinary conversation sessions without a current card, do not return cardEdits. Return concepts instead when the conversation reveals concepts suitable for the push box.
 - concepts should be concrete learnable objects, not generic verbs, UI actions, or broad domains. They can later become missing-card or link suggestions.
 - observations must use one of the six dimensionKey values when they describe the learning profile.
+- The six top-level dimensions are navigation and control domains. Choose a precise dynamic subDimensionKey from the learner mechanism actually evidenced; do not try to fill every possible subdimension.
+- A useful profile observation explains why a learning behavior happens and how the next teaching turn should change. It must not be a list of learned topics, completed tasks, generated resources, or activity counts.
 - The six dimensionKey values are fixed. You may create a dynamic subDimensionKey and subDimensionLabel inside them when the evidence reveals a useful teaching decision not covered by an existing name.
 - Reuse the same subDimensionKey for observations that should be merged into one current profile node. Do not create separate nodes for synonymous preferences, behaviors, and outcomes that imply the same teaching action.
 - subDimensionLabel must describe a useful learning decision, not a source object, course title, personality, or vague category such as "其他观察".
 - userFacingSummary must be understandable and reassuring: state what current evidence suggests, avoid diagnosing or defining the person, and make clear that later evidence can revise the conclusion.
+- userFacingSummary, subDimensionLabel, claim, mechanismHypothesis, teachingIntervention, verificationCriterion, failureBranch, and stopCondition must use natural everyday Chinese. Do not expose theory terms such as 目标函数、状态估计、控制变量、扰动、信噪比、观测量、闭环、反馈采样; translate them into what the user wants, does, finds difficult, and what the AI will change next.
 - If a profile observation has no direct evidence, do not return it.
 - Single-turn weak inference should usually have confidence between 0.28 and 0.55.
 - If the user explicitly states a learning goal, known foundation, preference, bottleneck, pace need, or mastery criterion and it will affect teaching strategy, profile observation confidence may be 0.55-0.78.
@@ -169,6 +175,7 @@ Rules:
 - A mechanismHypothesis without observableBehavior and evidence must not be returned. If the mechanism cannot yet be distinguished from alternatives, use status=hypothesis and name the competing hypotheses.
 - teachingIntervention must differ from generic advice such as "加强练习" or "多举例"; state the changed order, information dose, checkpoint, representation, or assessment action.
 - verificationCriterion must be directly observable, such as a prediction, explanation of an intermediate cause, counterexample, correction, transfer task, or card output.
+- controlVariable must name exactly one variable the teaching system can change. failureBranch and stopCondition are required whenever status is supported, confirmed, improved, or needs_retest.
 - For supported, confirmed, or improved observations, interventionProtocol must make the intervention operational: one currentLearningObject, one primaryIntervention, at least three ordered executionSteps, at least two forbiddenActions, an observable verificationTask, explicit passCriteria, a failureBranch, and a stopCondition.
 - Keep only observations that change the next teaching decision. A course activity log, isolated topic mention, or duplicate claim must not become a main profile observation.
 - Do not claim the user mastered something just because the assistant explained it.

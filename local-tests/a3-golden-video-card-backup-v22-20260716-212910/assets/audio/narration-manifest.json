@@ -1,0 +1,171 @@
+{
+  "success": true,
+  "slides": 16,
+  "totalSeconds": 504.264,
+  "voice": "zh-CN-XiaoxiaoNeural",
+  "rate": "-4%",
+  "pitch": "-2Hz",
+  "volume": "+0%",
+  "report": [
+    {
+      "id": "01-content",
+      "scene": "01",
+      "kind": "content",
+      "fileName": "scene-01-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-content.vtt",
+      "seconds": 30.528,
+      "text": "小林正在学习库存超卖。通用 Agent 可以很快给出定义、代码和标准解法，但这还不能说明小林真的会了。只要他仍认为第二个请求一定会读到零，他脑中的并发时间线就是错的。AXIOM Space 是一套 AI 掌握学习系统：答案交付以后，它还要找到真实缺口，验证学生能否独立应用，并让证据改变下一步学习。"
+    },
+    {
+      "id": "01-video",
+      "scene": "01",
+      "kind": "video",
+      "fileName": "scene-01-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-01-video.vtt",
+      "seconds": 29.664,
+      "text": "AXIOM 没有再问一句“懂了吗”，而是让小林先预测两个请求会读到什么。他认为 A 买完以后，B 会读到零；实际运行时，A 和 B 都在任何一次写回之前读到了一。这个冲突把问题说清楚了：小林一直把读取、判断和写回误当成一个不会被打断的连续动作。真正需要补的，不是更多定义，而是这条错误的时间线。"
+    },
+    {
+      "id": "02-content",
+      "scene": "02",
+      "kind": "content",
+      "fileName": "scene-02-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-content.vtt",
+      "seconds": 32.04,
+      "text": "缺口被看见以后，系统不能只是生成一份分析报告。AXIOM 的 Agent1 留在前台负责教学，Agent2 在后台保存原话、判断卡点并更新六维画像。小林那句“B 会读到零”，被记录为时间线建模薄弱。于是 Agent1 不再重复并发定义，而是把下一问改成分步画时间线，一次只处理一个动作。证据因此直接进入了教学。"
+    },
+    {
+      "id": "02-video",
+      "scene": "02",
+      "kind": "video",
+      "fileName": "scene-02-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-02-video.vtt",
+      "seconds": 29.496,
+      "text": "小林的错误回答先成为一条可以核对的画像证据，随后回到当前教学。系统没有重新讲一遍标准答案，而是让他把两个请求的读取、判断和写回逐步排开。这样做不是为了展示画像，而是因为他的误解就发生在动作顺序上。AXIOM 所说的个性化，就是这份证据让眼前的问题、讲法和节奏都发生了变化。"
+    },
+    {
+      "id": "03-content",
+      "scene": "03",
+      "kind": "content",
+      "fileName": "scene-03-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-content.vtt",
+      "seconds": 33.552,
+      "text": "下一步不是另开一段没有过去的聊天。AXIOM 把课程主题、当前路径、相关卡片和对话绑定在同一个学习对象上，再从小林自己的知识库里寻找能帮助当前判断的内容。系统很快找回他以前写过的“在线表格覆盖”卡片：两件事表面不同，底层都是多人依据同一份旧状态分别写回。Qdrant 负责快速召回，LightRAG 在后台继续补全关系。"
+    },
+    {
+      "id": "03-video",
+      "scene": "03",
+      "kind": "video",
+      "fileName": "scene-03-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-03-video.vtt",
+      "seconds": 29.952,
+      "text": "系统召回的是小林过去真正写过的卡片，不是模型为了这次回答临时编出的类比。在线表格里，多个人先读到同一个旧值，再分别写回；库存超卖里，两个请求也先读到同一份库存，再各自完成判断。小林可以打开旧卡核对来源，也能看清两者为什么相关。过去形成的知识，就这样重新参与了今天的学习。"
+    },
+    {
+      "id": "04-content",
+      "scene": "04",
+      "kind": "content",
+      "fileName": "scene-04-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-content.vtt",
+      "seconds": 36.216,
+      "text": "讨论过程中，小林自己说出关键理解：每个人单独看都没错，错在他们使用了同一份过期库存。AXIOM 保留这句话和来源对话，先生成青色灵感卡。粉色文献卡保存资料与证据；灵感卡只有在清晰、准确、必要三项审核通过后，才成为紫色永久卡。Galaxy 继续用粉、青、紫表示卡片类型。紫色说明知识值得长期保存，但学生是否掌握，还要另外验证。"
+    },
+    {
+      "id": "04-video",
+      "scene": "04",
+      "kind": "video",
+      "fileName": "scene-04-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-04-video.vtt",
+      "seconds": 30.192,
+      "text": "第一次提交审核时，小林的解释已经很流畅，但它没有说清适用边界，也没有把关键判断对应到证据。AXIOM 因此没有把它升级成永久卡，而是明确告诉小林还缺什么，并保留为可以继续修改的灵感卡。这个失败很重要：系统留下的是用户真实形成的知识，而不是把一段听起来不错的话自动包装成“已经成熟”。"
+    },
+    {
+      "id": "05-content",
+      "scene": "05",
+      "kind": "content",
+      "fileName": "scene-05-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-content.vtt",
+      "seconds": 31.848,
+      "text": "发现缺口以后，AXIOM 可能需要补一份资源，但资源有两条不同入口。小林明确请求一个动画时，系统直接执行，而且只创建一个视频任务。系统主动发现可能有帮助的资源时，会先说明依据，放进推送盒等待确认，不会擅自写进知识库。产品可以生成多种学习资源和输出格式，但能力多，不等于每次都应该全部交付。"
+    },
+    {
+      "id": "05-video",
+      "scene": "05",
+      "kind": "video",
+      "fileName": "scene-05-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-05-video.vtt",
+      "seconds": 28.512,
+      "text": "小林只想看两个请求怎样交错执行，并且明确不要附加文字。AXIOM 因此只建立一个视频任务，围绕这个目标完成规划、生成和检查，最后交付一个可以直接预览的动画。任务列表里没有顺手增加讲义、测验或思维导图。系统做了它能做的部分，但没有越过小林这一次给出的边界。"
+    },
+    {
+      "id": "06-content",
+      "scene": "06",
+      "kind": "content",
+      "fileName": "scene-06-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-content.vtt",
+      "seconds": 33.696,
+      "text": "看过解释、整理过卡片、拿到动画，都还不能直接宣布掌握。AXIOM 把库存换成“最后一张优惠券”，要求小林在陌生场景里重新解释两个请求怎样交错。只有他能独立讲清，能力状态才更新。随后，同一份证据继续作用于路径：已经会的并发基础被跳过，仍然薄弱的锁方案适用边界进入下一步。评估不只留下分数，而是改变后面的学习。"
+    },
+    {
+      "id": "06-video",
+      "scene": "06",
+      "kind": "video",
+      "fileName": "scene-06-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-06-video.vtt",
+      "seconds": 29.496,
+      "text": "小林已经在优惠券题里独立重建了交错过程。通过以后，AXIOM 没有再让他重复并发基础，而是把这些步骤标为已掌握并自动跳过。同时，评估发现他对乐观锁和悲观锁的适用边界仍不稳定，于是把边界比较放进下一步。路径上的每个变化都对应前面的证据，个性化终于成为一个看得见的后续动作。"
+    },
+    {
+      "id": "07-content",
+      "scene": "07",
+      "kind": "content",
+      "fileName": "scene-07-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-07-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-07-content.vtt",
+      "seconds": 32.376,
+      "text": "这次学习结束后，AXIOM 保存的不只是一串消息，而是能继续工作的学习状态：原始对话、当前卡片、评估结果、路径位置和画像判断。小林下次回来，可以直接从锁方案选择继续，不必重讲背景。系统越主动，越需要允许检查。因此任何关键结论都能沿着路径调整、正式评估，一直回到小林当时的原始回答和发生时间。"
+    },
+    {
+      "id": "07-video",
+      "scene": "07",
+      "kind": "video",
+      "fileName": "scene-07-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-07-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-07-video.vtt",
+      "seconds": 31.32,
+      "text": "如果想知道系统为什么跳过某一步，可以从路径调整打开触发它的正式评估，再回到小林当时的原始回答和发生时间。这些信息属于同一条长期记录，所以系统下次能够接着教，用户也能在判断错误时找到来源并纠正。AXIOM 不要求评委相信一句“我们很智能”，而是把每个关键判断为什么产生、后来改变了什么，都留给人检查。"
+    },
+    {
+      "id": "08-content",
+      "scene": "08",
+      "kind": "content",
+      "fileName": "scene-08-content.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-08-content.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-08-content.vtt",
+      "seconds": 36.432,
+      "text": "把小林的案例还原成产品，我们已经打通一条完整主链：双 Agent 发现缺口并改变教学；三类卡片和 Galaxy 保存用户知识；两速记忆让旧知识重新参与；资源按真实意图生成；陌生迁移确认掌握；评估继续改写路径，所有判断还能追溯。这证明核心机制已经可运行、可检查。它还不能替代真实用户数据，我们不会把产品实现夸大成学习效果已经得到证明。"
+    },
+    {
+      "id": "08-video",
+      "scene": "08",
+      "kind": "video",
+      "fileName": "scene-08-video.mp3",
+      "audioPath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-08-video.mp3",
+      "subtitlePath": "/mnt/c/Users/why/Desktop/axiom-space/local-tests/a3-golden-video-card/assets/audio/scene-08-video.vtt",
+      "seconds": 28.944,
+      "text": "到这里，小林不只是看过库存超卖的答案。他的误解被具体找到，自己的解释被保留下来，掌握经过陌生题验证，形成的证据又把学习推进到锁方案选择和跨系统失败补偿。通用 Agent 擅长完成眼前的问题；AXIOM 要完成的是学习本身，让这一次真正学会的内容，成为下一次判断和行动的起点。"
+    }
+  ]
+}

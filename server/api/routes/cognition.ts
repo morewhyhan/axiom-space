@@ -237,7 +237,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
   // ── Learning stats ──
   // Streak: count consecutive days with activity
   const streakDays = computeStreak(recentCards.map(c => c.createdAt))
-  const mastered = capabilities.filter((capability) => capability.status === 'mastered' || capability.masteryLevel >= 80).length
+  const mastered = capabilities.filter((capability) => capability.status === 'mastered').length
   const pendingReview = fleetCount
   const chatRounds = learningSessions.length
 
@@ -272,10 +272,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
     .map((capability) => capability.concept)
   const masteredConcepts = [
     ...capabilities
-      .filter((capability) => capability.status === 'mastered' || capability.masteryLevel >= 80)
+      .filter((capability) => capability.status === 'mastered')
       .sort((a, b) => b.masteryLevel - a.masteryLevel)
       .map((capability) => capability.concept),
-    ...totalCards.filter((card) => card.type === 'permanent').map((card) => card.title || card.path),
   ].filter(Boolean).slice(0, 10)
   const weakConcepts = [
     ...lowMasteryConcepts,
@@ -498,6 +497,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
     profileLoop: learningProfileContext?.profileLoop ?? profileLoop,
     dimensionInsights: learningProfileContext?.dimensionInsights ?? [],
     promptBlock: learningProfileContext?.promptBlock ?? '',
+    promptVersion: learningProfileContext?.promptVersion ?? '',
+    promptOverrideActive: learningProfileContext?.promptOverrideActive ?? false,
     interventionRuns,
     assessmentTimeline: assessments.map((assessment) => ({
       id: assessment.id,
@@ -724,9 +725,19 @@ const routes = app
         category: 'observation',
       },
     })
+    const { refreshLearningProfilePromptSnapshot } = await import('@/server/core/learning/profile-context')
+    const refreshedPrompt = await refreshLearningProfilePromptSnapshot({
+      vaultId: vault.id,
+      userId,
+      reason: `manual_observation:${cat}`,
+    }).catch((error) => {
+      console.warn('[Cognition] Profile prompt refresh after feedback failed:', error)
+      return null
+    })
 
     return c.json({
       success: true,
+      promptVersion: refreshedPrompt?.promptVersion,
       observation: {
         id: memory.id,
         text,
@@ -736,6 +747,51 @@ const routes = app
         sourceObjectId: resolvedSourceObjectId,
         createdAt: memory.createdAt.toISOString(),
       },
+    })
+  })
+  .post('/save-prompt', async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
+
+    const body = await c.req.json().catch(() => null) as { promptBlock?: unknown } | null
+    if (!body || typeof body.promptBlock !== 'string' || body.promptBlock.length > 120_000) {
+      return c.json({ success: false, error: 'INVALID_PROMPT_BLOCK' }, 400)
+    }
+
+    const { buildLearningProfileContext, normalizeLearningProfileBlock } = await import('@/server/core/learning/profile-context')
+    const context = await buildLearningProfileContext({
+      vaultId: vault.id,
+      userId,
+      ignorePromptOverride: true,
+    })
+    const trimmed = body.promptBlock.trim()
+    const promptBlock = trimmed ? normalizeLearningProfileBlock(trimmed) : ''
+    if (trimmed && !promptBlock) {
+      return c.json({ success: false, error: 'INVALID_PROMPT_BLOCK' }, 400)
+    }
+
+    await prisma.vaultMemory.create({
+      data: {
+        vaultId: vault.id,
+        key: `profile_prompt_override_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        category: 'profile_prompt_override',
+        value: JSON.stringify({
+          active: true,
+          promptBlock,
+          promptVersion: context.promptVersion,
+          updatedBy: userId,
+          updatedAt: new Date().toISOString(),
+        }),
+      },
+    })
+
+    return c.json({
+      success: true,
+      promptBlock,
+      promptVersion: context.promptVersion,
+      promptOverrideActive: true,
+      savedAt: new Date().toISOString(),
     })
   })
   .post('/summarize-prompt', async (c) => {
@@ -750,7 +806,11 @@ const routes = app
         normalizeLearningProfileBlock,
         PROFILE_PROMPT_SUMMARY_INSTRUCTION,
       } = await import('@/server/core/learning/profile-context')
-      const learningProfileContext = await buildLearningProfileContext({ vaultId: vault.id, userId })
+      const learningProfileContext = await buildLearningProfileContext({
+        vaultId: vault.id,
+        userId,
+        ignorePromptOverride: true,
+      })
       if (learningProfileContext.dimensionInsights.length === 0 || !learningProfileContext.promptBlock.trim()) {
         return c.json({
           success: false,
@@ -765,6 +825,7 @@ const routes = app
         teachingPolicy: learningProfileContext.teachingPolicy,
         profileLoop: learningProfileContext.profileLoop,
         dimensionInsights: learningProfileContext.dimensionInsights,
+        promptVersion: learningProfileContext.promptVersion,
       }
       let promptBlock = learningProfileContext.promptBlock
       let generationMode: 'ai' | 'fallback' = 'fallback'
@@ -775,7 +836,10 @@ const routes = app
           [{ role: 'user', content: buildProfilePromptSummaryUserMessage(sourceContext) }],
           { temperature: 0.2, maxTokens: 1800 },
         )
-        promptBlock = normalizeLearningProfileBlock(generated) || learningProfileContext.promptBlock
+        const normalized = normalizeLearningProfileBlock(generated)
+        promptBlock = normalized
+          ? ensurePromptVersion(normalized, learningProfileContext.promptVersion)
+          : learningProfileContext.promptBlock
         generationMode = 'ai'
       } catch (error) {
         console.warn('[Cognition] AI prompt summary failed, using fallback:', error)
@@ -792,6 +856,23 @@ const routes = app
             generationMode,
             dimensionCount: learningProfileContext.dimensionInsights.length,
             evidenceCount: learningProfileContext.profileLoop.evidenceCount,
+            promptVersion: learningProfileContext.promptVersion,
+          }),
+        },
+      })
+
+      await prisma.vaultMemory.create({
+        data: {
+          vaultId: vault.id,
+          key: `profile_prompt_override_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          category: 'profile_prompt_override',
+          value: JSON.stringify({
+            active: false,
+            promptBlock: '',
+            promptVersion: learningProfileContext.promptVersion,
+            updatedBy: userId,
+            updatedAt: new Date().toISOString(),
+            reason: 'ai_resummarize',
           }),
         },
       })
@@ -799,6 +880,7 @@ const routes = app
       return c.json({
         success: true,
         promptBlock,
+        promptVersion: learningProfileContext.promptVersion,
         generatorPrompt: PROFILE_PROMPT_SUMMARY_INSTRUCTION,
         generationMode,
         generatedAt: new Date().toISOString(),
@@ -806,9 +888,82 @@ const routes = app
         evidenceCount: learningProfileContext.profileLoop.evidenceCount,
       })
     } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
       console.warn('[Cognition] Prompt summary failed:', error)
-      return c.json({ success: false, error: 'PROMPT_SUMMARY_FAILED' }, 500)
+      return c.json({
+        success: false,
+        error: 'PROMPT_SUMMARY_FAILED',
+        detail: process.env.NODE_ENV === 'development' ? detail : undefined,
+      }, 500)
     }
+  })
+  .get('/evidence-source', async (c) => {
+    const userId = c.get('userId') as string
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
+
+    const sourceType = c.req.query('sourceType')?.trim()
+    const sourceId = c.req.query('sourceId')?.trim()
+    if (!sourceType || !sourceId || sourceId.length > 200) {
+      return c.json({ success: false, error: 'Invalid evidence source' }, 400)
+    }
+
+    const cardNavigation = async (cardId: string | null | undefined) => {
+      if (!cardId) return null
+      const card = await prisma.card.findFirst({
+        where: { id: cardId, vaultId: vault.id },
+        select: { id: true, title: true, type: true },
+      })
+      return card
+        ? { target: 'card' as const, card: { id: card.id, title: card.title || '未命名卡片', type: card.type } }
+        : null
+    }
+
+    const sessionNavigation = async (sessionId: string | null | undefined) => {
+      if (!sessionId) return null
+      const session = await prisma.learningSession.findFirst({
+        where: { id: sessionId, userId, vaultId: vault.id, domain: '__agent__' },
+        select: { id: true },
+      })
+      return session ? { target: 'session' as const, sessionId: session.id } : null
+    }
+
+    if (sourceType === 'learningSession') {
+      return c.json({ success: true, navigation: await sessionNavigation(sourceId) })
+    }
+
+    if (sourceType === 'learningMessage') {
+      const message = await prisma.learningMessage.findFirst({
+        where: {
+          id: sourceId,
+          session: { userId, vaultId: vault.id, domain: '__agent__' },
+        },
+        select: { sessionId: true },
+      })
+      return c.json({
+        success: true,
+        navigation: message ? await sessionNavigation(message.sessionId) : null,
+      })
+    }
+
+    if (sourceType === 'assessmentResult') {
+      const assessment = await prisma.assessmentResult.findFirst({
+        where: { id: sourceId, userId, vaultId: vault.id },
+        select: { sessionId: true, cardId: true },
+      })
+      if (!assessment) return c.json({ success: true, navigation: null })
+      const session = await sessionNavigation(assessment.sessionId)
+      return c.json({
+        success: true,
+        navigation: session ?? await cardNavigation(assessment.cardId),
+      })
+    }
+
+    if (sourceType === 'card') {
+      return c.json({ success: true, navigation: await cardNavigation(sourceId) })
+    }
+
+    return c.json({ success: true, navigation: null })
   })
   .post('/profile-feedback', async (c) => {
     const userId = c.get('userId') as string
@@ -846,9 +1001,19 @@ const routes = app
         }),
       },
     })
+    const { refreshLearningProfilePromptSnapshot } = await import('@/server/core/learning/profile-context')
+    const refreshedPrompt = await refreshLearningProfilePromptSnapshot({
+      vaultId: vault.id,
+      userId,
+      reason: `user_feedback:${dimensionKey}:${verdict}`,
+    }).catch((error) => {
+      console.warn('[Cognition] Profile prompt refresh after feedback failed:', error)
+      return null
+    })
 
     return c.json({
       success: true,
+      promptVersion: refreshedPrompt?.promptVersion,
       feedback: {
         id: memory.id,
         dimensionKey,
@@ -864,3 +1029,11 @@ const routes = app
   })
 
 export default app
+
+function ensurePromptVersion(promptBlock: string, promptVersion: string): string {
+  if (!promptVersion || promptBlock.includes(`画像版本：${promptVersion}`)) return promptBlock
+  return promptBlock.replace(
+    '<learning-profile-context>',
+    `<learning-profile-context>\n画像版本：${promptVersion}`,
+  )
+}

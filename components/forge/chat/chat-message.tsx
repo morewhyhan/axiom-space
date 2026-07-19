@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { Bot, RefreshCw } from 'lucide-react'
-import type { AgentConfirmationRequest, AgentMessage } from '@/stores/agent-store'
+import { ArrowRight, Bot, RefreshCw } from 'lucide-react'
+import type { AgentConfirmationRequest, AgentMessage, AgentMessageAction } from '@/stores/agent-store'
 import { ConfirmationPanel } from './confirmation-panel'
 import { CopyButton } from './copy-button'
 import { MarkdownContent } from './markdown-content'
@@ -16,6 +16,7 @@ export function ChatMessage({
   streaming,
   onConfirmRequest,
   onCancelRequest,
+  onMessageAction,
 }: {
   message: AgentMessage
   isLastAssistant?: boolean
@@ -23,6 +24,7 @@ export function ChatMessage({
   streaming?: boolean
   onConfirmRequest?: (request: AgentConfirmationRequest) => void
   onCancelRequest?: (request: AgentConfirmationRequest) => void
+  onMessageAction?: (action: AgentMessageAction) => void
 }) {
   const isUser = message.role === 'user'
   const [hovered, setHovered] = useState(false)
@@ -81,6 +83,21 @@ export function ChatMessage({
                 onConfirm={(request) => onConfirmRequest?.(request)}
                 onCancel={(request) => onCancelRequest?.(request)}
               />
+              {(message.actions?.length ?? 0) > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-white/[0.06] pt-3">
+                  {message.actions?.map((action) => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      onClick={() => onMessageAction?.(action)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-purple-300/25 bg-purple-300/[0.09] px-3 py-2 text-xs font-medium text-purple-100 transition-colors hover:border-purple-300/45 hover:bg-purple-300/[0.16]"
+                    >
+                      <span>{action.label}</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
         </div>

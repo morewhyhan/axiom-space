@@ -36,8 +36,8 @@ export function compileInterventionProtocol(input: InterventionProtocolInput): I
   const executionSteps = [
     `先确认本轮只处理“${label}”，不同时展开新的学习目标。`,
     normalizeSentence(input.teachingIntervention),
-    `干预后立即执行验证任务：${normalizeSentence(input.verificationCriterion)}`,
-    '根据用户可观察表现记录结果；未达到标准时进入失败分支，不直接宣布掌握。',
+    `调整后立即用一个小任务确认：${normalizeSentence(input.verificationCriterion)}`,
+    '根据用户实际表现记录结果；未达到标准时换一种方法，不直接宣布已经掌握。',
   ]
   return {
     currentLearningObject: supplied.currentLearningObject?.trim() || label,
@@ -50,7 +50,7 @@ export function compileInterventionProtocol(input: InterventionProtocolInput): I
     verificationTask: supplied.verificationTask?.trim() || normalizeSentence(input.verificationCriterion),
     passCriteria: normalizeList(supplied.passCriteria, [normalizeSentence(input.verificationCriterion)], 5),
     failureBranch: supplied.failureBranch?.trim() || defaultFailureBranch(input.dimensionKey),
-    stopCondition: supplied.stopCondition?.trim() || '达到通过标准并在一个变式或正式评估中保持后，停止当前干预，进入下一学习节点。',
+    stopCondition: supplied.stopCondition?.trim() || '达到标准，并且换一个场景仍能做到后，停止额外帮助，进入下一步。',
     priority: clampPriority(supplied.priority ?? Math.round((input.confidence ?? 0.5) * 100)),
   }
 }
@@ -61,13 +61,13 @@ export function formatInterventionProtocol(protocol: InterventionProtocol): stri
     `【观察事实】${protocol.observationFact}`,
     `【当前判断】${protocol.currentJudgment}`,
     `【判断边界】${protocol.judgmentBoundary}`,
-    `【唯一主干预】${protocol.primaryIntervention}`,
-    `【执行顺序】\n${protocol.executionSteps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`,
-    `【禁止事项】\n${protocol.forbiddenActions.map((item) => `- ${item}`).join('\n')}`,
-    `【验证任务】${protocol.verificationTask}`,
-    `【通过标准】\n${protocol.passCriteria.map((item) => `- ${item}`).join('\n')}`,
-    `【失败分支】${protocol.failureBranch}`,
-    `【停止条件】${protocol.stopCondition}`,
+    `【这次只调整】${protocol.primaryIntervention}`,
+    `【具体顺序】\n${protocol.executionSteps.map((step, index) => `${index + 1}. ${step}`).join('\n')}`,
+    `【不要这样做】\n${protocol.forbiddenActions.map((item) => `- ${item}`).join('\n')}`,
+    `【怎样确认】${protocol.verificationTask}`,
+    `【怎样算有效】\n${protocol.passCriteria.map((item) => `- ${item}`).join('\n')}`,
+    `【如果没效果】${protocol.failureBranch}`,
+    `【什么时候停止】${protocol.stopCondition}`,
   ].join('\n')
 }
 

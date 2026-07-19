@@ -54,6 +54,7 @@ interface MermaidModule {
 let mermaidModule: MermaidModule | null = null;
 let mermaidInitPromise: Promise<void> | null = null;
 let mermaidRenderSequence = 0;
+const MERMAID_LOAD_TIMEOUT_MS = 10_000;
 
 async function getMermaid(): Promise<MermaidModule> {
   if (mermaidModule) return mermaidModule;
@@ -216,7 +217,11 @@ export async function renderMermaidBlocks(container: HTMLElement): Promise<void>
   if (mermaidDivs.length === 0) return;
 
   try {
-    const mermaid = await getMermaid();
+    const mermaid = await withTimeout(
+      getMermaid(),
+      MERMAID_LOAD_TIMEOUT_MS,
+      `Mermaid 加载超过 ${MERMAID_LOAD_TIMEOUT_MS / 1000} 秒`,
+    );
 
     for (const div of Array.from(mermaidDivs) as HTMLElement[]) {
       const src = decodeURIComponent(div.getAttribute('data-mermaid-src') || '');
@@ -245,11 +250,25 @@ export async function renderMermaidBlocks(container: HTMLElement): Promise<void>
         div.dataset.mermaidRetries = String(retries + 1);
         shouldRetry = true;
       }
-      div.innerHTML = '<div class="mermaid-error">图表组件加载失败，正在等待重试。</div>';
+      div.innerHTML = retries < 2
+        ? '<div class="mermaid-error">图表组件加载超时，正在重试。</div>'
+        : '<div class="mermaid-error">图表组件加载超时，请刷新后重试。</div>';
       div.setAttribute('data-mermaid-src', div.getAttribute('data-mermaid-src') || '');
     }
     if (shouldRetry && container.isConnected) {
       window.setTimeout(() => { void renderMermaidBlocks(container); }, 800);
     }
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }

@@ -13,6 +13,14 @@ export interface AgentMessage {
   resourceProgress?: ResourceProgressItem[]
   ragReferences?: RagReference[]
   confirmationRequests?: AgentConfirmationRequest[]
+  actions?: AgentMessageAction[]
+}
+
+export interface AgentMessageAction {
+  id: string
+  label: string
+  type: 'navigate'
+  mode: 'cognition'
 }
 
 export interface AgentConfirmationRequest {
@@ -48,6 +56,7 @@ export type ResourceProgressStatus =
   | 'failed'
 
 export interface ResourceProgressItem {
+  id?: string
   topic: string
   resourceType: string
   label: string
@@ -57,6 +66,8 @@ export interface ResourceProgressItem {
   path?: string
   fileName?: string
   error?: string
+  sourceSessionId?: string
+  workflowId?: string
   timestamp?: number
 }
 
@@ -166,6 +177,7 @@ interface AgentStore {
   _upsertLastResourceProgress: (item: ResourceProgressItem) => void
   _setLastRagReferences: (references: RagReference[]) => void
   _upsertLastConfirmationRequest: (request: AgentConfirmationRequest) => void
+  _setLastMessageActions: (actions: AgentMessageAction[]) => void
   _markConfirmationRequest: (id: string, status: AgentConfirmationRequest['status']) => void
 
   // Stream abort control — shared across hook instances so switchSession
@@ -184,6 +196,10 @@ interface AgentStore {
   openCardThread: (card: { id: string; title: string; type: string }, options?: { openChat?: boolean }) => Promise<void>
   deleteSession: (id: string) => Promise<void>
   clearMessages: () => Promise<void>
+}
+
+function resourceProgressKey(item: ResourceProgressItem): string {
+  return [item.workflowId || item.sourceSessionId || item.topic, item.resourceType, item.label].join('::')
 }
 
 export const useAgentStore = create<AgentStore>()((set, get) => ({
@@ -228,16 +244,21 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     set((s) => {
       const updated = [...s.messages]
       if (updated.length === 0) return { messages: updated }
-      const lastIndex = updated.length - 1
+      // A resource job may finish after the user has already sent another
+      // message.  Binding progress to the literal last message silently drops
+      // that completion event whenever the last message is a user turn.
+      // Always attach it to the most recent assistant turn in this session.
+      const lastIndex = updated.findLastIndex((message) => message.role === 'assistant')
+      if (lastIndex < 0) return { messages: updated }
       const last = updated[lastIndex]
-      if (last.role !== 'assistant') return { messages: updated }
       const existing = last.resourceProgress ?? []
-      const next = existing.some((entry) => entry.resourceType === item.resourceType)
-        ? existing.map((entry) => entry.resourceType === item.resourceType ? { ...entry, ...item } : entry)
+      const itemKey = resourceProgressKey(item)
+      const next = existing.some((entry) => resourceProgressKey(entry) === itemKey)
+        ? existing.map((entry) => resourceProgressKey(entry) === itemKey ? { ...entry, ...item } : entry)
         : [...existing, item]
       updated[lastIndex] = { ...last, resourceProgress: next }
       return { messages: updated }
-    }),
+  }),
   _setLastRagReferences: (references) =>
     set((s) => {
       const updated = [...s.messages]
@@ -260,6 +281,16 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
         ? existing.map((entry) => entry.id === request.id ? { ...entry, ...request } : entry)
         : [...existing, request]
       updated[lastIndex] = { ...last, confirmationRequests: next }
+      return { messages: updated }
+    }),
+  _setLastMessageActions: (actions) =>
+    set((s) => {
+      const updated = [...s.messages]
+      if (updated.length === 0) return { messages: updated }
+      const lastIndex = updated.length - 1
+      const last = updated[lastIndex]
+      if (last.role !== 'assistant') return { messages: updated }
+      updated[lastIndex] = { ...last, actions }
       return { messages: updated }
     }),
   _markConfirmationRequest: (id, status) =>
@@ -303,14 +334,10 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
       return
     }
 
-    const isUsableSession = session.status !== 'completed' && session.threadStatus !== 'archived'
-    const shouldActivate = session.status !== 'active'
+    const isReadOnlySession = session.status === 'completed' || session.threadStatus === 'archived'
+    const shouldActivate = session.status !== 'active' && !isReadOnlySession
 
     if (shouldActivate) {
-      if (!isUsableSession) {
-        set({ error: '该会话已归档，无法继续对话' })
-        return
-      }
       try {
         const vid = useAppStore.getState().currentVaultId
         const res = await client.api.agent.sessions[':id'].activate.$post({
@@ -357,6 +384,10 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
           appStore.setRightPanelView('editor')
         }
       } else {
+        // Ordinary conversations are intentionally unbound. Keeping the
+        // previously selected card here makes the centre transcript look as
+        // though it belongs to that card.
+        appStore.clearSelectedNode()
         const hadLeftPanel = appStore.panelLayout.left.length > 0
         const leftPanel: PanelId[] = !hadLeftPanel || appStore.forgeResourceView === 'context'
           ? ['sessionList']
@@ -375,16 +406,28 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
     try {
       const vid = useAppStore.getState().currentVaultId
       const res = await client.api.agent.history.$get({ query: { id, ...(vid ? { vid } : {}) } })
-      const data = await readApiResult<{ success: boolean; messages?: Array<{ role: string; content: string }>; error?: string }>(res, '加载历史失败')
+      const data = await readApiResult<{
+        success: boolean
+        messages?: Array<{ role: string; content: string; ragReferences?: RagReference[] }>
+        error?: string
+      }>(res, '加载历史失败')
       if (data.success && data.messages?.length) {
         set({
           messages: data.messages
             .flatMap((m): AgentMessage[] => (
               isVisibleAgentStoreMessage(m.role, m.content)
-                ? [{ role: m.role, content: m.content }]
+                ? [{
+                    role: m.role,
+                    content: m.content,
+                    ...(Array.isArray(m.ragReferences) && m.ragReferences.length > 0
+                      ? { ragReferences: m.ragReferences }
+                      : {}),
+                  }]
                 : []
             )),
         })
+      } else if (data.success) {
+        set({ messages: [] })
       }
     } catch (err) {
       set({ error: err instanceof Error ? err.message : '加载历史失败' })

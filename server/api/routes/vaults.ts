@@ -9,6 +9,7 @@ import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { ensureVaultRootCard } from '@/server/core/domain/concept-graph'
 import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
+import { deleteSemanticVault } from '@/server/core/rag/semantic-index-service'
 
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
@@ -21,6 +22,19 @@ const app = new Hono<{ Variables: { userId: string } }>()
     orderBy: { createdAt: 'asc' },
     include: { _count: { select: { cards: { where: { path: { not: ROOT_CARD_PATH } } } } } },
   })
+  const completedProfileSessions = await prisma.learningSession.findMany({
+    where: {
+      userId,
+      vaultId: { in: vaults.map((vault) => vault.id) },
+      status: 'completed',
+      OR: [
+        { metadata: { contains: '"initialProfileCompleted":true' } },
+        { metadata: { contains: '"timelineKey":"onboarding"' } },
+      ],
+    },
+    select: { vaultId: true },
+  })
+  const profiledVaultIds = new Set(completedProfileSessions.map((session) => session.vaultId).filter(Boolean))
 
   return c.json({
     success: true,
@@ -28,6 +42,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
       id: v.id,
       name: v.name,
       cardCount: v._count.cards,
+      initialProfileCompleted: profiledVaultIds.has(v.id),
       createdAt: v.createdAt,
     })),
   })
@@ -75,6 +90,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
     await tx.cardRevision.deleteMany({ where: { vaultId } })
     await tx.sourceDocument.deleteMany({ where: { vaultId } })
     await tx.vault.delete({ where: { id: vaultId } })
+  })
+  await deleteSemanticVault(vaultId).catch((error) => {
+    console.warn('[Qdrant] failed to clean deleted vault:', error instanceof Error ? error.message : String(error))
   })
 
   return c.json({ success: true, deletedVaultId: vaultId })

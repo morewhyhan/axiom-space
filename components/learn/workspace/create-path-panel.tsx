@@ -176,7 +176,7 @@ export function CreatePathPanel({
             <FileText className="h-3 w-3" />
             {importPending ? currentGenerationStage.label : '导入并生成'}
           </Button>
-          {importPending && <GenerationStatusHint stage={currentGenerationStage} />}
+          {importPending && <GenerationStatusHint stage={currentGenerationStage} floating />}
         </>
       )}
       {error && (

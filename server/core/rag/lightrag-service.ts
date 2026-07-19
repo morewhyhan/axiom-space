@@ -6,6 +6,7 @@ import {
   type LightRAGQueryMode,
   type LightRAGTrackStatus,
 } from '@/server/infra/rag/lightrag-client'
+import { searchSemanticCards } from '@/server/core/rag/semantic-index-service'
 
 export type RagSyncStatus = 'pending' | 'indexing' | 'indexed' | 'failed' | 'disabled'
 
@@ -55,7 +56,7 @@ export function getLightRAGClient() {
   })
 }
 
-export async function syncCardToLightRAG(cardId: string): Promise<{
+export async function syncCardToLightRAG(cardId: string, options: { waitForCompletion?: boolean } = {}): Promise<{
   status: RagSyncStatus
   skipped?: boolean
   error?: string
@@ -79,7 +80,17 @@ export async function syncCardToLightRAG(cardId: string): Promise<{
     where: { provider_cardId: { provider: PROVIDER, cardId: card.id } },
   })
 
-  if (existing?.contentHash === contentHash && existing.status === 'indexed') {
+  const remoteRecords = client
+    ? await findLightRAGDocumentRecordsByFilePath(client, documentId, workspace).catch(() => [])
+    : []
+  const remoteReady = remoteRecords.some((record) => ['processed', 'completed', 'indexed'].includes(String(record.status || '').toLowerCase()))
+  if (existing?.contentHash === contentHash && remoteReady) {
+    if (existing.status !== 'indexed') {
+      await prisma.ragDocumentIndex.update({
+        where: { id: existing.id },
+        data: { status: 'indexed', lastError: null, indexedAt: new Date(), lastSyncedAt: new Date() },
+      })
+    }
     return { status: 'indexed', skipped: true }
   }
 
@@ -109,8 +120,8 @@ export async function syncCardToLightRAG(cardId: string): Promise<{
   if (!client) return { status: 'disabled', error: 'LIGHTRAG_BASE_URL is not configured' }
 
   try {
-    if (existing && existing.contentHash !== contentHash) {
-      await deleteExistingLightRAGDocument(client, documentId)
+    if (remoteRecords.length > 0) {
+      await deleteExistingLightRAGDocument(client, documentId, workspace)
     }
 
     const result = await client.insertText({ content, documentId, workspace })
@@ -123,7 +134,9 @@ export async function syncCardToLightRAG(cardId: string): Promise<{
           : null
 
     const trackStatus = trackId
-      ? await waitForLightRAGTrack(client, trackId, {
+      ? options.waitForCompletion === false
+        ? { state: 'pending' as const }
+        : await waitForLightRAGTrack(client, trackId, {
         timeoutMs: Number(process.env.LIGHTRAG_INDEX_TIMEOUT_MS || 180_000),
         pollMs: Number(process.env.LIGHTRAG_INDEX_POLL_MS || 3_000),
       })
@@ -158,20 +171,21 @@ export async function syncCardToLightRAG(cardId: string): Promise<{
     return { status: 'indexed' }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    await prisma.ragDocumentIndex.update({
-      where: { provider_cardId: { provider: PROVIDER, cardId: card.id } },
+    const updated = await prisma.ragDocumentIndex.updateMany({
+      where: { provider: PROVIDER, cardId: card.id },
       data: {
         status: 'failed',
         lastError: message,
         lastSyncedAt: new Date(),
       },
     })
+    if (updated.count === 0) return { status: 'disabled', error: 'Card was deleted before graph enhancement completed' }
     return { status: 'failed', error: message }
   }
 }
 
-async function deleteExistingLightRAGDocument(client: LightRAGClient, documentId: string) {
-  const docIds = await findLightRAGDocumentIdsByFilePath(client, documentId)
+async function deleteExistingLightRAGDocument(client: LightRAGClient, documentId: string, workspace: string) {
+  const docIds = await findLightRAGDocumentIdsByFilePath(client, documentId, workspace)
   if (docIds.length === 0) return
 
   const timeoutMs = Number(process.env.LIGHTRAG_DELETE_TIMEOUT_MS || 120_000)
@@ -179,7 +193,7 @@ async function deleteExistingLightRAGDocument(client: LightRAGClient, documentId
   const startedAt = Date.now()
 
   while (Date.now() - startedAt <= timeoutMs) {
-    const result = await client.deleteDocuments(docIds)
+    const result = await client.deleteDocuments(docIds, workspace)
     if (result.status === 'deletion_started' || result.status === 'not_allowed') {
       await waitForLightRAGPipelineIdle(client, { timeoutMs, pollMs })
       return
@@ -191,13 +205,16 @@ async function deleteExistingLightRAGDocument(client: LightRAGClient, documentId
   throw new Error(`Timed out deleting existing LightRAG document: ${documentId}`)
 }
 
-async function findLightRAGDocumentIdsByFilePath(client: LightRAGClient, filePath: string): Promise<string[]> {
-  const result = await client.listDocuments()
+async function findLightRAGDocumentIdsByFilePath(client: LightRAGClient, filePath: string, workspace: string): Promise<string[]> {
+  const documents = await findLightRAGDocumentRecordsByFilePath(client, filePath, workspace)
+  return documents.filter((doc) => typeof doc.id === 'string').map((doc) => doc.id as string)
+}
+
+async function findLightRAGDocumentRecordsByFilePath(client: LightRAGClient, filePath: string, workspace: string): Promise<LightRAGDocumentRecord[]> {
+  const result = await client.listDocuments(workspace)
   const statuses = result.statuses && typeof result.statuses === 'object' ? result.statuses : {}
   const documents = Object.values(statuses).flatMap((items) => Array.isArray(items) ? items : []) as LightRAGDocumentRecord[]
-  return documents
-    .filter((doc) => doc.file_path === filePath && typeof doc.id === 'string')
-    .map((doc) => doc.id as string)
+  return documents.filter((doc) => doc.file_path === filePath)
 }
 
 async function waitForLightRAGPipelineIdle(
@@ -249,6 +266,203 @@ export async function syncVaultToLightRAG(vaultId: string, limit = 200) {
   return summary
 }
 
+export async function deleteVaultFromLightRAG(vaultId: string): Promise<{ deleted: number; disabled: boolean }> {
+  const client = getLightRAGClient()
+  if (!client) return { deleted: 0, disabled: true }
+
+  const workspace = getLightRAGWorkspace(vaultId)
+  const documents = await client.listDocuments(workspace)
+  const prefix = `axiom:${vaultId}:card:`
+  const docIds = Object.values(documents.statuses || {})
+    .flatMap((items) => Array.isArray(items) ? items : [])
+    .filter((document) => typeof document.file_path === 'string' && document.file_path.startsWith(prefix))
+    .map((document) => document.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+
+  if (docIds.length === 0) return { deleted: 0, disabled: false }
+
+  const timeoutMs = Number(process.env.LIGHTRAG_VAULT_INDEX_TIMEOUT_MS || 1_800_000)
+  const pollMs = Number(process.env.LIGHTRAG_INDEX_POLL_MS || 3_000)
+  await waitForLightRAGPipelineIdle(client, { timeoutMs, pollMs })
+  const result = await client.deleteDocuments(docIds, workspace)
+  if (String(result.status || '').toLowerCase() === 'busy') {
+    throw new Error(`LightRAG refused deletion for vault ${vaultId}: ${result.message || 'pipeline busy'}`)
+  }
+  await waitForLightRAGPipelineIdle(client, { timeoutMs, pollMs })
+  return { deleted: docIds.length, disabled: false }
+}
+
+/**
+ * Batch-index a newly created vault. Golden/demo imports create a new vault id,
+ * so their document ids cannot conflict with an older run. Submitting batches
+ * first lets LightRAG drain one real processing queue instead of making the
+ * seed script wait for every card before submitting the next one.
+ */
+export async function syncFreshVaultToLightRAG(
+  vaultId: string,
+  options: { limit?: number; batchSize?: number } = {},
+) {
+  const cards = await prisma.card.findMany({
+    where: { vaultId },
+    include: { cluster: { select: { name: true, color: true } } },
+    orderBy: { updatedAt: 'desc' },
+    take: options.limit ?? 500,
+  })
+  const summary = { total: cards.length, indexed: 0, failed: 0, disabled: 0, skipped: 0, pending: 0 }
+  if (cards.length === 0) return summary
+
+  const client = getLightRAGClient()
+  const workspace = getLightRAGWorkspace(vaultId)
+  if (!client) {
+    await Promise.all(cards.map((card) => prisma.ragDocumentIndex.upsert({
+      where: { provider_cardId: { provider: PROVIDER, cardId: card.id } },
+      create: {
+        provider: PROVIDER,
+        vaultId,
+        cardId: card.id,
+        workspace,
+        documentId: buildLightRAGDocumentId(vaultId, card.id),
+        contentHash: hashRagContent(formatCardForRag(card)),
+        status: 'disabled',
+        lastError: 'LIGHTRAG_BASE_URL is not configured',
+      },
+      update: { status: 'disabled', lastError: 'LIGHTRAG_BASE_URL is not configured' },
+    })))
+    summary.disabled = cards.length
+    return summary
+  }
+
+  // A previous batch may finish after AXIOM's polling window. Reconcile the
+  // remote processed documents before submitting anything again so a late
+  // completion is recovered instead of duplicated or left permanently failed.
+  const [existingIndexes, remoteResult] = await Promise.all([
+    prisma.ragDocumentIndex.findMany({ where: { vaultId, provider: PROVIDER } }),
+    client.listDocuments(workspace).catch(() => null),
+  ])
+  const existingByCardId = new Map(existingIndexes.map((item) => [item.cardId, item]))
+  const remoteStatuses = remoteResult?.statuses && typeof remoteResult.statuses === 'object'
+    ? remoteResult.statuses
+    : {}
+  const remoteReadyPaths = new Set(
+    Object.values(remoteStatuses)
+      .flatMap((items) => Array.isArray(items) ? items : [])
+      .filter((record) => ['processed', 'completed', 'indexed'].includes(String(record.status || '').toLowerCase()))
+      .map((record) => record.file_path)
+      .filter((filePath): filePath is string => typeof filePath === 'string' && filePath.length > 0),
+  )
+
+  const cardsToIndex = [] as typeof cards
+  const staleDocumentPaths = new Set<string>()
+  for (const card of cards) {
+    const contentHash = hashRagContent(formatCardForRag(card))
+    const documentId = buildLightRAGDocumentId(vaultId, card.id)
+    const existing = existingByCardId.get(card.id)
+    if (existing?.contentHash === contentHash && remoteReadyPaths.has(documentId)) {
+      await prisma.ragDocumentIndex.update({
+        where: { id: existing.id },
+        data: { status: 'indexed', lastError: null, indexedAt: new Date(), lastSyncedAt: new Date() },
+      })
+      summary.skipped += 1
+      continue
+    }
+    if (remoteReadyPaths.has(documentId)) staleDocumentPaths.add(documentId)
+    cardsToIndex.push(card)
+  }
+
+  // A changed card keeps the same AXIOM document identity. Remove the old
+  // derived document before inserting the new content so stale vectors cannot
+  // survive beside the current card.
+  for (const documentId of staleDocumentPaths) {
+    await deleteExistingLightRAGDocument(client, documentId, workspace)
+  }
+
+  const batchSize = Math.max(1, Math.min(100, options.batchSize ?? Number(process.env.LIGHTRAG_SEED_BATCH_SIZE || 24)))
+  const tracks: Array<{ trackId: string; cardIds: string[] }> = []
+
+  for (let offset = 0; offset < cardsToIndex.length; offset += batchSize) {
+    const batch = cardsToIndex.slice(offset, offset + batchSize)
+    const documents = batch.map((card) => {
+      const content = formatCardForRag(card)
+      return {
+        card,
+        content,
+        documentId: buildLightRAGDocumentId(vaultId, card.id),
+        contentHash: hashRagContent(content),
+      }
+    })
+
+    await Promise.all(documents.map(({ card, documentId, contentHash }) => prisma.ragDocumentIndex.upsert({
+      where: { provider_cardId: { provider: PROVIDER, cardId: card.id } },
+      create: {
+        provider: PROVIDER,
+        vaultId,
+        cardId: card.id,
+        workspace,
+        documentId,
+        contentHash,
+        status: 'indexing',
+        lastSyncedAt: new Date(),
+      },
+      update: {
+        workspace,
+        documentId,
+        contentHash,
+        status: 'indexing',
+        trackId: null,
+        lastError: null,
+        lastSyncedAt: new Date(),
+      },
+    })))
+
+    try {
+      const result = await client.insertTexts({
+        texts: documents.map((document) => document.content),
+        documentIds: documents.map((document) => document.documentId),
+        workspace,
+      })
+      const trackId = typeof result.track_id === 'string'
+        ? result.track_id
+        : typeof result.trackId === 'string'
+          ? result.trackId
+          : null
+      if (!trackId) throw new Error('LightRAG batch insert did not return a track id')
+      const cardIds = batch.map((card) => card.id)
+      await prisma.ragDocumentIndex.updateMany({
+        where: { provider: PROVIDER, cardId: { in: cardIds } },
+        data: { trackId, lastSyncedAt: new Date() },
+      })
+      tracks.push({ trackId, cardIds })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      await prisma.ragDocumentIndex.updateMany({
+        where: { provider: PROVIDER, cardId: { in: batch.map((card) => card.id) } },
+        data: { status: 'failed', lastError: message, lastSyncedAt: new Date() },
+      })
+      summary.failed += batch.length
+    }
+  }
+
+  const timeoutMs = Number(process.env.LIGHTRAG_VAULT_INDEX_TIMEOUT_MS || 1_800_000)
+  const pollMs = Number(process.env.LIGHTRAG_INDEX_POLL_MS || 3_000)
+  for (const track of tracks) {
+    const result = await waitForLightRAGTrack(client, track.trackId, { timeoutMs, pollMs })
+    const indexed = result.state === 'processed'
+    await prisma.ragDocumentIndex.updateMany({
+      where: { provider: PROVIDER, cardId: { in: track.cardIds } },
+      data: indexed
+        ? { status: 'indexed', lastError: null, indexedAt: new Date(), lastSyncedAt: new Date() }
+        : result.state === 'pending'
+          ? { status: 'indexing', lastError: result.error || 'LightRAG batch indexing is still pending', lastSyncedAt: new Date() }
+          : { status: 'failed', lastError: result.error || 'LightRAG batch indexing failed', lastSyncedAt: new Date() },
+    })
+    if (indexed) summary.indexed += track.cardIds.length
+    else if (result.state === 'pending') summary.pending += track.cardIds.length
+    else summary.failed += track.cardIds.length
+  }
+
+  return summary
+}
+
 export async function queryLightRAGContext(params: {
   vaultId: string
   query: string
@@ -256,21 +470,38 @@ export async function queryLightRAGContext(params: {
   topK?: number
 }): Promise<RagQueryContext> {
   const client = getLightRAGClient()
-  if (!client) return { enabled: false, answer: '', references: [], error: 'LIGHTRAG_BASE_URL is not configured' }
-
   try {
-    const raw = await client.query({
-      query: params.query,
-      workspace: getLightRAGWorkspace(params.vaultId),
-      mode: params.mode,
-      topK: params.topK,
-    })
-    const answer = extractRagAnswer(raw)
+    const [semanticHits, deepResult] = await Promise.all([
+      searchSemanticCards(params.vaultId, params.query, Math.max(params.topK ?? 8, 12)).catch(() => []),
+      client
+        ? client.query({
+          query: params.query,
+          workspace: getLightRAGWorkspace(params.vaultId),
+          mode: params.mode,
+          topK: Math.max((params.topK ?? 8) * 4, 24),
+        }).catch(() => null)
+        : Promise.resolve(null),
+    ])
+    const semanticReferences: RagReference[] = semanticHits.map((hit) => ({
+      referenceId: String(hit.id),
+      filePath: hit.payload.path,
+      cardId: hit.payload.cardId,
+      vaultId: hit.payload.vaultId,
+      title: hit.payload.title,
+      type: hit.payload.type,
+    }))
     const references = mergeRagReferences(
-      await enrichRagReferences(extractRagReferences(raw), params.vaultId),
+      mergeRagReferences(
+        semanticReferences,
+        deepResult ? await enrichRagReferences(extractRagReferences(deepResult), params.vaultId) : [],
+      ),
       await findLocalIndexedReferences(params.vaultId, params.query, params.topK ?? 6),
-    )
-    return { enabled: true, answer, references, raw }
+    ).slice(0, params.topK ?? 8)
+    // The sidecar image keeps one physical vector store. Its synthesized answer
+    // may mix workspaces, so only use vault-scoped references and hydrate their
+    // content from Prisma, which remains AXIOM's business fact source.
+    const answer = await buildScopedRagAnswer(params.vaultId, references)
+    return { enabled: true, answer, references, raw: { semanticHits, deep: deepResult } }
   } catch (error) {
     return {
       enabled: true,
@@ -282,9 +513,10 @@ export async function queryLightRAGContext(params: {
 }
 
 export async function getLightRAGCardStatus(cardId: string) {
-  const index = await prisma.ragDocumentIndex.findUnique({
-    where: { provider_cardId: { provider: PROVIDER, cardId } },
+  let indexes = await prisma.ragDocumentIndex.findMany({
+    where: { cardId, provider: { in: ['qdrant', PROVIDER] } },
     select: {
+      provider: true,
       status: true,
       workspace: true,
       documentId: true,
@@ -295,12 +527,35 @@ export async function getLightRAGCardStatus(cardId: string) {
       updatedAt: true,
     },
   })
+  const pendingGraph = indexes.find((item) => item.provider === PROVIDER && item.status === 'indexing' && item.trackId)
+  const client = pendingGraph ? getLightRAGClient() : null
+  if (client && pendingGraph?.trackId) {
+    const remote = await client.getTrackStatus(pendingGraph.trackId).catch(() => null)
+    const normalized = normalizeTrackStatus(remote)
+    if (normalized.state === 'processed' || normalized.state === 'failed') {
+      await prisma.ragDocumentIndex.update({
+        where: { provider_cardId: { provider: PROVIDER, cardId } },
+        data: normalized.state === 'processed'
+          ? { status: 'indexed', indexedAt: new Date(), lastSyncedAt: new Date(), lastError: null }
+          : { status: 'failed', lastSyncedAt: new Date(), lastError: normalized.error || 'LightRAG graph enhancement failed' },
+      })
+      indexes = await prisma.ragDocumentIndex.findMany({
+        where: { cardId, provider: { in: ['qdrant', PROVIDER] } },
+        select: { provider: true, status: true, workspace: true, documentId: true, trackId: true, lastError: true, indexedAt: true, lastSyncedAt: true, updatedAt: true },
+      })
+    }
+  }
+  const semantic = indexes.find((item) => item.provider === 'qdrant') ?? null
+  const graph = indexes.find((item) => item.provider === PROVIDER) ?? null
+  const index = semantic ?? graph
 
   return {
-    provider: PROVIDER,
+    provider: semantic ? 'qdrant' : PROVIDER,
     status: index?.status ?? 'pending',
     synced: index?.status === 'indexed',
     index: index ?? null,
+    semantic,
+    graph,
   }
 }
 
@@ -394,18 +649,20 @@ export async function findRelatedCardsForRag(params: {
 }
 
 export async function getLightRAGStatus(vaultId: string) {
-  const [totalCards, indexed, failed, disabled, pending] = await Promise.all([
+  const [totalCards, indexed, failed, disabled, pending, deepIndexed, deepPending] = await Promise.all([
     prisma.card.count({ where: { vaultId } }),
+    prisma.ragDocumentIndex.count({ where: { vaultId, provider: 'qdrant', status: 'indexed' } }),
+    prisma.ragDocumentIndex.count({ where: { vaultId, provider: 'qdrant', status: 'failed' } }),
+    prisma.ragDocumentIndex.count({ where: { vaultId, provider: 'qdrant', status: 'disabled' } }),
+    prisma.ragDocumentIndex.count({ where: { vaultId, provider: 'qdrant', status: { in: ['pending', 'indexing'] } } }),
     prisma.ragDocumentIndex.count({ where: { vaultId, provider: PROVIDER, status: 'indexed' } }),
-    prisma.ragDocumentIndex.count({ where: { vaultId, provider: PROVIDER, status: 'failed' } }),
-    prisma.ragDocumentIndex.count({ where: { vaultId, provider: PROVIDER, status: 'disabled' } }),
     prisma.ragDocumentIndex.count({ where: { vaultId, provider: PROVIDER, status: { in: ['pending', 'indexing'] } } }),
   ])
   const client = getLightRAGClient()
   const health = client ? await client.health() : { ok: false, detail: 'LIGHTRAG_BASE_URL is not configured' }
   return {
-    provider: PROVIDER,
-    enabled: !!client,
+    provider: 'qdrant+lightrag',
+    enabled: !!process.env.QDRANT_BASE_URL,
     workspace: getLightRAGWorkspace(vaultId),
     health,
     totalCards,
@@ -413,11 +670,13 @@ export async function getLightRAGStatus(vaultId: string) {
     failed,
     disabled,
     pending,
+    deepGraph: { enabled: !!client, indexed: deepIndexed, pending: deepPending, health },
   }
 }
 
 function formatCardForRag(card: {
   id: string
+  vaultId: string
   path: string
   title: string | null
   type: string
@@ -430,6 +689,7 @@ function formatCardForRag(card: {
     `# ${card.title || card.path}`,
     '',
     `AXIOM_CARD_ID: ${card.id}`,
+    `AXIOM_WORKSPACE: ${getLightRAGWorkspace(card.vaultId)}`,
     `AXIOM_CARD_TYPE: ${card.type}`,
     `AXIOM_CARD_PATH: ${card.path}`,
     card.cluster?.name ? `AXIOM_CLUSTER: ${card.cluster.name}` : null,
@@ -449,14 +709,19 @@ function safeParseTags(raw: string | null | undefined): string[] {
   }
 }
 
-function extractRagAnswer(raw: unknown) {
-  if (!raw || typeof raw !== 'object') return typeof raw === 'string' ? raw : ''
-  const data = raw as { response?: unknown; answer?: unknown; result?: unknown; data?: unknown }
-  for (const value of [data.response, data.answer, data.result]) {
-    if (typeof value === 'string') return value
-  }
-  if (typeof data.data === 'string') return data.data
-  return JSON.stringify(raw)
+async function buildScopedRagAnswer(vaultId: string, references: RagReference[]): Promise<string> {
+  const cardIds = references.map((reference) => reference.cardId).filter((id): id is string => !!id)
+  if (cardIds.length === 0) return ''
+  const cards = await prisma.card.findMany({
+    where: { vaultId, id: { in: [...new Set(cardIds)] } },
+    select: { id: true, title: true, path: true, content: true },
+  })
+  const byId = new Map(cards.map((card) => [card.id, card]))
+  return references.flatMap((reference, index) => {
+    const card = reference.cardId ? byId.get(reference.cardId) : null
+    if (!card) return []
+    return [`【当前知识库参考 ${index + 1}】${card.title || card.path}\n${card.content.slice(0, 1200)}`]
+  }).join('\n\n')
 }
 
 function extractRagReferences(raw: unknown): RagReference[] {
@@ -506,15 +771,19 @@ async function enrichRagReferences(references: RagReference[], vaultId: string):
 async function findLocalIndexedReferences(vaultId: string, query: string, limit: number): Promise<RagReference[]> {
   const q = query.trim()
   if (!q) return []
+  const terms = [...new Set(q.match(/[A-Za-z][A-Za-z0-9_-]{1,}|[\u4e00-\u9fff]{2,6}/g) || [])]
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 12)
+  if (terms.length === 0) return []
   const cards = await prisma.card.findMany({
     where: {
       vaultId,
-      ragIndexes: { some: { provider: PROVIDER, status: 'indexed' } },
-      OR: [
-        { title: { contains: q, mode: 'insensitive' } },
-        { path: { contains: q, mode: 'insensitive' } },
-        { content: { contains: q, mode: 'insensitive' } },
-      ],
+      ragIndexes: { some: { provider: { in: ['qdrant', PROVIDER] }, status: 'indexed' } },
+      OR: terms.flatMap((term) => [
+        { title: { contains: term, mode: 'insensitive' as const } },
+        { path: { contains: term, mode: 'insensitive' as const } },
+        { content: { contains: term, mode: 'insensitive' as const } },
+      ]),
     },
     select: { id: true, title: true, type: true },
     take: Math.max(1, Math.min(limit, 12)),
@@ -565,20 +834,8 @@ async function waitForLightRAGTrack(
       await sleep(Math.max(500, options.pollMs))
       continue
     }
-    const documents = Array.isArray(lastStatus.documents) ? lastStatus.documents : []
-    const statuses = documents.map((doc) => String(doc.status || '').toLowerCase())
-
-    if (statuses.length > 0 && statuses.every((status) => status.includes('processed'))) {
-      return { state: 'processed' }
-    }
-
-    const failed = documents.find((doc) => {
-      const status = String(doc.status || '').toLowerCase()
-      return status.includes('fail') || status.includes('error')
-    })
-    if (failed) {
-      return { state: 'failed', error: failed.error_msg || `LightRAG document status: ${failed.status}` }
-    }
+    const normalized = normalizeTrackStatus(lastStatus)
+    if (normalized.state !== 'pending') return normalized
 
     await sleep(Math.max(500, options.pollMs))
   }
@@ -589,6 +846,18 @@ async function waitForLightRAGTrack(
       ? `Timed out waiting for LightRAG track ${trackId}`
       : lastError || 'LightRAG track status unavailable',
   }
+}
+
+function normalizeTrackStatus(status: LightRAGTrackStatus | null): { state: 'processed' | 'failed' | 'pending'; error?: string } {
+  const documents = Array.isArray(status?.documents) ? status.documents : []
+  const statuses = documents.map((document) => String(document.status || '').toLowerCase())
+  if (statuses.length > 0 && statuses.every((value) => value.includes('processed'))) return { state: 'processed' }
+  const failed = documents.find((document) => {
+    const value = String(document.status || '').toLowerCase()
+    return value.includes('fail') || value.includes('error')
+  })
+  if (failed) return { state: 'failed', error: failed.error_msg || `LightRAG document status: ${failed.status}` }
+  return { state: 'pending' }
 }
 
 function sleep(ms: number) {

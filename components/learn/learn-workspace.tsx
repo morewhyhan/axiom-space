@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { CheckCircle2, FileText, LayoutDashboard, Loader2, Route } from 'lucide-react'
 import { toast } from '@/lib/ui-feedback'
 import {
   AI_GENERATION_STAGES,
@@ -18,7 +19,6 @@ import {
   isArchivedPath,
   isUnassignedTaskPath,
   type CreateMode,
-  type PathBuckets,
   type PathFilter,
 } from './workspace'
 import {
@@ -28,6 +28,7 @@ import {
   useExecuteStep,
   useGeneratePath,
   useImportDocument,
+  useDocumentImportProgress,
   useLearningPaths,
   usePathAdjustments,
   useUpdateStepProgress,
@@ -36,6 +37,7 @@ import type { AssessmentEvaluation, LearningPath, LearningStep } from '@/hooks/u
 import { useAppStore } from '@/stores/mode-store'
 import { useAgentStore } from '@/stores/agent-store'
 import type { ImportFilePayload } from '@/lib/import-files'
+import { HudPanel } from '@/components/ui'
 
 export default function LearnWorkspace() {
   const { data, loading, refetch } = useLearningPaths()
@@ -71,13 +73,27 @@ export default function LearnWorkspace() {
   const [pathFilter, setPathFilter] = useState<PathFilter>('active')
   const [stepSessionIds, setStepSessionIds] = useState<Record<string, string>>({})
   const [selectedPushSuggestion, setSelectedPushSuggestion] = useState<PushSuggestion | null>(null)
-  const isGenerating = generatePath.isPending || importDocument.isPending
+  const [importJobId, setImportJobId] = useState<string | null>(null)
+  const [importCompletion, setImportCompletion] = useState<{
+    pathId: string
+    pathName: string
+    stepCount: number
+    sourceTitle: string
+  } | null>(null)
+  const importProgress = useDocumentImportProgress(importJobId)
   const generationStages = createMode === 'material' ? DOCUMENT_IMPORT_STAGES : AI_GENERATION_STAGES
   const [generationStageIndex, setGenerationStageIndex] = useState(0)
-  const currentGenerationStage = generationStages[generationStageIndex] ?? generationStages[0]
+  const currentGenerationStage = createMode === 'material' && importProgress.data
+    ? { label: `${importProgress.data.label} · ${importProgress.data.progress}%`, desc: importProgress.data.message }
+    : generationStages[generationStageIndex] ?? generationStages[0]
+  const importProgressPercent = importDocument.isPending
+    ? Math.max(8, importProgress.data?.progress ?? 12)
+    : importCompletion
+      ? 100
+      : 0
 
   useEffect(() => {
-    if (!isGenerating) {
+    if (!generatePath.isPending) {
       setGenerationStageIndex(0)
       return
     }
@@ -86,7 +102,7 @@ export default function LearnWorkspace() {
       setGenerationStageIndex((index) => Math.min(index + 1, generationStages.length - 1))
     }, 2400)
     return () => clearInterval(id)
-  }, [generationStages.length, isGenerating])
+  }, [generatePath.isPending, generationStages.length])
 
   useEffect(() => {
     if (data?.activePath && !selectedPathId) {
@@ -274,8 +290,12 @@ export default function LearnWorkspace() {
       return
     }
     setError(null)
+    setImportCompletion(null)
+    const jobId = globalThis.crypto.randomUUID()
+    setImportJobId(jobId)
     try {
       const result = await importDocument.mutateAsync({
+        jobId,
         ...(documentText.trim() ? { document: documentText.trim() } : {}),
         ...(documentFile?.fileText ? { fileText: documentFile.fileText } : {}),
         ...(documentFile?.fileBase64 ? { fileBase64: documentFile.fileBase64 } : {}),
@@ -292,12 +312,29 @@ export default function LearnWorkspace() {
         setSelectedPathId(result.pathId)
       }
       setCreatePanelOpen(false)
+      setImportCompletion({
+        pathId: result.pathId ?? '',
+        pathName: `${topic.trim()} 资料学习路径`,
+        stepCount: (result.concepts?.length ?? 0) + 1,
+        sourceTitle: result.docTitle || topic.trim(),
+      })
       toast.success('资料已导入并转成路径')
     } catch (err) {
       const message = err instanceof Error ? err.message : '导入失败'
       setError(message)
       toast.error(message)
+      setImportCompletion(null)
+      setImportJobId(null)
     }
+  }
+
+  const handleOpenDashboardAfterImport = () => {
+    if (importCompletion?.pathId) {
+      setSelectedPathId(importCompletion.pathId)
+    }
+    setImportCompletion(null)
+    setImportJobId(null)
+    setMode('dashboard')
   }
 
   const handleDeletePath = async (pathId: string) => {
@@ -334,6 +371,15 @@ export default function LearnWorkspace() {
 
   return (
     <div className="learn-workspace">
+      {(importDocument.isPending || importCompletion) && (
+        <DocumentImportOverlay
+          pending={importDocument.isPending}
+          progress={importProgressPercent}
+          stage={currentGenerationStage}
+          completion={importCompletion}
+          onOpenDashboard={handleOpenDashboardAfterImport}
+        />
+      )}
       <div className="learn-orbit-grid">
         <PathSidebar
           loading={loading}
@@ -441,6 +487,100 @@ export default function LearnWorkspace() {
           )}
         </section>
       </div>
+    </div>
+  )
+}
+
+function DocumentImportOverlay({
+  pending,
+  progress,
+  stage,
+  completion,
+  onOpenDashboard,
+}: {
+  pending: boolean
+  progress: number
+  stage: { label: string; desc?: string }
+  completion: {
+    pathId: string
+    pathName: string
+    stepCount: number
+    sourceTitle: string
+  } | null
+  onOpenDashboard: () => void
+}) {
+  const safeProgress = Math.min(100, Math.max(0, Math.round(progress)))
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-6 backdrop-blur-md"
+      role="status"
+      aria-live="polite"
+    >
+      <HudPanel
+        as="div"
+        className={`learn-import-modal relative w-[min(560px,calc(100vw-56px))] overflow-hidden rounded-[26px] border-cyan-200/15 bg-black/70 px-9 py-8 text-center shadow-[0_34px_110px_rgba(0,0,0,0.52),0_0_70px_rgba(34,211,238,0.12)]${completion ? ' complete' : ''}`}
+        data-state={pending ? 'running' : 'complete'}
+        style={{ '--import-progress': `${safeProgress}%` } as CSSProperties}
+      >
+        <div className="learn-import-orb">
+          {completion ? <CheckCircle2 className="h-8 w-8" /> : <Loader2 className="h-8 w-8 animate-spin" />}
+        </div>
+
+        <div className="learn-import-kicker">
+          {completion ? 'MATERIAL IMPORT COMPLETE' : 'MATERIAL TO KNOWLEDGE GRAPH'}
+        </div>
+
+        <h3>
+          {completion ? '资料已经生成学习路径' : '正在把资料转成可学习的知识结构'}
+        </h3>
+
+        <p>
+          {completion
+            ? `《${completion.sourceTitle}》已经写入当前仓库，并生成可以在仪表盘查看的知识节点。`
+            : stage.desc || '系统正在解析文档、抽取概念、建立路径与图谱关系。'}
+        </p>
+
+        <div className="learn-import-progress-block">
+          <div className="learn-import-progress-meta">
+            <span>{completion ? '生成完成' : stage.label}</span>
+            <span>{safeProgress}%</span>
+          </div>
+          <div className="learn-import-progress-track">
+            <div className="learn-import-progress-fill" />
+          </div>
+        </div>
+
+        {completion ? (
+          <div className="learn-import-result">
+            <div>
+              <Route className="h-4 w-4" />
+              <span>{completion.pathName}</span>
+            </div>
+            <div>
+              <FileText className="h-4 w-4" />
+              <span>{completion.stepCount || '多'} 个学习步骤与知识节点</span>
+            </div>
+          </div>
+        ) : (
+          <div className="learn-import-live-line">
+            <span />
+            正在写入文献卡、概念卡、学习路径与知识图谱连接
+          </div>
+        )}
+
+        {completion && (
+          <button
+            type="button"
+            className="learn-import-dashboard-button"
+            onClick={onOpenDashboard}
+            data-testid="learn-import-open-dashboard"
+          >
+            <LayoutDashboard className="h-4 w-4" />
+            进入仪表盘查看生成结果
+          </button>
+        )}
+      </HudPanel>
     </div>
   )
 }

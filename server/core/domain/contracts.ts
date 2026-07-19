@@ -1,3 +1,5 @@
+import { findInventoryRaceAccuracyViolations } from './inventory-race-contract'
+
 export const CARD_TYPES = ['fleeting', 'literature', 'permanent'] as const
 export type CardType = typeof CARD_TYPES[number]
 
@@ -110,6 +112,15 @@ export function validatePermanentCardContent(content: string): PermanentCardQual
       label: 'Visitor 变化方向错误',
       message: 'Visitor 通常便于新增操作，但新增元素类型会要求修改 Visitor 接口及已有实现。',
       fix: '明确区分“新增操作”和“新增元素类型”的相反修改成本。',
+    })
+  }
+  for (const violation of findInventoryRaceAccuracyViolations(text)) {
+    accuracyIssues.push({
+      dimension: 'accuracy',
+      code: `inventoryRace:${violation.code}`,
+      label: violation.label,
+      message: violation.message,
+      fix: violation.fix,
     })
   }
   const issues = [...buildQualityIssues(checks), ...accuracyIssues]

@@ -23,12 +23,12 @@ export interface EducationProfile {
 
   // 6 个维度
   dimensions: {
-    depth: DimensionScore;              // 概念理解深度
-    breadth: DimensionScore;            // 知识覆盖广度
-    connection: DimensionScore;         // 知识间的关联能力
-    expression: DimensionScore;         // 语言表达和沟通能力
-    application: DimensionScore;        // 实际应用和问题求解
-    learning_pace: DimensionScore;      // 学习节奏和习惯
+    learningGoal: DimensionScore;        // 愿景、意义与动力
+    currentFoundation: DimensionScore;   // 当前学习状态与自我判断
+    bestExplanationPath: DimensionScore; // 信息编码与噪声
+    stuckPattern: DimensionScore;        // 主要卡点及其触发条件
+    paceAndLoad: DimensionScore;          // 执行负荷与启动摩擦
+    masteryCheck: DimensionScore;         // 反馈、纠偏与停止条件
   };
 
   // 自动更新记录
@@ -47,12 +47,12 @@ export interface EducationProfile {
 }
 
 const EDUCATION_DIMENSION_KEYS = [
-  'depth',
-  'breadth',
-  'connection',
-  'expression',
-  'application',
-  'learning_pace',
+  'learningGoal',
+  'currentFoundation',
+  'bestExplanationPath',
+  'stuckPattern',
+  'paceAndLoad',
+  'masteryCheck',
 ] as const;
 
 type EducationDimensionKey = typeof EDUCATION_DIMENSION_KEYS[number];
@@ -209,33 +209,42 @@ export class EducationProfileAnalyzer {
   ): Promise<Partial<EducationProfile>> {
     const updates: Partial<EducationProfile> = {
       dimensions: {
-        depth: { score: 0, confidence: 0, evidence: [] },
-        breadth: { score: 0, confidence: 0, evidence: [] },
-        connection: { score: 0, confidence: 0, evidence: [] },
-        expression: { score: 0, confidence: 0, evidence: [] },
-        application: { score: 0, confidence: 0, evidence: [] },
-        learning_pace: { score: 0, confidence: 0, evidence: [] },
+        learningGoal: { score: 0, confidence: 0, evidence: [] },
+        currentFoundation: { score: 0, confidence: 0, evidence: [] },
+        bestExplanationPath: { score: 0, confidence: 0, evidence: [] },
+        stuckPattern: { score: 0, confidence: 0, evidence: [] },
+        paceAndLoad: { score: 0, confidence: 0, evidence: [] },
+        masteryCheck: { score: 0, confidence: 0, evidence: [] },
       },
       updateHistory: currentProfile?.updateHistory || [],
     };
 
-    // 1. 分析深度（conceptual depth）
-    updates.dimensions!.depth = this.analyzeConceptualDepth(session);
-
-    // 2. 分析广度（knowledge breadth）
-    updates.dimensions!.breadth = this.analyzeKnowledgeBreadth(session);
-
-    // 3. 分析联接（knowledge connection）
-    updates.dimensions!.connection = this.analyzeKnowledgeConnection(session);
-
-    // 4. 分析表达（expression）
-    updates.dimensions!.expression = this.analyzeExpression(session);
-
-    // 5. 分析应用（application）
-    updates.dimensions!.application = this.analyzeApplication(session);
-
-    // 6. 分析学习节奏（learning pace）
-    updates.dimensions!.learning_pace = this.analyzeLearningPace(userHistory);
+    const userMessages = normalizeUserMessages(session?.messages)
+    updates.dimensions!.learningGoal = analyzeControlSignal(userMessages, {
+      signal: /目标|希望|想要|为了|长期|愿景|意义|值得|选择|独立|解决/u,
+      evidence: '用户表达了为什么愿意持续投入，以及什么结果对自己真正重要',
+    })
+    updates.dimensions!.currentFoundation = analyzeControlSignal(userMessages, {
+      signal: /我(?:以为|判断|感觉|不确定|原来|现在理解)|可能|应该|置信|没把握|修正/u,
+      evidence: '用户主动报告内部状态、置信度或修正自我判断',
+    })
+    updates.dimensions!.bestExplanationPath = analyzeControlSignal(userMessages, {
+      signal: /例子|图|流程|代码|类比|反例|一步一步|换句话说|因为|所以|解释/u,
+      evidence: '用户暴露了信息编码、重建或降噪方式',
+    })
+    updates.dimensions!.stuckPattern = analyzeControlSignal(userMessages, {
+      signal: /卡住|没懂|混淆|接不上|为什么|断|压力|焦虑|打断|拖延/u,
+      evidence: '会话中出现了可以继续确认的具体卡点',
+    })
+    updates.dimensions!.paceAndLoad = analyzeControlSignal(userMessages, {
+      signal: /开始|执行|一步|短一点|慢一点|快一点|太多|负担|提醒|提示|继续/u,
+      evidence: '用户表达了任务粒度、启动摩擦或反馈频率需求',
+      supplementalConfidence: Math.min(0.18, normalizeHistoryEvents(userHistory) / 20),
+    })
+    updates.dimensions!.masteryCheck = analyzeControlSignal(userMessages, {
+      signal: /验证|测试|预测|复述|改错|迁移|检查|反馈|通过|停止|复测/u,
+      evidence: '用户表达了反馈变量、纠偏方式或停止条件',
+    })
 
     // 记录更新
     const changes: Record<string, { before: number; after: number }> = {};
@@ -556,3 +565,32 @@ export class EducationProfileAnalyzer {
 }
 
 export const profileAnalyzer = new EducationProfileAnalyzer();
+
+function normalizeUserMessages(messages: unknown): string[] {
+  if (!Array.isArray(messages)) return []
+  return messages.flatMap((message) => {
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return []
+    const record = message as { role?: unknown; content?: unknown }
+    if (record.role !== 'user' || typeof record.content !== 'string') return []
+    const content = record.content.replace(/\s+/g, ' ').trim()
+    return content ? [content] : []
+  })
+}
+
+function analyzeControlSignal(
+  messages: string[],
+  input: { signal: RegExp; evidence: string; supplementalConfidence?: number },
+): DimensionScore {
+  const hits = messages.filter((message) => input.signal.test(message)).length
+  if (hits === 0) return { score: 0, confidence: 0.16 + (input.supplementalConfidence ?? 0), evidence: [] }
+  const coverage = hits / Math.max(messages.length, 1)
+  return {
+    score: Math.round(clamp(38 + coverage * 48 + Math.min(hits, 4) * 3, 0, 100)),
+    confidence: clamp(0.34 + Math.min(hits, 5) * 0.09 + (input.supplementalConfidence ?? 0), 0, 0.82),
+    evidence: [input.evidence],
+  }
+}
+
+function normalizeHistoryEvents(history: unknown[]): number {
+  return Array.isArray(history) ? history.filter(Boolean).length : 0
+}

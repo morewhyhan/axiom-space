@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BookOpen,
   Code2,
@@ -38,23 +38,57 @@ const RESOURCE_ICON: Record<string, React.ComponentType<{ className?: string }>>
 }
 
 export function LearningResourcePanel({ resources, loading }: LearningResourcePanelProps) {
+  const layoutRef = useRef<HTMLDivElement | null>(null)
   const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [activeAttachmentKey, setActiveAttachmentKey] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<GeneratedResourceItem | null>(null)
-  const visibleResources = resources
+  const [stackedLayout, setStackedLayout] = useState(true)
+  const resourceGroups = useMemo(() => {
+    const groups = new Map<string, GeneratedResourceItem[]>()
+    for (const item of resources) {
+      const key = item.kind || item.type
+      groups.set(key, [...(groups.get(key) ?? []), item])
+    }
+    return [...groups.entries()].map(([key, items]) => ({ key, items }))
+  }, [resources])
+  const activeGroup = useMemo(() => {
+    if (resourceGroups.length === 0) return null
+    return resourceGroups.find((group) => group.key === activeKey) ?? resourceGroups[0]
+  }, [activeKey, resourceGroups])
   const active = useMemo(() => {
-    if (visibleResources.length === 0) return null
-    return visibleResources.find((item) => resourceKey(item) === activeKey) ?? visibleResources[0]
-  }, [activeKey, visibleResources])
+    if (!activeGroup) return null
+    return activeGroup.items.find((item) => attachmentKey(item) === activeAttachmentKey) ?? activeGroup.items[0]
+  }, [activeAttachmentKey, activeGroup])
 
   useEffect(() => {
-    if (visibleResources.length === 0) {
+    if (resourceGroups.length === 0) {
       setActiveKey(null)
       return
     }
-    if (!activeKey || !visibleResources.some((item) => resourceKey(item) === activeKey)) {
-      setActiveKey(resourceKey(visibleResources[0]))
+    if (!activeKey || !resourceGroups.some((group) => group.key === activeKey)) {
+      setActiveKey(resourceGroups[0].key)
     }
-  }, [activeKey, visibleResources])
+  }, [activeKey, resourceGroups])
+
+  useEffect(() => {
+    if (!activeGroup) return
+    if (!activeAttachmentKey || !activeGroup.items.some((item) => attachmentKey(item) === activeAttachmentKey)) {
+      setActiveAttachmentKey(attachmentKey(activeGroup.items[0]))
+    }
+  }, [activeAttachmentKey, activeGroup])
+
+  useEffect(() => {
+    const element = layoutRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const update = (width: number) => setStackedLayout(width < 720)
+    update(element.getBoundingClientRect().width)
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) update(entry.contentRect.width)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
 
   if (loading) {
     return (
@@ -64,7 +98,7 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
     )
   }
 
-  if (visibleResources.length === 0) return null
+  if (resourceGroups.length === 0) return null
 
   return (
     <>
@@ -74,23 +108,41 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
             <div className="mono text-purple-400 uppercase" style={{ fontSize: 'var(--f8)' }}>Generated Resources</div>
             <div className="mt-1 text-xs text-white/35">左侧选择单个资源，右侧单独预览、放大和下载</div>
           </div>
-          <div className="mono text-white/25" style={{ fontSize: 'var(--f8)' }}>{visibleResources.length} items</div>
+          <div className="mono text-white/25" style={{ fontSize: 'var(--f8)' }}>{resourceGroups.length} resources · {resources.length} formats</div>
         </div>
-        <div className="grid gap-4 lg:grid-cols-[minmax(220px,0.85fr)_minmax(0,1.65fr)]">
-          <div className="grid content-start gap-2">
-            {visibleResources.map((item) => {
+        <div
+          ref={layoutRef}
+          data-testid="learning-resource-layout"
+          data-layout={stackedLayout ? 'stacked' : 'split'}
+          className="grid gap-4"
+          style={{
+            gridTemplateColumns: stackedLayout
+              ? 'minmax(0, 1fr)'
+              : 'minmax(220px, 0.85fr) minmax(0, 1.65fr)',
+          }}
+        >
+          <div
+            className="grid content-start gap-2"
+            style={{
+              gridTemplateColumns: stackedLayout
+                ? 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))'
+                : 'minmax(0, 1fr)',
+            }}
+          >
+            {resourceGroups.map((group) => {
+              const item = group.items[0]
               const Icon = RESOURCE_ICON[item.type] || FileText
-              const selected = active ? resourceKey(item) === resourceKey(active) : false
+              const selected = activeGroup?.key === group.key
               return (
                 <button
-                  key={resourceKey(item)}
+                  key={group.key}
                   type="button"
                   className={`group rounded-xl border p-3 text-left transition-colors ${
                     selected
                       ? 'border-emerald-300/30 bg-emerald-300/[0.08]'
                       : 'border-white/8 bg-white/[0.025] hover:border-white/16 hover:bg-white/[0.055]'
                   }`}
-                  onClick={() => setActiveKey(resourceKey(item))}
+                  onClick={() => setActiveKey(group.key)}
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/8 text-white/60">
@@ -98,12 +150,12 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium text-white/80">{item.title}</div>
-                      <div className="truncate text-xs text-white/30">{item.fileName}</div>
+                      <div className="truncate text-xs text-white/30">{group.items.map((attachment) => attachment.format || attachment.type).join(' · ')}</div>
                     </div>
                   </div>
                   <div className="mt-3 grid gap-1 text-[10px] text-white/35">
                     <div className="truncate"><span className="text-emerald-300/75">status</span> {statusLabel(item.status)}</div>
-                    <div className="truncate" title={item.path}><span className="text-emerald-300/75">path</span> {item.path}</div>
+                    <div className="truncate"><span className="text-emerald-300/75">formats</span> {group.items.length}</div>
                   </div>
                 </button>
               )
@@ -146,6 +198,23 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
                     <span className="text-emerald-300/75">generated</span> {active.generatedAt ? new Date(active.generatedAt).toLocaleString() : 'unknown'}
                   </div>
                 </div>
+                {activeGroup && activeGroup.items.length > 1 && (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {activeGroup.items.map((attachment) => (
+                      <Button
+                        key={attachmentKey(attachment)}
+                        className={`rounded-md border px-2.5 py-1 text-[10px] uppercase ${
+                          attachmentKey(attachment) === attachmentKey(active)
+                            ? 'border-emerald-300/35 bg-emerald-300/10 text-emerald-200'
+                            : 'border-white/10 bg-white/[0.03] text-white/45'
+                        }`}
+                        onClick={() => setActiveAttachmentKey(attachmentKey(attachment))}
+                      >
+                        {attachment.format || attachment.type}
+                      </Button>
+                    ))}
+                  </div>
+                )}
                 <div className="resource-preview-pane max-h-[68vh] overflow-auto rounded-lg border border-white/5 bg-black/15 p-4">
                   <ResourcePreview item={active} />
                 </div>
@@ -188,6 +257,6 @@ export function LearningResourcePanel({ resources, loading }: LearningResourcePa
   )
 }
 
-function resourceKey(item: GeneratedResourceItem) {
+function attachmentKey(item: GeneratedResourceItem) {
   return `${item.type}:${item.path || item.fileName}`
 }

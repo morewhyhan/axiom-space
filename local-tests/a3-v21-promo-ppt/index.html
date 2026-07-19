@@ -197,7 +197,6 @@
   #hint{position:fixed;bottom:3vh;right:3vw;z-index:30;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;opacity:.4;mix-blend-mode:difference;color:#aaa}
   body.low-power #hint{opacity:.72;color:var(--paper);mix-blend-mode:normal}
   body.light-bg.low-power #hint{color:var(--ink)}
-
   /* ============================================================
      ============ LAYOUTS API · 面向 agent 的类（v2）============
      所有 layouts.md 中的骨架都基于下面这套命名。
@@ -539,6 +538,11 @@
   .gap-list{display:flex;flex-direction:column;gap:1.2vh;margin:2.2vh 0 2.8vh}
   .gap-list span{display:block;padding:1.15vh 0;border-top:1px solid rgba(127,127,127,.24);font-family:var(--sans-zh);font-size:clamp(13px,1vw,18px);line-height:1.45}
   .gap-question .q.small{font-size:clamp(30px,3.65vw,66px)}
+  .need-strip{display:grid;grid-template-columns:repeat(4,1fr);gap:1.2vw;margin-top:-1.2vh;margin-bottom:2.2vh}
+  .need-card{padding:1.25vh 1vw;border-top:1px solid rgba(127,127,127,.36)}
+  .need-card b{display:block;font-family:var(--mono);font-size:clamp(8px,.58vw,11px);letter-spacing:.14em;text-transform:uppercase;opacity:.48}
+  .need-card strong{display:block;margin-top:.5vh;font-family:var(--serif-zh);font-size:clamp(14px,1.08vw,20px);line-height:1.32}
+  .need-card span{display:block;margin-top:.4vh;font-family:var(--sans-zh);font-size:clamp(10px,.72vw,13px);line-height:1.4;opacity:.58}
 
   .arch-layers{display:grid;gap:.7vh;width:72vw;margin-top:2.6vh}
   .arch-layer{display:grid;grid-template-columns:16vw 1fr;gap:1.7vw;align-items:center;padding:1vh 1.1vw;border-top:1px solid rgba(127,127,127,.28)}
@@ -550,6 +554,312 @@
   .harness-actions span{padding:.48vh .55vw;border:1px solid rgba(127,127,127,.35);font-family:var(--mono);font-size:clamp(8px,.58vw,11px);letter-spacing:.08em;white-space:nowrap}
   .journey-rail{display:flex;align-items:center;gap:.65vw;width:72vw;margin-top:1.8vh;font-family:var(--mono);font-size:clamp(8px,.58vw,11px);letter-spacing:.08em;opacity:.62}
   .journey-rail span{white-space:nowrap}.journey-rail i{flex:1;height:1px;background:currentColor;opacity:.28}
+  .tech-diagram{position:relative;border:1px solid rgba(var(--paper-rgb),.32);background:rgba(var(--paper-rgb),.035);overflow:hidden}
+  .tech-diagram::before{content:"";position:absolute;inset:0;opacity:.08;background-image:linear-gradient(rgba(var(--paper-rgb),.5) 1px,transparent 1px),linear-gradient(90deg,rgba(var(--paper-rgb),.5) 1px,transparent 1px);background-size:3.2vw 3.2vw;pointer-events:none}
+  .tech-head{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:.85vh .95vw;border-bottom:1px solid rgba(var(--paper-rgb),.2);font-family:var(--mono);font-size:clamp(8px,.56vw,10px);letter-spacing:.13em;text-transform:uppercase;opacity:.68}
+  .arch-system{position:relative;width:88vw;height:42.5vh;margin-top:2vh;display:grid;grid-template-rows:auto 1fr auto;border-top:1px solid rgba(var(--paper-rgb),.52);border-bottom:1px solid rgba(var(--paper-rgb),.34);overflow:hidden}
+  .arch-system::before{content:"";position:absolute;inset:0;opacity:.055;background-image:linear-gradient(rgba(var(--paper-rgb),.48) 1px,transparent 1px),linear-gradient(90deg,rgba(var(--paper-rgb),.48) 1px,transparent 1px);background-size:2.4vw 2.4vw;pointer-events:none}
+  .arch-system-head{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:.72vh .9vw;border-bottom:1px solid rgba(var(--paper-rgb),.2);font-family:var(--mono);font-size:clamp(9px,.6vw,12px);letter-spacing:.13em;text-transform:uppercase;opacity:.66}
+  .arch-system-body{position:relative;z-index:2;display:grid;gap:.36vh;padding:.7vh 3.7vw .65vh .9vw;min-height:0}
+  .arch-row-pro{display:grid;grid-template-columns:10.4vw 1fr;align-items:stretch;min-height:5.25vh;border-top:1px solid rgba(var(--paper-rgb),.2)}
+  .arch-row-pro:first-child{border-top:0}
+  .arch-layer-title{display:grid;grid-template-columns:1.75vw 1fr;grid-template-rows:auto auto;column-gap:.55vw;align-content:center;padding:.45vh .7vw .45vh 0}
+  .arch-layer-title b{grid-row:1/3;align-self:center;font-family:var(--serif-en);font-size:clamp(18px,1.45vw,28px);font-style:italic;font-weight:500;line-height:1;opacity:.32}
+  .arch-layer-title span{font-family:var(--mono);font-size:clamp(8px,.52vw,10px);letter-spacing:.11em;text-transform:uppercase;opacity:.48}
+  .arch-layer-title strong{font-family:var(--serif-zh);font-size:clamp(12px,.88vw,17px);font-weight:600;line-height:1.22}
+  .arch-modules{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-items:stretch}
+  .arch-module{display:flex;flex-direction:column;justify-content:center;padding:.48vh .72vw;border-left:1px solid rgba(var(--paper-rgb),.18);min-width:0}
+  .arch-module strong{font-family:var(--sans-zh);font-size:clamp(11px,.77vw,15px);font-weight:500;line-height:1.22;white-space:nowrap}
+  .arch-module span{margin-top:.2vh;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.04em;line-height:1.2;opacity:.46;white-space:nowrap}
+  .arch-row-pro.is-control{grid-template-columns:10.4vw 1fr;min-height:7.1vh;border:1px solid rgba(var(--paper-rgb),.66);background:rgba(var(--paper-rgb),.095)}
+  .arch-row-pro.is-control .arch-layer-title{padding-left:.65vw}
+  .arch-row-pro.is-control .arch-layer-title b{opacity:.62}
+  .control-core{display:grid;grid-template-columns:19vw 1fr;align-items:center;border-left:1px solid rgba(var(--paper-rgb),.36)}
+  .control-core>div:first-child{padding:0 1.1vw}
+  .control-core .control-kicker{display:block;font-family:var(--mono);font-size:clamp(8px,.54vw,10px);letter-spacing:.12em;text-transform:uppercase;opacity:.55}
+  .control-core strong{display:block;margin-top:.2vh;font-family:var(--serif-zh);font-size:clamp(19px,1.5vw,29px);font-weight:600;line-height:1.15}
+  .control-capabilities{display:grid;grid-template-columns:repeat(5,1fr);height:100%;border-left:1px solid rgba(var(--paper-rgb),.22)}
+  .control-capabilities span{display:flex;align-items:center;justify-content:center;padding:0 .5vw;border-left:1px solid rgba(var(--paper-rgb),.18);font-family:var(--sans-zh);font-size:clamp(10px,.7vw,13px);font-weight:500;white-space:nowrap}
+  .arch-writeback{position:absolute;z-index:3;right:.7vw;top:4.15vh;bottom:3.15vh;width:2.1vw;border-left:1px solid rgba(var(--paper-rgb),.52);border-top:1px solid rgba(var(--paper-rgb),.52);border-bottom:1px solid rgba(var(--paper-rgb),.52)}
+  .arch-writeback::before{content:"↑";position:absolute;left:-.44em;top:-.72em;font-family:var(--serif-en);font-size:clamp(18px,1.5vw,28px);background:var(--ink);line-height:1}
+  .arch-writeback span{position:absolute;right:.1vw;top:50%;transform:translateY(-50%);writing-mode:vertical-rl;font-family:var(--mono);font-size:clamp(8px,.52vw,10px);letter-spacing:.13em;text-transform:uppercase;opacity:.64}
+  .arch-system-foot{position:relative;z-index:2;display:flex;justify-content:space-between;align-items:center;padding:.55vh 3.7vw .58vh .9vw;border-top:1px solid rgba(var(--paper-rgb),.2);font-family:var(--mono);font-size:clamp(8px,.52vw,10px);letter-spacing:.1em;text-transform:uppercase;opacity:.58}
+
+  /* Scene 04 — keep the original five-layer map; animate how one learning action travels through it. */
+  #scene-04{--arch-duration:13.2s}
+  #scene-04 .arch-row-pro{position:relative;isolation:isolate}
+  #scene-04 .arch-layer-title,#scene-04 .arch-modules,#scene-04 .control-core{position:relative;z-index:3}
+  #scene-04 .arch-module{position:relative}
+  #scene-04 .arch-scan{position:absolute;z-index:4;left:.9vw;right:3.7vw;top:4.55vh;height:1px;opacity:0;background:linear-gradient(90deg,transparent,rgba(var(--paper-rgb),.72) 22%,rgba(var(--paper-rgb),.72) 78%,transparent);box-shadow:0 0 14px rgba(var(--paper-rgb),.14);pointer-events:none}
+  #scene-04 .arch-scan::after{content:"ASSEMBLING LEARNING LOOP";position:absolute;right:0;bottom:.48vh;font-family:var(--mono);font-size:clamp(7px,.45vw,9px);letter-spacing:.12em;white-space:nowrap;opacity:.58}
+  #scene-04 .arch-action-pulse{position:absolute;z-index:5;left:11.15vw;top:50%;display:flex;align-items:center;gap:.42vw;padding:.28vh .45vw;border:1px solid rgba(var(--paper-rgb),.44);background:var(--ink);font-family:var(--mono);font-size:clamp(7px,.45vw,9px);letter-spacing:.1em;white-space:nowrap;opacity:0;pointer-events:none}
+  #scene-04 .arch-action-pulse::before{content:"";width:.34vw;height:.34vw;min-width:5px;min-height:5px;background:var(--paper)}
+  #scene-04 [data-arch-layer="2"]::before{content:"";position:absolute;z-index:4;left:10.4vw;right:0;top:50%;height:1px;opacity:0;background:linear-gradient(90deg,transparent,rgba(var(--paper-rgb),.54) 12%,rgba(var(--paper-rgb),.54) 88%,transparent);pointer-events:none}
+  #scene-04 [data-arch-layer="2"]::after{content:"";position:absolute;z-index:5;left:10.8vw;top:calc(50% - 3px);width:7px;height:7px;border:1px solid rgba(var(--paper-rgb),.88);background:var(--ink);box-shadow:0 0 0 3px rgba(var(--paper-rgb),.08);opacity:0;pointer-events:none}
+  #scene-04 .control-core{overflow:hidden}
+  #scene-04 .control-core::after{content:"";position:absolute;z-index:5;top:0;bottom:0;left:-12%;width:12%;opacity:0;background:linear-gradient(90deg,transparent,rgba(var(--paper-rgb),.15),rgba(var(--paper-rgb),.48),transparent);transform:skewX(-12deg);pointer-events:none}
+  #scene-04 [data-arch-layer="4"] .arch-module::after{content:"";position:absolute;right:.42vw;top:.46vh;width:.26vw;height:.26vw;min-width:4px;min-height:4px;border:1px solid rgba(var(--paper-rgb),.7);opacity:0}
+  #scene-04 .arch-data-particles{position:absolute;z-index:5;left:10.4vw;right:0;top:0;bottom:0;pointer-events:none}
+  #scene-04 .arch-data-particles i{position:absolute;top:-.2vh;width:5px;height:5px;background:var(--paper);opacity:0}
+  #scene-04 .arch-data-particles i:nth-child(1){left:9.6%}
+  #scene-04 .arch-data-particles i:nth-child(2){left:29.6%}
+  #scene-04 .arch-data-particles i:nth-child(3){left:49.6%}
+  #scene-04 .arch-data-particles i:nth-child(4){left:69.6%}
+  #scene-04 .arch-data-particles i:nth-child(5){left:89.6%}
+  #scene-04 .arch-writeback i{position:absolute;z-index:4;left:-3px;bottom:0;width:5px;height:1.2vh;background:var(--paper);box-shadow:0 0 11px rgba(var(--paper-rgb),.58);opacity:0}
+  #scene-04 .arch-writeback::after{content:"";position:absolute;left:-1px;bottom:0;width:1px;height:100%;background:var(--paper);transform:scaleY(0);transform-origin:bottom;opacity:0}
+
+  #scene-04 .arch-system.arch-live .arch-scan{animation:arch-scan var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="1"]{animation:arch-layer-01 var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"]{animation:arch-layer-02 var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="3"]{animation:arch-layer-03 var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"]{animation:arch-layer-04 var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="5"]{animation:arch-layer-05 var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live .arch-action-pulse{animation:arch-action var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="1"] .arch-module{animation:arch-product-window .52s cubic-bezier(.22,1,.36,1) both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="1"] .arch-module:nth-child(1){animation-delay:.4s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="1"] .arch-module:nth-child(2){animation-delay:.52s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="1"] .arch-module:nth-child(3){animation-delay:.64s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="1"] .arch-module:nth-child(4){animation-delay:.76s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="1"] .arch-module:nth-child(5){animation-delay:.88s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"]::before{animation:arch-access-line var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"]::after{animation:arch-access-packet var(--arch-duration) cubic-bezier(.4,0,.2,1) both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"] .arch-module{animation:arch-access-gate .44s cubic-bezier(.22,1,.36,1) both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"] .arch-module:nth-child(1){animation-delay:2.78s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"] .arch-module:nth-child(2){animation-delay:3.02s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"] .arch-module:nth-child(3){animation-delay:3.27s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"] .arch-module:nth-child(4){animation-delay:3.51s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="2"] .arch-module:nth-child(5){animation-delay:3.75s}
+  #scene-04 .arch-system.arch-live .control-core{animation:arch-control-lock .86s cubic-bezier(.22,1,.36,1) 5s both}
+  #scene-04 .arch-system.arch-live .control-core::after{animation:arch-control-sweep var(--arch-duration) cubic-bezier(.4,0,.2,1) both}
+  #scene-04 .arch-system.arch-live .control-capabilities span{animation:arch-port-lock .38s cubic-bezier(.22,1,.36,1) both}
+  #scene-04 .arch-system.arch-live .control-capabilities span:nth-child(1){animation-delay:5.24s}
+  #scene-04 .arch-system.arch-live .control-capabilities span:nth-child(2){animation-delay:5.37s}
+  #scene-04 .arch-system.arch-live .control-capabilities span:nth-child(3){animation-delay:5.5s}
+  #scene-04 .arch-system.arch-live .control-capabilities span:nth-child(4){animation-delay:5.63s}
+  #scene-04 .arch-system.arch-live .control-capabilities span:nth-child(5){animation-delay:5.76s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"] .arch-module{animation:arch-execution-fan .82s cubic-bezier(.22,1,.36,1) both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"] .arch-module:nth-child(1){--arch-fan:5vw;animation-delay:7.22s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"] .arch-module:nth-child(2){--arch-fan:2.5vw;animation-delay:7.31s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"] .arch-module:nth-child(3){--arch-fan:0vw;animation-delay:7.41s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"] .arch-module:nth-child(4){--arch-fan:-2.5vw;animation-delay:7.5s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"] .arch-module:nth-child(5){--arch-fan:-5vw;animation-delay:7.59s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="4"] .arch-module::after{animation:arch-execution-ready var(--arch-duration) linear both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="5"] .arch-module{animation:arch-memory-rise .66s cubic-bezier(.22,1,.36,1) both}
+  #scene-04 .arch-system.arch-live [data-arch-layer="5"] .arch-module:nth-child(1){animation-delay:9.52s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="5"] .arch-module:nth-child(2){animation-delay:9.62s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="5"] .arch-module:nth-child(3){animation-delay:9.71s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="5"] .arch-module:nth-child(4){animation-delay:9.8s}
+  #scene-04 .arch-system.arch-live [data-arch-layer="5"] .arch-module:nth-child(5){animation-delay:9.9s}
+  #scene-04 .arch-system.arch-live .arch-data-particles i{animation:arch-data-write .62s cubic-bezier(.4,0,.2,1) both}
+  #scene-04 .arch-system.arch-live .arch-data-particles i:nth-child(1){animation-delay:9.36s}
+  #scene-04 .arch-system.arch-live .arch-data-particles i:nth-child(2){animation-delay:9.45s}
+  #scene-04 .arch-system.arch-live .arch-data-particles i:nth-child(3){animation-delay:9.55s}
+  #scene-04 .arch-system.arch-live .arch-data-particles i:nth-child(4){animation-delay:9.64s}
+  #scene-04 .arch-system.arch-live .arch-data-particles i:nth-child(5){animation-delay:9.73s}
+  #scene-04 .arch-system.arch-live .arch-writeback i{animation:arch-return-signal var(--arch-duration) cubic-bezier(.4,0,.2,1) both}
+  #scene-04 .arch-system.arch-live .arch-writeback::after{animation:arch-return-rail var(--arch-duration) cubic-bezier(.22,1,.36,1) both}
+
+  @keyframes arch-layer-01{0%{opacity:.16;transform:translateY(-.45vh)}4%,18%{opacity:1;transform:none}23%,89%{opacity:.42;transform:none}95%,100%{opacity:1;transform:none}}
+  @keyframes arch-layer-02{0%,17%{opacity:.14;transform:translateY(-.35vh)}22%,35%{opacity:1;transform:none}40%,89%{opacity:.42;transform:none}95%,100%{opacity:1;transform:none}}
+  @keyframes arch-layer-03{0%,34%{opacity:.14;transform:scaleX(.985)}39%,52%{opacity:1;transform:scaleX(1)}57%,89%{opacity:.48;transform:scaleX(1)}95%,100%{opacity:1;transform:scaleX(1)}}
+  @keyframes arch-layer-04{0%,51%{opacity:.14;transform:translateY(.35vh)}56%,70%{opacity:1;transform:none}75%,89%{opacity:.42;transform:none}95%,100%{opacity:1;transform:none}}
+  @keyframes arch-layer-05{0%,68%{opacity:.14;transform:translateY(.45vh)}73%,100%{opacity:1;transform:none}}
+  @keyframes arch-scan{0%{opacity:0;transform:translateY(0)}3%{opacity:.42}86%{opacity:.24;transform:translateY(31.5vh)}90%,100%{opacity:0;transform:translateY(31.5vh)}}
+  @keyframes arch-product-window{0%{opacity:.08;clip-path:inset(0 100% 0 0);transform:translateX(-.5vw)}100%{opacity:1;clip-path:inset(0);transform:none}}
+  @keyframes arch-action{0%,6%{opacity:0;transform:translate(0,-50%)}9%{opacity:1}17%{opacity:1;transform:translate(62vw,-50%)}20%,100%{opacity:0;transform:translate(62vw,-50%)}}
+  @keyframes arch-access-line{0%,19%{opacity:0;transform:scaleX(.04)}22%{opacity:.42;transform:scaleX(1)}35%{opacity:.3;transform:scaleX(1)}39%,100%{opacity:0;transform:scaleX(1)}}
+  @keyframes arch-access-packet{0%,20%{opacity:0;transform:translateX(0) rotate(0)}22%{opacity:1}35%{opacity:1;transform:translateX(62.4vw) rotate(135deg)}39%,100%{opacity:0;transform:translateX(62.4vw) rotate(135deg)}}
+  @keyframes arch-access-gate{0%{opacity:.28;background:transparent}48%{opacity:1;background:rgba(var(--paper-rgb),.13)}100%{opacity:1;background:transparent}}
+  @keyframes arch-control-lock{0%{opacity:.34;clip-path:inset(0 50%);transform:scaleX(.94)}100%{opacity:1;clip-path:inset(0);transform:scaleX(1)}}
+  @keyframes arch-control-sweep{0%,37%{opacity:0;transform:translateX(0) skewX(-12deg)}41%{opacity:.75}51%{opacity:.35;transform:translateX(930%) skewX(-12deg)}55%,100%{opacity:0;transform:translateX(930%) skewX(-12deg)}}
+  @keyframes arch-port-lock{0%{opacity:.2;transform:translateY(4px)}55%{opacity:1;background:rgba(var(--paper-rgb),.12)}100%{opacity:1;transform:none;background:transparent}}
+  @keyframes arch-execution-fan{0%{opacity:.14;transform:translateX(var(--arch-fan)) scale(.94)}100%{opacity:1;transform:none}}
+  @keyframes arch-execution-ready{0%,59%{opacity:0;transform:scale(.4)}64%,72%{opacity:.85;transform:scale(1)}76%,100%{opacity:.28;transform:scale(1)}}
+  @keyframes arch-memory-rise{0%{opacity:.15;transform:translateY(1.1vh)}100%{opacity:1;transform:none}}
+  @keyframes arch-data-write{0%{opacity:0;transform:translateY(-1.5vh) scale(.6)}18%{opacity:1}78%{opacity:1;transform:translateY(4.1vh) scale(1)}100%{opacity:0;transform:translateY(4.1vh) scale(.5)}}
+  @keyframes arch-return-signal{0%,84%{opacity:0;transform:translateY(0)}87%{opacity:1}95%{opacity:1;transform:translateY(-30.8vh)}98%,100%{opacity:0;transform:translateY(-30.8vh)}}
+  @keyframes arch-return-rail{0%,84%{opacity:0;transform:scaleY(0)}94%{opacity:.88;transform:scaleY(1)}100%{opacity:.42;transform:scaleY(1)}}
+
+  body.low-power #scene-04 .arch-row-pro,body.low-power #scene-04 .arch-module,body.low-power #scene-04 .control-core,body.low-power #scene-04 .control-capabilities span{opacity:1!important;transform:none!important;clip-path:none!important}
+  body.low-power #scene-04 .arch-scan,body.low-power #scene-04 .arch-action-pulse,body.low-power #scene-04 .arch-data-particles,body.low-power #scene-04 .arch-writeback i{display:none!important}
+
+  /* Scene 15 · Harness mechanism theatre. One progress spine, eight different visual proofs. */
+  #scene-15{--phase-progress:.125}
+  #scene-15 .axiom-copy{gap:.75vh}
+  #scene-15 .axiom-title.compact{font-size:clamp(28px,3.05vw,56px);line-height:1.08}
+  .harness-story{position:relative;z-index:3;width:88vw;height:53.5vh;margin-top:1.8vh;display:grid;grid-template-columns:20.5vw 1fr;gap:2vw;min-height:0}
+  #scene-15 .harness-phase-nav{position:relative;left:auto;bottom:auto;transform:none;display:grid;grid-template-columns:1fr;grid-template-rows:repeat(8,1fr);gap:0;width:100%;height:100%;padding:0;background:transparent;color:var(--paper);border:0}
+  #scene-15 .harness-phase-nav::before,#scene-15 .harness-phase-nav::after{content:"";position:absolute;left:1.15vw;top:0;width:1px;z-index:0}
+  #scene-15 .harness-phase-nav::before{height:100%;background:rgba(var(--paper-rgb),.2)}
+  #scene-15 .harness-phase-nav::after{height:calc(var(--phase-progress)*100%);background:var(--paper);transition:height .45s cubic-bezier(.22,1,.36,1)}
+  #scene-15 .harness-phase-nav span{position:relative;z-index:1;display:grid;grid-template-columns:2.25vw 1fr;grid-template-rows:auto auto;column-gap:.6vw;align-content:center;padding:.25vh .65vw .25vh 2.3vw;border:0;border-top:1px solid rgba(var(--paper-rgb),.15);font-family:var(--sans-zh);letter-spacing:0;text-transform:none;transition:background .32s ease,color .32s ease,transform .32s cubic-bezier(.22,1,.36,1),opacity .32s ease;opacity:.48}
+  #scene-15 .harness-phase-nav span:last-child{border-bottom:1px solid rgba(var(--paper-rgb),.15)}
+  #scene-15 .harness-phase-nav span::before{content:"";position:absolute;left:.9vw;top:50%;width:.52vw;height:.52vw;min-width:7px;min-height:7px;transform:translate(-50%,-50%);border:1px solid currentColor;background:var(--ink)}
+  #scene-15 .harness-phase-nav span b{grid-row:1/3;align-self:center;font-family:var(--serif-en);font-size:clamp(17px,1.3vw,25px);font-style:italic;font-weight:500;line-height:1;opacity:.48}
+  #scene-15 .harness-phase-nav span strong{font-family:var(--serif-zh);font-size:clamp(13px,.96vw,18px);font-weight:600;line-height:1.15}
+  #scene-15 .harness-phase-nav span small{margin-top:.18vh;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.065em;text-transform:uppercase;line-height:1.1;opacity:.58;white-space:nowrap}
+  #scene-15 .harness-phase-nav span.is-complete{opacity:.72}
+  #scene-15 .harness-phase-nav span.is-complete::before{background:var(--paper)}
+  #scene-15 .harness-phase-nav span.is-current{background:var(--paper);color:var(--ink);opacity:1;transform:translateX(.35vw)}
+  #scene-15 .harness-phase-nav span.is-current::before{background:var(--ink);border-color:var(--ink);box-shadow:0 0 0 4px rgba(var(--paper-rgb),.18)}
+
+  .harness-evidence-stack{height:53.5vh;min-width:0;border-top:1px solid rgba(var(--paper-rgb),.5);border-bottom:1px solid rgba(var(--paper-rgb),.28);background:rgba(var(--paper-rgb),.025);overflow:hidden}
+  .harness-evidence-stack::before{content:"";position:absolute;inset:0;opacity:.055;background-image:linear-gradient(rgba(var(--paper-rgb),.48) 1px,transparent 1px),linear-gradient(90deg,rgba(var(--paper-rgb),.48) 1px,transparent 1px);background-size:2.5vw 2.5vw;pointer-events:none}
+  .mechanism-evidence{position:relative;z-index:2;height:100%;display:grid;grid-template-rows:8.2vh 1fr 6.1vh}
+  .mechanism-head{display:grid;grid-template-columns:10.8vw 1fr 14vw;gap:1.2vw;align-items:center;padding:.75vh 1vw;border-bottom:1px solid rgba(var(--paper-rgb),.2)}
+  .mechanism-head .id{font-family:var(--mono);font-size:clamp(8px,.55vw,10px);letter-spacing:.13em;text-transform:uppercase;opacity:.52}
+  .mechanism-head strong{display:block;margin-top:.25vh;font-family:var(--serif-zh);font-size:clamp(17px,1.35vw,25px);font-weight:600;line-height:1.18}
+  .mechanism-head>p{font-family:var(--sans-zh);font-size:clamp(11px,.76vw,14px);line-height:1.5;opacity:.68}
+  .mechanism-route{display:flex;align-items:center;justify-content:flex-end;gap:.55vw;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.09em;text-transform:uppercase;opacity:.55;white-space:nowrap}
+  .mechanism-route i{width:2.2vw;height:1px;background:currentColor;opacity:.45}
+  .mechanism-canvas{position:relative;min-height:0;overflow:hidden}
+  .mechanism-caption{display:grid;grid-template-columns:9.2vw 1fr 10.5vw;gap:1vw;align-items:center;padding:.65vh 1vw;border-top:1px solid rgba(var(--paper-rgb),.2)}
+  .mechanism-caption b,.mechanism-caption em{font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.09em;text-transform:uppercase;font-style:normal;opacity:.52}
+  .mechanism-caption p{font-family:var(--serif-zh);font-size:clamp(12px,.88vw,17px);line-height:1.35}
+  .mechanism-caption em{text-align:right}
+  .harness-evidence-stack>.phase:not(.is-visible) .mechanism-canvas *,
+  .harness-evidence-stack>.phase:not(.is-visible) .mechanism-canvas *::before,
+  .harness-evidence-stack>.phase:not(.is-visible) .mechanism-canvas *::after{animation-play-state:paused!important}
+  .harness-evidence-stack>.phase.is-visible .mechanism-canvas *,
+  .harness-evidence-stack>.phase.is-visible .mechanism-canvas *::before,
+  .harness-evidence-stack>.phase.is-visible .mechanism-canvas *::after{animation-play-state:running}
+  .io-label{position:absolute;z-index:4;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.1em;text-transform:uppercase;opacity:.5}
+  .io-label.input{left:1.1vw;top:1vh}.io-label.output{right:1.1vw;top:1vh}
+  .flow-line{position:absolute;height:1px;background:rgba(var(--paper-rgb),.28)}
+  .flow-line::after{content:"";position:absolute;top:-3px;width:7px;height:7px;background:var(--paper);animation:flow-dot 2.8s linear 1 forwards}
+  @keyframes flow-dot{0%{left:0;opacity:0}10%{opacity:1}88%{opacity:1}100%{left:calc(100% - 7px);opacity:.8}}
+
+  /* 01 · API gate */
+  .api-canvas .flow-line{left:8%;right:8%;top:53%}
+  .api-message{position:absolute;left:3.5%;top:29%;width:21%;padding:1.2vh .9vw;border:1px solid rgba(var(--paper-rgb),.42);background:var(--ink);animation:api-message 3s ease-in-out 1 forwards}
+  .api-message span,.api-stream span{display:block;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.09em;text-transform:uppercase;opacity:.5}
+  .api-message strong{display:block;margin-top:.6vh;font-family:var(--serif-zh);font-size:clamp(12px,.9vw,17px);font-weight:600;line-height:1.35}
+  .api-gate{position:absolute;top:28%;width:10.5%;height:49%;display:grid;place-items:center;align-content:center;gap:.38vh;border-left:1px solid rgba(var(--paper-rgb),.36);border-right:1px solid rgba(var(--paper-rgb),.36);background:rgba(var(--paper-rgb),.035)}
+  .api-gate.auth{left:36%}.api-gate.schema{left:53%}
+  .api-gate svg{width:1.35vw;height:1.35vw;stroke-width:1.25;opacity:.68}
+  .api-gate b{font-family:var(--mono);font-size:clamp(9px,.58vw,11px);letter-spacing:.09em}
+  .api-gate small{font-family:var(--sans-zh);font-size:clamp(9px,.61vw,12px);opacity:.5}
+  .api-gate::after{content:"PASS";position:absolute;right:.35vw;top:.45vh;font-family:var(--mono);font-size:clamp(7px,.43vw,9px);letter-spacing:.08em;opacity:0;animation:gate-pass 3s ease 1 forwards}
+  .api-gate.schema::after{animation-delay:.45s}
+  .api-stream{position:absolute;right:3.5%;top:29%;width:20%;padding:1.1vh .85vw;border-top:1px solid rgba(var(--paper-rgb),.45);border-bottom:1px solid rgba(var(--paper-rgb),.22)}
+  .api-stream i{display:block;height:3px;margin-top:.75vh;background:rgba(var(--paper-rgb),.58);transform-origin:left;animation:stream-line 3s ease-in-out 1 forwards}
+  .api-stream i:nth-of-type(2){width:72%;animation-delay:.16s}.api-stream i:nth-of-type(3){width:88%;animation-delay:.32s}.api-stream i:nth-of-type(4){width:48%;animation-delay:.48s}
+  @keyframes api-message{0%{transform:translateX(0);opacity:.65}35%,100%{transform:translateX(1vw);opacity:1}}
+  @keyframes gate-pass{0%,28%{opacity:0;transform:translateY(3px)}40%,100%{opacity:.72;transform:none}}
+  @keyframes stream-line{0%,42%{transform:scaleX(.05);opacity:.18}58%,100%{transform:scaleX(1);opacity:1}}
+
+  /* 02 · Object binding */
+  .binding-core{position:absolute;left:41%;top:24%;width:18%;height:56%;display:grid;place-items:center;align-content:center;border:1px solid rgba(var(--paper-rgb),.5);background:rgba(var(--paper-rgb),.055)}
+  .binding-core::before,.binding-core::after{content:"";position:absolute;inset:12%;border:1px solid rgba(var(--paper-rgb),.15)}
+  .binding-core::after{inset:25%;animation:binding-pulse 2.8s ease-in-out 1 forwards}
+  .binding-core b{position:relative;z-index:2;font-family:var(--serif-zh);font-size:clamp(16px,1.25vw,23px);font-weight:600}
+  .binding-core span{position:relative;z-index:2;margin-top:.35vh;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.08em;opacity:.5}
+  .binding-token{position:absolute;left:4.5%;top:var(--y);width:16%;padding:.55vh .65vw;border-top:1px solid rgba(var(--paper-rgb),.35);font-family:var(--mono);font-size:clamp(8px,.55vw,11px);letter-spacing:.07em;animation:binding-token 3s cubic-bezier(.22,1,.36,1) 1 forwards;animation-delay:var(--delay)}
+  .binding-token b{float:right;font-weight:400;opacity:.42}
+  .bound-object{position:absolute;right:4%;top:18%;width:24%;padding:1vh .8vw;border:1px solid rgba(var(--paper-rgb),.38)}
+  .bound-object>span{font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.1em;text-transform:uppercase;opacity:.5}
+  .bound-slot{display:grid;grid-template-columns:5.8vw 1fr;gap:.55vw;margin-top:.62vh;padding-top:.5vh;border-top:1px solid rgba(var(--paper-rgb),.18);font-family:var(--mono);font-size:clamp(8px,.52vw,10px);opacity:.35;animation:slot-lock 3s ease 1 forwards;animation-delay:var(--delay)}
+  .bound-slot b{font-weight:500}.bound-slot i{font-style:normal;white-space:nowrap}
+  @keyframes binding-token{0%,8%{transform:translateX(0);opacity:0}18%{opacity:1}48%,72%{transform:translateX(23.5vw);opacity:1}78%,100%{transform:translateX(23.5vw);opacity:0}}
+  @keyframes binding-pulse{0%,35%{transform:scale(.82);opacity:.18}55%,100%{transform:scale(1);opacity:.7}}
+  @keyframes slot-lock{0%,42%{opacity:.18}58%,100%{opacity:1}}
+
+  /* 03 · Intent recognition */
+  .intent-utterance{position:absolute;left:3.5%;top:27%;width:25%;padding:1.3vh 1vw;border-left:2px solid rgba(var(--paper-rgb),.58);font-family:var(--serif-zh);font-size:clamp(13px,1vw,19px);line-height:1.5}
+  .intent-scan{position:absolute;left:3.4%;top:24%;width:2px;height:56%;background:var(--paper);opacity:.65;animation:intent-scan 2.8s ease-in-out 1 forwards}
+  .intent-classifier{position:absolute;left:35%;top:14%;width:27%;padding:.8vh .85vw;border-top:1px solid rgba(var(--paper-rgb),.42);border-bottom:1px solid rgba(var(--paper-rgb),.24)}
+  .intent-classifier>span,.intent-result>span{font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.1em;text-transform:uppercase;opacity:.5}
+  .intent-score{display:grid;grid-template-columns:5.4vw 1fr 2.7vw;gap:.45vw;align-items:center;margin-top:.72vh;font-family:var(--mono);font-size:clamp(8px,.53vw,10px)}
+  .intent-score i{height:4px;background:rgba(var(--paper-rgb),.14);overflow:hidden}
+  .intent-score i::after{content:"";display:block;width:var(--score);height:100%;background:var(--paper);transform-origin:left;animation:intent-score 2.8s ease 1 forwards}
+  .intent-score em{font-style:normal;text-align:right;opacity:.52}
+  .intent-result{position:absolute;right:3.5%;top:15%;width:27%;padding:.85vh .9vw;border:1px solid rgba(var(--paper-rgb),.4);background:rgba(var(--paper-rgb),.035)}
+  .intent-result strong{display:block;margin-top:.55vh;font-family:var(--serif-zh);font-size:clamp(15px,1.15vw,21px)}
+  .intent-slot{display:grid;grid-template-columns:6.2vw 1fr;margin-top:.52vh;padding-top:.45vh;border-top:1px solid rgba(var(--paper-rgb),.2);font-family:var(--mono);font-size:clamp(8px,.5vw,10px);opacity:0;animation:intent-slot 2.8s ease 1 forwards;animation-delay:var(--delay)}
+  .intent-slot b{font-weight:500;opacity:.52}.intent-slot i{font-style:normal}
+  .intent-next{position:absolute;right:3.5%;bottom:8%;width:27%;display:flex;align-items:center;justify-content:space-between;padding:.55vh .75vw;border-top:1px solid rgba(var(--paper-rgb),.4);font-family:var(--mono);font-size:clamp(8px,.52vw,10px);letter-spacing:.07em;opacity:.72}
+  @keyframes intent-scan{0%,100%{transform:translateX(0);opacity:0}18%{opacity:.7}52%{transform:translateX(15.2vw);opacity:.7}70%,100%{transform:translateX(15.2vw);opacity:0}}
+  @keyframes intent-score{0%,28%{transform:scaleX(.04)}55%,100%{transform:scaleX(1)}}
+  @keyframes intent-slot{0%,43%{opacity:0;transform:translateY(3px)}58%,100%{opacity:1;transform:none}}
+
+  /* 04 · Task planning */
+  .plan-canvas{padding:4.2vh 3.5% 2vh}
+  .plan-flow{position:relative;height:100%;display:grid;grid-template-columns:repeat(5,1fr);grid-template-rows:1fr 1fr;gap:1.4vh 1.1vw;align-items:center}
+  .plan-node{position:relative;z-index:2;min-height:7.3vh;padding:.75vh .65vw;border-top:1px solid rgba(var(--paper-rgb),.38);background:var(--ink);opacity:.28;animation:plan-node 3s ease 1 forwards;animation-delay:var(--delay)}
+  .plan-node::after{content:"→";position:absolute;right:-.92vw;top:50%;transform:translateY(-50%);font-family:var(--serif-en);font-size:clamp(16px,1.2vw,22px);opacity:.5}
+  .plan-node:nth-child(5)::after,.plan-node:last-child::after{display:none}
+  .plan-node b{display:block;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.08em;opacity:.52}
+  .plan-node strong{display:block;margin-top:.45vh;font-family:var(--serif-zh);font-size:clamp(11px,.84vw,16px);line-height:1.3}
+  .plan-loop{position:absolute;left:42%;right:3%;bottom:14%;height:32%;border-left:1px solid rgba(var(--paper-rgb),.32);border-bottom:1px solid rgba(var(--paper-rgb),.32);border-right:1px solid rgba(var(--paper-rgb),.32);opacity:.55}
+  .plan-loop::before{content:"证据不足：只回到缺口继续追问";position:absolute;right:.5vw;bottom:.35vh;font-family:var(--mono);font-size:clamp(8px,.48vw,9px);letter-spacing:.05em}
+  @keyframes plan-node{0%,12%{opacity:.22;transform:translateY(3px)}24%,48%{opacity:1;transform:none}62%,100%{opacity:.76;transform:none}}
+
+  /* 05 · Context assembly */
+  .context-links{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}
+  .context-links path{fill:none;stroke:rgba(var(--paper-rgb),.3);stroke-width:1;stroke-dasharray:1;stroke-dashoffset:1;animation:draw-context 2.1s ease 1 forwards;animation-delay:var(--delay)}
+  .context-source{position:absolute;left:var(--x);top:var(--y);width:17%;padding:.62vh .65vw;border-top:1px solid rgba(var(--paper-rgb),.34);font-family:var(--mono);font-size:clamp(8px,.52vw,10px);letter-spacing:.055em}
+  .context-source strong{display:block;margin-bottom:.22vh;font-family:var(--serif-zh);font-size:clamp(11px,.82vw,15px);letter-spacing:0}
+  .context-source::after{content:"";position:absolute;right:0;top:50%;width:7px;height:7px;background:var(--paper);animation:context-packet 3s cubic-bezier(.22,1,.36,1) 1 forwards;animation-delay:var(--delay)}
+  .context-core{position:absolute;left:43%;top:23%;width:19%;height:55%;display:grid;place-items:center;align-content:center;border:1px solid rgba(var(--paper-rgb),.5);background:rgba(var(--paper-rgb),.045)}
+  .context-core i{position:absolute;width:68%;height:42%;border:1px solid rgba(var(--paper-rgb),.18);animation:context-stack 3s ease-in-out 1 forwards}
+  .context-core i:nth-child(2){transform:translate(6px,-6px);animation-delay:.12s}.context-core i:nth-child(3){transform:translate(12px,-12px);animation-delay:.24s}
+  .context-core strong{position:relative;z-index:2;font-family:var(--serif-zh);font-size:clamp(15px,1.2vw,22px)}
+  .context-core span{position:relative;z-index:2;margin-top:.4vh;font-family:var(--mono);font-size:clamp(8px,.49vw,10px);letter-spacing:.08em;opacity:.52}
+  .context-output{position:absolute;right:3.5%;top:22%;width:26%;padding:1vh .9vw;border-left:1px solid rgba(var(--paper-rgb),.45)}
+  .context-output>span{font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.09em;text-transform:uppercase;opacity:.5}
+  .context-layer{margin-top:.7vh;padding:.58vh .65vw;background:rgba(var(--paper-rgb),.065);font-family:var(--sans-zh);font-size:clamp(9px,.64vw,12px);opacity:.25;animation:context-layer 3s ease 1 forwards;animation-delay:var(--delay)}
+  @keyframes context-packet{0%,12%{transform:translate(0,0);opacity:0}24%{opacity:1}62%,78%{transform:translate(var(--dx),var(--dy));opacity:1}86%,100%{transform:translate(var(--dx),var(--dy));opacity:0}}
+  @keyframes draw-context{0%{stroke-dashoffset:1;opacity:.12}100%{stroke-dashoffset:0;opacity:1}}
+  @keyframes context-stack{0%,35%{opacity:.18}55%,100%{opacity:.68}}
+  @keyframes context-layer{0%,48%{opacity:.18;transform:translateX(5px)}62%,100%{opacity:1;transform:none}}
+
+  /* 06 · Dual-agent runtime */
+  .dual-canvas{display:grid;grid-template-columns:1.62fr .9fr;gap:1.1vw;padding:1.4vh 1.1vw}
+  .teaching-lane,.observer-lane{position:relative;border-top:1px solid rgba(var(--paper-rgb),.38);min-height:0;padding:.8vh .75vw}
+  .teaching-lane>span,.observer-lane>span{font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.09em;text-transform:uppercase;opacity:.5}
+  .chat-bubble{width:78%;margin-top:.65vh;padding:.65vh .7vw;border-left:2px solid rgba(var(--paper-rgb),.42);font-family:var(--sans-zh);font-size:clamp(9px,.65vw,12px);line-height:1.4;opacity:0;animation:chat-reveal 3s ease 1 forwards;animation-delay:var(--delay)}
+  .chat-bubble.user{margin-left:auto;border-left:0;border-right:2px solid rgba(var(--paper-rgb),.7);text-align:right}
+  .observer-lane::before{content:"";position:absolute;left:-.58vw;top:12%;bottom:10%;width:1px;background:rgba(var(--paper-rgb),.3)}
+  .observer-lane::after{content:"";position:absolute;left:-.72vw;top:14%;width:.3vw;height:.3vw;min-width:5px;min-height:5px;background:var(--paper);animation:observer-scan 3s linear 1 forwards}
+  .evidence-record{display:grid;grid-template-columns:1fr auto;gap:.5vw;margin-top:.62vh;padding:.55vh .5vw;border-bottom:1px solid rgba(var(--paper-rgb),.16);font-family:var(--sans-zh);font-size:clamp(9px,.62vw,12px);opacity:.18;animation:evidence-record 3s ease 1 forwards;animation-delay:var(--delay)}
+  .evidence-record b{font-weight:500}.evidence-record i{font-family:var(--mono);font-size:clamp(8px,.48vw,9px);font-style:normal;opacity:.5}
+  @keyframes chat-reveal{0%,18%{opacity:0;transform:translateY(5px)}32%,100%{opacity:1;transform:none}}
+  @keyframes observer-scan{0%{top:14%;opacity:0}16%{opacity:1}84%{opacity:1}100%{top:82%;opacity:0}}
+  @keyframes evidence-record{0%,42%{opacity:.16;transform:translateX(5px)}58%,100%{opacity:1;transform:none}}
+
+  /* 07 · Controlled execution */
+  .tool-call{position:absolute;left:4%;top:var(--y);width:20%;padding:.62vh .7vw;border-top:1px solid rgba(var(--paper-rgb),.35);font-family:var(--mono);font-size:clamp(8px,.52vw,10px);letter-spacing:.055em;animation:tool-call 3s ease 1 forwards;animation-delay:var(--delay)}
+  .tool-call b{float:right;font-weight:400;opacity:.45}
+  .guard-core{position:absolute;left:38%;top:17%;width:22%;height:66%;display:grid;place-items:center;align-content:center;border:1px solid rgba(var(--paper-rgb),.5);background:rgba(var(--paper-rgb),.045)}
+  .guard-core svg{width:2.2vw;height:2.2vw;stroke-width:1.15;opacity:.7}
+  .guard-core strong{margin-top:.55vh;font-family:var(--serif-zh);font-size:clamp(15px,1.15vw,21px)}
+  .guard-core span{margin-top:.35vh;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.08em;opacity:.48}
+  .guard-checks{position:absolute;right:3.5%;top:17%;width:26%;padding:.75vh .8vw;border-top:1px solid rgba(var(--paper-rgb),.4)}
+  .guard-check{display:grid;grid-template-columns:1fr auto;gap:.7vw;padding:.55vh 0;border-bottom:1px solid rgba(var(--paper-rgb),.16);font-family:var(--sans-zh);font-size:clamp(9px,.64vw,12px);opacity:.2;animation:guard-check 3s ease 1 forwards;animation-delay:var(--delay)}
+  .guard-check b{font-weight:500}.guard-check i{font-family:var(--mono);font-size:clamp(8px,.48vw,9px);font-style:normal;letter-spacing:.06em}
+  .guard-check.denied{text-decoration:line-through;opacity:.18}
+  .audit-stamp{position:absolute;right:3.5%;bottom:8%;width:26%;display:flex;justify-content:space-between;padding:.55vh .7vw;border:1px solid rgba(var(--paper-rgb),.34);font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.07em;opacity:.26;animation:audit-stamp 3s ease 1 forwards}
+  @keyframes tool-call{0%,10%{transform:translateX(0);opacity:.18}28%,58%{transform:translateX(16vw);opacity:1}72%,100%{transform:translateX(16vw);opacity:.18}}
+  @keyframes guard-check{0%,42%{opacity:.18}58%,100%{opacity:1}}
+  @keyframes audit-stamp{0%,58%{opacity:.2;transform:scale(.97)}72%,100%{opacity:1;transform:scale(1)}}
+
+  /* 08 · Evidence commit and next-learning loop */
+  .commit-core{position:absolute;left:38%;top:30%;width:24%;height:42%;display:grid;place-items:center;align-content:center;border:1px solid rgba(var(--paper-rgb),.58);background:rgba(var(--paper-rgb),.055);animation:commit-core 3s ease-in-out 1 forwards}
+  .commit-core strong{font-family:var(--serif-zh);font-size:clamp(16px,1.25vw,23px)}
+  .commit-core span{margin-top:.35vh;font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.09em;opacity:.5}
+  .commit-target{position:absolute;left:var(--x);top:var(--y);width:18%;padding:.62vh .65vw;border-top:1px solid rgba(var(--paper-rgb),.36);font-family:var(--sans-zh);font-size:clamp(9px,.64vw,12px);opacity:.22;animation:commit-target 3s ease 1 forwards;animation-delay:var(--delay)}
+  .commit-target b{display:block;font-family:var(--mono);font-size:clamp(8px,.48vw,9px);letter-spacing:.08em;text-transform:uppercase;opacity:.5}
+  .commit-target strong{display:block;margin-top:.28vh;font-family:var(--serif-zh);font-size:clamp(11px,.8vw,15px)}
+  .mastery-gate{position:absolute;left:5%;bottom:5%;width:30%;display:grid;grid-template-columns:1fr auto 1fr;gap:.55vw;align-items:center;padding:.6vh .7vw;border:1px solid rgba(var(--paper-rgb),.3);font-family:var(--mono);font-size:clamp(8px,.5vw,10px);text-align:center}
+  .mastery-gate i{font-style:normal;opacity:.42}
+  .mastery-gate strong{font-family:var(--serif-zh);font-size:clamp(10px,.72vw,14px)}
+  .next-loop{position:absolute;right:4%;bottom:5%;width:52%;height:2.6vh;border-bottom:1px solid rgba(var(--paper-rgb),.42);font-family:var(--mono);font-size:clamp(8px,.5vw,10px);letter-spacing:.09em;text-transform:uppercase;text-align:right}
+  .next-loop::before{content:"";position:absolute;left:0;bottom:-4px;width:7px;height:7px;background:var(--paper);animation:next-loop 3s linear 1 forwards}
+  .next-loop::after{content:"↺";margin-left:.55vw;font-family:var(--serif-en);font-size:clamp(18px,1.35vw,25px)}
+  @keyframes commit-core{0%,30%{box-shadow:0 0 0 0 rgba(var(--paper-rgb),0)}55%,100%{box-shadow:0 0 0 12px rgba(var(--paper-rgb),.06)}}
+  @keyframes commit-target{0%,38%{opacity:.18;transform:translateY(4px)}55%,100%{opacity:1;transform:none}}
+  @keyframes next-loop{0%,50%{left:0;opacity:0}60%{opacity:1}94%,100%{left:calc(100% - 7px);opacity:.8}}
 
   .question-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75vh .6vw;width:34vw;margin-top:.6vh}
   .question-grid span{padding:.85vh .55vw;border-top:1px solid rgba(127,127,127,.34);font-family:var(--serif-zh);font-size:clamp(13px,1vw,18px);font-weight:600;text-align:center}
@@ -572,7 +882,7 @@
   .review-tier span{font-family:var(--mono);font-size:clamp(9px,.64vw,12px);letter-spacing:.08em;opacity:.62}
 
   .phase-stack{position:relative;min-width:0}
-  .phase-stack>.phase{position:absolute;inset:0;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .48s ease,transform .58s cubic-bezier(.22,1,.36,1);display:flex;flex-direction:column;gap:1vh}
+  .phase-stack>.phase{position:absolute;inset:0;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .32s ease,transform .38s cubic-bezier(.22,1,.36,1);display:flex;flex-direction:column;gap:1vh}
   .phase-stack>.phase:first-child{opacity:1;transform:none}
   .phase-stack.has-active>.phase{opacity:0;transform:translateY(10px)}
   .phase-stack.has-active>.phase.is-visible{opacity:1;transform:none;pointer-events:auto}
@@ -593,20 +903,6 @@
   .mode-question span{font-family:var(--sans-zh);font-size:clamp(12px,.9vw,17px);opacity:.7}
   .mode-strip span.is-current{background:var(--ink);color:var(--paper)}
 
-  .innovation-stage{width:57vw;margin-top:2.6vh;height:34vh}
-  .harness-core{padding:1.5vh 1.2vw;border:1px solid currentColor}
-  .harness-core strong{display:block;font-family:var(--serif-zh);font-size:clamp(23px,2vw,37px)}
-  .harness-core .harness-actions{margin-top:1.2vh}
-  .outcome-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1vw;margin-top:1vh}
-  .outcome-row div{padding:1.1vh .8vw;border-top:1px solid currentColor}
-  .outcome-row strong{display:block;font-family:var(--serif-zh);font-size:clamp(15px,1.15vw,21px)}
-  .outcome-row span{font-family:var(--sans-zh);font-size:clamp(10px,.68vw,13px);opacity:.58}
-  .innovation-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.2vw}
-  .innovation-chip{padding:1.1vh .85vw;border-top:1px solid currentColor}
-  .innovation-chip b{font-family:var(--serif-en);font-size:clamp(16px,1.2vw,22px);font-style:italic;opacity:.35}
-  .innovation-chip strong{display:block;margin-top:.35vh;font-family:var(--serif-zh);font-size:clamp(15px,1.12vw,21px)}
-  .innovation-chip span{display:block;margin-top:.25vh;font-family:var(--sans-zh);font-size:clamp(10px,.68vw,13px);line-height:1.35;opacity:.58}
-
   .value-proof-stage{height:20vh;margin-top:1.4vh}
   .proof-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:2.2vw}
   .proof-item{padding-top:1.1vh;border-top:1px solid currentColor}
@@ -616,21 +912,25 @@
   .behavior-proof div{padding:1.1vh 1vw;border-top:1px solid currentColor}
   .behavior-proof strong{display:block;font-family:var(--serif-zh);font-size:clamp(16px,1.28vw,24px)}
   .behavior-proof span{display:block;margin-top:.6vh;font-family:var(--sans-zh);font-size:clamp(11px,.78vw,14px);line-height:1.45;opacity:.62}
-  .perf-proof{display:flex;align-items:flex-end;gap:3vw}
+  .perf-proof{display:grid;grid-template-columns:.72fr .72fr .92fr 2fr;align-items:end;gap:2vw}
   .perf-proof .metric strong{font-family:var(--serif-en);font-size:clamp(34px,3.8vw,70px);line-height:.9}
   .perf-proof .metric span{display:block;margin-top:.6vh;font-family:var(--sans-zh);font-size:clamp(11px,.76vw,14px);opacity:.62}
-  .perf-proof .condition{max-width:28vw;font-family:var(--mono);font-size:clamp(9px,.62vw,12px);line-height:1.55;letter-spacing:.08em;opacity:.52}
+  .perf-proof .condition{font-family:var(--mono);font-size:clamp(10px,.7vw,13px);line-height:1.6;letter-spacing:.04em;opacity:.62}
+  .perf-proof .condition strong,.perf-proof .condition span,.perf-proof .condition small{display:block}
+  .perf-proof .condition strong{margin-bottom:.45vh;font-size:.94em;letter-spacing:.12em;opacity:.76}
+  .perf-proof .condition small{margin-top:.45vh;font-family:var(--sans-zh);font-size:.9em;letter-spacing:0;opacity:.72}
   .vision-title{font-size:clamp(36px,4.65vw,84px)!important;max-width:88vw}
   .vision-center{align-items:center;justify-content:center;text-align:center;max-width:82vw;margin:auto}
   .vision-center .axiom-title{max-width:78vw}
 
   /* ---------- 连续视频证据舞台：全程只有一个 video ---------- */
   #continuityStage,.stage-proxy{--sx:92vw;--sy:86vh;--sw:2vw;--sh:2vh;left:var(--sx);top:var(--sy);width:var(--sw);height:var(--sh)}
-  #continuityStage{position:fixed;z-index:9;pointer-events:none;color:var(--paper);opacity:1;transform:translateZ(0) scale(1);transform-origin:center;transition:left .9s cubic-bezier(.77,0,.175,1),top .9s cubic-bezier(.77,0,.175,1),width .9s cubic-bezier(.77,0,.175,1),height .9s cubic-bezier(.77,0,.175,1),opacity .4s ease,transform .9s cubic-bezier(.77,0,.175,1);contain:layout paint style;will-change:left,top,width,height,transform,opacity}
+  #continuityStage{position:fixed;z-index:9;pointer-events:none;color:var(--paper);opacity:1;transform:translateZ(0) scale(1);transform-origin:center;transition:left .9s cubic-bezier(.77,0,.175,1),top .9s cubic-bezier(.77,0,.175,1),width .9s cubic-bezier(.77,0,.175,1),height .9s cubic-bezier(.77,0,.175,1),opacity .4s ease,transform .9s cubic-bezier(.77,0,.175,1);contain:layout paint style;isolation:isolate;will-change:left,top,width,height,transform,opacity}
   #continuityStage[data-layout="off"]{opacity:0;transform:translateZ(0) scale(.94);visibility:hidden;transition:left .9s cubic-bezier(.77,0,.175,1),top .9s cubic-bezier(.77,0,.175,1),width .9s cubic-bezier(.77,0,.175,1),height .9s cubic-bezier(.77,0,.175,1),opacity .3s ease,transform .9s cubic-bezier(.77,0,.175,1),visibility 0s linear .9s}
   #continuityStage:not([data-layout="off"]){visibility:visible}
   :is(#continuityStage,.stage-proxy)[data-layout="seed"]{--sx:78vw;--sy:68vh;--sw:16vw;--sh:16vh}
   :is(#continuityStage,.stage-proxy)[data-layout="full"]{--sx:4vw;--sy:10vh;--sw:92vw;--sh:78vh}
+  :is(#continuityStage,.stage-proxy)[data-layout="cinema"]{--sx:0;--sy:0;--sw:100vw;--sh:100vh}
   :is(#continuityStage,.stage-proxy)[data-layout="right"]{--sx:45vw;--sy:16vh;--sw:49vw;--sh:67vh}
   :is(#continuityStage,.stage-proxy)[data-layout="right-wide"]{--sx:39vw;--sy:14vh;--sw:55vw;--sh:70vh}
   :is(#continuityStage,.stage-proxy)[data-layout="wide"]{--sx:9vw;--sy:35vh;--sw:82vw;--sh:47vh}
@@ -639,16 +939,23 @@
   :is(#continuityStage,.stage-proxy)[data-layout="left-wide"]{--sx:6vw;--sy:15vh;--sw:62vw;--sh:69vh}
   :is(#continuityStage,.stage-proxy)[data-layout="float"]{--sx:62vw;--sy:52vh;--sw:32vw;--sh:30vh}
   :is(#continuityStage,.stage-proxy)[data-layout="ribbon"]{--sx:6vw;--sy:17vh;--sw:88vw;--sh:24vh}
-  .cs-shell{width:100%;height:100%;display:grid;grid-template-rows:minmax(25px,4vh) 1fr minmax(24px,3.7vh);overflow:hidden;background:var(--ink-tint);border:1px solid rgba(var(--paper-rgb),.28);border-radius:6px}
+  :is(#continuityStage,.stage-proxy)[data-layout="evidence"]{--sx:2.5vw;--sy:4.5vh;--sw:95vw;--sh:90vh}
+  .cs-shell{position:relative;width:100%;height:100%;display:grid;grid-template-rows:minmax(25px,4vh) 1fr minmax(24px,3.7vh);overflow:hidden;background:var(--ink-tint);border:1px solid rgba(var(--paper-rgb),.28);border-radius:6px;box-shadow:0 1.8vh 5.5vh rgba(var(--ink-rgb),.28),inset 0 0 0 1px rgba(var(--paper-rgb),.025);transition:box-shadow .45s ease,filter .45s ease}
+  .cs-shell::after{content:"";position:absolute;inset:0;z-index:8;pointer-events:none;border:1px solid rgba(var(--paper-rgb),.08);border-radius:inherit;mix-blend-mode:screen}
   .cs-top,.cs-bottom{display:flex;align-items:center;gap:1.1vw;padding:0 1vw;font-family:var(--mono);font-size:clamp(8px,.62vw,11px);letter-spacing:.14em;text-transform:uppercase;white-space:nowrap;overflow:hidden}
   .cs-top{justify-content:space-between;border-bottom:1px solid rgba(var(--paper-rgb),.13)}
   .cs-bottom{border-top:1px solid rgba(var(--paper-rgb),.13)}
   .cs-live{display:flex;align-items:center;gap:.55em;opacity:.72}.cs-live i{width:5px;height:5px;display:block;background:currentColor;border-radius:50%;animation:cs-live 1.8s ease-in-out infinite}
   @keyframes cs-live{50%{opacity:.22;transform:scale(.72)}}
-  .cs-viewport{--media-scale:1;--media-origin:50% 50%;position:relative;min-height:0;overflow:hidden;background:var(--ink)}
-  #continuityVideo{position:absolute;inset:0;width:100%;height:100%;display:block;object-fit:cover;object-position:center;transform:scale(var(--media-scale));transform-origin:var(--media-origin);transition:transform .85s cubic-bezier(.22,1,.36,1);opacity:0}
+  .cs-viewport{--media-scale:1;--media-origin:50% 50%;--media-position:center;--media-pan-x:0%;--media-pan-y:0%;position:relative;min-height:0;overflow:hidden;background:var(--ink)}
+  .cs-viewport::after{content:"";position:absolute;inset:0;z-index:3;pointer-events:none;background:linear-gradient(180deg,rgba(var(--ink-rgb),.08),transparent 24%,transparent 72%,rgba(var(--ink-rgb),.18)),linear-gradient(90deg,rgba(var(--paper-rgb),.035),transparent 18%,transparent 82%,rgba(var(--paper-rgb),.025));mix-blend-mode:multiply}
+  #continuityVideo{position:absolute;inset:0;z-index:2;width:100%;height:100%;display:block;object-fit:cover;object-position:var(--media-position);transform:translate3d(var(--media-pan-x),var(--media-pan-y),0) scale(var(--media-scale));transform-origin:center center;transition:transform .55s cubic-bezier(.22,1,.36,1),object-position .55s cubic-bezier(.22,1,.36,1),opacity .34s ease,filter .45s ease;filter:saturate(.88) contrast(1.045) brightness(.9);opacity:0}
   #continuityStage.has-video #continuityVideo{opacity:1}
-  .cs-placeholder{position:absolute;inset:0;overflow:hidden;background:var(--ink);transition:opacity .4s ease}
+  .cs-frame-cache{position:absolute;inset:0;z-index:2;width:100%;height:100%;display:block;object-fit:cover;object-position:var(--media-position);transform:translate3d(var(--media-pan-x),var(--media-pan-y),0) scale(var(--media-scale));transform-origin:center center;filter:saturate(.88) contrast(1.045) brightness(.9);opacity:0;transition:opacity .24s ease;pointer-events:none}
+  #continuityStage.has-camera-cues #continuityVideo{transition:transform .34s cubic-bezier(.22,1,.36,1),object-position .34s cubic-bezier(.22,1,.36,1),opacity .34s ease,filter .45s ease}
+  #continuityStage.has-camera-cues .cs-frame-cache{transition:transform .34s cubic-bezier(.22,1,.36,1),object-position .34s cubic-bezier(.22,1,.36,1),opacity .24s ease}
+  #continuityStage.has-frame .cs-frame-cache{opacity:1}
+  .cs-placeholder{position:absolute;inset:0;z-index:1;overflow:hidden;background:var(--ink);transition:opacity .4s ease}
   #continuityStage.has-video .cs-placeholder{opacity:0}
   .cs-grid{position:absolute;inset:0;opacity:.14;background-image:linear-gradient(rgba(var(--paper-rgb),.12) 1px,transparent 1px),linear-gradient(90deg,rgba(var(--paper-rgb),.12) 1px,transparent 1px);background-size:4.8vw 4.8vw}
   .cs-scan{position:absolute;left:0;right:0;height:1px;top:8%;background:rgba(var(--paper-rgb),.5);animation:cs-scan 5.2s linear infinite}
@@ -658,8 +965,32 @@
   .cs-caption span,.cs-caption small{font-family:var(--mono);font-size:clamp(8px,.6vw,11px);letter-spacing:.16em;text-transform:uppercase;opacity:.55}
   .cs-caption strong{font-family:var(--serif-zh);font-size:clamp(16px,1.75vw,33px);font-weight:500;line-height:1.18}
   .cs-progress{flex:1;height:1px;margin-left:auto;background:rgba(var(--paper-rgb),.2)}.cs-progress i{width:0;height:100%;display:block;background:var(--paper);transition:width .6s cubic-bezier(.22,1,.36,1)}
-  .cs-seek-veil{position:absolute;inset:0;z-index:6;opacity:0;background:rgba(var(--ink-rgb),.36);transition:opacity .18s ease}.is-seeking .cs-seek-veil{opacity:1}
+  .cs-seek-veil{position:absolute;inset:0;z-index:6;opacity:0;transform:scaleX(.02);transform-origin:left center;background:linear-gradient(90deg,rgba(var(--ink-rgb),.02),rgba(var(--ink-rgb),.62) 38%,rgba(var(--paper-rgb),.1) 50%,rgba(var(--ink-rgb),.62) 62%,rgba(var(--ink-rgb),.02));transition:opacity .2s ease,transform .34s cubic-bezier(.22,1,.36,1)}
+  .cs-seek-veil::after{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(var(--paper-rgb),.72);box-shadow:0 0 2vw rgba(var(--paper-rgb),.2)}
+  #continuityStage[data-direction="prev"] .cs-seek-veil{transform-origin:right center}
+  #continuityStage.is-seeking .cs-seek-veil,#continuityStage.is-buffering .cs-seek-veil{opacity:1;transform:scaleX(1)}
+  #continuityStage.is-seeking #continuityVideo{opacity:.7}
+  #continuityStage.is-frozen #continuityVideo{filter:saturate(.7) contrast(1.03) brightness(.66);opacity:.76}
+  #continuityStage.is-frozen .cs-live i{animation-play-state:paused;opacity:.36}
+  #continuityStage.is-handoff #continuityVideo{filter:saturate(.58) contrast(1.02) brightness(.52);opacity:.44}
+  #continuityStage.is-handoff{z-index:12}
+  #continuityStage.is-handoff .cs-top,#continuityStage.is-handoff .cs-bottom{opacity:.5}
+  #continuityStage.is-handoff .cs-shell{box-shadow:0 1vh 3vh rgba(var(--ink-rgb),.18)}
+  #continuityStage.is-evidence-focus .cs-shell{box-shadow:0 2.4vh 7vh rgba(var(--ink-rgb),.34),inset 0 0 0 1px rgba(var(--paper-rgb),.05)}
+  #continuityStage.is-evidence-focus #continuityVideo{filter:saturate(1) contrast(1.045) brightness(1)}
+  #continuityStage.is-entering .cs-shell{animation:cs-stage-enter .72s cubic-bezier(.22,1,.36,1) both}
+  @keyframes cs-stage-enter{0%{clip-path:inset(48% 48% round 6px);filter:brightness(.62)}52%{filter:brightness(.82)}100%{clip-path:inset(0 round 6px);filter:brightness(1)}}
   .cs-time{font-variant-numeric:tabular-nums}
+
+  /* 全屏实录阶段：画面先独占注意力，状态文字只压在上下安全区。 */
+  #continuityStage[data-layout="cinema"] .cs-shell{display:block;border:0;border-radius:0;box-shadow:none;background:var(--ink)}
+  #continuityStage[data-layout="cinema"] .cs-shell::after{border:0;border-radius:0}
+  #continuityStage[data-layout="cinema"] .cs-viewport{position:absolute;inset:0;width:100%;height:100%}
+  #continuityStage[data-layout="cinema"] .cs-top,#continuityStage[data-layout="cinema"] .cs-bottom{position:absolute;left:0;right:0;z-index:10;height:7.5vh;padding-left:3.2vw;padding-right:3.2vw;border:0;color:var(--paper);text-shadow:0 1px 16px rgba(var(--ink-rgb),.7)}
+  #continuityStage[data-layout="cinema"] .cs-top{top:0;align-items:flex-start;padding-top:2.5vh;background:linear-gradient(180deg,rgba(var(--ink-rgb),.76),rgba(var(--ink-rgb),0))}
+  #continuityStage[data-layout="cinema"] .cs-bottom{bottom:0;align-items:flex-end;padding-bottom:2.5vh;background:linear-gradient(0deg,rgba(var(--ink-rgb),.78),rgba(var(--ink-rgb),0))}
+  #continuityStage[data-layout="cinema"] #continuityVideo{object-fit:cover;filter:saturate(1) contrast(1.015) brightness(1)}
+  #continuityStage[data-layout="cinema"] .cs-viewport::after{opacity:.22}
 
   /* 占位视频里的产品场景，全部沿用主题色 */
   .demo-browser{position:absolute;inset:2% 1%;border:1px solid rgba(var(--paper-rgb),.24);display:grid;grid-template-rows:7% 1fr;background:rgba(var(--ink-rgb),.8)}
@@ -684,6 +1015,12 @@
   .slide.stage-slide::before,.slide.stage-slide::after{z-index:0!important;backdrop-filter:none!important}
   .slide.stage-slide>*{position:relative;z-index:2}
   .slide.stage-slide>.mode-strip,.slide.stage-slide>.role-tags{position:absolute}
+  .slide.stage-slide>.axiom-copy,.slide.stage-slide>.foot,.slide.stage-slide>.chrome{transition:opacity .52s ease,transform .72s cubic-bezier(.22,1,.36,1)}
+  .slide.stage-slide[data-reveal-after-video="true"]>.axiom-copy,.slide.stage-slide[data-reveal-after-video="true"]>.foot,.slide.stage-slide[data-reveal-after-video="true"]>.chrome{opacity:0;transform:translateY(1.4vh);pointer-events:none}
+  .slide.stage-slide[data-reveal-after-video="true"].is-video-complete>.axiom-copy,.slide.stage-slide[data-reveal-after-video="true"].is-video-complete>.foot,.slide.stage-slide[data-reveal-after-video="true"].is-video-complete>.chrome{opacity:1;transform:none;pointer-events:auto}
+  .slide.stage-slide[data-reveal-after-video="true"]::before{background:transparent!important;transition:background .72s ease}
+  .slide.stage-slide[data-reveal-after-video="true"].is-video-complete::before{background:linear-gradient(90deg,rgba(var(--ink-rgb),0) 0%,rgba(var(--ink-rgb),.1) 56%,rgba(var(--ink-rgb),.94) 68%,rgba(var(--ink-rgb),1) 100%)!important}
+  .slide.stage-slide.is-evidence-focus>.axiom-copy,.slide.stage-slide.is-evidence-focus>.foot,.slide.stage-slide.is-evidence-focus>.chrome{opacity:0;transform:translateY(1.2vh);pointer-events:none}
   .slide.stage-slide[data-stage-layout="seed"]::before{background:rgba(var(--ink-rgb),.84)}
   .slide.stage-slide[data-stage-layout="full"]::before{background:linear-gradient(180deg,rgba(var(--ink-rgb),.58) 0%,rgba(var(--ink-rgb),.08) 25%,rgba(var(--ink-rgb),.04) 72%,rgba(var(--ink-rgb),.62) 100%)}
   .slide.light.stage-slide[data-stage-layout="full"]::before{background:linear-gradient(180deg,rgba(var(--paper-rgb),.72) 0%,rgba(var(--paper-rgb),.06) 28%,rgba(var(--paper-rgb),.02) 70%,rgba(var(--paper-rgb),.72) 100%)}
@@ -695,6 +1032,7 @@
   .slide.light.stage-slide[data-stage-layout="wide"]::before{background:linear-gradient(180deg,rgba(var(--paper-rgb),.99) 0%,rgba(var(--paper-rgb),.94) 25%,rgba(var(--paper-rgb),.08) 42%,rgba(var(--paper-rgb),0) 72%,rgba(var(--paper-rgb),.5) 100%)}
   .slide.stage-slide[data-stage-layout="float"]::before{background:linear-gradient(90deg,rgba(var(--ink-rgb),.98) 0%,rgba(var(--ink-rgb),.94) 54%,rgba(var(--ink-rgb),.34) 68%,rgba(var(--ink-rgb),.12) 100%)}
   .slide.light.stage-slide[data-stage-layout="ribbon"]::before{background:linear-gradient(180deg,rgba(var(--paper-rgb),.76) 0%,rgba(var(--paper-rgb),.24) 43%,rgba(var(--paper-rgb),.96) 48%,rgba(var(--paper-rgb),1) 100%)}
+  .slide.stage-slide.is-evidence-focus::before{background:transparent!important}
   #continuityStage[data-layout="full"] .cs-caption,#continuityStage[data-layout="ribbon"] .cs-caption{display:none}
   #continuityStage.is-quiet .cs-top,#continuityStage.is-quiet .cs-bottom{opacity:.34}
   #continuityStage.is-quiet .cs-caption{display:none}
@@ -750,7 +1088,7 @@
 <canvas id="bg-dark" class="bg"></canvas>
 <canvas id="bg-light" class="bg"></canvas>
 
-<!-- 连续演示母片：录屏完成后只需替换 ./media/axiom-one-take.mp4 -->
+<!-- 分片产品实录：舞台 DOM 始终不变，只在翻页时切换对应片段或片段序列。 -->
 <div id="continuityStage" data-layout="off" data-scene="vault" aria-hidden="true">
   <div class="cs-shell">
     <div class="cs-top">
@@ -758,7 +1096,8 @@
       <span class="cs-live"><i></i><span data-stage-kicker>CONTINUOUS PRODUCT EVIDENCE</span></span>
     </div>
     <div class="cs-viewport">
-      <video id="continuityVideo" data-src="./media/axiom-one-take.mp4" muted playsinline preload="metadata"></video>
+      <video id="continuityVideo" autoplay muted playsinline webkit-playsinline preload="auto" disablepictureinpicture></video>
+      <canvas id="continuityFrameCache" class="cs-frame-cache" aria-hidden="true"></canvas>
       <div class="cs-placeholder" aria-hidden="true">
         <div class="cs-grid"></div>
         <div class="cs-scene" id="continuityScene"></div>
@@ -819,7 +1158,61 @@
     <div class="value-reel"><div><strong>学生</strong><span>知道哪里没会、为什么</span></div><div><strong>教师干预</strong><span>看到原话、追问与依据</span></div><div><strong>课程</strong><span>积累知识、资源与证据</span></div><div><strong>下一次</strong><span>从已有理解继续</span></div></div>
   </template>
 </div>
+<audio id="narrationAudio" preload="auto" autoplay playsinline hidden></audio>
 <div id="hint">← → 翻页 · B 静态 · ESC 索引</div>
+
+<script>
+/* =============== 逐页配音 ===============
+   每页只挂一条 narration。视频保持静音；进入页面时自动尝试，翻页动作直接启动当前页配音。
+   浏览器若拦截首屏有声自动播放，不显示额外控件；第一次正常翻页即完成解锁。
+*/
+(function(){
+  const audio=document.getElementById('narrationAudio');
+  let currentSlide=null,overviewOpen=false,playToken=0;
+
+  function attemptPlay(){
+    if(overviewOpen||!currentSlide||!currentSlide.dataset.narration)return;
+    const token=++playToken;
+    const result=audio.play();
+    if(result&&typeof result.catch==='function')result.catch(function(error){
+      if(token!==playToken)return;
+      if(error&&error.name!=='NotAllowedError'&&error.name!=='AbortError'){
+        console.warn('[narration] playback failed',error);
+      }
+    });
+  }
+  function syncNarration(slide,options){
+    options=options||{};
+    currentSlide=slide;
+    ++playToken;audio.pause();
+    const source=slide&&slide.dataset.narration;
+    if(!source){
+      audio.removeAttribute('src');
+      audio.load();
+      return;
+    }
+    const mediaUrl=new URL(source,document.baseURI);
+    mediaUrl.searchParams.set('voice','xiaoxiao-neural-v1');
+    const absolute=mediaUrl.href;
+    if(audio.src!==absolute){audio.src=absolute;audio.load();}
+    if(options.restart){try{audio.currentTime=0;}catch(error){}}
+    if(!overviewOpen)attemptPlay();
+  }
+
+  audio.addEventListener('error',function(){console.warn('[narration] audio file unavailable',audio.currentSrc);});
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden){audio.pause();return;}
+    if(!overviewOpen&&currentSlide)attemptPlay();
+  });
+
+  window.__syncNarration=syncNarration;
+  window.__setNarrationOverview=function(on){
+    overviewOpen=!!on;
+    if(overviewOpen){++playToken;audio.pause();}
+    else if(currentSlide)attemptPlay();
+  };
+})();
+</script>
 
 <div id="deck">
 
@@ -830,7 +1223,7 @@
      ============================================================ -->
 
 <!-- 01 / 开篇：产品主语必须第一眼可见 -->
-<section id="scene-01" class="slide dark hero" data-theme="dark" data-stage="off" data-video-play="false" data-animate="hero" aria-label="01 开篇">
+<section id="scene-01" class="slide dark hero" data-theme="dark" data-stage="off" data-video-play="false" data-narration="./assets/audio/scene-01-opening.mp3" data-animate="hero" aria-label="01 开篇">
   <div class="chrome"><div class="left"><span>AXIOM SPACE</span><span class="sep"></span><span>A3 GOLDEN CASE</span></div><div class="right"><span>01 / 17</span></div></div>
   <div class="axiom-copy" style="margin-top:13vh;width:76vw">
     <div class="axiom-eyebrow" data-anim>FOR UNIVERSITY STUDENTS</div>
@@ -842,7 +1235,7 @@
 </section>
 
 <!-- 02 / 痛点：不否定现有工具，指出仍未解决的缺口 -->
-<section id="scene-02" class="slide light" data-theme="light" data-animate="directional" aria-label="02 行业痛点">
+<section id="scene-02" class="slide light" data-theme="light" data-narration="./assets/audio/scene-02-learning-gap.mp3" data-animate="directional" aria-label="02 行业痛点">
   <div class="chrome"><div class="left"><span>WHY AXIOM</span><span class="sep"></span><span>LEARNING GAP</span></div><div class="right"><span>02 / 17</span></div></div>
   <div class="axiom-copy top" style="margin-top:3.8vh">
     <div class="axiom-eyebrow" data-anim="left">知识输入已经足够容易</div>
@@ -860,11 +1253,17 @@
       <div class="q small">学生凭什么<br>算学会？</div>
     </div>
   </div>
-  <div class="foot"><span class="title">AXIOM 要解决的不是“答得快”，而是“学生是否学会”</span><span>PAIN / 00:12—00:32</span></div>
+  <div class="need-strip" data-anim>
+    <div class="need-card"><b>Student</b><strong>我到底哪里没会？</strong><span>需要被迫输出、被指出缺口，而不是只看懂答案。</span></div>
+    <div class="need-card"><b>Teacher</b><strong>学生卡在哪里？</strong><span>需要原话、追问过程和通过依据，而不是只看完成率。</span></div>
+    <div class="need-card"><b>Course</b><strong>知识如何沉淀？</strong><span>需要资料、卡片、图谱、资源都回到同一门课。</span></div>
+    <div class="need-card"><b>System</b><strong>下一步怎么变？</strong><span>需要由掌握证据驱动推荐、复习和资源生成。</span></div>
+  </div>
+  <div class="foot"><span class="title">需求不是“更多 AI 答案”，而是学生、教师、课程和系统都能看到掌握证据</span><span>PAIN / 00:12—00:32</span></div>
 </section>
 
 <!-- 03 / 定位：一句话说明 AXIOM 的回答 -->
-<section id="scene-03" class="slide light hero" data-theme="light" data-animate="hero" aria-label="03 产品定位">
+<section id="scene-03" class="slide light hero" data-theme="light" data-narration="./assets/audio/scene-03-positioning.mp3" data-animate="hero" aria-label="03 产品定位">
   <div class="chrome"><div class="left"><span>AXIOM'S ANSWER</span><span class="sep"></span><span>VERIFIABLE LEARNING</span></div><div class="right"><span>03 / 17</span></div></div>
   <div class="axiom-copy center" style="margin:auto;width:88vw">
     <div class="axiom-eyebrow" data-anim>AXIOM 的产品定位</div>
@@ -881,65 +1280,113 @@
 </section>
 
 <!-- 04 / 架构：纯机制页，母视频从下一页正式开始 -->
-<section id="scene-04" class="slide dark" data-theme="dark" data-animate="cascade" aria-label="04 整体架构">
+<section id="scene-04" class="slide dark" data-theme="dark" data-narration="./assets/audio/scene-04-architecture.mp3" data-animate="cascade" aria-label="04 整体架构">
   <div class="chrome"><div class="left"><span>SYSTEM</span><span class="sep"></span><span>MASTERY LOOP</span></div><div class="right"><span>04 / 17</span></div></div>
-  <div class="axiom-copy top" style="margin-top:3.5vh">
-    <div class="axiom-eyebrow" data-anim>一次学习怎样被系统接住</div>
-    <h2 class="axiom-title compact" data-anim>AXIOM 的系统架构：<br><span class="hi">把一次学习变成可追踪的掌握闭环</span></h2>
+  <div class="axiom-copy top" style="margin-top:2.8vh;width:88vw">
+    <div class="axiom-eyebrow" data-anim>AXIOM Space · Mastery Learning Infrastructure</div>
+    <h2 class="axiom-title compact" data-anim>一次学习动作，穿过五层系统<br><span class="hi">最终改变下一次学习</span></h2>
   </div>
-  <div class="arch-layers">
-    <div class="arch-layer" data-anim><span class="name">学生＋课程资料</span><span class="desc">真实学习输入与课程边界</span></div>
-    <div class="arch-layer" data-anim><span class="name">长期学习工作台</span><span class="desc">仓库｜画像｜Learn｜Forge｜Galaxy｜资源</span></div>
-    <div class="arch-layer harness" data-anim><span class="name">AXIOM Agent Harness</span><span class="harness-actions"><span>对象绑定</span><span>上下文装配</span><span>工具治理</span><span>证据路由</span><span>状态写回</span></span></div>
-    <div class="arch-layer" data-anim><span class="name">掌握学习核心</span><span class="desc">苏格拉底追问 → 学生费曼输出 → 审核 → 反馈</span></div>
-    <div class="arch-layer" data-anim><span class="name">长期学习状态</span><span class="desc">卡片｜画像｜评估｜图谱｜路径｜资源</span></div>
+  <div class="arch-system" data-anim>
+    <div class="arch-system-head"><span>AXIOM SPACE / SYSTEM ARCHITECTURE</span><span>LEARNING ACTION → CONTROL PLANE → PERSISTENT STATE</span></div>
+    <div class="arch-scan" aria-hidden="true"></div>
+    <div class="arch-system-body">
+      <div class="arch-row-pro" data-arch-layer="1">
+        <div class="arch-layer-title"><b>01</b><span>Product Surfaces</span><strong>产品体验层</strong></div>
+        <div class="arch-modules">
+          <div class="arch-module"><strong>Course Vault</strong><span>课程仓库与对象边界</span></div>
+          <div class="arch-module"><strong>Dashboard</strong><span>卡片盒与学习状态</span></div>
+          <div class="arch-module"><strong>Cognition</strong><span>画像、证据与洞察</span></div>
+          <div class="arch-module"><strong>Learn / Forge</strong><span>学习、追问与打磨</span></div>
+          <div class="arch-module"><strong>Galaxy</strong><span>图谱、多视角与路径</span></div>
+        </div>
+        <div class="arch-action-pulse" aria-hidden="true">LEARNING ACTION</div>
+      </div>
+      <div class="arch-row-pro" data-arch-layer="2">
+        <div class="arch-layer-title"><b>02</b><span>Access & Streaming</span><strong>访问与流式层</strong></div>
+        <div class="arch-modules">
+          <div class="arch-module"><strong>Next.js App Router</strong><span>页面与交互入口</span></div>
+          <div class="arch-module"><strong>React Query / Zustand</strong><span>服务端与界面状态</span></div>
+          <div class="arch-module"><strong>Hono RPC Gateway</strong><span>类型安全 API 边界</span></div>
+          <div class="arch-module"><strong>Better Auth / Zod</strong><span>身份、权限与校验</span></div>
+          <div class="arch-module"><strong>SSE Event Stream</strong><span>文本、工具与资源进度</span></div>
+        </div>
+      </div>
+      <div class="arch-row-pro is-control" data-arch-layer="3">
+        <div class="arch-layer-title"><b>03</b><span>Control Plane</span><strong>掌握控制平面</strong></div>
+        <div class="control-core">
+          <div><span class="control-kicker">Mastery Learning Runtime</span><strong>AXIOM Agent Harness</strong></div>
+          <div class="control-capabilities"><span>对象绑定</span><span>意图路由</span><span>上下文装配</span><span>工具治理</span><span>证据路由</span></div>
+        </div>
+      </div>
+      <div class="arch-row-pro" data-arch-layer="4">
+        <div class="arch-layer-title"><b>04</b><span>Learning Execution</span><strong>学习执行层</strong></div>
+        <div class="arch-modules">
+          <div class="arch-module"><strong>Socratic Teaching</strong><span>追问倒逼费曼输出</span></div>
+          <div class="arch-module"><strong>Mastery Review</strong><span>灵感卡升级永久卡</span></div>
+          <div class="arch-module"><strong>Dual-Agent Runtime</strong><span>前台教学、后台分析</span></div>
+          <div class="arch-module"><strong>Resource Orchestrator</strong><span>缺口驱动多模态生成</span></div>
+          <div class="arch-module"><strong>Graph Integration</strong><span>关系、路径与迁移</span></div>
+        </div>
+      </div>
+      <div class="arch-row-pro" data-arch-layer="5">
+        <div class="arch-layer-title"><b>05</b><span>Persistent Intelligence</span><strong>长期智能层</strong></div>
+        <div class="arch-modules">
+          <div class="arch-module"><strong>Prisma Business DB</strong><span>用户、仓库与业务真源</span></div>
+          <div class="arch-module"><strong>LightRAG Retrieval</strong><span>课程材料与引用召回</span></div>
+          <div class="arch-module"><strong>Vector Memory</strong><span>旧知、偏好与跨会话迁移</span></div>
+          <div class="arch-module"><strong>Knowledge Graph</strong><span>节点、关系与学习路径</span></div>
+          <div class="arch-module"><strong>Audit / Checkpoint</strong><span>证据、轨迹与写入保护</span></div>
+        </div>
+        <div class="arch-data-particles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+    </div>
+    <div class="arch-writeback"><i aria-hidden="true"></i><span>State Writeback / 下一次学习</span></div>
+    <div class="arch-system-foot"><span>READ TOP → BOTTOM · RETURN BOTTOM → TOP</span><span>画像 · 卡片 · 图谱 · 资源 · 路径持续回写</span></div>
   </div>
-  <div class="journey-rail" data-anim><span>认识学生</span><i></i><span>资料变成知识</span><i></i><span>学生亲自讲清</span><i></i><span>审核确认掌握</span><i></i><span>证据改变下一步</span></div>
-  <div class="foot"><span class="title">Harness 不是大模型：它统一学习对象、工具边界、证据流向与状态写回</span><span>ARCHITECTURE / 00:45—01:17</span></div>
+  <div class="foot"><span class="title">AXIOM 的核心不是聊天框，而是把模型、工具、证据与长期状态绑在同一个掌握闭环里</span><span>ARCHITECTURE / 00:45—01:17</span></div>
 </section>
 
 <!-- 05 / 进入仓库 -->
-<section id="scene-05" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 01" data-stage-key="vault" data-stage-title="进入学习仓库" data-stage-caption="一门课程 · 一份跨页面不断裂的学习状态" data-stage-progress="0.08" data-video-time="77" data-video-play="true" data-animate="hero" aria-label="05 进入仓库">
+<section id="scene-05" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 01" data-stage-key="vault" data-stage-title="进入一门课程的学习仓库" data-stage-caption="选定课程 → 进入这门课自己的学习空间" data-stage-progress="0.08" data-video-src="./media/05-entry-onboarding.mp4" data-video-play="true" data-narration="./assets/audio/scene-05-vault.mp3" data-animate="hero" aria-label="05 进入仓库">
   <div class="chrome"><div class="left"><span>STEP 01</span><span class="sep"></span><span>ENTER THE VAULT</span></div><div class="right"><span>05 / 17</span></div></div>
   <div class="axiom-copy overlay">
-    <div class="axiom-eyebrow" data-anim>进入仓库</div>
-    <h2 class="axiom-title" data-anim>每门课程，都有一个<br>持续生长的学习仓库</h2>
-    <p class="axiom-sub strong" data-anim>同一门课程、同一份学习状态，在不同页面之间不断裂。</p>
-    <div class="axiom-note" data-anim>资料 · 画像 · 卡片 · 图谱 · 路径</div>
+    <div class="axiom-eyebrow" data-anim>先选课程，再开始学习</div>
+    <h2 class="axiom-title" data-anim>进入的不是聊天框<br>而是一门课的学习仓库</h2>
+    <p class="axiom-sub strong" data-anim>这里保存这门课自己的资料、画像、卡片、图谱与学习记录。</p>
+    <div class="axiom-note" data-anim>选择仓库 · 进入课程 · 读取课程上下文</div>
   </div>
-  <div class="foot"><span class="title">保存的不是聊天历史，而是下一次学习可调用的状态</span><span>LIVE / 01:17—01:27</span></div>
+  <div class="foot"><span class="title">这一步只做一件事：先确定“现在学的是哪一门课”</span><span>LIVE / 01:17—01:27</span></div>
 </section>
 
 <!-- 06 / 初次画像 -->
-<section id="scene-06" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="right" data-stage-scene="SCENE 02" data-stage-key="profile-chat" data-stage-title="对话式建立初始画像" data-stage-caption="上一轮回答 → 改变下一轮提问" data-stage-progress="0.17" data-video-time="87" data-video-play="true" data-animate="directional" aria-label="06 初次画像">
+<section id="scene-06" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="right" data-stage-scene="SCENE 02" data-stage-key="profile-chat" data-stage-title="通过对话建立初始画像" data-stage-caption="目标 · 基础 · 讲解偏好 · 卡点 · 节奏 · 掌握标准" data-video-captions="真实一镜到底：新建仓库 → 六维问答 → Agent 引导 → 查看画像证据" data-stage-progress="0.17" data-video-src="./media/06-initial-profile-start.mp4" data-video-play="true" data-narration="./assets/audio/scene-06-profile-dialogue.mp3" data-evidence-at="15.8" data-evidence-layout="evidence" data-evidence-zoom="1.02" data-evidence-origin="50% 48%" data-evidence-scene="PROFILE EVIDENCE" data-evidence-title="六维画像已经形成可检查的教学证据" data-evidence-caption="逐项查看 AI 提取出的目标、基础、偏好、卡点、节奏与掌握标准" data-animate="directional" aria-label="06 初次画像">
   <div class="chrome"><div class="left"><span>STEP 02</span><span class="sep"></span><span>INITIAL PROFILE</span></div><div class="right"><span>06 / 17</span></div></div>
   <div class="axiom-copy left">
-    <div class="axiom-eyebrow" data-anim="left">个性化从真实对话开始</div>
-    <h2 class="axiom-title compact" data-anim="left">六项教学假设<br>来自一段真实对话</h2>
+    <div class="axiom-eyebrow" data-anim="left">不是让学生填写固定标签</div>
+    <h2 class="axiom-title compact" data-anim="left">AI 通过真实回答<br>建立六项教学假设</h2>
     <div class="question-grid" data-anim="left"><span>学什么</span><span>会什么</span><span>怎么讲</span><span>哪里卡</span><span>讲多少</span><span>怎么算会</span></div>
-    <p class="axiom-sub strong" data-anim="left">这只是待验证的初始画像。</p>
+    <p class="axiom-sub strong" data-anim="left">它只是教学起点，后续还会被真实学习表现不断校正。</p>
   </div>
-  <div class="foot"><span class="title">画像先形成假设，再由学生的真实输出持续校正</span><span>LIVE / 01:27—01:50</span></div>
+  <div class="foot"><span class="title">上一轮回答改变下一轮提问，先确定接下来应该怎么教</span><span>LIVE / 01:27—01:50</span></div>
 </section>
 
 <!-- 07 / 画像变化 -->
-<section id="scene-07" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="left" data-stage-scene="SCENE 03" data-stage-key="profile-insight" data-stage-title="查看画像变化" data-stage-caption="学生原话 → 当前判断 → 教学干预 → 后续验证" data-stage-progress="0.25" data-video-time="110" data-video-play="true" data-stage-zoom="1.06" data-stage-origin="72% 45%" data-stage-focus-delay="1800" data-animate="directional" aria-label="07 查看画像变化">
+<section id="scene-07" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="cinema" data-stage-final-layout="left" data-reveal-after-video="true" data-stage-scene="SCENE 03" data-stage-key="profile-insight" data-stage-title="检查画像判断与教学规则" data-stage-caption="画像节点 → 打开证据 → 自动生成注入提示词" data-stage-progress="0.25" data-video-src="./media/08-profile-insights.mp4" data-video-play="true" data-video-loop="false" data-narration="./assets/audio/scene-07-profile-evidence.mp3" data-animate="directional" aria-label="07 查看画像变化">
   <div class="chrome"><div class="left"><span>STEP 03</span><span class="sep"></span><span>COGNITIVE INSIGHT</span></div><div class="right"><span>07 / 17</span></div></div>
   <div class="axiom-copy right">
-    <div class="axiom-eyebrow" data-anim="right">AI 的判断也要接受检查</div>
-    <h2 class="axiom-title compact" data-anim="right">每一条画像都有出处<br>也能被学生纠正</h2>
+    <div class="axiom-eyebrow" data-anim="right">AI 对学生的判断也要接受检查</div>
+    <h2 class="axiom-title compact" data-anim="right">每一条画像判断<br>都必须能追到真实证据</h2>
     <div class="evidence-chain">
-      <div class="evidence-step" data-anim="right"><b>01</b><div><strong>学生原话</strong><small>判断从哪条真实表达得出</small></div></div>
-      <div class="evidence-step" data-anim="right"><b>02</b><div><strong>当前判断</strong><small>依据强弱与变化记录可见</small></div></div>
-      <div class="evidence-step" data-anim="right"><b>03</b><div><strong>教学干预</strong><small>改变起点、例子、节奏或验收</small></div></div>
-      <div class="evidence-step" data-anim="right"><b>04</b><div><strong>后续验证</strong><small>可增强、削弱、推翻或纠正</small></div></div>
+      <div class="evidence-step" data-anim="right"><b>01</b><div><strong>当前判断</strong><small>这条画像现在怎样理解学生</small></div></div>
+      <div class="evidence-step" data-anim="right"><b>02</b><div><strong>来源对象</strong><small>证据类型、会话编号与原始表达可见</small></div></div>
+      <div class="evidence-step" data-anim="right"><b>03</b><div><strong>注入提示词</strong><small>画像与证据压缩为下一轮可执行教学规则</small></div></div>
     </div>
   </div>
-  <div class="foot"><span class="title">来源可见｜依据强弱可见｜学生可以纠正</span><span>LIVE / 01:50—02:06</span></div>
+  <div class="foot"><span class="title">画面直接显示：多维画像、证据来源与自动同步的注入提示词</span><span>LIVE / 01:50—02:06</span></div>
 </section>
 
 <!-- 08 / 导入资料 -->
-<section id="scene-08" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="right-wide" data-stage-scene="SCENE 04" data-stage-key="import" data-stage-title="导入学习资料" data-stage-caption="原文先保存 → 前台可搜索 → 后台补关系" data-stage-progress="0.34" data-video-time="126" data-video-play="true" data-animate="directional" aria-label="08 导入资料">
+<section id="scene-08" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="right-wide" data-stage-scene="SCENE 04" data-stage-key="import" data-stage-title="导入学习资料" data-stage-caption="原文先保存 → 前台可搜索 → 后台补关系" data-stage-progress="0.34" data-video-src="./media/08-import-file-to-dashboard-zen-v4-fast.mp4" data-video-start="5.6" data-video-play="true" data-narration="./assets/audio/scene-08-import.mp3" data-animate="directional" aria-label="08 导入资料">
   <div class="chrome"><div class="left"><span>STEP 04</span><span class="sep"></span><span>MATERIAL TO KNOWLEDGE</span></div><div class="right"><span>08 / 17</span></div></div>
   <div class="axiom-copy left" style="width:31vw">
     <div class="axiom-eyebrow" data-anim="left">资料先可用，关系再增强</div>
@@ -954,11 +1401,11 @@
 </section>
 
 <!-- 09 / 仪表盘与三种卡片 -->
-<section id="scene-09" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 05" data-stage-key="dashboard" data-stage-title="仪表盘与三色卡片" data-stage-caption="卡片看状态 · 连线看关系 · 星团看主题" data-stage-progress="0.43" data-video-time="144" data-video-play="true" data-stage-zoom="1.09" data-stage-origin="18% 52%" data-stage-focus-delay="2600" data-phase-duration="4200" data-animate="hero" aria-label="09 仪表盘与三色卡片">
+<section id="scene-09" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 05" data-stage-key="dashboard" data-stage-title="仪表盘与三色卡片" data-stage-caption="卡片看状态 · 连线看关系 · 星团看主题" data-stage-progress="0.43" data-video-src="./media/09-dashboard-stats-graph-user.mp4" data-video-play="true" data-narration="./assets/audio/scene-09-dashboard.mp3" data-stage-zoom="1.09" data-stage-origin="18% 52%" data-stage-focus-delay="2600" data-phase-duration="4200" data-animate="hero" aria-label="09 仪表盘与三色卡片">
   <div class="chrome"><div class="left"><span>STEP 05</span><span class="sep"></span><span>DASHBOARD</span></div><div class="right"><span>09 / 17</span></div></div>
-  <div class="axiom-copy" style="margin-top:4vh;width:63vw">
+  <div class="axiom-copy" style="position:absolute;top:11.5vh;right:6vw;margin-top:0;width:54vw;text-align:right">
     <div class="axiom-eyebrow" data-anim>知识结构与学习状态合在一张图里</div>
-    <h2 class="axiom-title compact" data-anim>在同一张图上<br>看见课程结构，也看见掌握状态</h2>
+    <h2 class="axiom-title compact" data-anim>在一张图上<br><span style="white-space:nowrap">看见课程结构，也看见掌握状态</span></h2>
   </div>
   <div class="phase-stack" style="position:absolute;right:7vw;bottom:13.5vh;width:31vw;height:17vh">
     <div class="phase">
@@ -972,22 +1419,22 @@
 </section>
 
 <!-- 10 / 打开灵感卡 -->
-<section id="scene-10" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="focus" data-stage-scene="SCENE 06" data-stage-key="focus" data-stage-title="从图谱打开灵感卡" data-stage-caption="同一知识点：图谱 → 工作台 → 审核 → 再回到图谱" data-stage-progress="0.51" data-video-time="171" data-video-play="true" data-stage-zoom="1.08" data-stage-origin="58% 48%" data-stage-focus-delay="1200" data-animate="directional" aria-label="10 打开灵感卡">
+<section id="scene-10" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="focus" data-stage-scene="SCENE 06" data-stage-key="focus" data-stage-title="从图谱进入同一张灵感卡" data-stage-caption="图谱中的 Visitor 节点 → 工作台中的同一张 Visitor 灵感卡" data-stage-progress="0.51" data-video-src="./media/10-graph-to-card-user.mp4" data-video-play="true" data-narration="./assets/audio/scene-10-current-focus.mp3" data-stage-zoom="1.08" data-stage-origin="58% 48%" data-stage-focus-delay="1200" data-animate="directional" aria-label="10 打开灵感卡">
   <div class="chrome"><div class="left"><span>STEP 06</span><span class="sep"></span><span>OPEN FLEETING CARD</span></div><div class="right"><span>10 / 17</span></div></div>
   <div class="axiom-copy left" style="width:31vw">
-    <div class="axiom-eyebrow" data-anim="left">点开灵感卡</div>
-    <h2 class="axiom-title compact" data-anim="left">就是进入一处<br>尚未掌握的知识</h2>
+    <div class="axiom-eyebrow" data-anim="left">跨页面不断裂的第一处可见证据</div>
+    <h2 class="axiom-title compact" data-anim="left">图谱里点开的知识<br>会带着同一张卡进入工作台</h2>
     <div class="focus-badge" data-anim="left"><span>CURRENT FOCUS</span><strong>当前仓库｜当前路径｜当前卡片</strong></div>
   </div>
-  <div class="foot"><span class="title">对象没有换：后续提问、回答、记录与审核都围绕同一张卡</span><span>LIVE / 02:51—03:01</span></div>
+  <div class="foot"><span class="title">对象没有换：同一个 Visitor 标题、同一种灵感卡状态</span><span>LIVE / 02:51—03:01</span></div>
 </section>
 
 <!-- 11 / 双 Agent 与向量旧知 -->
-<section id="scene-11" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 07" data-stage-key="workbench" data-stage-title="双 Agent 工作台" data-stage-caption="苏格拉底追问 · 学生费曼输出 · Agent B 原话留证" data-stage-progress="0.62" data-video-time="181" data-video-play="true" data-stage-zoom="1.05" data-stage-origin="58% 47%" data-stage-focus-delay="1800" data-phase-duration="4200" data-animate="hero" aria-label="11 双 Agent 工作台">
+<section id="scene-11" class="slide dark hero stage-slide" data-theme="dark" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 07" data-stage-key="workbench" data-stage-title="同一张卡上的双 Agent 学习闭环" data-stage-caption="Agent A 追问 → 学生费曼输出 → Agent B 同步记录原话证据" data-stage-progress="0.62" data-video-src="./media/11-socratic-agentb-auto-update-v5-fast-trim-26s.mp4" data-video-play="true" data-narration="./assets/audio/scene-11-dual-agent.mp3" data-stage-zoom="1.05" data-stage-origin="58% 47%" data-stage-focus-delay="1800" data-phase-duration="4200" data-animate="hero" aria-label="11 双 Agent 工作台">
   <div class="chrome"><div class="left"><span>STEP 07</span><span class="sep"></span><span>DUAL AGENT WORKBENCH</span></div><div class="right"><span>11 / 17</span></div></div>
   <div class="axiom-copy" style="position:absolute;left:6vw;top:16vh;width:56vw">
-    <div class="axiom-eyebrow" data-anim>通用 AI 帮你输入，AXIOM 要求你输出</div>
-    <h2 class="axiom-title compact" data-anim>AI 可以解释<br>真正的理解必须由学生说出来</h2>
+    <div class="axiom-eyebrow" data-anim>同一张卡继续承接问题、回答与学习证据</div>
+    <h2 class="axiom-title compact" data-anim>AI 不替学生说会了<br>而是逼学生把理解讲出来</h2>
   </div>
   <div class="role-tags">
     <div class="role-tag a" data-anim>AGENT A · 苏格拉底式追问</div>
@@ -995,15 +1442,15 @@
     <div class="role-tag b" data-anim>AGENT B · 原话与证据</div>
   </div>
   <div class="phase-stack" style="position:absolute;left:6vw;bottom:18.5vh;width:48vw;height:6.5vh">
-    <div class="phase"><div class="mode-question"><strong>画像注入</strong><span>按当前基础、卡点与验收方式追问</span></div></div>
-    <div class="phase"><div class="mode-question"><strong>旧知召回</strong><span>旧永久卡为当前问题搭桥，但不能替代审核</span></div></div>
-    <div class="phase"><div class="mode-question"><strong>证据写回</strong><span>只保存学生真正说过的话</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>Agent A</strong><span>追问：到底是编译期类型，还是运行时类型在起作用</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>学生输出</strong><span>不用术语背诵，用自己的话解释 accept 与 visit</span></div></div>
+    <div class="phase"><div class="mode-question"><strong>Agent B</strong><span>右侧同步保留学生原话、当前判断与仍待补足的边界</span></div></div>
   </div>
   <div class="foot"><span class="title">预测｜为什么｜例子｜反例｜边界</span><span>LIVE / 03:01—03:43</span></div>
 </section>
 
 <!-- 12 / 掌握审核 -->
-<section id="scene-12" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="wide" data-stage-scene="SCENE 08" data-stage-key="review" data-stage-title="同一张灵感卡的掌握审核" data-stage-caption="未通过 → 只追问缺口 → 换情境作答 → 通过" data-stage-progress="0.73" data-video-time="223" data-video-play="true" data-animate="cascade" aria-label="12 掌握审核">
+<section id="scene-12" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="wide" data-stage-scene="SCENE 08" data-stage-key="review" data-stage-title="同一张灵感卡的掌握审核" data-stage-caption="未通过 → 只追问缺口 → 换情境作答 → 通过" data-video-captions="第一次审核：证据不足，保持灵感卡并指出具体缺口" data-stage-progress="0.73" data-video-src="./media/12-review-user.mp4" data-video-play="true" data-narration="./assets/audio/scene-12-mastery-review.mp3" data-camera-cues="0:1.06@78% 18%;0.25:1.22@87% 17%;1.85:1.22@87% 17%;2.15:1.06@50% 50%;2.55:1.16@50% 52%;4.55:1.04@50% 50%" data-animate="cascade" aria-label="12 掌握审核">
   <div class="chrome"><div class="left"><span>STEP 08</span><span class="sep"></span><span>MASTERY REVIEW</span></div><div class="right"><span>12 / 17</span></div></div>
   <div class="axiom-copy top" style="margin-top:3.2vh">
     <div class="axiom-eyebrow" data-anim>失败不是瑕疵，而是下一步的证据</div>
@@ -1018,28 +1465,27 @@
 </section>
 
 <!-- 13 / 个性化资源 -->
-<section id="scene-13" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="left-wide" data-stage-scene="SCENE 09" data-stage-key="resources" data-stage-title="受学习证据约束的个性化资源" data-stage-caption="发现缺口 → 形成候选 → 说明理由 → 学生确认" data-stage-progress="0.82" data-video-time="273" data-video-play="true" data-phase-duration="4300" data-animate="directional" aria-label="13 个性化资源">
+<section id="scene-13" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="left-wide" data-stage-scene="SCENE 09" data-stage-key="resources" data-stage-title="受学习证据约束的个性化资源" data-stage-caption="学生点单 + 系统发现缺口后征得确认" data-video-captions="系统建议：把缺口、依据、生成范围和预期结果摆给学生选择||两种触发：学生主动点单直接执行；系统主动建议必须先确认||生成结果：文档、导图、题目、代码、图示与视频写入同一资源包||结果证明：同一次生成产出讲解、图示、动画、Mermaid 等多模态资源" data-stage-progress="0.82" data-video-src="./media/13a-resource-push-evidence.mp4|./media/13d-resource-two-paths.mp4|./media/13c-resource-pack-types.mp4|./media/13-resource-generation-results-only.mp4" data-video-play="true" data-narration="./assets/audio/scene-13-resources.mp3" data-phase-sync="clip" data-animate="directional" aria-label="13 个性化资源">
   <div class="chrome"><div class="left"><span>STEP 09</span><span class="sep"></span><span>PERSONALIZED RESOURCES</span></div><div class="right"><span>13 / 17</span></div></div>
   <div class="axiom-copy right" style="width:27vw">
     <div class="axiom-eyebrow" data-anim="right">先判断需要，再决定生成</div>
     <h2 class="axiom-title compact" data-anim="right">缺口决定补什么<br>偏好决定怎么补</h2>
     <div class="mini-flow" data-anim="right"><span>发现缺口</span><i></i><span>形成候选</span><i></i><span>说明理由</span><i></i><span>学生确认</span></div>
     <div class="phase-stack" style="height:22vh;width:28vw">
-      <div class="phase"><div class="phase-label">01 · 先判断要不要生成</div><div class="phase-list"><span>已掌握或已有等价资源 → 不重复生成</span><span>旧知相关但不等价 → 只用于类比</span><span>确有学习缺口 → 再选择资源与任务</span></div></div>
-      <div class="phase"><div class="phase-label">02 · 两种触发方式</div><div class="phase-list"><span><strong>学生主动请求</strong>：我知道自己想要什么</span><span><strong>系统提出建议</strong>：我还不知道该补什么</span></div></div>
-      <div class="phase"><div class="phase-label">03 · 受治理的建议</div><div class="phase-list"><span>来源｜理由｜证据强度｜预期结果</span><span>学生只选择：接受 / 忽略</span></div></div>
-      <div class="phase"><div class="phase-label">04 · 六类学习用途</div><div class="resource-uses"><span>文档＝讲解</span><span>导图＝梳理</span><span>题目＝验证</span><span>代码＝实操</span><span>图示＝说明</span><span>视频＝演示</span></div></div>
+      <div class="phase"><div class="phase-label">01 · 系统为什么建议</div><div class="phase-list"><span>已通过 Visitor 基础复测 → 不重复基础 UML</span><span>仍缺模式选择边界 → 只补对照资料与测验</span><span>画面同时显示证据、范围、预期结果与接受 / 忽略</span></div></div>
+      <div class="phase"><div class="phase-label">02 · 两种触发方式</div><div class="phase-list"><span><strong>学生主动点单</strong>：明确要六类资源，直接执行</span><span><strong>系统主动建议</strong>：说明缺口后，必须征得确认</span><span>用户说“不要重复 UML”，后续资源立即遵守</span></div></div>
+      <div class="phase"><div class="phase-label">03 · 六类结果真实落库</div><div class="resource-uses"><span>文档＝讲解</span><span>导图＝梳理</span><span>题目＝验证</span><span>代码＝实操</span><span>图示＝说明</span><span>视频＝演示</span></div></div>
     </div>
   </div>
   <div class="foot"><span class="title">价值不在生成更多，而在补得必要、补得合适、不污染长期知识库</span><span>LIVE / 04:33—05:10</span></div>
 </section>
 
 <!-- 14 / 图谱多视角 -->
-<section id="scene-14" class="slide light hero stage-slide" data-theme="light" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 10" data-stage-key="graph" data-stage-title="知识图谱的六个真实视角" data-stage-caption="同一仓库 · 同一节点 · 同一组学习证据" data-stage-progress="0.91" data-video-time="310" data-video-play="true" data-stage-zoom="1.06" data-stage-origin="48% 48%" data-stage-focus-delay="1600" data-phase-duration="3300" data-animate="hero" aria-label="14 知识图谱视角">
+<section id="scene-14" class="slide light hero stage-slide" data-theme="light" data-stage="on" data-stage-layout="full" data-stage-scene="SCENE 10" data-stage-key="graph" data-stage-title="同一知识网络的六种观察视角" data-stage-caption="节点没有换 · 学习状态没有换 · 只切换观察方式" data-stage-progress="0.91" data-video-src="./media/14-graph-modes.mp4" data-video-play="true" data-narration="./assets/audio/scene-14-graph-views.mp3" data-stage-zoom="1.06" data-stage-origin="48% 48%" data-stage-focus-delay="1600" data-phase-duration="3300" data-animate="hero" aria-label="14 知识图谱视角">
   <div class="chrome"><div class="left"><span>STEP 10</span><span class="sep"></span><span>MULTI-VIEW GRAPH</span></div><div class="right"><span>14 / 17</span></div></div>
   <div class="axiom-copy" style="margin-top:3.8vh;width:58vw">
-    <div class="axiom-eyebrow" data-anim>图谱不是 3D 装饰</div>
-    <h2 class="axiom-title compact" data-anim>同一份学习证据<br>可以从不同问题来读</h2>
+    <div class="axiom-eyebrow" data-anim>六次切换，始终是同一批知识节点</div>
+    <h2 class="axiom-title compact" data-anim>不是六张演示图<br>而是同一知识网络的六种读法</h2>
   </div>
   <div class="phase-stack mode-reading">
     <div class="phase"><div class="mode-question"><strong>星系</strong><span>我整体学了什么</span></div></div>
@@ -1053,34 +1499,232 @@
   <div class="foot"><span class="title">看结构｜查证据｜定下一步</span><span>LIVE / 05:10—05:37</span></div>
 </section>
 
-<!-- 15 / 从视频证据归纳技术创新 -->
-<section id="scene-15" class="slide dark stage-slide" data-theme="dark" data-stage="on" data-stage-layout="float" data-stage-scene="EVIDENCE" data-stage-key="innovation" data-stage-title="刚才看见的产品证据" data-stage-caption="从真实动作归纳七项机制" data-stage-progress="0.95" data-video-time="337" data-video-play="false" data-phase-duration="5200" data-animate="cascade" aria-label="15 技术创新">
+<!-- 15 / Harness 运行机制：进度与机制证据同步 -->
+<section id="scene-15" class="slide dark" data-theme="dark" data-stage="off" data-stage-layout="off" data-phase-duration="3500" data-phase-loop="false" data-narration="./assets/audio/scene-15-harness.mp3" data-animate="cascade" aria-label="15 Harness 运行机制">
   <div class="chrome"><div class="left"><span>WHY IT WORKS</span><span class="sep"></span><span>MECHANISM INNOVATION</span></div><div class="right"><span>15 / 17</span></div></div>
-  <div class="axiom-copy top" style="margin-top:4vh;width:78vw">
-    <div class="axiom-eyebrow" data-anim>七项机制都已在前面的真实动作中出现</div>
-    <h2 class="axiom-title compact" data-anim>创新不在“接入大模型”<br>而在让学习判断可追溯、可验证、可复用</h2>
+  <div class="axiom-copy top" style="margin-top:2.1vh;width:88vw">
+    <div class="axiom-eyebrow" data-anim>不是 Prompt 包装，而是一条可识别、可规划、可审计、可回写的学习运行管线</div>
+    <h2 class="axiom-title compact" data-anim>一句话进入系统之后，<span class="hi">怎样成为下一次学习的起点？</span></h2>
   </div>
-  <div class="phase-stack innovation-stage">
-    <div class="phase">
-      <div class="harness-core"><span class="phase-label">01 · 自研垂直学习运行框架</span><strong>AXIOM Agent Harness</strong><div class="harness-actions"><span>对象绑定</span><span>上下文装配</span><span>工具治理</span><span>证据路由</span><span>状态写回</span></div></div>
-      <div class="outcome-row"><div><strong>可验证</strong><span>学生输出必须经过审核</span></div><div><strong>可解释</strong><span>判断、推荐与关系都有来源</span></div><div><strong>可继续</strong><span>证据改变下一次学习</span></div></div>
+  <div class="harness-story" data-anim>
+    <div class="mode-strip harness-phase-nav" aria-label="Harness 八步运行进度">
+      <span><b>01</b><strong>请求入口</strong><small>AUTH · ZOD · SSE</small></span>
+      <span><b>02</b><strong>对象绑定</strong><small>USER · VAULT · CARD</small></span>
+      <span><b>03</b><strong>意图识别</strong><small>INTENT · SLOTS · ROUTE</small></span>
+      <span><b>04</b><strong>任务规划</strong><small>PLAN · CONFIRM · LOOP</small></span>
+      <span><b>05</b><strong>上下文装配</strong><small>PROFILE · RAG · MEMORY</small></span>
+      <span><b>06</b><strong>双 Agent 运行</strong><small>TEACH · OBSERVE</small></span>
+      <span><b>07</b><strong>受控执行</strong><small>GUARD · AUDIT · RETRY</small></span>
+      <span><b>08</b><strong>证据写回</strong><small>COMMIT · NEXT LEARNING</small></span>
     </div>
-    <div class="phase"><div class="innovation-grid">
-      <div class="innovation-chip"><b>02</b><strong>掌握授权</strong><span>输出证据先过审核</span></div>
-      <div class="innovation-chip"><b>03</b><strong>证据画像</strong><span>画像真正改变教学</span></div>
-      <div class="innovation-chip"><b>04</b><strong>前台教学＋后台分析</strong><span>教学与记录不互相打断</span></div>
-    </div></div>
-    <div class="phase"><div class="innovation-grid">
-      <div class="innovation-chip"><b>05</b><strong>克制型资源与推送</strong><span>先判断需要，再由学生确认</span></div>
-      <div class="innovation-chip"><b>06</b><strong>业务真源＋双速语义</strong><span>事实可回源，旧知快召回，关系后增强</span></div>
-      <div class="innovation-chip"><b>07</b><strong>认知图谱与行动反馈</strong><span>看结构、查来源、定下一步</span></div>
-    </div></div>
+
+    <div class="phase-stack harness-evidence-stack">
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 01 / SECURE ENTRY</span><strong>先把一句话变成可信请求</strong></div>
+            <p>身份、数据结构、流式连接依次通过，模型才有资格接收这次学习动作。</p>
+            <div class="mechanism-route"><span>自然语言</span><i></i><span>可信请求</span></div>
+          </header>
+          <div class="mechanism-canvas api-canvas">
+            <span class="io-label input">UPSTREAM / USER</span><span class="io-label output">DOWNSTREAM / BINDING</span>
+            <div class="flow-line"></div>
+            <div class="api-message"><span>USER REQUEST</span><strong>“帮我把反向传播真正学懂。”</strong></div>
+            <div class="api-gate auth"><i data-lucide="shield-check"></i><b>AUTH</b><small>身份有效</small></div>
+            <div class="api-gate schema"><i data-lucide="file-check"></i><b>ZOD</b><small>结构合法</small></div>
+            <div class="api-stream"><span>SSE STREAM</span><i></i><i></i><i></i><i></i></div>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>Harness 接管的是一次有身份、有边界、可持续返回的学习事务，而不是裸 Prompt。</p><em>/api/agent/chat</em></footer>
+        </article>
+      </div>
+
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 02 / SCOPE BINDING</span><strong>明确“谁、在哪、学什么”</strong></div>
+            <p>同一句话必须绑定到具体学生、仓库、会话与卡片线程，后续状态才不会串线。</p>
+            <div class="mechanism-route"><span>可信请求</span><i></i><span>学习对象</span></div>
+          </header>
+          <div class="mechanism-canvas binding-canvas">
+            <span class="io-label input">UPSTREAM / VERIFIED REQUEST</span><span class="io-label output">DOWNSTREAM / SCOPED TASK</span>
+            <div class="binding-token" style="--y:16%;--delay:0s">USER ID <b>u_2048</b></div>
+            <div class="binding-token" style="--y:34%;--delay:.16s">VAULT ID <b>ml_course</b></div>
+            <div class="binding-token" style="--y:52%;--delay:.32s">SESSION <b>s_037</b></div>
+            <div class="binding-token" style="--y:70%;--delay:.48s">CARD THREAD <b>backprop</b></div>
+            <div class="binding-core"><b>对象绑定器</b><span>EXECUTION SCOPE</span></div>
+            <div class="bound-object"><span>BOUND LEARNING OBJECT</span>
+              <div class="bound-slot" style="--delay:.15s"><b>student</b><i>why / profile-v6</i></div>
+              <div class="bound-slot" style="--delay:.3s"><b>vault</b><i>机器学习课程</i></div>
+              <div class="bound-slot" style="--delay:.45s"><b>node</b><i>反向传播</i></div>
+              <div class="bound-slot" style="--delay:.6s"><b>thread</b><i>card_118</i></div>
+            </div>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>每次 Agent 行动都拥有明确业务作用域，读写只发生在当前学习现场。</p><em>USER · VAULT · SESSION</em></footer>
+        </article>
+      </div>
+
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 03 / INTENT ROUTER</span><strong>识别要做什么，再决定往哪走</strong></div>
+            <p>不仅判断“聊天还是生成”，还抽取学习对象、教学方式与置信度，送入对应 Skill。</p>
+            <div class="mechanism-route"><span>学习对象</span><i></i><span>SkillEngine</span></div>
+          </header>
+          <div class="mechanism-canvas intent-canvas">
+            <span class="io-label input">UPSTREAM / SCOPED UTTERANCE</span><span class="io-label output">DOWNSTREAM / SKILL ROUTE</span>
+            <div class="intent-scan"></div>
+            <div class="intent-utterance">“解释反向传播，再用问题检查我是不是真的懂了。”</div>
+            <div class="intent-classifier"><span>INTENT CANDIDATES</span>
+              <div class="intent-score"><b>learn.assess</b><i style="--score:94%"></i><em>.94</em></div>
+              <div class="intent-score"><b>resource.create</b><i style="--score:31%"></i><em>.31</em></div>
+              <div class="intent-score"><b>vault.manage</b><i style="--score:12%"></i><em>.12</em></div>
+              <div class="intent-score"><b>profile.query</b><i style="--score:08%"></i><em>.08</em></div>
+            </div>
+            <div class="intent-result"><span>CLASSIFY INTENT SMART</span><strong>学习＋掌握审核</strong>
+              <div class="intent-slot" style="--delay:0s"><b>ACTION</b><i>learn.assess</i></div>
+              <div class="intent-slot" style="--delay:.15s"><b>OBJECT</b><i>反向传播</i></div>
+              <div class="intent-slot" style="--delay:.3s"><b>METHOD</b><i>socratic</i></div>
+              <div class="intent-slot" style="--delay:.45s"><b>CONFIDENCE</b><i>0.94</i></div>
+            </div>
+            <div class="intent-next"><span>ROUTE SELECTED</span><strong>mastery_review_skill →</strong></div>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>先理解本轮目标，再只开放必要能力；错误路线不会带着全部工具继续执行。</p><em>INTENT · SLOTS · CONFIDENCE</em></footer>
+        </article>
+      </div>
+
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 04 / TASK PLANNER</span><strong>把目标拆成可检查的学习步骤</strong></div>
+            <p>规划不是一次生成答案，而是带确认点、等待点、审核分支和失败回路的执行图。</p>
+            <div class="mechanism-route"><span>Skill 路线</span><i></i><span>执行计划</span></div>
+          </header>
+          <div class="mechanism-canvas plan-canvas">
+            <span class="io-label input">UPSTREAM / MASTERY REVIEW SKILL</span><span class="io-label output">DOWNSTREAM / EXECUTABLE PLAN</span>
+            <div class="plan-loop"></div>
+            <div class="plan-flow">
+              <div class="plan-node" style="--delay:0s"><b>01 · READ</b><strong>读取当前卡片</strong></div>
+              <div class="plan-node" style="--delay:.28s"><b>02 · DIAGNOSE</b><strong>定位理解缺口</strong></div>
+              <div class="plan-node" style="--delay:.56s"><b>03 · ASK</b><strong>生成苏格拉底问题</strong></div>
+              <div class="plan-node" style="--delay:.84s"><b>04 · WAIT</b><strong>等待学生输出</strong></div>
+              <div class="plan-node" style="--delay:1.12s"><b>05 · OBSERVE</b><strong>记录原话证据</strong></div>
+              <div class="plan-node" style="--delay:1.4s"><b>06 · ASSESS</b><strong>检查概念与迁移</strong></div>
+              <div class="plan-node" style="--delay:1.68s"><b>07 · GATE</b><strong>决定继续或通过</strong></div>
+              <div class="plan-node" style="--delay:1.96s"><b>08 · COMMIT</b><strong>提交状态变更</strong></div>
+            </div>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>“没掌握”不会被包装成结论；系统只回到具体缺口继续追问。</p><em>PLAN · CONFIRM · RETRY</em></footer>
+        </article>
+      </div>
+
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 05 / CONTEXT ASSEMBLY</span><strong>让模型进入真实学习现场</strong></div>
+            <p>画像控制教学策略，向量记忆召回旧知，图谱提供关系路径，证据限定当前判断。</p>
+            <div class="mechanism-route"><span>执行计划</span><i></i><span>Context Envelope</span></div>
+          </header>
+          <div class="mechanism-canvas context-canvas">
+            <span class="io-label input">UPSTREAM / CONTEXT SOURCES</span><span class="io-label output">DOWNSTREAM / MODEL CONTEXT</span>
+            <svg class="context-links" viewBox="0 0 1000 360" preserveAspectRatio="none" aria-hidden="true">
+              <path pathLength="1" style="--delay:.05s" d="M210 75 L430 180"/><path pathLength="1" style="--delay:.15s" d="M210 170 L430 180"/><path pathLength="1" style="--delay:.25s" d="M210 275 L430 180"/>
+              <path pathLength="1" style="--delay:.35s" d="M400 70 L430 180"/><path pathLength="1" style="--delay:.45s" d="M400 285 L430 180"/><path pathLength="1" style="--delay:.6s" d="M620 180 L705 180"/>
+            </svg>
+            <div class="context-source" style="--x:4%;--y:13%;--dx:14.5vw;--dy:9vh;--delay:0s"><strong>学生画像</strong>偏好 · 误区 · 能力边界</div>
+            <div class="context-source" style="--x:4%;--y:39%;--dx:14.5vw;--dy:1.5vh;--delay:.18s"><strong>当前卡片</strong>原文 · 摘要 · 当前状态</div>
+            <div class="context-source" style="--x:4%;--y:66%;--dx:14.5vw;--dy:-7vh;--delay:.36s"><strong>向量记忆</strong>相似旧知 · 历史回答</div>
+            <div class="context-source" style="--x:24%;--y:10%;--dx:2vw;--dy:10vh;--delay:.54s"><strong>知识图谱</strong>前置节点 · 邻域关系</div>
+            <div class="context-source" style="--x:24%;--y:72%;--dx:2vw;--dy:-9vh;--delay:.72s"><strong>学习证据</strong>掌握判断 · 未解缺口</div>
+            <div class="context-core"><i></i><i></i><i></i><strong>上下文装配</strong><span>FILTER · RANK · PACK</span></div>
+            <div class="context-output"><span>CONTEXT ENVELOPE</span>
+              <div class="context-layer" style="--delay:.25s">教学策略：先类比，再要求复述</div>
+              <div class="context-layer" style="--delay:.4s">当前节点：反向传播 / 灵感卡</div>
+              <div class="context-layer" style="--delay:.55s">相关旧知：链式法则 / 梯度下降</div>
+              <div class="context-layer" style="--delay:.7s">待验证缺口：无法解释梯度如何回传</div>
+            </div>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>下一次学习会真正调用过去的卡片、画像和向量记忆，而不是只依赖这一轮聊天。</p><em>PROFILE · RAG · VECTOR</em></footer>
+        </article>
+      </div>
+
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 06 / DUAL-AGENT RUNTIME</span><strong>前台教学，后台留证</strong></div>
+            <p>教学 Agent 负责苏格拉底追问；助手 Agent 不打断对话，持续记录原话与掌握证据。</p>
+            <div class="mechanism-route"><span>Context</span><i></i><span>回答＋证据</span></div>
+          </header>
+          <div class="mechanism-canvas dual-canvas">
+            <section class="teaching-lane"><span>AGENT 1 / TEACHING CHANNEL</span>
+              <div class="chat-bubble" style="--delay:0s">如果梯度只知道输出层误差，它怎样影响更早的一层？</div>
+              <div class="chat-bubble user" style="--delay:.48s">误差沿计算图反向传播，每一层用局部导数和上游梯度相乘。</div>
+              <div class="chat-bubble" style="--delay:.96s">很好。请不用公式，给刚入门的同学讲一遍。</div>
+            </section>
+            <aside class="observer-lane"><span>AGENT 2 / EVIDENCE CHANNEL</span>
+              <div class="evidence-record" style="--delay:.35s"><b>保留学生原话</b><i>QUOTE</i></div>
+              <div class="evidence-record" style="--delay:.65s"><b>概念准确：链式法则</b><i>PASS</i></div>
+              <div class="evidence-record" style="--delay:.95s"><b>因果解释：仍需验证</b><i>OPEN</i></div>
+              <div class="evidence-record" style="--delay:1.25s"><b>画像：偏好类比表达</b><i>UPDATE</i></div>
+              <div class="evidence-record" style="--delay:1.55s"><b>下一问：迁移到新情境</b><i>NEXT</i></div>
+            </aside>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>学生专注用费曼方式输出；记录、分析和状态更新由第二条通道自动完成。</p><em>TEACHING AGENT + AGENT B</em></footer>
+        </article>
+      </div>
+
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 07 / CONTROLLED EXECUTION</span><strong>工具能调用，但不能越权</strong></div>
+            <p>每次读写经过权限、作用域、确认点和检查点；失败可重试，所有结果进入审计链。</p>
+            <div class="mechanism-route"><span>任务计划</span><i></i><span>可信结果</span></div>
+          </header>
+          <div class="mechanism-canvas guard-canvas">
+            <span class="io-label input">UPSTREAM / TOOL REQUESTS</span><span class="io-label output">DOWNSTREAM / AUDITED RESULT</span>
+            <div class="tool-call" style="--y:20%;--delay:0s">read_card <b>card_118</b></div>
+            <div class="tool-call" style="--y:42%;--delay:.22s">search_memory <b>top_k=6</b></div>
+            <div class="tool-call" style="--y:64%;--delay:.44s">write_profile <b>evidence</b></div>
+            <div class="guard-core"><i data-lucide="shield-check"></i><strong>Harness Guard</strong><span>SCOPE · POLICY · CHECKPOINT</span></div>
+            <div class="guard-checks">
+              <div class="guard-check" style="--delay:.25s"><b>当前仓库内读取</b><i>ALLOW</i></div>
+              <div class="guard-check" style="--delay:.5s"><b>向量召回只读</b><i>ALLOW</i></div>
+              <div class="guard-check" style="--delay:.75s"><b>画像更新附带证据</b><i>ALLOW</i></div>
+              <div class="guard-check denied" style="--delay:1s"><b>跨仓库直接写入</b><i>DENY</i></div>
+            </div>
+            <div class="audit-stamp"><span>CHECKPOINT #037</span><strong>3 PASS · 1 BLOCKED · AUDIT SAVED</strong></div>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>模型负责推理，Harness 决定它此刻能看什么、能做什么、结果怎样被验证。</p><em>GUARDRAIL · CHECKPOINT</em></footer>
+        </article>
+      </div>
+
+      <div class="phase">
+        <article class="mechanism-evidence">
+          <header class="mechanism-head">
+            <div><span class="id">STEP 08 / EVIDENCE COMMIT</span><strong>把这次学习写回长期状态</strong></div>
+            <p>证据同时更新卡片、画像、图谱、向量记忆与资源队列，并成为下一轮检索的起点。</p>
+            <div class="mechanism-route"><span>可信结果</span><i></i><span>下一次学习</span></div>
+          </header>
+          <div class="mechanism-canvas commit-canvas">
+            <span class="io-label input">UPSTREAM / VERIFIED EVIDENCE</span><span class="io-label output">DOWNSTREAM / PERSISTENT STATE</span>
+            <div class="commit-core"><strong>证据提交</strong><span>EVIDENCE COMMIT</span></div>
+            <div class="commit-target" style="--x:4%;--y:15%;--delay:.2s"><b>CARD STATE</b><strong>灵感卡 / 永久卡</strong></div>
+            <div class="commit-target" style="--x:4%;--y:48%;--delay:.4s"><b>PROFILE</b><strong>六维画像证据更新</strong></div>
+            <div class="commit-target" style="--x:72%;--y:15%;--delay:.6s"><b>KNOWLEDGE GRAPH</b><strong>节点与关系增强</strong></div>
+            <div class="commit-target" style="--x:72%;--y:43%;--delay:.8s"><b>VECTOR MEMORY</b><strong>旧知进入后续召回</strong></div>
+            <div class="commit-target" style="--x:72%;--y:70%;--delay:1s"><b>RESOURCE QUEUE</b><strong>按缺口准备资源</strong></div>
+            <div class="mastery-gate"><span>灵感卡</span><i>审核未过 ↺ / 审核通过 →</i><strong>永久卡＝已掌握</strong></div>
+            <div class="next-loop">下一次请求重新读取这些长期状态</div>
+          </div>
+          <footer class="mechanism-caption"><b>WHAT IT PROVES</b><p>AXIOM 的长期性来自“证据写回＋向量召回＋状态迁移”，不是简单保存聊天记录。</p><em>STATE → RETRIEVAL → NEXT</em></footer>
+        </article>
+      </div>
+    </div>
   </div>
-  <div class="foot"><span class="title">普通 Agent 主要解决怎样回答；AXIOM Harness 还决定在哪学、能做什么、留下什么证据、下一步怎样改变</span><span>INNOVATION / 05:37—06:12</span></div>
+  <div class="foot"><span class="title">普通 Agent 交付一次回答；AXIOM Harness 交付一次可验证、可积累、会改变下一步的学习行动</span><span>HARNESS / 05:37—06:12</span></div>
 </section>
 
 <!-- 16 / 价值与案例数据 -->
-<section id="scene-16" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="ribbon" data-stage-scene="CASE DATA" data-stage-key="value" data-stage-title="真实仓库留下的长期状态" data-stage-caption="行为证明与运行证明，不偷换为学习效果结论" data-stage-progress="1" data-video-time="372" data-video-play="false" data-phase-duration="5200" data-animate="cascade" aria-label="16 落地价值">
+<section id="scene-16" class="slide light stage-slide" data-theme="light" data-stage="on" data-stage-layout="ribbon" data-stage-scene="CASE DATA" data-stage-key="value" data-stage-title="真实仓库留下的长期状态" data-stage-caption="行为证明与运行证明，不偷换为学习效果结论" data-stage-progress="1" data-video-play="false" data-narration="./assets/audio/scene-16-value.mp3" data-phase-duration="5200" data-animate="cascade" aria-label="16 落地价值">
   <div class="chrome"><div class="left"><span>WHAT CHANGES</span><span class="sep"></span><span>APPLICATION VALUE</span></div><div class="right"><span>16 / 17</span></div></div>
   <div style="margin-top:36vh;position:relative;z-index:3">
     <div class="axiom-eyebrow" data-anim>落地价值</div>
@@ -1096,18 +1740,18 @@
         <div><strong>长期连续</strong><span>旧知识跨会话回到原卡；资源与路径随证据改变</span></div>
       </div></div>
       <div class="phase"><div class="perf-proof">
-        <div class="metric"><strong>312</strong><span>张卡片 · 长期黄金仓库规模背景</span></div>
-        <div class="metric"><strong>81.25s</strong><span>96 张真实卡片快速索引及验证</span></div>
-        <div class="metric"><strong>0.25s</strong><span>热模型语义查询</span></div>
-        <div class="condition">本机 bge-m3 单并发历史实测；最终录制前复测。数据仅证明工程链路可用与反馈及时，不等于学习效果提升。</div>
+        <div class="metric"><strong>311</strong><span>张用户可见卡片 · 长期黄金仓库</span></div>
+        <div class="metric"><strong>357</strong><span>条真实知识关系</span></div>
+        <div class="metric"><strong>133 / 12</strong><span>学习会话 / 正式评估</span></div>
+        <div class="condition"><strong>LIVE CONTRACT CHECK / 2026-07-18</strong><span>可见卡片：102 永久 · 98 灵感 · 111 文献</span><span>系统：96 语义索引 · 12 资源任务 · 6 推送建议</span><small>排除 1 张内部仓库根卡。数据只证明链路真实存在，不冒充学习效果结论。</small></div>
       </div></div>
     </div>
   </div>
-  <div class="foot"><span class="title">三方价值、行为证明与运行数据分时出现，不把规模冒充学习效果</span><span>VALUE / 06:12—06:47</span></div>
+  <div class="foot"><span class="title">三方价值、行为证明与当前数据库检查结果分时出现，不把规模冒充学习效果</span><span>VALUE / 06:12—06:47</span></div>
 </section>
 
 <!-- 17 / 浅色愿景收束，避免黑屏 -->
-<section id="scene-17" class="slide light hero" data-theme="light" data-animate="hero" aria-label="17 愿景">
+<section id="scene-17" class="slide light hero" data-theme="light" data-narration="./assets/audio/scene-17-vision.mp3" data-animate="hero" aria-label="17 愿景">
   <div class="horizon" data-anim></div><span class="scene-count">∞</span>
   <div class="chrome"><div class="left"><span>AXIOM SPACE</span><span class="sep"></span><span>VISION</span></div><div class="right"><span>17 / 17</span></div></div>
   <div class="axiom-copy vision-center">
@@ -1122,13 +1766,14 @@
 </div>
 
 <script>
-/* =============== 单一连续视频舞台 ===============
-   第 04—16 页只改变同一个 video 的几何状态；不创建分页视频。
-   占位阶段按 data-stage-key 切换品牌化产品场景。
+/* =============== 分片实录 · 单一连续舞台 ===============
+   第 05—16 页始终复用同一个 video DOM；每页只切换片源或片段序列。
+   切片时冻结上一帧并沿用同一套几何变形，避免分页播放器造成黑屏和割裂。
 */
 (function(){
   const stage=document.getElementById('continuityStage');
   const video=document.getElementById('continuityVideo');
+  const frameCache=document.getElementById('continuityFrameCache');
   const viewport=stage.querySelector('.cs-viewport');
   const sceneRoot=document.getElementById('continuityScene');
   const liveTitle=stage.querySelector('[data-stage-title]');
@@ -1137,7 +1782,8 @@
   const liveKicker=stage.querySelector('[data-stage-kicker]');
   const liveProgress=stage.querySelector('[data-stage-progress]');
   const liveTime=stage.querySelector('[data-stage-time]');
-  let focusTimer=0,currentSlide=null,overviewOpen=false;
+  let focusTimer=0,transitionTimer=0,revealTimer=0,seekTimer=0,seekToken=0,cameraRAF=0,currentSlide=null,overviewOpen=false,stageEnabled=false,evidenceFocusActive=false;
+  let currentPlaylist=[],currentClipIndex=0,currentPlaylistKey='';
 
   function clamp01(n){return Math.max(0,Math.min(1,Number(n)||0));}
   function formatTime(n){n=Math.max(0,Number(n)||0);return String(Math.floor(n/60)).padStart(2,'0')+':'+String(Math.floor(n%60)).padStart(2,'0');}
@@ -1147,35 +1793,245 @@
     sceneRoot.replaceChildren(tpl.content.cloneNode(true));
     stage.dataset.scene=key||'vault';
   }
-  function seekVideo(time,shouldPlay){
-    const target=Number(time)||0;
-    liveTime.textContent=formatTime(target);
-    if(!video.src)return;
-    const apply=function(){
-      try{
-        const duration=Number(video.duration);
-        const maxTarget=Number.isFinite(duration)&&duration>0?Math.max(0,duration-.35):target;
-        if(Number.isFinite(duration)&&target>maxTarget){
-          video.pause();stage.classList.remove('has-video');stage.dataset.videoFallback='out-of-range';return;
-        }
-        stage.dataset.videoFallback='';
-        if(video.readyState>=2)stage.classList.add('has-video');
-        if(Math.abs((video.currentTime||0)-target)>3.5){stage.classList.add('is-seeking');video.currentTime=Math.min(target,maxTarget);}
-        if(shouldPlay&&!window.__lowPowerMode&&!overviewOpen){video.play().catch(function(){});}else{video.pause();}
-      }finally{setTimeout(function(){stage.classList.remove('is-seeking');},220);}
+  function parsePlaylist(slide){
+    return String(slide&&slide.dataset.videoSrc||'').split('|').map(function(src){return src.trim();}).filter(Boolean);
+  }
+  function parseClipCopy(slide,key){
+    return String(slide&&slide.dataset[key]||'').split('||').map(function(value){return value.trim();}).filter(Boolean);
+  }
+  function parseCameraCues(slide){
+    return String(slide&&slide.dataset.cameraCues||'').split(';').map(function(item){
+      const match=item.trim().match(/^([\d.]+)\s*:\s*([\d.]+)\s*@\s*(.+)$/);
+      if(!match)return null;
+      const origin=match[3].trim();
+      const parts=origin.match(/([\d.]+)%\s+([\d.]+)%/);
+      return {time:Number(match[1]),scale:Number(match[2]),origin:origin,x:parts?Number(parts[1]):50,y:parts?Number(parts[2]):50};
+    }).filter(function(cue){return cue&&Number.isFinite(cue.time)&&Number.isFinite(cue.scale)&&cue.origin;}).sort(function(a,b){return a.time-b.time;});
+  }
+  function easeFocus(t){
+    t=Math.max(0,Math.min(1,Number(t)||0));
+    return t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+  }
+  function mixFocusCue(a,b,t){
+    if(!a||!b)return a||b;
+    const k=easeFocus(t);
+    const x=a.x+(b.x-a.x)*k;
+    const y=a.y+(b.y-a.y)*k;
+    const scale=a.scale+(b.scale-a.scale)*k;
+    return {time:a.time,scale:scale,origin:x.toFixed(1)+'% '+y.toFixed(1)+'%',x:x,y:y};
+  }
+  function applyMediaFocus(origin,scale){
+    const focus=origin||'50% 50%';
+    const zoom=Math.max(1,Number(scale)||1);
+    const parts=String(focus).match(/([\d.]+)%\s+([\d.]+)%/);
+    let panX=0,panY=0;
+    if(parts&&zoom>1){
+      const x=Number(parts[1]);
+      const y=Number(parts[2]);
+      panX=(50-x)*(zoom-1)*0.46;
+      panY=(50-y)*(zoom-1)*0.46;
+    }
+    viewport.style.setProperty('--media-origin',focus);
+    viewport.style.setProperty('--media-position',focus);
+    viewport.style.setProperty('--media-pan-x',panX.toFixed(2)+'%');
+    viewport.style.setProperty('--media-pan-y',panY.toFixed(2)+'%');
+    viewport.style.setProperty('--media-scale',String(zoom));
+  }
+  function syncCameraFocus(force){
+    if(!currentSlide||!currentSlide.dataset.cameraCues||evidenceFocusActive)return false;
+    const cues=parseCameraCues(currentSlide);
+    if(!cues.length)return false;
+    let active=cues[0];
+    const t=Number(video.currentTime)||0;
+    for(let i=0;i<cues.length;i++){if(t>=cues[i].time)active=cues[i];else break;}
+    if(force||stage.dataset.cameraOrigin!==active.origin||Math.abs(Number(stage.dataset.cameraScale||0)-active.scale)>.005){
+      stage.dataset.cameraOrigin=active.origin;
+      stage.dataset.cameraScale=String(active.scale);
+      applyMediaFocus(active.origin,active.scale);
+    }
+    return true;
+  }
+  function stopCameraLoop(){
+    if(cameraRAF)cancelAnimationFrame(cameraRAF);
+    cameraRAF=0;
+  }
+  function startCameraLoop(){
+    stopCameraLoop();
+    const tick=function(){
+      if(stageEnabled&&currentSlide&&currentSlide.dataset.cameraCues&&!video.paused&&!video.ended){
+        syncCameraFocus(false);
+        cameraRAF=requestAnimationFrame(tick);
+      }else cameraRAF=0;
     };
-    if(video.readyState>=1)apply();else video.addEventListener('loadedmetadata',apply,{once:true});
+    tick();
+  }
+  function syncClipCopy(){
+    if(!currentSlide)return;
+    const titles=parseClipCopy(currentSlide,'videoTitles');
+    const captions=parseClipCopy(currentSlide,'videoCaptions');
+    setText(liveTitle,titles[currentClipIndex]||currentSlide.dataset.stageTitle,'AXIOM 学习现场');
+    setText(liveCaption,captions[currentClipIndex]||currentSlide.dataset.stageCaption,'LIVE PRODUCT EVIDENCE');
+    window.dispatchEvent(new CustomEvent('ppt-stage-clip-change',{detail:{slide:currentSlide,index:currentClipIndex,count:currentPlaylist.length}}));
+  }
+  function setEvidenceFocus(active){
+    active=!!(active&&currentSlide&&currentSlide.dataset.evidenceAt);
+    if(active===evidenceFocusActive)return;
+    evidenceFocusActive=active;
+    clearTimeout(focusTimer);
+    currentSlide.classList.toggle('is-evidence-focus',active);
+    stage.classList.toggle('is-evidence-focus',active);
+    stage.dataset.layout=active?(currentSlide.dataset.evidenceLayout||'evidence'):currentSlide.dataset.stageLayout;
+    if(active)applyMediaFocus(currentSlide.dataset.evidenceOrigin||'50% 50%',Math.max(1,Number(currentSlide.dataset.evidenceZoom)||1));
+    else if(!syncCameraFocus(true))applyMediaFocus(currentSlide.dataset.stageOrigin||'50% 50%','1');
+    setText(liveScene,active?currentSlide.dataset.evidenceScene:currentSlide.dataset.stageScene,'LIVE SCENE');
+    setText(liveTitle,active?currentSlide.dataset.evidenceTitle:currentSlide.dataset.stageTitle,'AXIOM 学习现场');
+    setText(liveCaption,active?currentSlide.dataset.evidenceCaption:currentSlide.dataset.stageCaption,'LIVE PRODUCT EVIDENCE');
+  }
+  function syncEvidenceFocus(){
+    if(!currentSlide||!currentSlide.dataset.evidenceAt){setEvidenceFocus(false);return;}
+    const threshold=Number(currentSlide.dataset.evidenceAt);
+    setEvidenceFocus(Number.isFinite(threshold)&&currentClipIndex===0&&video.currentTime>=threshold);
+  }
+  function updateLiveTime(){
+    const prefix=currentPlaylist.length>1
+      ?String(currentClipIndex+1).padStart(2,'0')+'/'+String(currentPlaylist.length).padStart(2,'0')+' · '
+      :'';
+    liveTime.textContent=prefix+formatTime(video.currentTime);
+  }
+  function requestPlayback(shouldPlay){
+    if(shouldPlay&&!window.__lowPowerMode&&!overviewOpen&&!document.hidden){
+      video.muted=true;video.defaultMuted=true;video.autoplay=true;video.playsInline=true;
+      const tryPlay=function(delay){
+        setTimeout(function(){
+          if(!stageEnabled||overviewOpen||document.hidden||!currentSlide||currentSlide.dataset.videoPlay==='false')return;
+          video.play().then(function(){stage.dataset.autoplay='playing';}).catch(function(){stage.dataset.autoplay='blocked';});
+        },delay);
+      };
+      video.play().then(function(){stage.dataset.autoplay='playing';}).catch(function(){stage.dataset.autoplay='blocked';tryPlay(220);tryPlay(900);});
+    }else{video.pause();}
+  }
+  function revealPostVideo(){
+    if(!currentSlide||currentSlide.dataset.revealAfterVideo!=='true')return false;
+    const slide=currentSlide;
+    const finalLayout=slide.dataset.stageFinalLayout||'left';
+    clearTimeout(revealTimer);
+    video.pause();
+    stage.classList.add('is-frozen','is-post-video');
+    stage.dataset.layout=finalLayout;
+    viewport.style.setProperty('--media-origin','50% 50%');
+    viewport.style.setProperty('--media-scale','1');
+    slide.classList.add('is-video-transitioning');
+    revealTimer=setTimeout(function(){
+      if(currentSlide!==slide||!stageEnabled)return;
+      slide.classList.remove('is-video-transitioning');
+      slide.classList.add('is-video-complete');
+    },360);
+    return true;
+  }
+  function cacheCurrentFrame(){
+    if(!frameCache||video.readyState<2||!video.videoWidth||!video.videoHeight)return false;
+    try{
+      const maxWidth=1280;
+      const scale=Math.min(1,maxWidth/video.videoWidth);
+      frameCache.width=Math.max(1,Math.round(video.videoWidth*scale));
+      frameCache.height=Math.max(1,Math.round(video.videoHeight*scale));
+      frameCache.getContext('2d').drawImage(video,0,0,frameCache.width,frameCache.height);
+      stage.classList.add('has-frame');
+      return true;
+    }catch(error){stage.classList.remove('has-frame');return false;}
+  }
+  function settleSeek(delay){
+    clearTimeout(seekTimer);
+    seekTimer=setTimeout(function(){stage.classList.remove('is-seeking','has-frame');},Math.max(0,Number(delay)||0));
+  }
+  function loadClip(index,shouldPlay){
+    const token=++seekToken;
+    clearTimeout(seekTimer);
+    setEvidenceFocus(false);
+    if(!currentPlaylist.length){
+      stopCameraLoop();
+      video.pause();video.removeAttribute('src');video.load();
+      currentClipIndex=0;currentPlaylistKey='';
+      stage.dataset.videoState='placeholder';stage.dataset.clip='0/0';
+      stage.classList.remove('has-video','has-frame','is-seeking','is-buffering');
+      liveTime.textContent='LIVE';
+      return;
+    }
+    currentClipIndex=((Number(index)||0)+currentPlaylist.length)%currentPlaylist.length;
+    const source=currentPlaylist[currentClipIndex];
+    stage.dataset.clip=String(currentClipIndex+1)+'/'+String(currentPlaylist.length);
+    syncClipCopy();
+    stage.dataset.videoState='loading';stage.dataset.autoplay='';
+    if(stage.classList.contains('has-video'))cacheCurrentFrame();
+    video.pause();video.loop=false;
+    stage.classList.remove('has-video');
+    void stage.offsetWidth;
+    stage.classList.add('is-seeking','is-buffering');
+    liveTime.textContent=(currentPlaylist.length>1?String(currentClipIndex+1).padStart(2,'0')+'/'+String(currentPlaylist.length).padStart(2,'0')+' · ':'')+'00:00';
+    stage.dataset.cameraOrigin='';stage.dataset.cameraScale='';
+    const initialCameraCue=parseCameraCues(currentSlide)[0];
+    if(initialCameraCue)applyMediaFocus(initialCameraCue.origin,initialCameraCue.scale);
+    video.src=source;video.load();
+    const startAt=Number(currentSlide&&currentSlide.dataset.videoStart||0);
+    if(Number.isFinite(startAt)&&startAt>0&&currentClipIndex===0){
+      const seekToStart=function(){
+        try{video.currentTime=startAt;}catch(error){}
+      };
+      if(video.readyState>=1)seekToStart();else video.addEventListener('loadedmetadata',seekToStart,{once:true});
+    }
+    const reveal=function(){
+      if(token!==seekToken||!stageEnabled||currentPlaylist[currentClipIndex]!==source)return;
+      stage.dataset.videoState='ready';
+      stage.classList.add('has-video');stage.classList.remove('is-buffering');
+      updateLiveTime();requestPlayback(shouldPlay);settleSeek(260);
+    };
+    if(video.readyState>=2)reveal();else video.addEventListener('canplay',reveal,{once:true});
+  }
+  function activatePlaylist(slide,shouldPlay,forceRestart){
+    const next=parsePlaylist(slide);
+    const nextKey=next.join('|');
+    if(!next.length){
+      currentPlaylist=[];currentPlaylistKey='';loadClip(0,false);return;
+    }
+    if(nextKey!==currentPlaylistKey){
+      currentPlaylist=next;currentPlaylistKey=nextKey;loadClip(0,shouldPlay);return;
+    }
+    if(forceRestart){loadClip(0,shouldPlay);return;}
+    requestPlayback(shouldPlay);
   }
 
   window.__morphStage=function(slide,context){
-    context=context||{};currentSlide=slide;clearTimeout(focusTimer);
+    context=context||{};
+    if(currentSlide&&currentSlide!==slide)currentSlide.classList.remove('is-evidence-focus','is-video-transitioning','is-video-complete');
+    stage.classList.remove('is-evidence-focus','is-post-video');evidenceFocusActive=false;
+    currentSlide=slide;clearTimeout(focusTimer);clearTimeout(transitionTimer);clearTimeout(revealTimer);
+    if(currentSlide)currentSlide.classList.remove('is-video-transitioning','is-video-complete');
     const enabled=!!(slide&&slide.dataset.stage==='on'&&slide.dataset.stageLayout);
+    const wasEnabled=stageEnabled&&stage.dataset.layout!=='off';
     const layout=enabled?slide.dataset.stageLayout:'off';
-    stage.dataset.layout=layout;
     stage.classList.toggle('is-quiet',enabled&&slide.id==='scene-01');
     stage.dataset.direction=(context.direction||0)<0?'prev':'next';
+    stage.classList.toggle('has-camera-cues',enabled&&!!slide.dataset.cameraCues);
     stage.setAttribute('aria-hidden',enabled?'false':'true');
-    if(!enabled){video.pause();return;}
+    if(!enabled){
+      stageEnabled=false;++seekToken;clearTimeout(seekTimer);stopCameraLoop();video.pause();
+      stage.classList.remove('is-entering','is-seeking','is-buffering','is-frozen','has-frame');
+      if(wasEnabled&&!window.__lowPowerMode){
+        stage.classList.add('is-handoff');
+        transitionTimer=setTimeout(function(){
+          stage.dataset.layout='off';
+          transitionTimer=setTimeout(function(){stage.classList.remove('is-handoff');},420);
+        },140);
+      }else{stage.dataset.layout='off';stage.classList.remove('is-handoff');}
+      return;
+    }
+    stageEnabled=true;
+    stage.classList.remove('is-handoff');
+    if(!wasEnabled&&!window.__lowPowerMode){
+      stage.dataset.layout='seed';stage.classList.add('is-entering');
+      requestAnimationFrame(function(){requestAnimationFrame(function(){if(currentSlide===slide&&stageEnabled)stage.dataset.layout=layout;});});
+      transitionTimer=setTimeout(function(){stage.classList.remove('is-entering');},760);
+    }else{stage.dataset.layout=layout;stage.classList.remove('is-entering');}
     renderScene(slide.dataset.stageKey||'vault');
     setText(liveTitle,slide.dataset.stageTitle,'AXIOM 连续学习旅程');
     setText(liveScene,slide.dataset.stageScene,'LIVE SCENE');
@@ -1185,10 +2041,13 @@
     const origin=slide.dataset.stageOrigin||'50% 50%';
     const zoom=Math.max(1,Number(slide.dataset.stageZoom)||1);
     const delay=Math.max(0,Number(slide.dataset.stageFocusDelay)||0);
-    viewport.style.setProperty('--media-origin',origin);
-    viewport.style.setProperty('--media-scale','1');
-    if(zoom>1&&!window.__lowPowerMode){focusTimer=setTimeout(function(){viewport.style.setProperty('--media-scale',String(zoom));},delay);}
-    seekVideo(slide.dataset.videoTime,slide.dataset.videoPlay!=='false');
+    stage.dataset.cameraOrigin='';stage.dataset.cameraScale='';
+    if(!syncCameraFocus(true))applyMediaFocus(origin,'1');
+    if(zoom>1&&!window.__lowPowerMode&&!slide.dataset.cameraCues){focusTimer=setTimeout(function(){viewport.style.setProperty('--media-scale',String(zoom));},delay);}
+    const shouldPlay=slide.dataset.videoPlay!=='false';
+    stage.classList.toggle('is-frozen',!shouldPlay);
+    activatePlaylist(slide,shouldPlay,context.from!==context.to);
+    if(slide.dataset.revealAfterVideo==='true'&&window.__lowPowerMode)revealPostVideo();
   };
 
   window.__setStageOverview=function(on){
@@ -1197,16 +2056,35 @@
     else if(currentSlide){window.__morphStage(currentSlide,{direction:0});}
   };
 
-  const source=(video.dataset.src||'').trim();
-  if(source){video.src=source;video.load();}
-  video.addEventListener('loadeddata',function(){if(currentSlide)window.__morphStage(currentSlide,{direction:0});});
-  ['error','stalled','abort','emptied','ended'].forEach(function(type){video.addEventListener(type,function(){stage.classList.remove('has-video');});});
-  video.addEventListener('seeked',function(){
-    const target=Number(currentSlide&&currentSlide.dataset.videoTime)||0;
-    const duration=Number(video.duration);
-    if(!Number.isFinite(duration)||target<=Math.max(0,duration-.35))stage.classList.add('has-video');
+  video.muted=true;video.defaultMuted=true;video.playsInline=true;
+  video.addEventListener('loadeddata',function(){
+    stage.dataset.videoState='ready';
+    if(stageEnabled&&currentPlaylist.length)stage.classList.add('has-video');
   });
-  video.addEventListener('timeupdate',function(){if(stage.classList.contains('has-video'))liveTime.textContent=formatTime(video.currentTime);});
+  ['error','abort'].forEach(function(type){video.addEventListener(type,function(){
+    stage.dataset.videoState=type;stage.classList.remove('has-video','is-buffering');settleSeek(180);
+    if(currentSlide&&currentSlide.dataset.revealAfterVideo==='true')revealPostVideo();
+  });});
+  ['waiting','stalled'].forEach(function(type){video.addEventListener(type,function(){if(stageEnabled&&stage.classList.contains('has-video'))stage.classList.add('is-buffering');});});
+  ['canplay','playing','seeked'].forEach(function(type){video.addEventListener(type,function(){
+    if(stageEnabled&&currentPlaylist.length){stage.classList.add('has-video');stage.classList.remove('is-buffering');stage.dataset.videoState=type;}
+  });});
+  video.addEventListener('seeked',function(){if(stageEnabled)settleSeek(140);});
+  video.addEventListener('ended',function(){
+    if(!stageEnabled||!currentPlaylist.length)return;
+    const shouldPlay=!!(currentSlide&&currentSlide.dataset.videoPlay!=='false');
+    if(currentClipIndex<currentPlaylist.length-1){loadClip(currentClipIndex+1,shouldPlay);return;}
+    if(revealPostVideo())return;
+    if(!currentSlide||currentSlide.dataset.videoLoop!=='false'){loadClip(0,shouldPlay);return;}
+    video.pause();stage.classList.add('is-frozen');
+  });
+  video.addEventListener('timeupdate',function(){if(stage.classList.contains('has-video')){updateLiveTime();syncEvidenceFocus();syncCameraFocus(false);}});
+  video.addEventListener('playing',startCameraLoop);
+  video.addEventListener('pause',stopCameraLoop);
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden)video.pause();
+    else if(currentSlide&&stageEnabled&&!overviewOpen&&!currentSlide.classList.contains('is-video-complete'))requestPlayback(currentSlide.dataset.videoPlay!=='false');
+  });
 
   document.querySelectorAll('.slide[data-stage="on"]').forEach(function(slide){
     const proxy=document.createElement('div');
@@ -1221,7 +2099,7 @@
 
   addEventListener('ppt-low-power-change',function(e){
     clearTimeout(focusTimer);
-    if(e.detail.on){video.pause();viewport.style.setProperty('--media-scale','1');}
+    if(e.detail.on){video.pause();viewport.style.setProperty('--media-scale','1');stage.classList.remove('is-entering','is-seeking','is-buffering');}
     else if(currentSlide&&!overviewOpen){window.__morphStage(currentSlide,{direction:0});}
   });
 })();
@@ -1237,7 +2115,13 @@
     const phases=[...stack.querySelectorAll(':scope > .phase')];
     if(!phases.length)return 0;
     stack.classList.add('has-active');
-    phases.forEach((phase,i)=>phase.classList.toggle('is-visible',i===index));
+    phases.forEach((phase,i)=>{
+      phase.classList.toggle('is-visible',i===index);
+      if(i===index){
+        const canvas=phase.querySelector('.mechanism-canvas');
+        if(canvas&&typeof canvas.getAnimations==='function')requestAnimationFrame(()=>canvas.getAnimations({subtree:true}).forEach(animation=>{animation.currentTime=0;animation.play();}));
+      }
+    });
     return phases.length;
   }
   function resetAll(){
@@ -1246,7 +2130,25 @@
       stack.classList.remove('has-active');
       stack.querySelectorAll(':scope > .phase').forEach(phase=>phase.classList.remove('is-visible'));
     });
-    document.querySelectorAll('.mode-strip span').forEach(span=>span.classList.remove('is-current'));
+    document.querySelectorAll('.mode-strip span').forEach(span=>span.classList.remove('is-current','is-complete'));
+  }
+  function paintProgress(slide,index,max,labels){
+    slide.style.setProperty('--phase-progress',String((index+1)/Math.max(1,max)));
+    labels.forEach((label,i)=>{
+      label.classList.toggle('is-current',i===index%labels.length);
+      label.classList.toggle('is-complete',i<index%labels.length);
+    });
+  }
+  function showPhase(slide,index){
+    const stacks=[...slide.querySelectorAll('.phase-stack')];
+    if(!stacks.length)return 0;
+    const max=Math.max(...stacks.map(function(stack){
+      const length=Math.max(1,stack.querySelectorAll(':scope > .phase').length);
+      return resetStack(stack,index%length);
+    }));
+    const modeLabels=[...slide.querySelectorAll('.mode-strip span')];
+    if(modeLabels.length)paintProgress(slide,index,max,modeLabels);
+    return max;
   }
   function run(slide){
     resetAll();currentPhaseSlide=slide;
@@ -1254,22 +2156,52 @@
     const stacks=[...slide.querySelectorAll('.phase-stack')];
     if(!stacks.length)return;
     let index=0;
-    const max=Math.max(...stacks.map(stack=>resetStack(stack,0)));
+    const max=showPhase(slide,0);
     const modeLabels=[...slide.querySelectorAll('.mode-strip span')];
-    if(modeLabels[0])modeLabels[0].classList.add('is-current');
-    if(window.__lowPowerMode||max<2)return;
+    if(window.__lowPowerMode||max<2||slide.dataset.phaseSync==='clip')return;
     const duration=Math.max(2400,Number(slide.dataset.phaseDuration)||4200);
+    const shouldLoop=slide.dataset.phaseLoop!=='false';
     const tick=function(){
       if(currentPhaseSlide!==slide)return;
-      index=(index+1)%max;
+      if(!shouldLoop&&index>=max-1)return;
+      index=shouldLoop?(index+1)%max:index+1;
       stacks.forEach(stack=>resetStack(stack,index%Math.max(1,stack.querySelectorAll(':scope > .phase').length)));
-      modeLabels.forEach((label,i)=>label.classList.toggle('is-current',i===index%modeLabels.length));
-      phaseTimer=setTimeout(tick,duration);
+      if(modeLabels.length)paintProgress(slide,index,max,modeLabels);
+      if(shouldLoop||index<max-1)phaseTimer=setTimeout(tick,duration);
     };
     phaseTimer=setTimeout(tick,duration);
   }
   window.__runSlidePhases=run;
+  addEventListener('ppt-stage-clip-change',function(event){
+    const detail=event.detail||{};
+    const slide=detail.slide;
+    if(!slide||slide!==currentPhaseSlide||slide.dataset.phaseSync!=='clip')return;
+    clearTimeout(phaseTimer);
+    showPhase(slide,Math.max(0,Number(detail.index)||0));
+  });
   addEventListener('ppt-low-power-change',function(){run(currentPhaseSlide);});
+})();
+</script>
+
+<script>
+/* Scene 04 has its own spatial assembly sequence. Re-entering the slide always restarts it. */
+(function(){
+  let architectureTimer=0;
+  let architectureSlide=null;
+  function runArchitecture(slide){
+    clearTimeout(architectureTimer);
+    architectureSlide=slide;
+    document.querySelectorAll('#scene-04 .arch-system.arch-live').forEach(system=>system.classList.remove('arch-live'));
+    if(!slide||slide.id!=='scene-04'||window.__lowPowerMode)return;
+    const system=slide.querySelector('.arch-system');
+    if(!system)return;
+    void system.offsetWidth;
+    architectureTimer=setTimeout(function(){
+      if(architectureSlide===slide&&slide.classList.contains('is-active'))system.classList.add('arch-live');
+    },420);
+  }
+  window.__runArchitecture=runArchitecture;
+  addEventListener('ppt-low-power-change',function(){runArchitecture(document.querySelector('.slide.is-active'));});
 })();
 </script>
 
@@ -1416,12 +2348,13 @@ deck.style.width=(total*100)+'vw';
 slides.forEach((s,i)=>{
   const b=document.createElement('button');
   b.className='dot';b.dataset.i=i;b.setAttribute('aria-label','Page '+(i+1));
-  b.onclick=()=>go(i);
+  b.onclick=()=>go(i,{userInitiated:true});
   nav.appendChild(b);
 });
 
-function go(n){
+function go(n,options){
   if(lock)return;
+  options=options||{};
   const previous=idx;
   idx=Math.max(0,Math.min(total-1,n));
   window.__currentSlideIndex = idx;
@@ -1434,6 +2367,8 @@ function go(n){
   document.body.classList.toggle('light-bg',th==='light');
   window.__morphStage?.(el,{from:previous,to:idx,direction:Math.sign(idx-previous)});
   window.__runSlidePhases?.(el);
+  window.__runArchitecture?.(el);
+  window.__syncNarration?.(el,{restart:previous!==idx,userInitiated:!!options.userInitiated});
   if(el.id&&location.hash!=='#'+el.id)history.replaceState(null,'','#'+el.id);
   /* 动效：翻页过渡中段触发当前页的入场动画（由 motion-boot 注册） */
   if(window.__playSlide) setTimeout(()=>window.__playSlide(idx), 450);
@@ -1466,7 +2401,7 @@ function buildOverview(){
     label.textContent=(i+1)+' / '+total;
     card.appendChild(wrap);
     card.appendChild(label);
-    card.onclick=()=>{toggleOverview();go(i)};
+    card.onclick=()=>{toggleOverview();go(i,{userInitiated:true})};
     grid.appendChild(card);
   });
   ov.appendChild(grid);
@@ -1477,6 +2412,7 @@ function toggleOverview(){
   if(overviewOn){buildOverview();ov.style.display='block';}
   else{ov.style.display='none';}
   window.__setStageOverview?.(overviewOn);
+  window.__setNarrationOverview?.(overviewOn);
 }
 
 addEventListener('keydown',e=>{
@@ -1489,12 +2425,12 @@ addEventListener('keydown',e=>{
   if(overviewOn)return;
   if(e.key==='ArrowRight'||e.key==='PageDown'||e.key===' '||e.key==='ArrowDown'){
     if(window.__pipeAdvance && window.__pipeAdvance()) return;
-    go(idx+1);
+    go(idx+1,{userInitiated:true});
     return;
   }
-  if(e.key==='ArrowLeft'||e.key==='PageUp'||e.key==='ArrowUp')go(idx-1);
-  if(e.key==='Home')go(0);
-  if(e.key==='End')go(total-1);
+  if(e.key==='ArrowLeft'||e.key==='PageUp'||e.key==='ArrowUp')go(idx-1,{userInitiated:true});
+  if(e.key==='Home')go(0,{userInitiated:true});
+  if(e.key==='End')go(total-1,{userInitiated:true});
 });
 
 let wheelTO=null,wheelAcc=0;
@@ -1504,7 +2440,7 @@ addEventListener('wheel',e=>{
     if(wheelAcc>0 && window.__pipeAdvance && window.__pipeAdvance()){
       wheelAcc=0;
     }else{
-      go(idx+(wheelAcc>0?1:-1));wheelAcc=0;
+      go(idx+(wheelAcc>0?1:-1),{userInitiated:true});wheelAcc=0;
     }
   }
   clearTimeout(wheelTO);wheelTO=setTimeout(()=>wheelAcc=0,150);
@@ -1517,7 +2453,7 @@ addEventListener('touchend',e=>{
   const dy=(e.changedTouches[0].clientY-ty);
   if(Math.abs(dx)>50&&Math.abs(dx)>Math.abs(dy)){
     if(dx<0 && window.__pipeAdvance && window.__pipeAdvance()) return;
-    go(idx+(dx<0?1:-1));
+    go(idx+(dx<0?1:-1),{userInitiated:true});
   }
 },{passive:true});
 

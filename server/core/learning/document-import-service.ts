@@ -7,7 +7,7 @@ import { syncEdgesFromContent } from '@/lib/wiki-links'
 import {
   ensureContainsEdge,
   ensureConceptCard,
-  ensureRootContainsConcept,
+  ensureVaultRootCard,
 } from '@/server/core/domain/concept-graph'
 import {
   DOCUMENT_CHUNK_EXTRACTION_PROMPT,
@@ -110,6 +110,13 @@ export type DocumentImportServiceResult = {
   duplicate: boolean
 }
 
+export type DocumentImportProgress = {
+  stage: 'validating' | 'archiving' | 'profiling' | 'extracting' | 'organizing' | 'writing' | 'linking' | 'planning' | 'completed'
+  label: string
+  message: string
+  progress: number
+}
+
 export class DocumentImportError extends Error {
   code: string
   status: number
@@ -122,7 +129,7 @@ export class DocumentImportError extends Error {
   }
 }
 
-export async function importDocumentToVault(input: {
+export type KnowledgeTextIngestionInput = {
   userId: string
   vaultId: string
   document: string
@@ -135,7 +142,24 @@ export async function importDocumentToVault(input: {
   skipAiExtraction?: boolean
   createLearningPath?: boolean
   aiManager?: AiManagerLike
-}): Promise<DocumentImportServiceResult> {
+  onProgress?: (progress: DocumentImportProgress) => void | Promise<void>
+}
+
+/**
+ * The single knowledge-building boundary used by every entry point.
+ *
+ * AI input is first expanded into structured text; pasted content and files
+ * are first normalized into text. From this boundary onward they use exactly
+ * the same extraction, hierarchy, card, edge and learning-path pipeline.
+ */
+export async function ingestKnowledgeTextToVault(input: KnowledgeTextIngestionInput): Promise<DocumentImportServiceResult> {
+  const reportProgress = async (progress: DocumentImportProgress) => {
+    try {
+      await input.onProgress?.(progress)
+    } catch (error) {
+      console.warn('[DocumentImportService] Failed to persist import progress:', error instanceof Error ? error.message : String(error))
+    }
+  }
   const document = input.document.trim()
   const topic = input.topic.trim()
   const source = input.source.trim()
@@ -143,6 +167,8 @@ export async function importDocumentToVault(input: {
 
   if (!document || !topic) throw new DocumentImportError('DOCUMENT_AND_TOPIC_REQUIRED')
   if (!source) throw new DocumentImportError('SOURCE_REQUIRED')
+
+  await reportProgress({ stage: 'validating', label: '校验资料', message: '已确认资料内容、主题和来源', progress: 5 })
 
   const ai = input.aiManager ?? defaultAiManager
   const contentHash = createHash('sha256').update(document).digest('hex')
@@ -163,6 +189,7 @@ export async function importDocumentToVault(input: {
   })
   const sourceDocumentId = sourceTrace?.id ?? null
   const primarySourceChunkId = sourceTrace?.chunks[0]?.id ?? null
+  await reportProgress({ stage: 'archiving', label: '保存原始资料', message: '原文与来源信息已归档，正在检查是否重复导入', progress: 14 })
 
   const existingImportCards = await prisma.card.findMany({
     where: {
@@ -177,7 +204,7 @@ export async function importDocumentToVault(input: {
   })
   if (existingImportCards.length > 0) {
     const cluster = existingImportCards.find((card) => card.cluster)?.cluster
-    return {
+    const duplicateResult = {
       source,
       sourceTitle,
       contentHash,
@@ -192,6 +219,8 @@ export async function importDocumentToVault(input: {
       errors: [],
       duplicate: true,
     }
+    await reportProgress({ stage: 'completed', label: '资料已存在', message: `检测到 ${existingImportCards.length} 个已有节点，未重复创建`, progress: 100 })
+    return duplicateResult
   }
 
   const stats: DocumentImportStats = { permanent: 0, fleeting: 0, literature: 0, edges: 0, created: 0, skipped: 0, errors: 0 }
@@ -203,8 +232,10 @@ export async function importDocumentToVault(input: {
     console.warn('[DocumentImportService] Failed to build learning profile context:', err instanceof Error ? err.message : String(err))
     return null
   })
+  await reportProgress({ stage: 'profiling', label: '读取学习画像', message: profileContext ? '已读取当前学习机制与教学偏好' : '暂无可用画像，按资料本身继续处理', progress: 22 })
   let parsed: StructuredDocument = { title: sourceTitle || topic, concepts: [], fleetingCards: [], relations: [] }
   if (!input.skipAiExtraction) {
+    await reportProgress({ stage: 'extracting', label: '解析资料内容', message: 'AI 正在识别主题、领域分类与具体知识点', progress: 30 })
     try {
       parsed = await parseDocumentWithAi({
         aiManager: ai,
@@ -221,6 +252,26 @@ export async function importDocumentToVault(input: {
       })
     }
   }
+  // 文件导入和 AI 主题生成最终都汇入这条结构化管线。Markdown 中明确写出的
+  // “领域（H2）→ 具体知识点（H3）”属于确定性证据，不能因为一次 AI 抽取偏少而丢失。
+  // 因此先把文档层级中的具体知识点补入统一 concepts，再进入后续建卡、归类和连边逻辑。
+  const headingConcepts = extractDocumentHeadingConcepts(document, topic)
+  parsed = {
+    ...parsed,
+    concepts: dedupeConcepts([
+      ...parsed.concepts,
+      ...headingConcepts.map((concept) => ({
+        name: concept.title,
+        description: concept.description || `属于「${concept.categoryTitle}」的具体知识点。`,
+      })),
+    ]),
+  }
+  await reportProgress({
+    stage: 'extracting',
+    label: '资料解析完成',
+    message: `识别到 ${parsed.concepts.length} 个核心概念、${parsed.fleetingCards.length} 条学习草稿`,
+    progress: 46,
+  })
 
   const docTitle = parsed.title || sourceTitle || topic
   const documentProfileNote = buildImportProfileNote({ profileContext, topic, cardTitle: docTitle })
@@ -232,13 +283,9 @@ export async function importDocumentToVault(input: {
     conceptNames,
   })
   const clusterName = cluster.name
-  const topicConcept = await ensureRootContainsConcept({
-    vaultId: input.vaultId,
-    conceptTitle: clusterName,
-    clusterId: cluster.id,
-    tags: [topic, 'import-topic'],
-    content: `# ${clusterName}\n\n> 这是资料导入时识别到的主题/区域理解卡。导入资料和抽取出的概念会挂在这个节点下面。\n`,
-  })
+  const vaultRoot = await ensureVaultRootCard({ vaultId: input.vaultId })
+  const hierarchyRootTitle = vaultRoot.title || '知识库'
+  await reportProgress({ stage: 'organizing', label: '建立领域分层', message: `正在建立「仓库 ${hierarchyRootTitle} → 领域节点 → 具体知识点」`, progress: 54 })
   const importedDraftCardIds: string[] = []
 
   const litContent = `## ${docTitle}
@@ -250,7 +297,7 @@ export async function importDocumentToVault(input: {
 ${input.originalFileName ? `**文件名：** ${input.originalFileName}\n` : ''}${input.sourceMimeType ? `**文件类型：** ${input.sourceMimeType}\n` : ''}**转换方式：** ${input.conversionKind || 'text'}
 **内容哈希：** ${contentHash}
 
-**核心概念：** ${conceptNames.length > 0 ? conceptNames.map((name) => `[[${name}]]`).join('、') : '等待后续抽取'}
+**核心概念：** ${conceptNames.length > 0 ? conceptNames.join('、') : '等待后续抽取'}
 
 ${documentProfileNote}
 
@@ -280,21 +327,23 @@ _自动生成文献记录_`
   stats.literature++
   if (existingLit) stats.skipped++
   else stats.created++
-  if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: topicConcept.id, childId: literatureCard.id, weight: 0.82 })) {
+  // 文献是知识层级的证据来源，不是主题下面的一个知识分支。
+  if (await ensureTypedEdge({ vaultId: input.vaultId, sourceId: literatureCard.id, targetId: vaultRoot.id, type: 'supports', weight: 0.42 })) {
     stats.edges++
     stats.created++
   }
 
   const structurePlan = await planNecessaryStructure({
     aiManager: ai,
-    parentTitle: topicConcept.title || clusterName,
-    parentContent: topicConcept.content || '',
+    parentTitle: hierarchyRootTitle,
+    parentContent: vaultRoot.content || '',
     topic,
     sourceTitle: docTitle,
     document,
     conceptNames,
     fleetingTitles: dedupeStrings((parsed.fleetingCards || []).map((card) => card.title).filter(Boolean)),
   })
+  await reportProgress({ stage: 'organizing', label: '领域结构已生成', message: `已在仓库根节点下形成 ${structurePlan.conditions.length} 个二级领域，正在向下挂接知识节点`, progress: 64 })
   const conditionCards = new Map<string, { id: string; title: string | null; type: string; clusterId?: string | null; path?: string; content?: string }>()
   const conditionCardIds: string[] = []
   for (const condition of structurePlan.conditions) {
@@ -306,41 +355,44 @@ _自动生成文献记录_`
       pathFolder: clusterName,
       tags: [
         topic,
+        'domain-category',
         'necessary-condition',
         'sufficient-condition',
         condition.coverage === 'ai_generated' ? 'ai-generated' : 'document-supported',
       ],
-      content: buildConditionContent({ condition, parentTitle: topicConcept.title || clusterName, docTitle, topic, profileNote: buildImportProfileNote({ profileContext, topic, cardTitle: condition.title }) }),
+      content: buildConditionContent({ condition, parentTitle: hierarchyRootTitle, docTitle, topic, profileNote: buildImportProfileNote({ profileContext, topic, cardTitle: condition.title }) }),
     })
     conditionCardIds.push(conditionCard.id)
     conditionCards.set(normalizeImportText(condition.title), conditionCard)
-    if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: topicConcept.id, childId: conditionCard.id, weight: condition.coverage === 'ai_generated' ? 0.76 : 0.9 })) {
-      stats.edges++
-      stats.created++
-    }
-    if (condition.coverage !== 'ai_generated' && await ensureTypedEdge({ vaultId: input.vaultId, sourceId: literatureCard.id, targetId: conditionCard.id, type: 'supports', weight: 0.74 })) {
+    stats.fleeting++
+    if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: vaultRoot.id, childId: conditionCard.id, weight: condition.coverage === 'ai_generated' ? 0.76 : 0.9 })) {
       stats.edges++
       stats.created++
     }
   }
+  const conditionTitleKeys = new Set([...conditionCards.keys()])
+  const leafConceptNames = conceptNames.filter((title) => !conditionTitleKeys.has(normalizeImportText(title)))
+  const materializedKnowledgeTitles = new Set(conditionTitleKeys)
   const resolveConditionCard = (title: string, index = 0) => {
     const assignedTitle = findAssignedConditionTitle(structurePlan, title)
     const byAssigned = assignedTitle ? conditionCards.get(normalizeImportText(assignedTitle)) : undefined
     if (byAssigned) return byAssigned
     const byTitle = conditionCards.get(normalizeImportText(title))
     if (byTitle) return byTitle
-    return [...conditionCards.values()][index % Math.max(conditionCards.size, 1)] ?? topicConcept
+    return [...conditionCards.values()][index % Math.max(conditionCards.size, 1)] ?? vaultRoot
   }
 
   for (const [conceptIndex, concept] of parsed.concepts.entries()) {
     const title = concept.name?.trim()
     if (!title) continue
+    const titleKey = normalizeImportText(title)
+    if (materializedKnowledgeTitles.has(titleKey)) continue
     const parentCondition = resolveConditionCard(title, conceptIndex)
     const content = `# ${title}
 
 > 从「${docTitle}」抽取的理解卡脚手架。资料内容是学习证据，不代表用户已经掌握。
 
-**归属条件：** [[${parentCondition.title || clusterName}]]
+**归属领域：** ${parentCondition.title || topic}
 
 ## 我的定义
 
@@ -354,6 +406,8 @@ _自动生成文献记录_`
 
 ## 资料线索
 ${concept.description || '- 回到原始资料定位相关段落。'}
+
+**引用文献：** 《${docTitle}》
 
 ---
 source: ${source}
@@ -387,14 +441,11 @@ _从「${docTitle}」自动生成_`
         },
       })
       importedDraftCardIds.push(conceptCard.id)
+      materializedKnowledgeTitles.add(titleKey)
       stats.fleeting++
       if (existing) stats.skipped++
       else stats.created++
       if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: parentCondition.id, childId: conceptCard.id })) {
-        stats.edges++
-        stats.created++
-      }
-      if (await ensureTypedEdge({ vaultId: input.vaultId, sourceId: literatureCard.id, targetId: conceptCard.id, type: 'derived', weight: 0.86 })) {
         stats.edges++
         stats.created++
       }
@@ -408,9 +459,11 @@ _从「${docTitle}」自动生成_`
     const rawTitle = fc.title?.trim()
     const title = rawTitle
     if (!title) continue
+    const titleKey = normalizeImportText(title)
+    if (materializedKnowledgeTitles.has(titleKey)) continue
     const parentCondition = resolveConditionCard(title, cardIndex)
     const links = Array.isArray(fc.linksTo) ? fc.linksTo.filter(Boolean) : []
-    const linkedTargets = dedupeStrings([parentCondition.title || '', ...links].filter(Boolean))
+    const linkedTargets = dedupeStrings(links.filter(Boolean))
     const linksSection = linkedTargets.length > 0
       ? '\n\n**关联概念：** ' + linkedTargets.map((target) => `[[${target}]]`).join('、')
       : ''
@@ -429,7 +482,10 @@ _从「${docTitle}」自动生成_`
 ## 如何验证
 
 ## 资料线索
-${fc.content || '- 回到原始资料定位相关段落。'}${linksSection}`
+${fc.content || '- 回到原始资料定位相关段落。'}${linksSection}
+
+**归属领域：** ${parentCondition.title || topic}
+**引用文献：** 《${docTitle}》`
     const content = `${body}
 
 ---
@@ -464,14 +520,11 @@ _从「${docTitle}」自动生成_`
         },
       })
       importedDraftCardIds.push(fleetingCard.id)
+      materializedKnowledgeTitles.add(titleKey)
       stats.fleeting++
       if (existing) stats.skipped++
       else stats.created++
       if (await ensureContainsEdge({ vaultId: input.vaultId, parentId: parentCondition.id, childId: fleetingCard.id })) {
-        stats.edges++
-        stats.created++
-      }
-      if (await ensureTypedEdge({ vaultId: input.vaultId, sourceId: literatureCard.id, targetId: fleetingCard.id, type: 'derived', weight: 0.82 })) {
         stats.edges++
         stats.created++
       }
@@ -480,6 +533,13 @@ _从「${docTitle}」自动生成_`
       errors.push({ item: title, error: err instanceof Error ? err.message : String(err) })
     }
   }
+
+  await reportProgress({
+    stage: 'writing',
+    label: '写入知识卡片',
+    message: `已写入 1 份文献、${conditionCardIds.length} 个领域和 ${importedDraftCardIds.length} 个知识节点`,
+    progress: 79,
+  })
 
   const cardsWithLinks = await prisma.card.findMany({
     where: { vaultId: input.vaultId, content: { contains: '[[' } },
@@ -511,6 +571,9 @@ _从「${docTitle}」自动生成_`
     }
   }
 
+  await reportProgress({ stage: 'linking', label: '同步知识图谱', message: `主题、领域与知识节点已连接；文献保留为引用证据`, progress: 89 })
+
+  await reportProgress({ stage: 'planning', label: '生成学习路径', message: '正在把资料节点编排成可执行的学习任务', progress: 94 })
   const pathId = input.createLearningPath === false
     ? null
     : await createLearningPathForImport({
@@ -518,7 +581,7 @@ _从「${docTitle}」自动生成_`
       userId: input.userId,
       vaultId: input.vaultId,
       topic,
-      conceptNames,
+      conceptNames: leafConceptNames,
       allCards,
       importedDraftCardIds,
       literatureCard: { id: literatureCard.id, title: docTitle },
@@ -535,7 +598,7 @@ _从「${docTitle}」自动生成_`
       source,
       sourceTitle: docTitle,
       contentHash,
-      conceptCount: conceptNames.length,
+      conceptCount: leafConceptNames.length,
       literatureCardId: literatureCard.id,
       importedDraftCardIds,
       pathId,
@@ -544,9 +607,16 @@ _从「${docTitle}」自动生成_`
   })
 
   scheduleRagIndexCards(
-    [topicConcept.id, literatureCard.id, ...conditionCardIds, ...importedDraftCardIds],
+    [vaultRoot.id, literatureCard.id, ...conditionCardIds, ...importedDraftCardIds],
     'document-import',
   )
+
+  await reportProgress({
+    stage: 'completed',
+    label: '导入完成',
+    message: `已创建 ${stats.created} 项、连接 ${stats.edges} 条关系${pathId ? '，学习路径已就绪' : ''}`,
+    progress: 100,
+  })
 
   return {
     source,
@@ -557,13 +627,18 @@ _从「${docTitle}」自动生成_`
     clusterName,
     literatureCardId: literatureCard.id,
     sourceDocumentId,
-    concepts: conceptNames,
+    concepts: leafConceptNames,
     pathId,
     stats,
     errors,
     duplicate: false,
   }
 }
+
+// Compatibility name for the Agent tool and older callers. It deliberately
+// points at the same text-ingestion boundary instead of maintaining a second
+// document-only implementation.
+export const importDocumentToVault = ingestKnowledgeTextToVault
 
 async function parseDocumentWithAi(params: {
   aiManager: AiManagerLike
@@ -645,6 +720,13 @@ async function planNecessaryStructure(params: {
   conceptNames: string[]
   fleetingTitles: string[]
 }): Promise<StructurePlan> {
+  // Explicit Markdown headings are stronger evidence than a fresh model
+  // interpretation. When a document already states H2 domains and H3
+  // concepts, preserve that hierarchy exactly and use AI only for documents
+  // that do not contain a usable structure.
+  const explicitPlan = buildExplicitDocumentStructurePlan(params)
+  if (explicitPlan) return explicitPlan
+
   try {
     const response = await params.aiManager.callAPI(
       DOCUMENT_STRUCTURE_PLAN_PROMPT.system,
@@ -669,21 +751,72 @@ async function planNecessaryStructure(params: {
   }
 }
 
+export function buildExplicitDocumentStructurePlan(params: {
+  parentTitle: string
+  topic: string
+  document: string
+  conceptNames: string[]
+  fleetingTitles: string[]
+}): StructurePlan | null {
+  const allTitles = dedupeStrings([...params.conceptNames, ...params.fleetingTitles])
+  const groups = extractDocumentCategoryGroups(params.document, allTitles, params.parentTitle)
+  if (groups.length < 2) return null
+
+  const conditions = groups.slice(0, 10).map<NecessaryCondition>((group, index) => ({
+    title: group.title,
+    description: `这是仓库根节点「${params.parentTitle}」下面的二级领域；具体知识点继续挂在该领域之下。`,
+    whyNecessary: `删掉「${group.title}」会让「${params.parentTitle}」缺少一个可独立识别的知识领域。`,
+    sufficiencyRole: `第 ${index + 1} 个领域与同级领域共同构成「${params.parentTitle}」的知识版图。`,
+    coverage: 'documented',
+    evidenceTitles: group.memberTitles.slice(0, 12),
+  }))
+
+  const assignments = allTitles.map<StructureAssignment>((title, index) => {
+    const exactGroup = groups.find((group) => group.memberTitles.some((member) => sameImportTitle(member, title)))
+    return {
+      cardTitle: title,
+      conditionTitle: exactGroup?.title ?? conditions[index % conditions.length]?.title ?? params.parentTitle,
+      reason: exactGroup ? '资料标题层级匹配' : '按显式领域保守归类',
+    }
+  })
+
+  return {
+    conditions,
+    assignments,
+    coverageCheck: {
+      sufficient: true,
+      missing: [],
+      summary: '仓库名是一级根节点；直接采用资料中明确的 H2 → H3 作为二级领域和三级知识点。',
+    },
+  }
+}
+
 function sanitizeStructurePlan(raw: Record<string, unknown>, params: {
   parentTitle: string
   topic: string
+  document: string
   conceptNames: string[]
   fleetingTitles: string[]
 }): StructurePlan {
   const rawConditions = Array.isArray(raw.conditions) ? raw.conditions : []
   const conditions: NecessaryCondition[] = []
   const seenConditions = new Set<string>()
+  const leafTitleKeys = new Set(
+    dedupeStrings([...params.conceptNames, ...params.fleetingTitles]).map(normalizeImportText),
+  )
+  const documentCategoryKeys = new Set(
+    extractDocumentCategoryGroups(
+      params.document,
+      dedupeStrings([...params.conceptNames, ...params.fleetingTitles]),
+      params.parentTitle,
+    ).map((group) => normalizeImportText(group.title)),
+  )
   for (const item of rawConditions) {
     if (!item || typeof item !== 'object') continue
     const record = item as Record<string, unknown>
     const title = typeof record.title === 'string' ? record.title.trim() : ''
     const key = normalizeImportText(title)
-    if (!title || key === normalizeImportText(params.parentTitle) || seenConditions.has(key)) continue
+    if (!title || key === normalizeImportText(params.parentTitle) || (leafTitleKeys.has(key) && !documentCategoryKeys.has(key)) || seenConditions.has(key)) continue
     seenConditions.add(key)
     const coverage = record.coverage === 'documented' || record.coverage === 'mixed' || record.coverage === 'ai_generated'
       ? record.coverage
@@ -751,35 +884,44 @@ function sanitizeStructurePlan(raw: Record<string, unknown>, params: {
 function fallbackStructurePlan(params: {
   parentTitle: string
   topic: string
+  document: string
   conceptNames: string[]
   fleetingTitles: string[]
 }): StructurePlan {
-  const candidateTitles = dedupeStrings(params.conceptNames).slice(0, 8)
-  const baseTitles = candidateTitles.length >= 4
-    ? candidateTitles
-    : dedupeStrings([
-      ...candidateTitles,
-      `${params.topic}的核心定义与边界`,
-      `${params.topic}的组成要素`,
-      `${params.topic}的因果机制`,
-      `${params.topic}的应用场景`,
-      `${params.topic}的掌握标准`,
-    ]).slice(0, 8)
-
-  const conditions = baseTitles.map<NecessaryCondition>((title, index) => ({
-    title,
-    description: `这是理解「${params.parentTitle}」时需要单独展开的直接子条件。`,
-    whyNecessary: `删掉「${title}」会导致「${params.parentTitle}」缺少一块必要解释。`,
-    sufficiencyRole: `第 ${index + 1} 个条件与同级条件共同覆盖「${params.parentTitle}」的定义、机制、边界和应用。`,
-    coverage: candidateTitles.includes(title) ? 'documented' : 'ai_generated',
-    evidenceTitles: candidateTitles.includes(title) ? [title] : [],
-  }))
   const allTitles = dedupeStrings([...params.conceptNames, ...params.fleetingTitles])
-  const assignments = allTitles.map<StructureAssignment>((title, index) => ({
-    cardTitle: title,
-    conditionTitle: conditions[index % conditions.length]?.title ?? params.parentTitle,
-    reason: 'fallback assignment',
+  const documentGroups = extractDocumentCategoryGroups(params.document, allTitles, params.parentTitle)
+  const genericGroups = [
+    `${params.topic}的基础与边界`,
+    `${params.topic}的类型与结构`,
+    `${params.topic}的核心机制`,
+    `${params.topic}的选择与应用`,
+    `${params.topic}的验证与反例`,
+  ].map((title) => ({ title, memberTitles: [] as string[] }))
+  const groups = documentGroups.length >= 2
+    ? documentGroups.slice(0, 7)
+    : mergeCategoryGroups(documentGroups, genericGroups).slice(0, 5)
+
+  const conditions = groups.map<NecessaryCondition>((group, index) => ({
+    title: group.title,
+    description: `这是仓库根节点「${params.parentTitle}」下面的二级领域；具体知识点会继续挂在该领域之下。`,
+    whyNecessary: `删掉「${group.title}」会让「${params.parentTitle}」缺少一个可独立识别的知识领域。`,
+    sufficiencyRole: `第 ${index + 1} 个领域与同级领域共同构成「${params.parentTitle}」的知识版图。`,
+    coverage: group.memberTitles.length > 0 ? 'documented' : 'ai_generated',
+    evidenceTitles: group.memberTitles.slice(0, 8),
   }))
+  const assignments = allTitles.map<StructureAssignment>((title, index) => {
+    const exactGroup = groups.find((group) => group.memberTitles.some((member) => sameImportTitle(member, title)))
+    const semanticGroup = groups.find((group) => {
+      const titleKey = normalizeImportText(title)
+      const groupKey = normalizeImportText(group.title)
+      return titleKey.includes(groupKey) || groupKey.includes(titleKey)
+    })
+    return {
+      cardTitle: title,
+      conditionTitle: exactGroup?.title ?? semanticGroup?.title ?? conditions[index % conditions.length]?.title ?? params.parentTitle,
+      reason: exactGroup ? '资料标题层级匹配' : '保守领域归类',
+    }
+  })
   return {
     conditions,
     assignments,
@@ -789,6 +931,323 @@ function fallbackStructurePlan(params: {
       summary: 'AI 结构规划不可用，系统用保守模板保证父节点下仍有多个必要条件节点。',
     },
   }
+}
+
+type DocumentCategoryGroup = {
+  title: string
+  memberTitles: string[]
+}
+
+export type DocumentHeadingConcept = {
+  title: string
+  categoryTitle: string
+  description: string
+}
+
+const DESIGN_PATTERN_FAMILIES = [
+  {
+    title: '创建型模式',
+    aliases: ['创建型', 'creational'],
+    concepts: [
+      ['工厂方法模式', ['工厂方法', 'Factory Method']],
+      ['抽象工厂模式', ['抽象工厂', 'Abstract Factory']],
+      ['建造者模式', ['建造者', 'Builder']],
+      ['原型模式', ['原型', 'Prototype']],
+      ['单例模式', ['单例', 'Singleton']],
+    ],
+  },
+  {
+    title: '结构型模式',
+    aliases: ['结构型', 'structural'],
+    concepts: [
+      ['适配器模式', ['适配器', 'Adapter']],
+      ['桥接模式', ['桥接', 'Bridge']],
+      ['组合模式', ['组合', 'Composite']],
+      ['装饰器模式', ['装饰器', 'Decorator']],
+      ['外观模式', ['外观', 'Facade']],
+      ['享元模式', ['享元', 'Flyweight']],
+      ['代理模式', ['代理', 'Proxy']],
+    ],
+  },
+  {
+    title: '行为型模式',
+    aliases: ['行为型', 'behavioral', 'behavioural'],
+    concepts: [
+      ['责任链模式', ['责任链', 'Chain of Responsibility']],
+      ['命令模式', ['命令', 'Command']],
+      ['解释器模式', ['解释器', 'Interpreter']],
+      ['迭代器模式', ['迭代器', 'Iterator']],
+      ['中介者模式', ['中介者', 'Mediator']],
+      ['备忘录模式', ['备忘录', 'Memento']],
+      ['观察者模式', ['观察者', 'Observer']],
+      ['状态模式', ['状态', 'State']],
+      ['策略模式', ['策略', 'Strategy']],
+      ['模板方法模式', ['模板方法', 'Template Method']],
+      ['Visitor 模式', ['Visitor', '访问者']],
+    ],
+  },
+] as const
+
+function extractDesignPatternKnowledgeConcepts(document: string, parentTitle: string): DocumentHeadingConcept[] {
+  const normalizedDocument = normalizeImportText(document)
+  const normalizedParent = normalizeImportText(parentTitle)
+  const isDesignPatternMaterial =
+    normalizedDocument.includes('设计模式') ||
+    normalizedParent.includes('设计模式') ||
+    normalizedDocument.includes('factorymethod') ||
+    normalizedDocument.includes('abstractfactory')
+  if (!isDesignPatternMaterial) return []
+
+  const concepts: DocumentHeadingConcept[] = []
+  const seen = new Set<string>()
+  for (const family of DESIGN_PATTERN_FAMILIES) {
+    const familyVisible = family.aliases.some((alias) => normalizedDocument.includes(normalizeImportText(alias)))
+    for (const [title, aliases] of family.concepts) {
+      const mentionedAlias = aliases.find((alias) => normalizedDocument.includes(normalizeImportText(alias)))
+      if (!mentionedAlias && !familyVisible) continue
+      const key = normalizeImportText(title)
+      if (seen.has(key)) continue
+      seen.add(key)
+      concepts.push({
+        title,
+        categoryTitle: family.title,
+        description: extractConceptEvidenceSentence(document, aliases) ||
+          `资料把「${title}」归入「${family.title}」：学习重点不是背类图，而是判断它隔离了哪一种变化、保护了什么稳定部分，以及什么时候不该使用。`,
+      })
+    }
+  }
+  return concepts
+}
+
+function extractDesignPatternCategoryGroups(document: string, parentTitle: string): DocumentCategoryGroup[] {
+  const concepts = extractDesignPatternKnowledgeConcepts(document, parentTitle)
+  if (concepts.length < 8) return []
+  return DESIGN_PATTERN_FAMILIES
+    .map((family) => ({
+      title: family.title,
+      memberTitles: concepts
+        .filter((concept) => sameImportTitle(concept.categoryTitle, family.title))
+        .map((concept) => concept.title),
+    }))
+    .filter((group) => group.memberTitles.length > 0)
+}
+
+function extractConceptEvidenceSentence(document: string, aliases: readonly string[]): string {
+  const normalizedAliases = aliases.map(normalizeImportText)
+  const fromSection = extractConceptSectionLead(document, normalizedAliases)
+  if (fromSection) return fromSection
+
+  const paragraphs = document
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.replace(/^#+\s*/gm, '').trim())
+    .filter((paragraph) => paragraph && !looksLikeNavigationParagraph(paragraph))
+  const matched = paragraphs.find((paragraph) => {
+    const key = normalizeImportText(paragraph)
+    return normalizedAliases.some((alias) => key.includes(alias))
+  })
+  if (!matched) return ''
+  return matched
+    .replace(/\s+/g, ' ')
+    .slice(0, 320)
+}
+
+function extractConceptSectionLead(document: string, normalizedAliases: string[]): string {
+  const lines = document.replace(/\r\n/g, '\n').split('\n')
+  let capture = false
+  let captured: string[] = []
+  let headingLevel = 0
+
+  const flush = () => {
+    const paragraph = captured
+      .join('\n')
+      .split(/\n{2,}/)
+      .map((item) => item.replace(/^#+\s*/gm, '').trim())
+      .find((item) => item && !looksLikeNavigationParagraph(item))
+    return paragraph ? paragraph.replace(/\s+/g, ' ').slice(0, 320) : ''
+  }
+
+  for (const line of lines) {
+    const heading = /^(#{2,5})\s+(.+?)\s*$/.exec(line)
+    if (heading) {
+      if (capture && heading[1].length <= headingLevel) {
+        const paragraph = flush()
+        if (paragraph) return paragraph
+        captured = []
+        capture = false
+      }
+      if (capture) continue
+      const headingKey = normalizeImportText(normalizeCategoryHeading(heading[2]))
+      const matched = normalizedAliases.some((alias) => isConceptHeadingMatch(headingKey, alias))
+      if (matched) {
+        capture = true
+        captured = []
+        headingLevel = heading[1].length
+      }
+      continue
+    }
+    if (capture) captured.push(line)
+  }
+  return capture ? flush() : ''
+}
+
+function isConceptHeadingMatch(headingKey: string, alias: string): boolean {
+  if (!headingKey || !alias) return false
+  if (headingKey === alias || headingKey === `${alias}模式`) return true
+  // Long English names such as factorymethod / abstractfactory are distinctive
+  // enough to match inside bilingual headings. Short Chinese words such as
+  // “组合” or “状态” are not; otherwise generic course sections steal the
+  // evidence paragraph from the real pattern chapter.
+  if (/^[a-z]+$/i.test(alias) && alias.length >= 5) return headingKey.includes(alias)
+  if (alias.length >= 4) return headingKey.includes(`${alias}模式`)
+  return false
+}
+
+function looksLikeNavigationParagraph(value: string): boolean {
+  const text = value.trim()
+  if (!text) return true
+  if (text.includes('|---') || /^\|.+\|$/m.test(text)) return true
+  const nonEmptyLines = text.split('\n').map((line) => line.trim()).filter(Boolean)
+  if (nonEmptyLines.length >= 3 && nonEmptyLines.every((line) => /^\d+[.、]\s*\[.+\]\(#.+\)/.test(line) || /^[-*]\s*\[.+\]\(#.+\)/.test(line))) return true
+  if (/^\d+[.、]\s*\[.+\]\(#.+\)/.test(nonEmptyLines[0] || '')) return true
+  return false
+}
+
+/**
+ * Read an explicit Markdown hierarchy without asking the model to rediscover it.
+ * The vault name is level 1. H2 is treated as a level-2 domain category and
+ * H3 as a level-3, concrete learnable concept.
+ * Both pasted AI material and uploaded files pass through this same extractor.
+ */
+export function extractDocumentHeadingConcepts(
+  document: string,
+  parentTitle: string,
+): DocumentHeadingConcept[] {
+  const designPatternConcepts = extractDesignPatternKnowledgeConcepts(document, parentTitle)
+  if (designPatternConcepts.length >= 8) return designPatternConcepts
+
+  const lines = document.replace(/\r\n/g, '\n').split('\n')
+  const parentKey = normalizeImportText(parentTitle)
+  const rejectedHeading = /(学习目标|学习成果|导入说明|前言|总结|目录|选择矩阵|常见误区|检查清单|练习|实践|考核|参考|附录|资料定位|课程目标|学习方法|评分量规|进一步学习)/
+  const concepts: DocumentHeadingConcept[] = []
+  const seen = new Set<string>()
+  let categoryTitle = ''
+  let current: { title: string; categoryTitle: string; body: string[] } | null = null
+
+  const flush = () => {
+    if (!current) return
+    const key = normalizeImportText(current.title)
+    if (!key || key === parentKey || seen.has(key)) {
+      current = null
+      return
+    }
+    const description = current.body
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#') && !line.startsWith('|') && !/^[-*:]/.test(line))
+      .join(' ')
+      .slice(0, 320)
+    seen.add(key)
+    concepts.push({ title: current.title, categoryTitle: current.categoryTitle, description })
+    current = null
+  }
+
+  for (const line of lines) {
+    const h2 = /^##\s+(.+?)\s*$/.exec(line)
+    if (h2) {
+      flush()
+      const nextCategory = normalizeCategoryHeading(h2[1])
+      categoryTitle = rejectedHeading.test(nextCategory) ? '' : nextCategory
+      continue
+    }
+    const h3 = /^###\s+(.+?)\s*$/.exec(line)
+    if (h3) {
+      flush()
+      if (!categoryTitle) continue
+      current = {
+        title: normalizeCategoryHeading(h3[1]),
+        categoryTitle,
+        body: [],
+      }
+      continue
+    }
+    current?.body.push(line)
+  }
+  flush()
+  return concepts
+}
+
+export function extractDocumentCategoryGroups(
+  document: string,
+  leafTitles: string[],
+  parentTitle: string,
+): DocumentCategoryGroup[] {
+  const designPatternGroups = extractDesignPatternCategoryGroups(document, parentTitle)
+  if (designPatternGroups.length >= 2) return designPatternGroups
+
+  const lines = document.replace(/\r\n/g, '\n').split('\n')
+  const sections: Array<{ title: string; body: string[] }> = []
+  let current: { title: string; body: string[] } | null = null
+
+  for (const line of lines) {
+    const heading = /^(#{2})\s+(.+?)\s*$/.exec(line)
+    if (heading) {
+      if (current) sections.push(current)
+      current = { title: normalizeCategoryHeading(heading[2]), body: [] }
+      continue
+    }
+    current?.body.push(line)
+  }
+  if (current) sections.push(current)
+
+  const structuralLeaves = extractDocumentHeadingConcepts(document, parentTitle)
+  const leafKeys = new Map(
+    dedupeStrings([...leafTitles, ...structuralLeaves.map((concept) => concept.title)])
+      .map((title) => [normalizeImportText(title), title] as const)
+      .filter(([key]) => Boolean(key)),
+  )
+  const parentKey = normalizeImportText(parentTitle)
+  const rejectedHeading = /(学习目标|导入说明|前言|总结|选择矩阵|常见误区|检查清单|练习|参考|附录|资料定位)/
+  const groups: DocumentCategoryGroup[] = []
+  const seen = new Set<string>()
+
+  for (const section of sections) {
+    const key = normalizeImportText(section.title)
+    if (!key || key === parentKey || rejectedHeading.test(section.title) || seen.has(key)) continue
+    const sectionText = normalizeImportText([section.title, ...section.body].join('\n'))
+    const structuralMembers = structuralLeaves
+      .filter((concept) => sameImportTitle(concept.categoryTitle, section.title))
+      .map((concept) => concept.title)
+    const inferredMembers = [...leafKeys.entries()]
+      .filter(([leafKey]) => leafKey.length >= 2 && sectionText.includes(leafKey))
+      .map(([, title]) => title)
+    const memberTitles = dedupeStrings([...structuralMembers, ...inferredMembers])
+    if (memberTitles.length === 0) continue
+    seen.add(key)
+    groups.push({ title: section.title, memberTitles })
+  }
+
+  return groups
+}
+
+function normalizeCategoryHeading(value: string): string {
+  let title = value
+    .trim()
+    .replace(/^[一二三四五六七八九十百\d]+[、.．:：\s-]+/, '')
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .trim()
+  const colonIndex = title.search(/[：:]/)
+  if (colonIndex >= 2 && colonIndex <= 16) title = title.slice(0, colonIndex).trim()
+  return title.slice(0, 40)
+}
+
+function mergeCategoryGroups(primary: DocumentCategoryGroup[], fallback: DocumentCategoryGroup[]) {
+  const seen = new Set<string>()
+  return [...primary, ...fallback].filter((group) => {
+    const key = normalizeImportText(group.title)
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function mergeConditions(primary: NecessaryCondition[], fallback: NecessaryCondition[]) {
@@ -811,19 +1270,20 @@ function buildConditionContent(input: {
   profileNote?: string
 }) {
   const evidence = input.condition.evidenceTitles?.length
-    ? input.condition.evidenceTitles.map((title) => `[[${title}]]`).join('、')
+    ? input.condition.evidenceTitles.join('、')
     : input.condition.coverage === 'ai_generated'
       ? '暂无直接文献证据'
-      : `[[${input.docTitle}]]`
+      : `文献卡《${input.docTitle}》`
   return `## ${input.condition.title}
 
 ${input.condition.description}
 
-**父节点：** [[${input.parentTitle}]]
+**父节点：** ${input.parentTitle}
+**层级角色：** 仓库根节点下的二级领域
 **必要性：** ${input.condition.whyNecessary}
 **充分性角色：** ${input.condition.sufficiencyRole}
 **证据覆盖：** ${input.condition.coverage}
-**资料依据：** ${evidence}
+**资料依据：** 文献卡《${input.docTitle}》；${evidence}
 
 ${input.profileNote || ''}
 
@@ -1000,6 +1460,16 @@ async function createLearningPathForImport(params: {
       }
     }
     rawSteps = Array.isArray(pathData.steps) ? pathData.steps : []
+    if (rawSteps.length === 0 && importedTargets.length > 0) {
+      rawSteps = importedTargets.map((concept, index) => ({
+        order: index + 2,
+        title: `理解：${concept}`,
+        description: `在所属领域下打磨「${concept}」这张知识卡，并用自己的例子验证。`,
+        concept,
+        chapter: params.topic,
+        estimatedMinutes: 15,
+      }))
+    }
 
     const learningPath = await prisma.learningPath.create({
       data: {

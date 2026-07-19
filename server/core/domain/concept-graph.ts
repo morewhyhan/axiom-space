@@ -44,25 +44,29 @@ export async function ensureVaultRootCard(params: {
   vaultId: string
   vaultName?: string | null
 }): Promise<ConceptCard> {
+  const explicitName = params.vaultName?.trim()
+  const vault = explicitName
+    ? { name: explicitName }
+    : await prisma.vault.findUnique({ where: { id: params.vaultId }, select: { name: true } })
+  const name = vault?.name?.trim() || '知识库'
   const existing = await prisma.card.findUnique({
     where: { vaultId_path: { vaultId: params.vaultId, path: ROOT_CARD_PATH } },
     select: { id: true, title: true, type: true, clusterId: true, path: true, content: true },
   })
   if (existing) {
-    if (!existing.title && params.vaultName) {
+    // The white root node is the vault itself, not a separately generated
+    // topic. Keep its label synchronized when a vault is renamed so every
+    // ingestion path starts from the real warehouse name.
+    if (existing.title !== name) {
       return prisma.card.update({
         where: { id: existing.id },
-        data: { title: params.vaultName },
+        data: { title: name },
         select: { id: true, title: true, type: true, clusterId: true, path: true, content: true },
       })
     }
     return existing
   }
 
-  const vault = params.vaultName
-    ? { name: params.vaultName }
-    : await prisma.vault.findUnique({ where: { id: params.vaultId }, select: { name: true } })
-  const name = vault?.name || '知识库'
   return prisma.card.create({
     data: {
       vaultId: params.vaultId,
@@ -85,6 +89,11 @@ export async function ensureConceptCard(input: ConceptCardInput): Promise<Concep
       vaultId: input.vaultId,
       title,
       type: { not: 'literature' },
+      // The white vault root and a real topic card are different concepts even
+      // when the vault happens to have the same name as the topic. Reusing the
+      // root here collapses `vault -> topic` into one node and destroys the
+      // hierarchy that document import is expected to build.
+      path: { not: ROOT_CARD_PATH },
     },
     select: { id: true, title: true, type: true, clusterId: true, path: true, content: true },
     orderBy: [{ type: 'asc' }, { updatedAt: 'desc' }],

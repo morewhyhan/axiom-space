@@ -1158,12 +1158,12 @@ type EducationProfileChange = {
 }
 
 const EDUCATION_DIMENSION_LABELS: Record<string, string> = {
-  depth: '理解深度',
-  breadth: '知识广度',
-  connection: '关联能力',
-  expression: '表达能力',
-  application: '应用能力',
-  learning_pace: '学习节奏',
+  learningGoal: '愿景与动力',
+  currentFoundation: '我现在在哪',
+  bestExplanationPath: '怎样更容易理解',
+  stuckPattern: '为什么会卡住',
+  paceAndLoad: '怎样更容易行动',
+  masteryCheck: '怎样确认有效',
 };
 
 function describeEducationProfileChanges(

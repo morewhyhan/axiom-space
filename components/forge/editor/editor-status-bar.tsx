@@ -88,6 +88,11 @@ export function EditorStatusBar({
             重试
           </Button>
         )}
+        {ragStatus?.status === 'indexed' && ragStatus.graph?.status === 'indexing' && (
+          <span className="mono text-purple-300/45" style={{ fontSize: 'var(--f7)' }} title="不影响搜索和使用">
+            · 后台图谱增强中
+          </span>
+        )}
       </div>
       <div className="flex-1" />
       {saving ? (

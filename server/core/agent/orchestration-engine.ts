@@ -529,7 +529,7 @@ export class RealAgent {
 
     const capabilities = await prisma.vaultCapability.findMany({ where: { vaultId: vault.id } });
     const weakPoints = capabilities.filter(c => c.masteryLevel < 30).map(c => c.concept);
-    const masteryConcepts = capabilities.filter(c => c.masteryLevel >= 70).map(c => c.concept);
+    const masteryConcepts = capabilities.filter(c => c.status === 'mastered').map(c => c.concept);
 
     return {
       userLevel,

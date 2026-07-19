@@ -12,10 +12,12 @@ import {
 } from '@/server/core/domain/concept-graph';
 import { buildGenerationRagContext, type GenerationRagContext } from '@/server/core/rag/generation-context';
 import { buildLearningProfileContext, type LearningProfileContext } from '@/server/core/learning/profile-context';
-import { scheduleRagIndexCard, scheduleRagIndexCards } from '@/server/core/rag/auto-index';
+import { scheduleRagIndexCard } from '@/server/core/rag/auto-index';
+import { resourcePlanForTargets, type ResourcePlanItem, type ResourceType } from '@/server/core/agent/ResourceGenerationState';
+import { analyzeSemanticLearningNeed } from '@/server/core/learning/semantic-learning-decision';
 
 export type PushBoxType = 'link' | 'resource';
-export type PushItemType = 'link' | 'card' | 'resource' | 'task_group';
+export type PushItemType = 'link' | 'card' | 'resource';
 export type PushStatus = 'pending' | 'accepted' | 'rejected' | 'edited' | 'executed';
 
 export interface PushSuggestionDTO {
@@ -79,9 +81,11 @@ type AiSuggestion = {
   payloadPatch?: Record<string, unknown>;
 };
 
+type VerifiedMastery = Array<{ id: string; concept: string; mastery: number }>;
+
 const MAX_CANDIDATES_FOR_AI = 24;
 const MAX_SAVED_PER_SCAN = 16;
-const MIN_CONFIDENCE = 0.4;
+export const PUSH_MIN_CONFIDENCE = 0.7;
 const WIKILINK_RE = /\[\[([^\]]+?)\]\]/g;
 
 export class PushSuggestionEngine {
@@ -93,21 +97,33 @@ export class PushSuggestionEngine {
     limit?: number;
   }): Promise<PushSuggestionDTO[]> {
     const status = params.status && params.status !== 'all' ? params.status : undefined;
-    const records = await prisma.pushSuggestion.findMany({
-      where: {
-        userId: params.userId,
-        vaultId: params.vaultId,
-        ...(params.boxType ? { boxType: params.boxType } : {}),
-        ...(status ? { status } : {}),
-      },
-      orderBy: [
-        { status: 'asc' },
-        { confidence: 'desc' },
-        { createdAt: 'desc' },
-      ],
-      take: Math.min(Math.max(params.limit ?? 80, 1), 200),
-    });
-    return uniqueSuggestionsForDisplay(records.map(deserializeSuggestion));
+    const [records, verifiedMastery] = await Promise.all([
+      prisma.pushSuggestion.findMany({
+        where: {
+          userId: params.userId,
+          vaultId: params.vaultId,
+          ...(params.boxType ? { boxType: params.boxType } : {}),
+          ...(status ? { status } : {}),
+        },
+        orderBy: [
+          { status: 'asc' },
+          { confidence: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: Math.min(Math.max(params.limit ?? 80, 1), 200),
+      }),
+      prisma.assessmentResult.findMany({
+        where: { userId: params.userId, vaultId: params.vaultId, passed: true },
+        select: { id: true, concept: true, mastery: true },
+        orderBy: { createdAt: 'desc' },
+        take: 80,
+      }),
+    ]);
+    return uniqueSuggestionsForDisplay(records
+      .filter((record) => record.itemType !== 'task_group')
+      .map(deserializeSuggestion))
+      .filter(isSuggestionInsidePushBoundary)
+      .map((suggestion) => enforceVerifiedMasteryLanguage(suggestion, verifiedMastery));
   }
 
   async scanAndPersist(params: {
@@ -122,16 +138,17 @@ export class PushSuggestionEngine {
     });
     if (!vault) throw new Error('VAULT_NOT_FOUND');
 
-    const candidates = await this.findCandidates(params);
+    const { candidates, verifiedMastery } = await this.findCandidates(params);
     if (candidates.length === 0) return { created: [], skipped: 0, candidateCount: 0 };
 
-    const judged = await this.judgeCandidates(vault.name || '知识库', params.trigger, candidates);
+    const judged = (await this.judgeCandidates(vault.name || '知识库', params.trigger, candidates))
+      .map((candidate) => enforceVerifiedMasteryLanguage(candidate, verifiedMastery));
     const created: PushSuggestionDTO[] = [];
     let skipped = 0;
     const seenDisplayKeys = new Set<string>();
 
     for (const candidate of judged
-      .filter((item) => item.confidence >= MIN_CONFIDENCE)
+      .filter((item) => item.confidence >= PUSH_MIN_CONFIDENCE)
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, MAX_SAVED_PER_SCAN)) {
       const displayKey = suggestionDisplayKey(candidate);
@@ -229,6 +246,7 @@ export class PushSuggestionEngine {
       where: { id: params.suggestionId, userId: params.userId, vaultId: params.vaultId },
     });
     if (!suggestion) throw new Error('SUGGESTION_NOT_FOUND');
+    if (suggestion.itemType === 'task_group') throw new Error('SUGGESTION_OUTSIDE_PUSH_BOUNDARY');
     if (suggestion.status === 'executed') {
       return { suggestion: deserializeSuggestion(suggestion), result: { alreadyExecuted: true } };
     }
@@ -237,8 +255,7 @@ export class PushSuggestionEngine {
     let result: Record<string, unknown>;
     if (dto.itemType === 'link') result = await this.executeLink(dto);
     else if (dto.itemType === 'card') result = await this.executeCard(dto);
-    else if (dto.itemType === 'resource') result = await this.executeResource(dto);
-    else result = await this.executeTaskGroup(params.userId, dto);
+    else result = await this.executeResource(dto);
 
     const updated = await prisma.pushSuggestion.update({
       where: { id: suggestion.id },
@@ -272,8 +289,8 @@ export class PushSuggestionEngine {
     vaultId: string;
     trigger: string;
     scope?: Record<string, unknown>;
-  }): Promise<Candidate[]> {
-    const [cards, edges, paths, clusters, profile] = await Promise.all([
+  }): Promise<{ candidates: Candidate[]; verifiedMastery: VerifiedMastery }> {
+    const [cards, edges, paths, profile, verifiedMastery] = await Promise.all([
       prisma.card.findMany({
         where: { vaultId: params.vaultId, path: { not: ROOT_CARD_PATH }, type: { not: 'literature' } },
         select: {
@@ -299,12 +316,13 @@ export class PushSuggestionEngine {
         orderBy: { updatedAt: 'desc' },
         take: 30,
       }),
-      prisma.cluster.findMany({
-        where: { vaultId: params.vaultId },
-        include: { cards: { select: { id: true, title: true, type: true, content: true } } },
-        take: 40,
-      }),
       buildLearningProfileContext({ vaultId: params.vaultId, userId: params.userId }).catch(() => null),
+      prisma.assessmentResult.findMany({
+        where: { userId: params.userId, vaultId: params.vaultId, passed: true },
+        select: { id: true, concept: true, mastery: true },
+        orderBy: { createdAt: 'desc' },
+        take: 80,
+      }),
     ]);
 
     const candidates: Candidate[] = [];
@@ -312,18 +330,87 @@ export class PushSuggestionEngine {
     const titleToCard = buildTitleMap(cards);
     const cardById = new Map(cards.map((card) => [card.id, card]));
 
-    if (profile) this.findProfileGapCandidates(params, profile, cards, existingEdges, candidates);
-    if (profile) this.findEvidenceDrivenNextStepCandidates(params, profile, cards, existingEdges, candidates);
+    if (profile) this.findProfileGapCandidates(params, profile, cards, existingEdges, candidates, verifiedMastery);
+    if (profile) this.findEvidenceDrivenNextStepCandidates(params, profile, cards, existingEdges, candidates, verifiedMastery);
     this.findWikiLinkCandidates(params, cards, titleToCard, existingEdges, candidates);
     this.findPathCandidates(params, paths, cardById, existingEdges, candidates);
     this.findThinCardCandidates(params, cards, edges, candidates);
     this.findMissingCardCandidates(params, cards, titleToCard, candidates);
     this.findSimilarityLinkCandidates(params, cards, existingEdges, candidates);
-    this.findClusterTaskCandidates(params, clusters, edges, candidates);
 
-    return candidates
+    const boundedCandidates = candidates
+      .filter(isCandidateInsidePushBoundary)
       .filter((candidate, index, all) => all.findIndex((item) => item.dedupeKey === candidate.dedupeKey) === index)
       .slice(0, 80);
+    const guardedCandidates = await this.applySemanticLearningGuards(params, boundedCandidates);
+    return { candidates: guardedCandidates, verifiedMastery };
+  }
+
+  private async applySemanticLearningGuards(
+    params: { userId: string; vaultId: string },
+    candidates: Candidate[],
+  ): Promise<Candidate[]> {
+    const guarded: Candidate[] = [];
+    let semanticChecks = 0;
+    for (const candidate of candidates) {
+      if (candidate.itemType === 'link' || semanticChecks >= 14) {
+        guarded.push(candidate);
+        continue;
+      }
+      semanticChecks += 1;
+      const topic = stringValue(candidate.payload.profileGap)
+        || stringValue(candidate.payload.suggestedTitle)
+        || stringValue(candidate.payload.cardTitle)
+        || candidate.title;
+      const requestedKinds = candidateResourceKinds(candidate);
+      const decision = await analyzeSemanticLearningNeed({
+        vaultId: params.vaultId,
+        userId: params.userId,
+        topic,
+        requestedResourceKinds: requestedKinds,
+        judgeSemantics: false,
+      }).catch((error) => {
+        console.warn('[PushSuggestionEngine] Semantic guard failed:', error instanceof Error ? error.message : String(error));
+        return null;
+      });
+      if (!decision) {
+        guarded.push(candidate);
+        continue;
+      }
+
+      const duplicateCard = candidate.itemType === 'card' && decision.equivalentCardIds.length > 0;
+      const duplicateResource = candidate.itemType === 'resource'
+        && requestedKinds.length > 0
+        && requestedKinds.every((kind) => decision.coveredResourceKinds.includes(kind));
+      if (duplicateCard || duplicateResource || decision.shouldSuppressProactiveGeneration) {
+        continue;
+      }
+
+      if (decision.analogies.length > 0) {
+        const bridges = decision.analogies.map((item) => item.concept);
+        guarded.push({
+          ...candidate,
+          reason: `${candidate.reason} 可优先调用已学过的「${bridges.join('、')}」做机制对比，明确相同点和关键差异，避免从头讲解。`.slice(0, 500),
+          evidence: uniqueStrings([
+            ...candidate.evidence,
+            ...decision.analogies.map((item) => `语义类比候选：${item.concept}（${item.masteryState}/${item.masteryLevel}）`),
+          ]).slice(0, 8),
+          payload: {
+            ...candidate.payload,
+            semanticDecision: {
+              canonicalConcept: decision.canonicalConcept,
+              masteryState: decision.masteryState,
+              analogies: decision.analogies,
+              vectorUsed: decision.vectorUsed,
+            },
+            analogyBridges: decision.analogies,
+          },
+        });
+        continue;
+      }
+      guarded.push(candidate);
+    }
+    return guarded;
   }
 
   private findProfileGapCandidates(
@@ -332,6 +419,7 @@ export class PushSuggestionEngine {
     cards: CardSnapshot[],
     existingEdges: Set<string>,
     candidates: Candidate[],
+    verifiedMastery: VerifiedMastery,
   ) {
     const remainingGaps = getProfileRemainingGaps(profile).slice(0, 4);
     if (remainingGaps.length === 0) return;
@@ -351,7 +439,7 @@ export class PushSuggestionEngine {
       hasPreferenceEvidence && profile.teachingPolicy.shouldPreferPractice ? '练习' : '',
     ]).slice(0, 5);
     const recentEvidence = collectPushEvidence(profile).slice(0, 6);
-    const masteredCards = matchCardsByTitles(cards, profile.knowledgeProfile.masteredConcepts);
+    const masteredCards = matchCardsByTitles(cards, verifiedMastery.map((item) => item.concept));
 
     for (const gap of remainingGaps) {
       const refinedGap = refineGapTarget(gap, cards, recentEvidence);
@@ -366,33 +454,6 @@ export class PushSuggestionEngine {
         profile.profileSummary.goals[0] ? `当前目标：${profile.profileSummary.goals[0]}` : '',
       ]);
 
-      candidates.push(makeCandidate({
-        vaultId: params.vaultId,
-        trigger: params.trigger,
-        boxType: 'resource',
-        itemType: 'task_group',
-        title: `建议任务组：${targetGap}`,
-        reason: `画像字段「剩余缺口」指向「${gap}」，系统进一步定位到「${targetGap}」作为当前可执行下一步，因此推送一组任务而不是继续泛泛学习。`,
-        evidence,
-        confidence: refinedGap ? 0.9 : recentEvidence.length > 0 ? 0.84 : 0.68,
-        payload: {
-          missingType: 'profile_remaining_gap',
-          suggestedFormat: 'task_group',
-          targetArea: targetGap,
-          goal: `补齐画像剩余缺口：${targetGap}`,
-          profileGap: targetGap,
-          originalProfileGap: gap,
-          profileDriven: true,
-          resourcePreference,
-          displayLocked: refinedGap ? true : undefined,
-          tasks: [
-            { title: `说清「${targetGap}」的定义和边界` },
-            { title: `用一个例子解释「${targetGap}」` },
-            { title: `完成一题「${targetGap}」小练习` },
-          ],
-        },
-      }));
-
       if (gapCards[0]) {
         candidates.push(makeCandidate({
           vaultId: params.vaultId,
@@ -402,13 +463,14 @@ export class PushSuggestionEngine {
           title: `生成针对「${gap}」的补充资源`,
           reason: `画像字段「剩余缺口」显示「${gap}」仍需要补强，资源应引用当前画像和已有资料生成。`,
           evidence,
-          confidence: 0.76,
+          confidence: refinedGap && recentEvidence.length > 0 ? 0.84 : 0.76,
           payload: {
             cardId: gapCards[0].id,
             cardTitle: gapCards[0].title,
             missingType: 'profile_remaining_gap',
             suggestedTitle: `${gap} 针对性补充资源`,
             suggestedFormat: hasPreferenceEvidence && (preferredFormats.includes('quiz') || profile.teachingPolicy.shouldPreferPractice) ? 'exercise_json' : 'markdown_resource',
+            resourcePlan: buildSuggestedResourcePlan(resourcePreference, hasPreferenceEvidence),
             profileGap: gap,
             profileDriven: true,
             resourcePreference,
@@ -429,7 +491,7 @@ export class PushSuggestionEngine {
           title: `建议连接：${linkSource.title || linkSource.path} -> ${target.title || target.path}`,
           reason: `学生已经能用自己的表达说明「${linkSource.title || linkSource.path}」相关证据，下一步缺口是「${targetGap}」，两者需要建立支持关系，方便学习路径继续推进。`,
           evidence: uniqueStrings([
-            `已掌握概念：${linkSource.title || linkSource.path}`,
+            source ? `测验通过：${linkSource.title || linkSource.path}` : `观察到相关表达：${linkSource.title || linkSource.path}`,
             `画像字段：剩余缺口 = ${targetGap}`,
             `卡片证据：${extractCardEvidence(linkSource)}`,
             ...recentEvidence.map((item) => `触发证据：${item}`),
@@ -493,6 +555,7 @@ export class PushSuggestionEngine {
     cards: CardSnapshot[],
     existingEdges: Set<string>,
     candidates: Candidate[],
+    verifiedMastery: VerifiedMastery,
   ) {
     const recentEvidence = collectPushEvidence(profile).slice(0, 8);
     if (recentEvidence.length === 0) return;
@@ -504,7 +567,9 @@ export class PushSuggestionEngine {
     const remainingGaps = getProfileRemainingGaps(profile);
     const profileGap = target.title || remainingGaps[0] || target.path;
     const evidence = uniqueStrings([
-      `已掌握概念：${source.title || source.path}`,
+      verifiedMastery.some((item) => normalizeConceptLookup(item.concept) === normalizeConceptLookup(source.title || source.path))
+        ? `测验通过：${source.title || source.path}`
+        : `观察到相关表达：${source.title || source.path}`,
       `画像字段：剩余缺口 = ${profileGap}`,
       `卡片证据：${extractCardEvidence(source)}`,
       `资料证据：${extractCardEvidence(target)}`,
@@ -518,7 +583,7 @@ export class PushSuggestionEngine {
         boxType: 'link',
         itemType: 'link',
         title: `建议连接：${source.title || source.path} -> ${target.title || target.path}`,
-        reason: `学生已经能说出「${source.title || source.path}」相关理解，下一步应连接到「${target.title || target.path}」这类前提、适用条件或边界问题。`,
+        reason: `现有对话或卡片中出现了「${source.title || source.path}」相关表达，但这不等于测验通过；建议把它连接到「${target.title || target.path}」继续验证前提、适用条件或边界。`,
         evidence,
         confidence: 0.92,
         payload: {
@@ -535,30 +600,6 @@ export class PushSuggestionEngine {
       }));
     }
 
-    candidates.push(makeCandidate({
-      vaultId: params.vaultId,
-      trigger: params.trigger,
-      boxType: 'resource',
-      itemType: 'task_group',
-      title: `建议任务组：${target.title || target.path}`,
-      reason: `当前卡片证据说明用户已经修正基础理解，下一步需要处理「${target.title || target.path}」的适用条件、边界或局限。`,
-      evidence,
-      confidence: 0.91,
-      payload: {
-        missingType: 'evidence_driven_next_step',
-        suggestedFormat: 'task_group',
-        targetArea: target.title || target.path,
-        goal: `补齐下一步边界问题：${target.title || target.path}`,
-        profileGap,
-        evidenceDriven: true,
-        displayLocked: true,
-        tasks: [
-          { title: `说明「${target.title || target.path}」什么时候适用` },
-          { title: `找出一个会破坏该方法前提的反例` },
-          { title: `用当前资料证据写出判断标准` },
-        ],
-      },
-    }));
   }
 
   private findPathCandidates(
@@ -639,7 +680,9 @@ export class PushSuggestionEngine {
       const lacksExample = !/(例如|比如|举例|例子|example|for example)/i.test(card.content);
       const lacksLinks = extractWikiLinks(card.content).length === 0 && (degree.get(card.id) ?? 0) <= 1;
       const tooThin = content.length < 320;
-      if (!tooThin && !lacksExample && !lacksLinks) continue;
+      const signals = [tooThin, lacksExample, lacksLinks].filter(Boolean).length;
+      // 字数短只能作为线索，至少需要另一个独立缺失信号才能推送。
+      if (signals < 2) continue;
 
       const missingType = tooThin ? 'thin_card' : lacksExample ? 'missing_example' : 'missing_bridge';
       candidates.push(makeCandidate({
@@ -658,7 +701,7 @@ export class PushSuggestionEngine {
           `内容长度：${content.length}`,
           `连接度：${degree.get(card.id) ?? 0}`,
         ],
-        confidence: tooThin ? 0.68 : 0.58,
+        confidence: signals === 3 ? 0.82 : 0.74,
         payload: {
           cardId: card.id,
           cardTitle: card.title,
@@ -750,50 +793,6 @@ export class PushSuggestionEngine {
     }
   }
 
-  private findClusterTaskCandidates(
-    params: { vaultId: string; trigger: string },
-    clusters: Array<{ id: string; name: string; cards: Array<{ id: string; title: string | null; type: string; content: string }> }>,
-    edges: EdgeSnapshot[],
-    candidates: Candidate[],
-  ) {
-    for (const cluster of clusters) {
-      const cards = cluster.cards.filter((card) => card.type !== 'literature');
-      if (cards.length < 4) continue;
-      const ids = new Set(cards.map((card) => card.id));
-      const internalEdges = edges.filter((edge) => ids.has(edge.sourceId) && ids.has(edge.targetId));
-      const density = internalEdges.length / Math.max(1, cards.length * (cards.length - 1));
-      const thinCount = cards.filter((card) => stripMarkdown(card.content).length < 320).length;
-      if (density > 0.08 && thinCount < 2) continue;
-
-      candidates.push(makeCandidate({
-        vaultId: params.vaultId,
-        trigger: params.trigger,
-        boxType: 'resource',
-        itemType: 'task_group',
-        title: `补齐「${cluster.name}」板块`,
-        reason: `这个板块有 ${cards.length} 张卡片，但内部连接偏少或薄卡较多，适合生成一组补齐任务。`,
-        evidence: [
-          `板块：${cluster.name}`,
-          `卡片数：${cards.length}`,
-          `内部连接数：${internalEdges.length}`,
-          `薄卡数：${thinCount}`,
-        ],
-        confidence: 0.64,
-        payload: {
-          targetArea: cluster.name,
-          suggestedFormat: 'task_group',
-          goal: `补齐「${cluster.name}」板块的定义、例子、连接和练习`,
-          tasks: [
-            { action: 'review_cards', title: `审查「${cluster.name}」中的薄卡片` },
-            { action: 'suggest_links', title: `补齐「${cluster.name}」内部关键连接` },
-            { action: 'create_resource', title: `生成「${cluster.name}」总结材料` },
-            { action: 'create_exercise', title: `生成「${cluster.name}」练习题` },
-          ],
-        },
-      }));
-    }
-  }
-
   private async judgeCandidates(vaultName: string, trigger: string, candidates: Candidate[]): Promise<Candidate[]> {
     const subset = candidates
       .sort((a, b) => b.confidence - a.confidence)
@@ -833,7 +832,8 @@ export class PushSuggestionEngine {
           reason: preserveDisplay
             ? candidate.reason
             : typeof suggestion.reason === 'string' && suggestion.reason.trim() ? suggestion.reason.trim().slice(0, 500) : candidate.reason,
-          confidence: clampConfidence(typeof suggestion.confidence === 'number' ? suggestion.confidence : candidate.confidence),
+          // AI 只能降权或淘汰，不能把薄弱的规则证据改写成高置信事实。
+          confidence: capPushConfidence(candidate.confidence, suggestion.confidence),
           payload,
         });
       }
@@ -893,136 +893,42 @@ export class PushSuggestionEngine {
 
   private async executeResource(suggestion: PushSuggestionDTO): Promise<Record<string, unknown>> {
     const title = stringValue(suggestion.payload.suggestedTitle) || suggestion.title;
-    const ragContext = await buildGenerationRagContext({
-      vaultId: suggestion.vaultId,
-      query: [
-        title,
-        suggestion.reason,
-        suggestion.evidence.join('\n'),
-        stringValue(suggestion.payload.cardTitle),
-        stringValue(suggestion.payload.targetArea),
-      ].filter(Boolean).join('\n\n'),
-      topK: 8,
-      maxChars: 4500,
-    });
-    const content = await this.generateSuggestedResourceContent(title, suggestion, ragContext);
-    const path = await nextSuggestionPath(suggestion.vaultId, 'resources', title);
-    const card = await prisma.card.create({
-      data: {
-        vaultId: suggestion.vaultId,
-        path,
-        title,
-        type: 'literature',
-        tags: JSON.stringify(['push-resource', String(suggestion.payload.suggestedFormat || 'markdown_resource')]),
-        content,
-      },
-      select: { id: true, title: true, path: true },
-    });
-    const sourceCardId = stringValue(suggestion.payload.cardId);
-    if (sourceCardId) {
-      const source = await prisma.card.findFirst({ where: { id: sourceCardId, vaultId: suggestion.vaultId }, select: { id: true } });
-      if (source) {
-        await prisma.edge.create({
-          data: {
-            vaultId: suggestion.vaultId,
-            sourceId: source.id,
-            targetId: card.id,
-            type: 'supports',
-            weight: clampConfidence(suggestion.confidence),
-          },
-        }).catch(() => null);
-      }
-    }
-    scheduleRagIndexCard(card.id, 'push-resource');
-    return { cardId: card.id, title: card.title, path: card.path, ragUsed: ragContext.used, ragReferences: ragContext.references };
-  }
+    const resourcePlan = normalizeSuggestedResourcePlan(suggestion.payload.resourcePlan, suggestion.payload);
+    const { registerBuiltinTools } = await import('@/server/core/agent/builtin-tools');
+    const { toolRegistry } = await import('@/server/core/agent/tools');
+    const { runWithAgentContext } = await import('@/server/core/agent/agent-context');
+    registerBuiltinTools();
+    const tool = toolRegistry.get('push_resource');
+    if (!tool?.execute) throw new Error('RESOURCE_GENERATOR_UNAVAILABLE');
 
-  private async executeTaskGroup(userId: string, suggestion: PushSuggestionDTO): Promise<Record<string, unknown>> {
-    const tasks = Array.isArray(suggestion.payload.tasks)
-      ? suggestion.payload.tasks.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
-      : [];
-    if (tasks.length === 0) throw new Error('TASK_GROUP_EMPTY');
-    const targetArea = stringValue(suggestion.payload.targetArea) || suggestion.title;
-    const ragContext = await buildGenerationRagContext({
-      vaultId: suggestion.vaultId,
-      query: [
-        targetArea,
-        stringValue(suggestion.payload.goal),
-        suggestion.reason,
-        suggestion.evidence.join('\n'),
-      ].filter(Boolean).join('\n\n'),
-      topK: 8,
-      maxChars: 4500,
-    });
-    const cards: Array<{ id: string; title: string; type: string }> = [];
-    for (const task of tasks.slice(0, 12)) {
-      const title = stringValue(task.title) || stringValue(task.action) || '推送任务';
-      const card = await ensureConceptCard({
-        vaultId: suggestion.vaultId,
-        title,
-        pathFolder: targetArea,
-        tags: ['push-task', targetArea],
-        content: `# ${title}
-
-> 来自资源与任务推送盒的任务。完成后再决定是否沉淀为永久知识。
-
-## 任务目标
-${title}
-
-## 推送原因
-${suggestion.reason}
-
-## RAG 依据
-${formatRagEvidence(ragContext)}
-
-## 验收标准
-- 能说明这个任务补齐了哪个缺口。
-- 能写出至少一个例子或应用。
-- 能和相关卡片建立连接。
-`,
-      });
-      cards.push({ id: card.id, title: card.title || title, type: card.type });
-    }
-
-    const path = await prisma.learningPath.create({
-      data: {
-        userId,
-        vaultId: suggestion.vaultId,
-        name: suggestion.title,
-        topic: targetArea,
-        description: suggestion.reason,
-        difficulty: 'intermediate',
-        source: 'push_suggestion',
-        totalSteps: cards.length,
-        steps: {
-          create: cards.map((card, index) => ({
-            order: index + 1,
-            title: card.title,
-            description: `来自推送任务组：${suggestion.title}`,
-            concept: card.title,
-            chapter: targetArea,
-            cardId: card.id,
-            status: index === 0 ? 'available' : 'locked',
-          })),
-        },
-      },
-      include: { steps: { orderBy: { order: 'asc' } } },
-    });
-
-    for (let index = 1; index < cards.length; index += 1) {
-      await prisma.edge.create({
-        data: {
-          vaultId: suggestion.vaultId,
-          sourceId: cards[index - 1].id,
-          targetId: cards[index].id,
-          type: 'prerequisite',
-          weight: 0.8,
-        },
-      }).catch(() => null);
-    }
-
-    scheduleRagIndexCards(cards.map((card) => card.id), 'push-task-group');
-    return { pathId: path.id, taskCount: cards.length, cardIds: cards.map((card) => card.id), ragUsed: ragContext.used, ragReferences: ragContext.references };
+    const toolResult = await runWithAgentContext(
+      { userId: suggestion.userId, vaultId: suggestion.vaultId },
+      () => tool.execute(`push-suggestion-${suggestion.id}`, {
+        topic: title,
+        literatureTitle: `${title}-${suggestion.id.slice(0, 8)}`,
+        literatureContent: [
+          `推送原因：${suggestion.reason}`,
+          `真实证据：\n${suggestion.evidence.map((item) => `- ${item}`).join('\n')}`,
+          stringValue(suggestion.payload.cardTitle) ? `关联卡片：${stringValue(suggestion.payload.cardTitle)}` : '',
+        ].filter(Boolean).join('\n\n'),
+        resourcePlan: JSON.stringify(resourcePlan),
+        userRequested: true,
+      }),
+    );
+    const details = (toolResult as { details?: Record<string, unknown> } | null)?.details ?? {};
+    if (typeof details.error === 'string') throw new Error(details.error);
+    const generated = Array.isArray(details.resources) ? details.resources : [];
+    if (generated.length === 0) throw new Error('RESOURCE_GENERATION_EMPTY');
+    const actions = Array.isArray(details.workspaceActions) ? details.workspaceActions : [];
+    const selectAction = actions.find((action) => action && typeof action === 'object' && (action as { type?: string }).type === 'select_card') as { card?: Record<string, unknown> } | undefined;
+    return {
+      resourceGeneration: true,
+      resourcePlan,
+      resources: generated,
+      resourcePackCard: details.resourcePackCard,
+      openCard: selectAction?.card,
+      workspaceActions: actions,
+    };
   }
 
   private async generateSuggestedResourceContent(
@@ -1132,10 +1038,18 @@ function makeCandidate(input: Omit<Candidate, 'candidateId' | 'dedupeKey'> & { v
     itemType: input.itemType,
     title: input.title.slice(0, 160),
     reason: input.reason.slice(0, 500),
-    evidence: input.evidence.filter(Boolean).slice(0, 8),
+    evidence: uniqueStrings(input.evidence).slice(0, 8),
     confidence: clampConfidence(input.confidence),
     trigger: input.trigger,
-    payload: input.payload,
+    payload: {
+      ...input.payload,
+      recommendationBoundary: input.boxType === 'link' ? 'missing_relation' : 'missing_knowledge_object',
+      acceptanceCriteria: input.itemType === 'link'
+        ? ['源卡片与目标卡片真实存在', '关系方向和类型可解释', '不据此修改掌握状态']
+        : input.itemType === 'card'
+          ? ['创建真实卡片并写入知识图谱', '内容明确标注生成依据', '不据此修改掌握状态']
+          : ['生成结果非空且格式与计划一致', '写入文献节点并可在右侧预览', '保留推送原因与证据来源'],
+    },
     dedupeKey,
   };
 }
@@ -1171,6 +1085,22 @@ function candidateForAI(candidate: Candidate) {
     confidence: candidate.confidence,
     payload: candidate.payload,
   };
+}
+
+function candidateResourceKinds(candidate: Candidate): string[] {
+  const raw = candidate.payload.resourcePlan;
+  if (Array.isArray(raw)) {
+    return uniqueStrings(raw.map((item) => item && typeof item === 'object' && 'kind' in item
+      ? String((item as { kind?: unknown }).kind || '')
+      : ''));
+  }
+  const format = stringValue(candidate.payload.suggestedFormat).toLowerCase();
+  if (/quiz|exercise|题/.test(format)) return ['quiz'];
+  if (/video|mp4|html/.test(format)) return ['video'];
+  if (/mindmap|导图/.test(format)) return ['mindmap'];
+  if (/svg|diagram|mermaid|图/.test(format)) return ['diagram'];
+  if (/code|代码/.test(format)) return ['code-practice'];
+  return candidate.itemType === 'resource' ? ['explanation'] : [];
 }
 
 function markFallbackReviewed(candidate: Candidate): Candidate {
@@ -1420,8 +1350,30 @@ function parseJsonArray(raw: string): string[] {
 }
 
 function normalizeItemType(value: string): PushItemType {
-  if (value === 'link' || value === 'card' || value === 'resource' || value === 'task_group') return value;
+  if (value === 'link' || value === 'card' || value === 'resource') return value;
   return 'resource';
+}
+
+function isSuggestionInsidePushBoundary(item: PushSuggestionDTO): boolean {
+  return isPushSuggestionWithinBoundary(item);
+}
+
+function isCandidateInsidePushBoundary(item: Candidate): boolean {
+  if (uniqueStrings(item.evidence).length < 2) return false;
+  return isPushSuggestionWithinBoundary(item);
+}
+
+export function isPushSuggestionWithinBoundary(item: { boxType: string; itemType: string }): boolean {
+  return item.boxType === 'link'
+    ? item.itemType === 'link'
+    : item.boxType === 'resource' && (item.itemType === 'card' || item.itemType === 'resource');
+}
+
+export function capPushConfidence(ruleConfidence: number, aiConfidence?: number): number {
+  return Math.min(
+    clampConfidence(ruleConfidence),
+    clampConfidence(typeof aiConfidence === 'number' ? aiConfidence : ruleConfidence),
+  );
 }
 
 function normalizeStatus(value: string): PushStatus {
@@ -1440,6 +1392,63 @@ function stringArrayValue(value: unknown): string[] {
 
 function uniqueStrings(items: Array<string | null | undefined>): string[] {
   return Array.from(new Set(items.map((item) => (item || '').trim()).filter(Boolean)));
+}
+
+function buildSuggestedResourcePlan(preferences: string[], hasPreferenceEvidence: boolean): ResourcePlanItem[] {
+  if (!hasPreferenceEvidence) return resourcePlanForTargets(['document']);
+  const text = preferences.join(' ').toLowerCase();
+  const targets = new Set<ResourceType>();
+  if (/题|练习|quiz|exercise/.test(text)) targets.add('quiz');
+  if (/代码|实操|code|case/.test(text)) targets.add('code');
+  if (/图|流程|结构|diagram|visual/.test(text)) targets.add('diagram');
+  if (/视频|动画|video/.test(text)) targets.add('video');
+  if (/ppt|演示/.test(text)) targets.add('ppt');
+  if (/pdf/.test(text)) targets.add('pdf');
+  if (/word|docx/.test(text)) targets.add('docx');
+  if (targets.size === 0) targets.add('document');
+  return resourcePlanForTargets([...targets].slice(0, 3));
+}
+
+function normalizeSuggestedResourcePlan(value: unknown, payload: Record<string, unknown>): ResourcePlanItem[] {
+  if (Array.isArray(value)) {
+    const valid = value.filter((item): item is ResourcePlanItem => {
+      if (!item || typeof item !== 'object') return false;
+      const candidate = item as Partial<ResourcePlanItem>;
+      return typeof candidate.kind === 'string' && Array.isArray(candidate.formats) && candidate.formats.length > 0;
+    });
+    if (valid.length > 0) return valid;
+  }
+  const format = stringValue(payload.suggestedFormat);
+  if (/exercise|quiz|题/.test(format)) return resourcePlanForTargets(['quiz']);
+  if (/code|实操/.test(format)) return resourcePlanForTargets(['code']);
+  if (/diagram|mermaid|图/.test(format)) return resourcePlanForTargets(['diagram']);
+  if (/video|视频|动画/.test(format)) return resourcePlanForTargets(['video']);
+  return resourcePlanForTargets(['document']);
+}
+
+function enforceVerifiedMasteryLanguage<T extends { title: string; reason: string; evidence: string[]; payload: Record<string, unknown> }>(candidate: T, verified: VerifiedMastery): T {
+  const verifiedConcepts = verified.map((item) => normalizeConceptLookup(item.concept));
+  const isVerifiedClaim = (text: string) => verifiedConcepts.some((concept) => concept && normalizeConceptLookup(text).includes(concept));
+  const sanitize = (text: string) => {
+    if (isVerifiedClaim(text)) return text.replace(/已掌握概念/g, '测验通过');
+    return text
+      .replace(/已掌握概念/g, '已有资料涉及')
+      .replace(/学生已经(?:能|会|掌握|理解)/g, '现有材料或对话显示可能')
+      .replace(/已经掌握/g, '已有资料涉及')
+      .replace(/已经学会/g, '曾接触');
+  };
+  return {
+    ...candidate,
+    title: sanitize(candidate.title),
+    reason: sanitize(candidate.reason),
+    evidence: candidate.evidence.map(sanitize),
+    payload: {
+      ...candidate.payload,
+      masteryVerified: verified.length > 0,
+      passedAssessmentCount: verified.length,
+      evidencePolicy: 'assessment_pass_required_for_mastery_claim',
+    },
+  };
 }
 
 function buildSuggestedCardContent(title: string, suggestion: PushSuggestionDTO): string {

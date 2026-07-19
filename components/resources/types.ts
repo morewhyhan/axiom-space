@@ -1,5 +1,7 @@
 export type GeneratedResourceItem = {
   type: string
+  kind?: string
+  format?: string
   title: string
   path: string
   ref?: string
@@ -7,6 +9,8 @@ export type GeneratedResourceItem = {
   rawRef?: string
   mp4Path?: string
   mp4Ref?: string
+  previewPath?: string
+  previewRef?: string
   fileName: string
   status?: 'ready' | 'failed' | 'pending' | string
   source?: string
@@ -18,4 +22,5 @@ export type GeneratedResourceItem = {
   generatedAt?: string
   content?: string
   videoUrl?: string
+  previewContent?: string
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { BellRing, CheckCircle2, Layers3, Route } from 'lucide-react'
+import { CheckCircle2, Layers3, Route } from 'lucide-react'
 import { SegmentedControl } from '@/components/ui'
 import type { LearningPath } from '@/hooks/use-learning'
 import { PATH_FILTER_OPTIONS } from './helpers'
@@ -91,12 +91,7 @@ export function PathSidebar({
               </div>
             )}
 
-            {pushBox && (
-              <div className="learn-path-group">
-                <div className="learn-path-group-label"><BellRing className="h-3 w-3" />资源推送</div>
-                <div className="space-y-1">{pushBox}</div>
-              </div>
-            )}
+            {pushBox}
           </div>
         )}
 

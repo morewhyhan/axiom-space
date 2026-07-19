@@ -12,6 +12,8 @@ type VideoCardProps = {
   topic: string
   thumbnail?: string
   expanded?: boolean
+  minimal?: boolean
+  fullscreen?: boolean
 }
 
 export function VideoCard({
@@ -22,6 +24,8 @@ export function VideoCard({
   topic,
   thumbnail,
   expanded = false,
+  minimal = false,
+  fullscreen = false,
 }: VideoCardProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
@@ -41,6 +45,31 @@ export function VideoCard({
   useEffect(() => {
     setVideoFailed(false)
   }, [videoUrl])
+
+  if (minimal) {
+    return (
+      <div className={`${fullscreen ? 'h-full min-h-[70vh]' : expanded ? 'h-[78vh]' : 'h-80'} w-full overflow-hidden rounded-lg bg-black`}>
+        {playableVideoUrl ? (
+          <video
+            src={playableVideoUrl}
+            className="h-full w-full object-contain"
+            controls
+            autoPlay
+            playsInline
+            onError={() => setVideoFailed(true)}
+          />
+        ) : htmlContent ? (
+          <iframe
+            srcDoc={htmlContent}
+            className="h-full w-full border-0"
+            title={title}
+            sandbox="allow-scripts"
+            allowFullScreen
+          />
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <>
@@ -169,6 +198,7 @@ export function VideoCard({
               style={{ border: 'none' }}
               title={title}
               allowFullScreen
+              sandbox="allow-scripts"
             />
           ) : null}
         </div>

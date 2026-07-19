@@ -15,7 +15,7 @@ import { useAppStore, type GraphLayoutMode, type Mode, type PanelId, type PanelZ
 import { useAuthSession } from '@/hooks/use-auth'
 import { getSiteUrl } from '@/lib/site-url'
 import { client } from '@/lib/api-client'
-import type { AgentConfirmationRequest, AgentMessage, RagReference, SessionSummary } from '@/stores/agent-store'
+import type { AgentConfirmationRequest, AgentMessage, AgentMessageAction, RagReference, SessionSummary } from '@/stores/agent-store'
 import type { ResourceProgressStatus } from '@/stores/agent-store'
 
 // Re-export for callers that import the types from this file
@@ -239,11 +239,12 @@ function invalidateWorkspaceQueries(queryClient: ReturnType<typeof useQueryClien
   queryClient.invalidateQueries({ queryKey: ['card-links'] })
 }
 
-async function restoreResourceProgress(vaultId: string) {
-  const res = await client.api.events['resource-progress'].$get({ query: { vid: vaultId } })
+async function restoreResourceProgress(vaultId: string, sessionId?: string | null) {
+  const res = await client.api.events['resource-progress'].$get({ query: { vid: vaultId, ...(sessionId ? { sessionId } : {}) } })
   const data = await res.json() as {
     success?: boolean
     jobs?: Array<{
+      id?: string
       topic: string
       resourceType: string
       label: string
@@ -253,6 +254,8 @@ async function restoreResourceProgress(vaultId: string) {
       path?: string | null
       fileName?: string | null
       error?: string | null
+      sourceSessionId?: string
+      workflowId?: string
       timestamp?: number
     }>
   }
@@ -264,6 +267,7 @@ async function restoreResourceProgress(vaultId: string) {
   }
   for (const job of [...data.jobs].reverse()) {
     store._upsertLastResourceProgress({
+      id: job.id,
       topic: job.topic,
       resourceType: job.resourceType,
       label: job.label,
@@ -273,9 +277,31 @@ async function restoreResourceProgress(vaultId: string) {
       path: job.path || undefined,
       fileName: job.fileName || undefined,
       error: job.error || undefined,
+      sourceSessionId: job.sourceSessionId,
+      workflowId: job.workflowId,
       timestamp: job.timestamp,
     })
   }
+}
+
+const backgroundResourceWatchers = new Map<string, number>()
+
+function watchBackgroundResourceProgress(vaultId: string) {
+  const existing = backgroundResourceWatchers.get(vaultId)
+  if (existing) window.clearInterval(existing)
+  let attempts = 0
+  const timer = window.setInterval(async () => {
+    attempts += 1
+    await restoreResourceProgress(vaultId, useAgentStore.getState().sessionId).catch(() => {})
+    const lastAssistant = [...useAgentStore.getState().messages].reverse().find((message) => message.role === 'assistant')
+    const video = lastAssistant?.resourceProgress?.find((item) => item.resourceType === 'video')
+    const terminal = video?.status === 'completed' || video?.status === 'failed'
+    if (terminal || attempts >= 120) {
+      window.clearInterval(timer)
+      backgroundResourceWatchers.delete(vaultId)
+    }
+  }, 1500)
+  backgroundResourceWatchers.set(vaultId, timer)
 }
 
 async function requestCurrentCardThreadFlush(reason: string): Promise<void> {
@@ -298,11 +324,20 @@ async function requestCurrentCardThreadFlush(reason: string): Promise<void> {
 
   const route = (client.api.agent.sessions[':id'] as any)?.['flush-card-thread']
   if (!route?.$post) return
-  await route.$post({
+  const response = await route.$post({
     param: { id: currentSession.id },
     query: { vid: currentVaultId },
     json: { reason },
-  }).catch(() => {})
+  }).catch(() => null)
+  if (!response?.ok) return
+  const data = await response.json().catch(() => null) as {
+    result?: { status?: string; cardId?: string }
+  } | null
+  if (data?.result?.status === 'updated' && data.result.cardId) {
+    window.dispatchEvent(new CustomEvent('axiom:card-updated', {
+      detail: { cardId: data.result.cardId, action: 'agent2_card_thread_flush' },
+    }))
+  }
 }
 
 export function useAgent() {
@@ -346,7 +381,7 @@ export function useAgent() {
             if (target) {
               await store.switchSession(target.id)
             }
-            await restoreResourceProgress(currentVaultId).catch(() => {})
+            await restoreResourceProgress(currentVaultId, target.id).catch(() => {})
         }
       } catch {
         // non-critical
@@ -362,7 +397,7 @@ export function useAgent() {
     const refreshSessions = () => {
       if (document.visibilityState === 'visible') {
         useAgentStore.getState().loadSessions().catch(() => {})
-        restoreResourceProgress(currentVaultId).catch(() => {})
+        restoreResourceProgress(currentVaultId, useAgentStore.getState().sessionId).catch(() => {})
       }
     }
     const flushOnHidden = () => {
@@ -606,6 +641,23 @@ export function useAgent() {
                 applyWorkspaceActions(payload.actions, queryClient, currentVaultId)
                 useAgentStore.getState()._setCurrentProgress('')
               }
+              if (payloadType === 'card_updated' && typeof payload.cardId === 'string') {
+                window.dispatchEvent(new CustomEvent('axiom:card-updated', {
+                  detail: { cardId: payload.cardId, action: 'agent2_card_thread_flush' },
+                }))
+                invalidateWorkspaceQueries(queryClient, currentVaultId)
+              }
+              if (payloadType === 'message_actions' && Array.isArray(payload.actions)) {
+                const actions = payload.actions.filter((item): item is AgentMessageAction => {
+                  if (!item || typeof item !== 'object') return false
+                  const action = item as Partial<AgentMessageAction>
+                  return typeof action.id === 'string'
+                    && typeof action.label === 'string'
+                    && action.type === 'navigate'
+                    && action.mode === 'cognition'
+                })
+                if (actions.length > 0) useAgentStore.getState()._setLastMessageActions(actions)
+              }
               if (payloadType === 'profile_question') {
                 const askedInCurrentSession = payload.askedInCurrentSession === true
                 const question = typeof payload.question === 'string' ? payload.question.trim() : ''
@@ -661,6 +713,10 @@ export function useAgent() {
       useAgentStore.getState()._appendMessage({ role: 'assistant', content: errorMsg })
       invalidateWorkspaceQueries(queryClient, currentVaultId)
     } finally {
+      const lastAssistant = [...useAgentStore.getState().messages].reverse().find((message) => message.role === 'assistant')
+      if (lastAssistant?.resourceProgress?.some((item) => item.resourceType === 'video')) {
+        watchBackgroundResourceProgress(currentVaultId)
+      }
       useAgentStore.getState()._setStreaming(false)
       useAgentStore.getState()._setAbortController(null)
       useAgentStore.getState()._setCurrentProgress('')
@@ -669,10 +725,12 @@ export function useAgent() {
 
   /* ── Delegate to store actions ── */
   const loadSessions = useCallback(() => useAgentStore.getState().loadSessions(), [])
-  const switchSession = useCallback((id: string) => {
+  const switchSession = useCallback(async (id: string) => {
     // Abort any in-progress stream before switching
     useAgentStore.getState()._abortStream()
-    return useAgentStore.getState().switchSession(id)
+    await useAgentStore.getState().switchSession(id)
+    const vaultId = useAppStore.getState().currentVaultId
+    if (vaultId) await restoreResourceProgress(vaultId, id).catch(() => {})
   }, [])
   const createSession = useCallback(() => useAgentStore.getState().createSession(), [])
   const createTalkSession = useCallback((options?: { title?: string; purpose?: 'initial_profile' }) => {
@@ -704,6 +762,9 @@ export function useAgent() {
       content: `确认执行高风险操作：${request.tool}${request.target ? ` ${request.target}` : ''}`,
     })
 
+    const progressPoll = window.setInterval(() => {
+      restoreResourceProgress(currentVaultId, store.sessionId).catch(() => {})
+    }, 1200)
     try {
       const response = await client.api.agent['confirm-operation'].$post({
         json: {
@@ -719,12 +780,17 @@ export function useAgent() {
         text?: string
         error?: string
         affectedCard?: { id: string; path?: string | null } | null
+        details?: { workspaceActions?: unknown[] } | null
       } | null
       if (!response.ok || payload?.success !== true) {
         throw new Error(payload?.error || `确认操作失败 (${response.status})`)
       }
       store._markConfirmationRequest(request.id, 'confirmed')
       store._appendMessage({ role: 'assistant', content: payload.text || '操作已完成。' })
+      await restoreResourceProgress(currentVaultId, store.sessionId).catch(() => {})
+      if (Array.isArray(payload.details?.workspaceActions)) {
+        applyWorkspaceActions(payload.details.workspaceActions, queryClient, currentVaultId)
+      }
       invalidateWorkspaceQueries(queryClient, currentVaultId)
       const selectedNode = useAppStore.getState().selectedNode
       if (payload.affectedCard?.id && selectedNode?.id === payload.affectedCard.id) {
@@ -737,6 +803,7 @@ export function useAgent() {
       store._setError(message)
       store._appendMessage({ role: 'assistant', content: message })
     } finally {
+      window.clearInterval(progressPoll)
       useAgentStore.getState()._setStreaming(false)
       useAgentStore.getState()._setCurrentProgress('')
     }

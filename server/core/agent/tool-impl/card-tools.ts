@@ -13,6 +13,7 @@ import { emitNotification } from '../notification-bus';
 import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
 import { clampEdgeWeight, normalizeEdgeType, validatePermanentCardContent } from '@/server/core/domain/contracts';
 import { pushSuggestionEngine } from '@/server/core/push/push-suggestion-engine';
+import { analyzeSemanticLearningNeed } from '@/server/core/learning/semantic-learning-decision';
 const axiom = createAxiomCompat(getFileStorage());
 
 function triggerPushScan(): void {
@@ -43,6 +44,26 @@ const createFleeingCardTool = createTool(
           content: [{ type: 'text', text: '错误: 未打开 Vault' }],
           details: { error: 'No vault open' },
         };
+      }
+      const fleetingVaultId = getCurrentVaultId();
+      if (fleetingVaultId && params.title) {
+        const semantic = await analyzeSemanticLearningNeed({
+          vaultId: fleetingVaultId,
+          userId: getCurrentUserId(),
+          topic: params.title,
+        }).catch(() => null);
+        if (semantic?.equivalentCardIds.length) {
+          const existing = await prisma.card.findFirst({
+            where: { vaultId: fleetingVaultId, id: { in: semantic.equivalentCardIds }, type: { not: 'literature' } },
+            select: { id: true, title: true, type: true, path: true },
+          });
+          if (existing) {
+            return {
+              content: [{ type: 'text', text: `未创建重复卡片，已复用语义等价的「${existing.title || existing.path}」。` }],
+              details: { reused: true, semanticReuse: true, cardId: existing.id, cardPath: existing.path, card: existing, semanticDecision: semantic },
+            };
+          }
+        }
       }
       const normalizedContent = normalizeGeneratedCardMarkdown(params.content, params.title || '未命名卡片');
       const result = await (axiom as any).createFleeing?.(vaultPath, params, normalizedContent);
@@ -116,6 +137,26 @@ const createPermanentCardTool = createTool(
           content: [{ type: 'text', text: '错误: 未打开 Vault' }],
           details: { error: 'No vault open' },
         };
+      }
+      const permanentVaultId = getCurrentVaultId();
+      if (permanentVaultId) {
+        const semantic = await analyzeSemanticLearningNeed({
+          vaultId: permanentVaultId,
+          userId: getCurrentUserId(),
+          topic: params.title,
+        }).catch(() => null);
+        if (semantic?.equivalentCardIds.length) {
+          const existing = await prisma.card.findFirst({
+            where: { vaultId: permanentVaultId, id: { in: semantic.equivalentCardIds }, type: 'permanent' },
+            select: { id: true, title: true, type: true, path: true },
+          });
+          if (existing) {
+            return {
+              content: [{ type: 'text', text: `未创建重复永久卡，已复用语义等价的「${existing.title || existing.path}」。` }],
+              details: { reused: true, semanticReuse: true, cardId: existing.id, cardPath: existing.path, card: existing, semanticDecision: semantic },
+            };
+          }
+        }
       }
       const normalizedContent = normalizeGeneratedCardMarkdown(params.content, params.title);
       const quality = validatePermanentCardContent(normalizedContent);

@@ -3,6 +3,16 @@ import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
 
+function parseResourceJobMetadata(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
 const app = new Hono<{ Variables: { userId: string } }>()
   .use('/*', requireAuth)
 
@@ -146,22 +156,30 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const vault = await resolveVault(c, userId)
     if (!vault) return c.json({ success: true, jobs: [] })
 
+    const sourceSessionId = c.req.query('sessionId')?.trim()
     const jobs = await prisma.resourceGenerationJob.findMany({
-      where: {
-        vaultId: vault.id,
-        updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
-        OR: [
-          { status: { in: ['queued', 'generating', 'validating', 'saving', 'ready', 'rendering', 'failed'] } },
-          { updatedAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } },
-        ],
-      },
+      where: sourceSessionId
+        ? {
+            vaultId: vault.id,
+            metadata: { contains: `"sourceSessionId":"${sourceSessionId.replace(/"/g, '\\"')}"` },
+          }
+        : {
+            vaultId: vault.id,
+            updatedAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+            OR: [
+              { status: { in: ['queued', 'generating', 'validating', 'saving', 'ready', 'rendering', 'failed'] } },
+              { updatedAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } },
+            ],
+          },
       orderBy: { updatedAt: 'desc' },
-      take: 20,
+      take: sourceSessionId ? 60 : 20,
     })
 
     return c.json({
       success: true,
-      jobs: jobs.map((job) => ({
+      jobs: jobs.map((job) => {
+        const metadata = parseResourceJobMetadata(job.metadata)
+        return {
         id: job.id,
         topic: job.topic,
         resourceType: job.resourceType,
@@ -172,8 +190,11 @@ const app = new Hono<{ Variables: { userId: string } }>()
         path: job.path,
         fileName: job.fileName,
         error: job.error,
+        sourceSessionId: typeof metadata.sourceSessionId === 'string' ? metadata.sourceSessionId : undefined,
+        workflowId: typeof metadata.workflowId === 'string' ? metadata.workflowId : undefined,
         timestamp: job.updatedAt.getTime(),
-      })),
+        }
+      }),
     })
   })
 

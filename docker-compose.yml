@@ -32,10 +32,24 @@ services:
       timeout: 5s
       retries: 20
 
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    container_name: axiom-qdrant
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - axiom_qdrant_data:/qdrant/storage
+
   ollama:
     image: ollama/ollama:latest
     container_name: axiom-ollama
     restart: unless-stopped
+    environment:
+      # bge-m3 indexing is embarrassingly parallel. One slot made a 300-card
+      # import take several minutes before LightRAG even began graph work.
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
@@ -63,7 +77,10 @@ services:
       # source of truth; this service only stores derived RAG indexes.
       LLM_BINDING: ${LIGHTRAG_LLM_BINDING:-openai}
       LLM_BINDING_HOST: ${LIGHTRAG_LLM_BINDING_HOST:-https://api.openai.com/v1}
-      LLM_BINDING_API_KEY: ${LIGHTRAG_LLM_BINDING_API_KEY:-}
+      LLM_BINDING_API_KEY: ${LIGHTRAG_LLM_BINDING_API_KEY:-${AI_API_KEY:-}}
+      # LightRAG's OpenAI-compatible binding still reads this conventional
+      # variable internally, even when LLM_BINDING_API_KEY is configured.
+      OPENAI_API_KEY: ${LIGHTRAG_LLM_BINDING_API_KEY:-${AI_API_KEY:-}}
       LLM_MODEL: ${LIGHTRAG_LLM_MODEL:-gpt-4o-mini}
       KEYWORD_LLM_MODEL: ${LIGHTRAG_KEYWORD_LLM_MODEL:-gpt-4o-mini}
       QUERY_LLM_MODEL: ${LIGHTRAG_QUERY_LLM_MODEL:-gpt-4o-mini}
@@ -74,6 +91,11 @@ services:
       EMBEDDING_MODEL: ${LIGHTRAG_EMBEDDING_MODEL:-text-embedding-3-small}
       EMBEDDING_DIM: ${LIGHTRAG_EMBEDDING_DIM:-1536}
       EMBEDDING_TOKEN_LIMIT: ${LIGHTRAG_EMBEDDING_TOKEN_LIMIT:-8192}
+      # Match Ollama's bounded parallelism. Full graph extraction stays in the
+      # background, while the fast semantic layer can use all embedding slots.
+      EMBEDDING_FUNC_MAX_ASYNC: ${LIGHTRAG_EMBEDDING_MAX_ASYNC:-1}
+      EMBEDDING_BATCH_NUM: ${LIGHTRAG_EMBEDDING_BATCH_NUM:-4}
+      EMBEDDING_TIMEOUT: ${LIGHTRAG_EMBEDDING_TIMEOUT:-180}
 
       LIGHTRAG_KV_STORAGE: JsonKVStorage
       LIGHTRAG_DOC_STATUS_STORAGE: JsonDocStatusStorage
@@ -90,6 +112,7 @@ services:
 volumes:
   axiom_postgres_data:
   axiom_redis_data:
+  axiom_qdrant_data:
   axiom_ollama_data:
   axiom_lightrag_data:
   axiom_lightrag_config:

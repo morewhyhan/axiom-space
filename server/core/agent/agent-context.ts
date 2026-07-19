@@ -18,13 +18,14 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 export interface AgentContext {
   userId: string
   vaultId?: string
+  sessionId?: string
   agent?: unknown
 }
 
 const storage = new AsyncLocalStorage<AgentContext>()
 
 export function runWithAgentContext<T>(ctx: AgentContext, fn: () => T): T {
-  return storage.run(ctx, fn)
+  return storage.run({ ...storage.getStore(), ...ctx }, fn)
 }
 
 export function getAgentContext(): AgentContext | undefined {
@@ -37,6 +38,10 @@ export function getCurrentUserId(): string | undefined {
 
 export function getCurrentVaultId(): string | undefined {
   return storage.getStore()?.vaultId
+}
+
+export function getCurrentSessionId(): string | undefined {
+  return storage.getStore()?.sessionId
 }
 
 export function getCurrentAgent<T = unknown>(): T | undefined {

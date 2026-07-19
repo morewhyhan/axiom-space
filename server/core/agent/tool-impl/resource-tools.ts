@@ -13,13 +13,24 @@ import { getCurrentUserId, getCurrentVaultId } from '@/server/core/agent/agent-c
 import { prisma } from '@/lib/db';
 import { emitNotification, emitResourceProgress } from '../notification-bus';
 import type { ResourceType } from '../ResourceGenerationState';
-import { createHash } from 'node:crypto';
+import {
+  RESOURCE_KIND_LABELS,
+  RESOURCE_TARGET_META,
+  resourcePlanForTargets,
+  targetsForResourcePlan,
+  type ResourceFormat,
+  type ResourceKind,
+  type ResourcePlanItem,
+} from '../ResourceGenerationState';
+import { createHash, randomUUID } from 'node:crypto';
 import { consumeConfirmationToken, createConfirmationToken } from '../OperationConfirmation';
 import { AXIOM_KNOWLEDGE_STANDARD } from '../../ai/prompt-standards';
 import { AGENT_TOOL_PROMPTS } from '../../ai/prompts';
 import { buildGenerationRagContext, type GenerationRagContext } from '@/server/core/rag/generation-context';
 import { buildLearningProfileContext, type LearningProfileContext } from '@/server/core/learning/profile-context';
 import { scheduleRagIndexCard, scheduleRagIndexCards } from '@/server/core/rag/auto-index';
+import { parseRequestedResourceTypes } from '../resource-request';
+import { analyzeSemanticLearningNeed, type SemanticLearningDecision } from '@/server/core/learning/semantic-learning-decision';
 
 const RESOURCE_LABELS: Record<string, string> = {
   document: '讲解文档',
@@ -54,6 +65,8 @@ type ResourceOrchestrationEvidence = {
 
 type GeneratedResourceManifestItem = {
   type: string;
+  kind: ResourceKind;
+  format: ResourceFormat;
   title: string;
   path: string;
   ref: string;
@@ -61,6 +74,8 @@ type GeneratedResourceManifestItem = {
   rawRef?: string;
   mp4Path?: string;
   mp4Ref?: string;
+  previewPath?: string;
+  previewRef?: string;
   fileName: string;
   status: 'ready';
   source: string;
@@ -73,7 +88,6 @@ type GeneratedResourceManifestItem = {
 };
 
 const GRAPH_RESOURCE_TYPES = new Set<ResourceType>(['document', 'mindmap', 'diagram', 'quiz', 'svg', 'video', 'code', 'pdf', 'docx', 'ppt']);
-const MARKDOWN_RENDERED_RESOURCE_TYPES = new Set<ResourceType>(['document', 'mindmap', 'diagram', 'quiz', 'svg', 'code']);
 
 type ResourceProfileEvidence = {
   profileSummary: string;
@@ -91,10 +105,6 @@ function sha256Text(value: string): string {
 
 function safeResourceSlug(value: string): string {
   return value.replace(/[\\/:*?"<>|]/g, '-').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120) || 'resource';
-}
-
-function displayResourceTitle(topic: string, type: string): string {
-  return `${topic} - ${RESOURCE_LABELS[type] || type}`;
 }
 
 function renderResourceCardMarkdown(params: {
@@ -171,6 +181,46 @@ function renderQuizMarkdown(rawContent: string) {
   }
 }
 
+function mergeResourceNodeManifest(existingContent: string | null | undefined, current: GeneratedResourceManifestItem[]) {
+  const match = existingContent?.match(/<!--\s*axiom-resources:([\s\S]*?)\s*-->/)
+  let existing: GeneratedResourceManifestItem[] = []
+  if (match?.[1]) {
+    try {
+      const parsed = JSON.parse(match[1]) as GeneratedResourceManifestItem[]
+      if (Array.isArray(parsed)) existing = parsed
+    } catch {}
+  }
+  const merged = new Map<string, GeneratedResourceManifestItem>()
+  for (const item of [...existing, ...current]) {
+    const meta = RESOURCE_TARGET_META[item.type as ResourceType]
+    const normalized = {
+      ...item,
+      kind: item.kind || meta?.kind,
+      format: item.format || meta?.format,
+    } as GeneratedResourceManifestItem
+    merged.set(`${normalized.kind}:${normalized.format}`, normalized)
+  }
+  return [...merged.values()]
+}
+
+function isGeneratedResourceManifestItem(item: Record<string, unknown>): item is GeneratedResourceManifestItem {
+  return typeof item.type === 'string'
+    && typeof item.kind === 'string'
+    && typeof item.format === 'string'
+    && typeof item.title === 'string'
+    && typeof item.path === 'string'
+    && typeof item.fileName === 'string';
+}
+
+function dedupeManifestRecords(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const merged = new Map<string, Record<string, unknown>>();
+  for (const item of items) {
+    const key = [item.kind, item.format, item.type, item.path].map((value) => String(value || '')).join(':');
+    if (key.replace(/:/g, '')) merged.set(key, item);
+  }
+  return [...merged.values()];
+}
+
 type PendingExtractCards = {
   target: string;
   literatureTitle: string;
@@ -180,6 +230,14 @@ type PendingExtractCards = {
 };
 
 const pendingExtractCards = new Map<string, PendingExtractCards>();
+
+type PendingResourceGeneration = {
+  params: Record<string, unknown>;
+  requestedTypes: ResourceType[];
+  createdAt: number;
+};
+
+const pendingResourceGenerations = new Map<string, PendingResourceGeneration>();
 
 function rememberPendingExtractCards(token: string, pending: Omit<PendingExtractCards, 'createdAt'>): void {
   pendingExtractCards.set(token, { ...pending, createdAt: Date.now() });
@@ -319,21 +377,15 @@ function inferDefaultResourceTypes(
     if (types.size === 0) types.add('document');
   }
 
-  if (/(资源包|一套|全部|全套|所有格式|all resources|resource pack)/i.test(text)) {
-    types.add('document');
-    types.add('mindmap');
-    types.add('quiz');
-  }
-
-  return (types.size > 0 ? Array.from(types) : ['document' as ResourceType]).slice(0, 4);
+  for (const type of parseRequestedResourceTypes(text)) types.add(type);
+  return types.size > 0 ? Array.from(types) : ['document'];
 }
 
 const pushResourceTool = createTool(
   'push_resource',
   '推送学习资源到文献盒',
-  '为当前学习主题生成必要的学习资料并保存到文献盒。支持 10 种格式：'
-  + '📄 文档(markdown)、🧠 思维导图(mermaid)、❓ 练习题(JSON)、💻 代码实操(markdown)、🎬 教学视频(HTML/MP4)、'
-  + '📊 SVG矢量图、🔀 Mermaid流程图/时序图/类图等、📝 Word文档(docx)、📑 PDF文档、📽️ PPT演示文稿。'
+  '为当前学习主题生成必要的学习资料并保存到文献盒。产品层有 6 种资源：讲解材料、知识导图、练习题、代码实操、关系图示、教学视频。'
+  + '文件只作为资源附件格式：讲解材料可含 Markdown/DOCX/PDF/PPTX，知识导图使用 Mermaid，关系图示可含 Mermaid/SVG，视频可含 HTML/MP4。'
   + '【关键时机】当用户说"整理成学习资料"、"保存到文献盒"、"生成文档"、"导出Word"、"导出PDF"、"做个PPT"'
   + '"画个流程图"、"生成SVG"等类似请求时，必须直接调用此工具。不要在普通对话里打断式推送资源；'
   + '必须尊重用户指定格式：用户指定什么就只生成什么。用户没有指定 formats 时，只按明确意图推断少量资源，默认只生成 document；'
@@ -344,10 +396,28 @@ const pushResourceTool = createTool(
     level: Type.Optional(Type.String({ description: '可选。不填则自动从 .axiom/user-profile.json 读取。' })),
     literatureTitle: Type.Optional(Type.String({ description: '关联的文献标题。' })),
     literatureContent: Type.Optional(Type.String({ description: '文献内容截取。' })),
-    formats: Type.Optional(Type.String({ description: '可选。指定生成的格式，逗号分隔。如 "svg,diagram" 只生成 SVG 和图表；"mindmap" 只生成知识导图。不填则按明确意图推断，默认只生成 document。可用值: document,mindmap,quiz,code,video,svg,diagram,docx,pdf,ppt' })),
+    formats: Type.Optional(Type.String({ description: '兼容旧生成器的内部渲染目标，逗号分隔。新调用优先使用 resourcePlan。' })),
+    resourcePlan: Type.Optional(Type.String({ description: '产品层资源计划 JSON：[{kind,formats}]。文件格式不是独立资源种类。' })),
+    userRequested: Type.Optional(Type.Boolean({ description: '仅当用户本轮明确要求生成资源时为 true。AI 主动建议时不得设置，必须先取得用户确认。' })),
+    confirmationToken: Type.Optional(Type.String({ description: 'AI 主动建议资源后，由用户确认操作返回的一次性 token。' })),
   }),
   async (_id, params) => {
     try {
+      if (params.confirmationToken) {
+        const pending = pendingResourceGenerations.get(params.confirmationToken);
+        if (!pending || !consumeConfirmationToken('push_resource', params.topic, params.confirmationToken)) {
+          return {
+            content: [{ type: 'text', text: '这次资源生成建议已经失效，请让 AI 重新分析。' }],
+            details: { error: 'Invalid or expired resource generation confirmation' },
+          };
+        }
+        Object.assign(params, pending.params, {
+          confirmationToken: params.confirmationToken,
+          userRequested: false,
+          formats: pending.requestedTypes.join(','),
+        });
+        pendingResourceGenerations.delete(params.confirmationToken);
+      }
       const vaultPath = getVaultPath();
       if (!vaultPath) {
         return {
@@ -368,7 +438,7 @@ const pushResourceTool = createTool(
       if (!userLevel) userLevel = 'intermediate';
 
       // Use topic as fallback literature title
-      const litTitle = params.literatureTitle || params.topic;
+      let litTitle = params.literatureTitle || params.topic;
       const progressVaultId = getCurrentVaultId();
       const currentUserId = getCurrentUserId();
       let profileEvidence: ResourceProfileEvidence | null = null;
@@ -413,9 +483,9 @@ const pushResourceTool = createTool(
           }
         },
         saveResourceFile: async (literatureTitle: string, fileName: string, content: string): Promise<void> => {
-          // Guardrail/report JSON is machine-only metadata. Do not persist it as a card,
-          // otherwise it pollutes the human knowledge graph.
-          if (/\.json$/i.test(fileName)) return;
+          // Quality reports are returned as structured generation metadata. Keeping
+          // them out of DbAdapter avoids creating machine-only nodes in the graph.
+          if (/^guardrail-.*\.json$/i.test(fileName)) return;
           const resourceDir = `resources/${safeResourceSlug(literatureTitle)}`;
           await getFileStorage().ensureDir(resourceDir);
           const fullPath = `${resourceDir}/${fileName}`;
@@ -434,10 +504,12 @@ const pushResourceTool = createTool(
           error?: string;
         }) => {
           if (!progressVaultId) return;
+          const meta = RESOURCE_TARGET_META[event.type as ResourceType];
+          const backgroundMp4 = event.type === 'video' && event.fileName === 'video.mp4';
           emitResourceProgress(progressVaultId, {
             topic: params.topic,
-            resourceType: event.type,
-            label: RESOURCE_LABELS[event.type] || event.type,
+            resourceType: backgroundMp4 ? 'video-mp4' : meta?.kind || event.type,
+            label: backgroundMp4 ? 'MP4 后台转码' : meta ? `${RESOURCE_KIND_LABELS[meta.kind]} · ${meta.format}` : RESOURCE_LABELS[event.type] || event.type,
             status: event.status,
             progress: event.progress,
             message: event.message,
@@ -451,12 +523,123 @@ const pushResourceTool = createTool(
       const state = new ResourceGenerationState();
       const orchestrator = new ResourceGenerationOrchestrator(state, deps);
 
+      let requestedPlanFromParams: ResourcePlanItem[] = [];
+      if (params.resourcePlan) {
+        try {
+          const parsed = JSON.parse(params.resourcePlan) as ResourcePlanItem[];
+          if (Array.isArray(parsed)) requestedPlanFromParams = parsed;
+        } catch {}
+      }
+      const planTargets = targetsForResourcePlan(requestedPlanFromParams);
       const formats = params.formats
         ? params.formats.split(',').map(f => f.trim()).filter(f => (RESOURCE_TYPES as readonly string[]).includes(f)) as ResourceType[]
         : undefined;
-      const requestedTypes = formats && formats.length > 0
+      let requestedTypes = planTargets.length > 0
+        ? planTargets
+        : formats && formats.length > 0
         ? formats
-        : inferDefaultResourceTypes(params.topic, params.literatureContent, userLevel);
+        : inferDefaultResourceTypes(
+          params.topic,
+          [
+            params.literatureContent,
+            profileEvidence?.resourcePreference.join('、'),
+            profileEvidence?.teachingFocus,
+            profileEvidence?.remainingGaps.join('、'),
+          ].filter(Boolean).join('\n'),
+          userLevel,
+        );
+      let resourcePlan: ResourcePlanItem[] = resourcePlanForTargets(requestedTypes);
+      let semanticDecision: SemanticLearningDecision | null = null;
+      if (progressVaultId) {
+        semanticDecision = await analyzeSemanticLearningNeed({
+          vaultId: progressVaultId,
+          userId: currentUserId,
+          topic: params.topic,
+          requestedResourceKinds: resourcePlan.map((item) => item.kind),
+          requestedResourceTypes: requestedTypes,
+        }).catch((error) => {
+          console.warn('[push_resource] Semantic learning preflight failed:', error instanceof Error ? error.message : String(error));
+          return null;
+        });
+        if (semanticDecision?.canonicalConcept) litTitle = semanticDecision.canonicalConcept;
+      }
+
+      const explicitRequest = params.userRequested === true || !!params.confirmationToken;
+      if (!explicitRequest && semanticDecision?.shouldSuppressProactiveGeneration) {
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              `没有重复生成「${semanticDecision.canonicalConcept}」的基础资源。`,
+              semanticDecision.masteryEvidence[0] ? `依据：${semanticDecision.masteryEvidence[0]}。` : '',
+              semanticDecision.analogies.length
+                ? `后续学习可把它作为类比桥梁连接到：${semanticDecision.analogies.map((item) => item.concept).join('、')}。`
+                : '后续只会在出现新的应用、边界或迁移缺口时建议补充资源。',
+            ].filter(Boolean).join('\n'),
+          }],
+          details: {
+            suppressed: true,
+            reason: 'SEMANTICALLY_MASTERED',
+            semanticDecision,
+          },
+        };
+      }
+
+      const reusableResources = semanticDecision?.existingResources ?? [];
+      const reusableManifest = reusableResources.flatMap((resource) => resource.manifest);
+      const coveredRequestedTypes = requestedTypes.filter((type) => semanticDecision?.coveredResourceTypes.includes(type));
+      if (explicitRequest && coveredRequestedTypes.length === requestedTypes.length && reusableResources.length > 0) {
+        const reused = reusableResources[0];
+        return {
+          content: [{ type: 'text', text: `已复用知识库中语义等价的现有资源：${reused.title}` }],
+          details: {
+            reused: true,
+            semanticReuse: true,
+            semanticDecision,
+            resources: dedupeManifestRecords(reusableManifest),
+            resourcePackCard: { id: reused.cardId, title: reused.title, type: 'literature', path: reused.path },
+            workspaceActions: [{
+              type: 'select_card',
+              card: { id: reused.cardId, title: reused.title, type: 'literature', path: reused.path },
+            }],
+          },
+        };
+      }
+      if (coveredRequestedTypes.length > 0) {
+        requestedTypes = requestedTypes.filter((type) => !coveredRequestedTypes.includes(type));
+        resourcePlan = resourcePlanForTargets(requestedTypes);
+      }
+      if (!params.userRequested && !params.confirmationToken) {
+        const confirmation = createConfirmationToken('push_resource', params.topic);
+        pendingResourceGenerations.set(confirmation.token, {
+          params: { ...params },
+          requestedTypes,
+          createdAt: Date.now(),
+        });
+        const labels = resourcePlan.map((item) => `${RESOURCE_KIND_LABELS[item.kind]}（${item.formats.join(' / ')}）`);
+        return {
+          content: [{
+            type: 'text',
+            text: [
+              `根据你的学习画像和当前内容，我建议生成：${labels.join('、')}。`,
+              profileEvidence?.remainingGaps.length ? `主要针对：${profileEvidence.remainingGaps.slice(0, 4).join('、')}。` : '',
+              '这些资源会写入当前知识库并成为文献节点。是否现在生成？',
+            ].filter(Boolean).join('\n'),
+          }],
+          details: {
+            awaitingConfirmation: true,
+            confirmationToken: confirmation.token,
+            expiresAt: confirmation.expiresAt,
+            target: params.topic,
+            proposedTypes: requestedTypes,
+            proposedPlan: resourcePlan,
+            proposedLabels: labels,
+            reason: profileEvidence ? 'learning_profile_and_current_context' : 'current_context',
+            semanticDecision,
+          },
+        };
+      }
+      const orchestrationStartedAt = Date.now();
       let orchestrationEvidence: ResourceOrchestrationEvidence | null = null;
       let ragContext: GenerationRagContext = { enabled: false, used: false, contextText: '', references: [] };
       if (progressVaultId) {
@@ -477,75 +660,61 @@ const pushResourceTool = createTool(
             requestedTypes.join(', '),
             profileEvidence?.remainingGaps.join(' ') || '',
             profileEvidence?.resourcePreference.join(' ') || '',
+            semanticDecision?.promptContext || '',
           ].filter(Boolean).join('\n\n'),
           topK: 8,
           maxChars: 5000,
         });
       }
-      if (currentUserId) {
-        try {
-          if (progressVaultId) {
-            emitResourceProgress(progressVaultId, {
-              topic: params.topic,
-              resourceType: 'document',
-              label: '多 Agent 协同',
-              status: 'generating',
-              progress: 2,
-              message: 'Profile/Planner/Generator/Reviewer/Pusher 正在协同规划',
-            });
-          }
-          const { orchestrationEngine } = await import('../orchestration-engine');
-          const startedAt = Date.now();
-          const orchestration = await orchestrationEngine.executeFlow('resource_generation', currentUserId, {
-            topic: params.topic,
-            vaultId: progressVaultId,
-            requestedTypes,
-            userLevel,
-            literatureTitle: litTitle,
-            profile: profileEvidence ? {
-              remainingGaps: profileEvidence.remainingGaps,
-              resourcePreference: profileEvidence.resourcePreference,
-              teachingFocus: profileEvidence.teachingFocus,
-            } : null,
-          });
-          orchestrationEvidence = {
-            id: orchestration.orchestrationId,
-            status: orchestration.status,
-            progress: orchestration.progress,
-            durationMs: orchestration.completedAt ? orchestration.completedAt - startedAt : null,
-            agents: orchestration.steps.map((step) => ({
-              role: step.agentRole,
-              task: step.taskDescription,
-              status: step.status,
-              error: step.error,
-            })),
-            logs: orchestration.logs.map((log) => ({
-              agent: log.agent,
-              level: log.level,
-              message: log.message,
-            })),
-          };
-        } catch (err) {
-          orchestrationEvidence = {
-            id: 'unavailable',
-            status: 'failed',
-            progress: 0,
-            durationMs: null,
-            agents: [],
-            logs: [{
-              agent: 'orchestrator',
-              level: 'error',
-              message: err instanceof Error ? err.message : String(err),
-            }],
-          };
-        }
-      }
+      orchestrationEvidence = {
+        id: `resource-${randomUUID()}`,
+        status: 'running',
+        progress: 18,
+        durationMs: null,
+        agents: [
+          {
+            role: 'profile',
+            task: profileEvidence
+              ? `已读取画像证据：${profileEvidence.remainingGaps.slice(0, 3).join('、') || '当前学习机制与资源偏好'}`
+              : '当前没有足够画像证据，本次只使用用户请求与当前资料',
+            status: 'completed',
+          },
+          {
+            role: 'retriever',
+            task: ragContext.used
+              ? `已从当前知识库检索 ${ragContext.references.length} 条可引用资料`
+              : '未检索到可用知识库资料，生成时不宣称具有资料依据',
+            status: 'completed',
+          },
+          {
+            role: 'planner',
+            task: `严格按用户请求生成：${resourcePlan.map((item) => `${RESOURCE_KIND_LABELS[item.kind]}（${item.formats.join(' / ')}）`).join('、')}`,
+            status: 'completed',
+          },
+          { role: 'generator', task: '正在生成用户指定的资源文件', status: 'running' },
+          { role: 'reviewer', task: '等待对真实生成结果执行结构、安全与事实校验', status: 'pending' },
+          { role: 'pusher', task: '等待资源文件通过校验后写入知识图谱', status: 'pending' },
+        ],
+        logs: [
+          {
+            agent: 'planner',
+            level: 'info',
+            message: params.userRequested ? '资源类型来自用户本次明确请求' : '资源计划已由用户确认',
+          },
+          {
+            agent: 'retriever',
+            level: ragContext.used ? 'info' : 'warning',
+            message: ragContext.used ? `检索命中 ${ragContext.references.length} 条资料` : '没有可用 RAG 命中',
+          },
+        ],
+      };
       if (progressVaultId) {
         for (const type of requestedTypes) {
+          const meta = RESOURCE_TARGET_META[type];
           emitResourceProgress(progressVaultId, {
             topic: params.topic,
-            resourceType: type,
-            label: RESOURCE_LABELS[type] || type,
+            resourceType: meta.kind,
+            label: RESOURCE_KIND_LABELS[meta.kind],
             status: 'queued',
             progress: 0,
             message: '等待生成',
@@ -564,15 +733,15 @@ const pushResourceTool = createTool(
           contextText: ragContext.contextText,
           references: ragContext.references,
         },
-        profileEvidence ? {
-          contextText: profileEvidence.contextText,
-          evidence: {
+        profileEvidence || semanticDecision ? {
+          contextText: [profileEvidence?.contextText, semanticDecision?.promptContext].filter(Boolean).join('\n\n'),
+          evidence: profileEvidence ? {
             remainingGaps: profileEvidence.remainingGaps,
             resourcePreference: profileEvidence.resourcePreference,
             recentEvidence: profileEvidence.recentEvidence,
             masteredConcepts: profileEvidence.masteredConcepts,
             teachingFocus: profileEvidence.teachingFocus,
-          },
+          } : undefined,
         } : undefined,
       );
 
@@ -580,8 +749,9 @@ const pushResourceTool = createTool(
       const sanitizedDir = safeResourceSlug(litTitle);
       const resourceDir = `resources/${sanitizedDir}`;
       const sections: string[] = [];
-      const resourceManifest: GeneratedResourceManifestItem[] = [];
-      let generatedCount = 0;
+      const resourceManifest: GeneratedResourceManifestItem[] = reusableManifest
+        .filter(isGeneratedResourceManifestItem)
+        .map((item) => ({ ...item }));
       const manifestVaultId = getCurrentVaultId();
 
       for (const type of RESOURCE_TYPES) {
@@ -599,6 +769,8 @@ const pushResourceTool = createTool(
               : null;
             const item: GeneratedResourceManifestItem = {
               type,
+              kind: RESOURCE_TARGET_META[type].kind,
+              format: RESOURCE_TARGET_META[type].format,
               title: RESOURCE_LABELS[type] || type,
               path: resourcePath,
               ref: resourcePath,
@@ -630,20 +802,55 @@ const pushResourceTool = createTool(
                 mp4Result?.success ? `<!-- axiom-video-mp4:${videoMp4Ref} -->` : '',
                 `<!-- axiom-video:${videoHtmlRef} -->`,
               ].filter(Boolean).join('\n'));
+            } else if (type === 'docx' || type === 'ppt') {
+              const previewPath = `${resourceDir}/${type === 'docx' ? 'document.preview.html' : 'presentation.preview.html'}`;
+              const previewResult = await getFileStorage().readFile(previewPath).catch(() => null);
+              resourceManifest.push({
+                ...item,
+                previewPath: previewResult?.success ? previewPath : undefined,
+                previewRef: previewResult?.success ? previewPath : undefined,
+              });
+              sections.push(`- **${RESOURCE_LABELS[type]}**：\`${resourcePath}\`（可在资源面板预览或下载）`);
             } else if (type === 'mindmap' || type === 'diagram') {
               resourceManifest.push(item);
               sections.push(`- **${RESOURCE_LABELS[type]}**：\`${resourcePath}\`（点击资源面板中的条目单独预览）`);
-            } else if (type === 'quiz' || type === 'svg' || type === 'docx' || type === 'pdf' || type === 'ppt') {
+            } else if (type === 'quiz' || type === 'svg' || type === 'pdf') {
               resourceManifest.push(item);
               sections.push(`- **${RESOURCE_LABELS[type]}**：\`${resourcePath}\`（点击资源面板中的条目单独预览/下载）`);
             } else {
               resourceManifest.push(item);
               sections.push(`- **${RESOURCE_LABELS[type]}**：\`${resourcePath}\`（点击资源面板中的条目单独打开）`);
             }
-            generatedCount++;
           }
         } catch (err) { console.warn('[ResourceTools] Failed to read generated resource:', err); }
       }
+
+      const completedResults = generationResults.filter((result) => result.status === 'completed');
+      const failedResults = generationResults.filter((result) => result.status === 'failed');
+      const warnedResults = completedResults.filter((result) => result.guardrails?.factualStatus === 'warning' || result.guardrails?.safetyStatus === 'review_needed');
+      const generatorAgent = orchestrationEvidence.agents.find((agent) => agent.role === 'generator');
+      const reviewerAgent = orchestrationEvidence.agents.find((agent) => agent.role === 'reviewer');
+      const pusherAgent = orchestrationEvidence.agents.find((agent) => agent.role === 'pusher');
+      if (generatorAgent) {
+        generatorAgent.status = completedResults.length > 0 ? 'completed' : 'failed';
+        generatorAgent.task = `实际完成 ${completedResults.length}/${generationResults.length} 个格式${failedResults.length ? `，${failedResults.length} 个失败` : ''}`;
+        generatorAgent.error = failedResults.length ? failedResults.map((result) => `${result.type}: ${result.error || '生成失败'}`).join('；') : undefined;
+      }
+      if (reviewerAgent) {
+        reviewerAgent.status = failedResults.length === generationResults.length ? 'failed' : 'completed';
+        reviewerAgent.task = `已对实际产物执行结构校验和 guardrail：通过 ${completedResults.length} 个${warnedResults.length ? `，其中 ${warnedResults.length} 个有事实提醒` : ''}`;
+        reviewerAgent.error = failedResults.length ? `${failedResults.length} 个产物未通过生成或质量校验` : undefined;
+      }
+      if (pusherAgent) {
+        pusherAgent.status = 'running';
+        pusherAgent.task = '正在把通过校验的资源保存为文献节点并连接知识图谱';
+      }
+      orchestrationEvidence.progress = 82;
+      orchestrationEvidence.logs.push({
+        agent: 'reviewer',
+        level: failedResults.length ? 'warning' : 'info',
+        message: `真实校验结果：${completedResults.length} 个通过，${failedResults.length} 个失败，${warnedResults.length} 个提醒`,
+      });
 
       if (sections.length === 0) {
         return {
@@ -655,17 +862,37 @@ const pushResourceTool = createTool(
       // 汇总卡只保存生成依据、manifest 和独立资源入口，不再把多个产物正文拼进一个 Markdown。
       const litDir = `literature`;
       await getFileStorage().ensureDir(litDir);
-      const litFileName = `lit-${Date.now()}.md`;
-      const litPath = `${litDir}/${litFileName}`;
+      const resourceTopic = semanticDecision?.canonicalConcept || params.topic;
       const resourcePackTitle = profileEvidence
-        ? `${params.topic} - 个性化资源包`
-        : `${params.topic} - 学习资源包`;
+        ? `${resourceTopic} - 个性化资源包`
+        : `${resourceTopic} - 学习资源包`;
+      const existingResourcePack = progressVaultId
+        ? await prisma.card.findFirst({
+          where: {
+            vaultId: progressVaultId,
+            type: 'literature',
+            AND: [
+              { title: { contains: resourceTopic } },
+              { title: { contains: '资源包' } },
+            ],
+            tags: { contains: 'ai-generated' },
+          },
+          select: { path: true },
+          orderBy: { updatedAt: 'desc' },
+        }).catch(() => null)
+        : null;
+      const litFileName = existingResourcePack?.path.startsWith(`${litDir}/`)
+        ? existingResourcePack.path.slice(litDir.length + 1)
+        : `lit-${safeResourceSlug(resourceTopic)}-resource-pack.md`;
+      const litPath = `${litDir}/${litFileName}`;
       const evidenceLines = [
         `- 当前主题：${params.topic}`,
         `- 当前资料/卡片：${litTitle}`,
         profileEvidence?.remainingGaps.length ? `- 剩余缺口：${profileEvidence.remainingGaps.join('、')}` : '',
         profileEvidence?.resourcePreference.length ? `- 画像支持的资源策略：${profileEvidence.resourcePreference.join('、')}` : '',
         profileEvidence?.masteredConcepts.length ? `- 已掌握概念：${profileEvidence.masteredConcepts.join('、')}` : '',
+        semanticDecision ? `- 语义裁决：${semanticDecision.reason}` : '',
+        semanticDecision?.analogies.length ? `- 类比桥梁：${semanticDecision.analogies.map((item) => item.concept).join('、')}` : '',
         profileEvidence ? '' : '- 画像依据：暂无可用证据，本次只按当前主题和卡片生成，不宣称个性化。',
         ragContext.references.length ? `- 资料来源：${ragContext.references.slice(0, 5).join('、')}` : '',
         profileEvidence
@@ -689,6 +916,7 @@ tags: [ai-generated, ${params.topic}]
   error: ragContext.error,
 })} -->
 <!-- axiom-profile-evidence:${JSON.stringify(profileEvidence)} -->
+<!-- axiom-semantic-decision:${JSON.stringify(semanticDecision)} -->
 
 ## ${profileEvidence ? '画像驱动依据' : '生成依据'}
 
@@ -704,7 +932,7 @@ ${orchestrationEvidence ? [
   `- 工作流 ID：${orchestrationEvidence.id}`,
   `- 状态：${orchestrationEvidence.status}`,
   `- 参与角色：${orchestrationEvidence.agents.map(a => `${a.role}(${a.status})`).join(' → ')}`,
-  `- 资源安全/事实核查：已为每个产物写入 guardrail-*.json 报告`,
+  `- 资源安全/事实核查：已执行结构、安全与事实校验，结果保存在本次结构化生成记录中`,
 ].join('\n') : ''}
 
 ## 独立资源
@@ -714,9 +942,9 @@ ${sections.join('\n')}
 ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as ResourceType)) ? [
   '## 知识库资源卡',
   '',
-  ...resourceManifest
+  ...Array.from(new Set(resourceManifest
     .filter((item) => GRAPH_RESOURCE_TYPES.has(item.type as ResourceType))
-    .map((item) => `- [[${displayResourceTitle(params.topic, item.type)}]]`),
+    .map((item) => `- [[${params.topic} - ${RESOURCE_KIND_LABELS[item.kind]}]]`))),
   '',
 ].join('\n') : ''}
 
@@ -726,6 +954,7 @@ ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as Resource
 
       // Also create a DB Card record for the literature so it appears in galaxy/knowledge graph
       let createdResourceCard: { id: string; title: string | null; type: string; path: string } | null = null;
+      const createdResourceNodes: Array<{ id: string; title: string | null; type: string; path: string; kind: ResourceKind }> = [];
       try {
         const { prisma: litDb } = await import('@/lib/db');
         const { getCurrentVaultId } = await import('@/server/core/agent/agent-context');
@@ -757,21 +986,30 @@ ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as Resource
           scheduleRagIndexCard(resourceCard.id, 'resource-generation');
 
           const graphResourceCards: Array<{ id: string; title: string | null; path: string }> = [];
+          const itemsByKind = new Map<ResourceKind, GeneratedResourceManifestItem[]>();
           for (const item of resourceManifest) {
             if (!GRAPH_RESOURCE_TYPES.has(item.type as ResourceType)) continue;
-            const resourceTitle = displayResourceTitle(params.topic, item.type);
+            itemsByKind.set(item.kind, [...(itemsByKind.get(item.kind) ?? []), item]);
+          }
+          for (const [kind, kindItems] of itemsByKind) {
+            const representative = kindItems.find((item) => ['document', 'mindmap', 'quiz', 'code', 'diagram', 'video'].includes(item.type)) ?? kindItems[0];
+            const resourceTitle = `${params.topic} - ${RESOURCE_KIND_LABELS[kind]}`;
             const resourceCardPath = `literature/${safeResourceSlug(resourceTitle)}.md`;
-            const rawResourcePath = item.path;
+            const existingGraphCard = await litDb.card.findUnique({
+              where: { vaultId_path: { vaultId: litVid, path: resourceCardPath } },
+              select: { content: true },
+            });
+            const rawResourcePath = representative.path;
             const rawResource = await getFileStorage().readFile(rawResourcePath).catch(() => null);
             const rawContent = rawResource?.success ? rawResource.content || '' : '';
             const resourceCardContent = renderResourceCardMarkdown({
-              type: item.type,
+              type: representative.type,
               title: resourceTitle,
               topic: params.topic,
               rawPath: rawResourcePath,
               rawContent,
               resourcePackTitle,
-              mp4Path: item.mp4Path,
+              mp4Path: representative.mp4Path,
             });
             const graphCard = await litDb.card.upsert({
               where: { vaultId_path: { vaultId: litVid, path: resourceCardPath } },
@@ -781,27 +1019,31 @@ ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as Resource
                 title: resourceTitle,
                 content: resourceCardContent,
                 type: 'literature',
-                tags: JSON.stringify(['ai-generated-resource', item.type, params.topic]),
+                tags: JSON.stringify(['ai-generated-resource', kind, params.topic]),
               },
               update: {
                 title: resourceTitle,
                 content: resourceCardContent,
-                tags: JSON.stringify(['ai-generated-resource', item.type, params.topic]),
+                tags: JSON.stringify(['ai-generated-resource', kind, params.topic]),
                 updatedAt: new Date(),
               },
             });
-            if (MARKDOWN_RENDERED_RESOURCE_TYPES.has(item.type as ResourceType)) {
-              item.rawPath = rawResourcePath;
-              item.rawRef = rawResourcePath;
-              item.path = graphCard.path;
-              item.ref = graphCard.path;
-              item.fileName = resourceCardPath.split('/').pop() || item.fileName;
-              item.contentHash = sha256Text(resourceCardContent);
+            for (const item of kindItems) {
+              item.sourceObjectId = graphCard.id;
+              item.sourcePath = graphCard.path;
+              item.sourceTitle = resourceTitle;
             }
-            item.sourceObjectId = graphCard.id;
-            item.sourcePath = graphCard.path;
-            item.sourceTitle = resourceTitle;
+            const nodeItems = mergeResourceNodeManifest(existingGraphCard?.content, kindItems);
+            const nodeContent = resourceCardContent.replace(
+              /^(---[\s\S]*?---\s*)/,
+              `$1\n<!-- axiom-resources:${JSON.stringify(nodeItems)} -->\n`,
+            );
+            await litDb.card.update({
+              where: { id: graphCard.id },
+              data: { content: nodeContent, updatedAt: new Date() },
+            });
             graphResourceCards.push({ id: graphCard.id, title: graphCard.title, path: graphCard.path });
+            createdResourceNodes.push({ id: graphCard.id, title: graphCard.title, type: graphCard.type, path: graphCard.path, kind });
             scheduleRagIndexCard(graphCard.id, 'resource-generation-card');
           }
 
@@ -862,6 +1104,44 @@ ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as Resource
         console.warn('[push_resource] Failed to create DB literature card:', dbErr);
       }
 
+      if (orchestrationEvidence) {
+        const pusherAgent = orchestrationEvidence.agents.find((agent) => agent.role === 'pusher');
+        const persistedToGraph = createdResourceNodes.length > 0 || !!createdResourceCard;
+        if (pusherAgent) {
+          pusherAgent.status = persistedToGraph ? 'completed' : 'failed';
+          pusherAgent.task = persistedToGraph
+            ? `已保存 ${createdResourceNodes.length || 1} 个可点击文献节点，资源可在右侧预览`
+            : '资源文件已生成，但未能写入知识图谱节点';
+          pusherAgent.error = persistedToGraph ? undefined : 'KNOWLEDGE_GRAPH_PERSIST_FAILED';
+        }
+        orchestrationEvidence.status = persistedToGraph
+          ? (failedResults.length ? 'completed_with_warnings' : 'completed')
+          : 'failed';
+        orchestrationEvidence.progress = 100;
+        orchestrationEvidence.durationMs = Date.now() - orchestrationStartedAt;
+        orchestrationEvidence.logs.push({
+          agent: 'pusher',
+          level: persistedToGraph ? 'info' : 'error',
+          message: persistedToGraph
+            ? `已落库资源包与 ${createdResourceNodes.length} 个资源节点`
+            : '知识图谱节点写入失败',
+        });
+        const finalizedContent = fullContent.replace(
+          /<!--\s*axiom-orchestration:[\s\S]*?\s*-->/,
+          `<!-- axiom-orchestration:${JSON.stringify(orchestrationEvidence)} -->`,
+        );
+        if (finalizedContent !== fullContent) {
+          fullContent = finalizedContent;
+          await getFileStorage().writeFile(litPath, fullContent).catch(() => {});
+          if (createdResourceCard) {
+            await prisma.card.update({
+              where: { id: createdResourceCard.id },
+              data: { content: fullContent.slice(0, 10000), updatedAt: new Date() },
+            }).catch(() => {});
+          }
+        }
+      }
+
       console.log(`[Event] axiom:toast — card: 生成学习资料: ${params.topic}`);
       const srcVaultId = getCurrentVaultId();
       if (srcVaultId) {
@@ -870,13 +1150,17 @@ ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as Resource
 
       const generatedResources = resourceManifest.map((item) => ({
         type: item.type,
-        title: RESOURCE_LABELS[item.type as keyof typeof RESOURCE_LABELS] || item.title || item.type,
+        kind: item.kind,
+        format: item.format,
+        title: RESOURCE_KIND_LABELS[item.kind],
         path: item.path,
         ref: item.ref,
         rawPath: item.rawPath,
         rawRef: item.rawRef,
         mp4Path: item.mp4Path,
         mp4Ref: item.mp4Ref,
+        previewPath: item.previewPath,
+        previewRef: item.previewRef,
         fileName: item.fileName,
         status: item.status,
         source: item.source,
@@ -887,15 +1171,42 @@ ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as Resource
         contentHash: item.contentHash,
         generatedAt: item.generatedAt,
       }));
-      const resourceLines = generatedResources.map((item) => {
-        const preview = item.type === 'video'
-          ? '卡片 READ 模式可播放'
-          : '卡片资源面板可预览/下载';
-        return `- ${item.title}: \`${item.fileName}\` (${preview})`;
+      const generatedKindGroups = new Map<ResourceKind, typeof generatedResources>();
+      for (const item of generatedResources) {
+        generatedKindGroups.set(item.kind, [...(generatedKindGroups.get(item.kind) ?? []), item]);
+      }
+      const resourceLines = [...generatedKindGroups.entries()].map(([kind, items]) => {
+        return `- ${RESOURCE_KIND_LABELS[kind]}：${items.map((item) => `${item.format}（\`${item.fileName}\`）`).join('、')}；共用一个文献节点`;
       }).join('\n');
+      const singleKind = generatedKindGroups.size === 1 ? [...generatedKindGroups.keys()][0] : null;
+      const singleKindNode = singleKind ? createdResourceNodes.find((node) => node.kind === singleKind) ?? null : null;
+      const conciseText = singleKind === 'video'
+        ? `视频已生成并在右侧打开。HTML 动画可以立即播放，MP4 在后台渲染完成后可下载。`
+        : singleKind
+          ? `${RESOURCE_KIND_LABELS[singleKind]}已生成并在右侧打开。`
+          : [
+            `「${params.topic}」已生成 ${generatedKindGroups.size} 种资源、${generatedResources.length} 个格式附件：`,
+            resourceLines,
+          ].join('\n');
+      if (progressVaultId) {
+        const completedKinds = new Map(generatedResources.map((item) => [item.kind, item]));
+        for (const [kind, item] of completedKinds) {
+          emitResourceProgress(progressVaultId, {
+            topic: params.topic,
+            resourceType: kind,
+            label: RESOURCE_KIND_LABELS[kind],
+            status: 'completed',
+            progress: 100,
+            message: '已保存为文献节点，点击可在右侧预览',
+            path: item.sourcePath || item.path,
+            fileName: item.fileName,
+          });
+        }
+      }
       if (currentUserId) {
-        persistResourceToDb(currentUserId, params.topic, generatedResources.map(r => r.type), {
+        persistResourceToDb(currentUserId, params.topic, Array.from(new Set(generatedResources.map(r => r.kind))), {
           requestedTypes,
+          resourcePlan,
           generationResults,
           orchestration: orchestrationEvidence,
           rag: {
@@ -912,33 +1223,22 @@ ${resourceManifest.some((item) => GRAPH_RESOURCE_TYPES.has(item.type as Resource
       return {
         content: [{
           type: 'text',
-          text: [
-            `学习资料已放入文献盒：\`${litPath}\``,
-            '',
-            `「${params.topic}」已生成 ${generatedResources.length} 个资源：`,
-            resourceLines,
-            '',
-            orchestrationEvidence
-              ? `多 Agent 协同已完成：${orchestrationEvidence.agents.map(a => `${a.role}:${a.status}`).join(' / ')}`
-              : '多 Agent 协同记录不可用，资源生成链路已继续执行。',
-            '资源安全和事实核查报告已写入同目录 guardrail-*.json。',
-            '',
-            '打开这张文献卡并切到 READ 模式，可以直接预览、放大或下载资源。视频 HTML 会先可播，MP4 会在后台完成后自动作为下载源。',
-          ].join('\n'),
+          text: conciseText,
         }],
         details: {
           topic: params.topic,
           userLevel,
-          types_generated: generatedCount,
+          types_generated: generatedKindGroups.size,
+          formats_generated: generatedResources.length,
           cardPath: litPath,
           resourcePackCard: createdResourceCard,
-          workspaceActions: createdResourceCard ? [
+          workspaceActions: (singleKindNode || createdResourceCard) ? [
             {
               type: 'select_card',
               card: {
-                id: createdResourceCard.id,
-                title: createdResourceCard.title || params.topic,
-                type: createdResourceCard.type || 'literature',
+                id: (singleKindNode || createdResourceCard)!.id,
+                title: (singleKindNode || createdResourceCard)!.title || params.topic,
+                type: (singleKindNode || createdResourceCard)!.type || 'literature',
               },
             },
             { type: 'set_right_panel_view', view: 'read' },

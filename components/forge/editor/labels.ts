@@ -19,11 +19,11 @@ export function cardTypeTone(type: string | undefined) {
 }
 
 export function ragStatusLabel(status: RagCardStatusValue | undefined) {
-  if (status === 'indexed') return '已进入知识库'
-  if (status === 'indexing') return '索引中'
+  if (status === 'indexed') return '已可语义搜索'
+  if (status === 'indexing') return '正在建立语义索引'
   if (status === 'failed') return '同步失败'
   if (status === 'disabled') return '未启用'
-  return '等待同步'
+  return '等待语义索引'
 }
 
 export function ragStatusTone(status: RagCardStatusValue | undefined) {

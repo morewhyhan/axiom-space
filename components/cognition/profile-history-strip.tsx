@@ -30,7 +30,7 @@ export function ProfileHistoryStrip() {
   const learningEvents = numericSnapshotValue(latest.snapshot, 'learningEvents')
   const assessmentCount = numericSnapshotValue(latest.snapshot, 'assessmentCount')
   const timeline = latest.profile?.updateHistory ?? []
-  const hasArchiveSummary = coverageDays !== null || learningEvents !== null || assessmentCount !== null || timeline.length > 0
+  const hasArchiveSummary = items.length > 1 || coverageDays !== null || learningEvents !== null || assessmentCount !== null || timeline.length > 0
   return (
     <HudPanel as="div" className="mb-3 rounded-xl p-3" data-testid="profile-history-archive">
       <div className="flex flex-wrap items-center gap-3">
@@ -90,20 +90,50 @@ export function ProfileHistoryStrip() {
       {expanded && hasArchiveSummary && (
         <div data-testid="profile-history-timeline" className="mt-3 grid gap-2 border-t border-white/8 pt-3">
           <div className="text-white/35" style={{ fontSize: 'var(--f8)' }}>
-            <span>画像变化时间线</span>
+            <span>画像档案版本</span>
           </div>
-          {timeline.length > 0 ? [...timeline].reverse().map((entry, index) => (
-            <div key={`${entry.timestamp}:${index}`} className="rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2">
+          {items.map((item, index) => {
+            const snapshotSummary = typeof item.snapshot?.summary === 'string' ? item.snapshot.summary : ''
+            const itemChanges = item.summary.changedDimensions
+            return (
+              <div
+                key={item.id}
+                data-testid="profile-history-snapshot"
+                className="rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2"
+              >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-white/62" style={{ fontSize: 'var(--f9)' }}>{profileTriggerLabel(entry.trigger)}</span>
-                <span className="mono text-white/28" style={{ fontSize: 'var(--f8)' }}>{new Date(entry.timestamp).toLocaleDateString('zh-CN')}</span>
+                  <span className="text-white/62" style={{ fontSize: 'var(--f9)' }}>
+                    {index === 0 ? '当前画像' : index === items.length - 1 ? '初始画像' : `历史版本 ${items.length - index}`}
+                    {' · '}{item.summary.sourceLabel || '学习画像'}
+                  </span>
+                  <span className="mono text-white/28" style={{ fontSize: 'var(--f8)' }}>{new Date(item.createdAt).toLocaleDateString('zh-CN')}</span>
               </div>
               <div className="mt-1 text-white/38" style={{ fontSize: 'var(--f8)' }}>
-                变化维度：{entry.dimensionsUpdated.join('、') || '未标注'}
+                  {snapshotSummary || item.summary.metricText || `平均 ${item.summary.avgScore} · 会话 ${item.summary.sessionCount}`}
               </div>
-            </div>
-          )) : (
-            <div className="text-white/32" style={{ fontSize: 'var(--f8)' }}>当前档案尚无字段级更新时间线。</div>
+                {itemChanges.length > 0 && (
+                  <div className="mt-1 text-cyan-100/42" style={{ fontSize: 'var(--f8)' }}>
+                    {itemChanges.map((change) => `${change.label} ${change.before}→${change.after}`).join('；')}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+          {timeline.length > 0 && (
+            <>
+              <div className="mt-1 text-white/35" style={{ fontSize: 'var(--f8)' }}>字段变化事件</div>
+              {[...timeline].reverse().map((entry, index) => (
+                <div key={`${entry.timestamp}:${index}`} className="rounded-lg border border-white/8 bg-white/[0.02] px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-white/62" style={{ fontSize: 'var(--f9)' }}>{profileTriggerLabel(entry.trigger)}</span>
+                    <span className="mono text-white/28" style={{ fontSize: 'var(--f8)' }}>{new Date(entry.timestamp).toLocaleDateString('zh-CN')}</span>
+                  </div>
+                  <div className="mt-1 text-white/38" style={{ fontSize: 'var(--f8)' }}>
+                    变化维度：{entry.dimensionsUpdated.join('、') || '未标注'}
+                  </div>
+                </div>
+              ))}
+            </>
           )}
         </div>
       )}

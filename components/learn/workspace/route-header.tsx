@@ -123,7 +123,11 @@ function PathPersonalizationEvidence({
     reordered: '调序',
     deepened: '加深',
   }
-  const evidenceById = new Map((adjustment.profileEvidence ?? []).map((item) => [item.id, item]))
+  // Adjustment history can outlive the frontend contract.  Treat legacy or
+  // malformed payloads as “no resolvable evidence” instead of crashing the
+  // entire Learn page when the user expands this panel.
+  const profileEvidence = Array.isArray(adjustment.profileEvidence) ? adjustment.profileEvidence : []
+  const evidenceById = new Map(profileEvidence.map((item) => [item.id, item]))
 
   return (
     <section

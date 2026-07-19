@@ -1,0 +1,135 @@
+{
+  "preset": "compact_reference_guide",
+  "overrides": [
+    "A4_CN_SUBMISSION",
+    "CN_TECH_TYPE",
+    "AXIOM_BRAND",
+    "DENSE_EVIDENCE_TABLE"
+  ],
+  "competition": "2026 年软件杯 · A3 组",
+  "team": "给春稗以秋实",
+  "documents": [
+    {
+      "code": "00",
+      "source_lines": 263,
+      "source_chars": 6302,
+      "paragraphs": 125,
+      "headings": 18,
+      "tables": 2,
+      "table_rows": 17,
+      "figures": 1,
+      "mermaid": 1,
+      "code_blocks": 1,
+      "hyperlinks": 11,
+      "missing_assets": 0,
+      "output_bytes": 296125
+    },
+    {
+      "code": "06",
+      "source_lines": 702,
+      "source_chars": 14972,
+      "paragraphs": 314,
+      "headings": 61,
+      "tables": 9,
+      "table_rows": 87,
+      "figures": 1,
+      "mermaid": 1,
+      "code_blocks": 0,
+      "hyperlinks": 0,
+      "missing_assets": 0,
+      "output_bytes": 241170
+    },
+    {
+      "code": "07",
+      "source_lines": 2175,
+      "source_chars": 47421,
+      "paragraphs": 509,
+      "headings": 187,
+      "tables": 16,
+      "table_rows": 98,
+      "figures": 2,
+      "mermaid": 2,
+      "code_blocks": 40,
+      "hyperlinks": 0,
+      "missing_assets": 0,
+      "output_bytes": 400393
+    },
+    {
+      "code": "09",
+      "source_lines": 934,
+      "source_chars": 30548,
+      "paragraphs": 246,
+      "headings": 72,
+      "tables": 27,
+      "table_rows": 177,
+      "figures": 7,
+      "mermaid": 7,
+      "code_blocks": 7,
+      "hyperlinks": 11,
+      "missing_assets": 0,
+      "output_bytes": 622511
+    },
+    {
+      "code": "10",
+      "source_lines": 6174,
+      "source_chars": 113319,
+      "paragraphs": 1505,
+      "headings": 375,
+      "tables": 67,
+      "table_rows": 527,
+      "figures": 9,
+      "mermaid": 2,
+      "code_blocks": 267,
+      "hyperlinks": 0,
+      "missing_assets": 0,
+      "output_bytes": 1261363
+    }
+  ],
+  "audits": [
+    {
+      "file": "00-提交文档索引.docx",
+      "bytes": 296125,
+      "paragraphs": 196,
+      "tables": 2,
+      "embedded_media": 2,
+      "hyperlink_relationships": 11,
+      "issues": []
+    },
+    {
+      "file": "06-用户使用说明书.docx",
+      "bytes": 241170,
+      "paragraphs": 431,
+      "tables": 9,
+      "embedded_media": 2,
+      "hyperlink_relationships": 0,
+      "issues": []
+    },
+    {
+      "file": "07-软件设计模式系统化学习资料.docx",
+      "bytes": 400393,
+      "paragraphs": 1548,
+      "tables": 16,
+      "embedded_media": 3,
+      "hyperlink_relationships": 0,
+      "issues": []
+    },
+    {
+      "file": "09-AI工具使用与AI辅助开发流程说明.docx",
+      "bytes": 622511,
+      "paragraphs": 489,
+      "tables": 27,
+      "embedded_media": 8,
+      "hyperlink_relationships": 14,
+      "issues": []
+    },
+    {
+      "file": "10-产品创新与设计决策全记录.docx",
+      "bytes": 1261363,
+      "paragraphs": 3607,
+      "tables": 67,
+      "embedded_media": 10,
+      "hyperlink_relationships": 3,
+      "issues": []
+    }
+  ]
+}

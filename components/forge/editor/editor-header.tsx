@@ -1,6 +1,6 @@
 'use client'
 
-import { Trash2, X } from 'lucide-react'
+import { Maximize2, Minimize2, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui'
 
 type EditorMode = 'live' | 'read'
@@ -12,6 +12,8 @@ type EditorHeaderProps = {
   onModeChange: (mode: EditorMode) => void | Promise<void>
   onDelete: () => void | Promise<void>
   onClose: () => void | Promise<void>
+  fullscreen: boolean
+  onFullscreenChange: (fullscreen: boolean) => void
 }
 
 export function EditorHeader({
@@ -21,6 +23,8 @@ export function EditorHeader({
   onModeChange,
   onDelete,
   onClose,
+  fullscreen,
+  onFullscreenChange,
 }: EditorHeaderProps) {
   return (
     <div className="forge-paper-header flex justify-between items-center px-5 py-3 border-b border-white/10">
@@ -37,6 +41,18 @@ export function EditorHeader({
         </span>
       </div>
       <div className="flex items-center gap-3 shrink-0">
+        {hasCard && editorMode === 'read' && (
+          <Button
+            className="forge-paper-icon-btn"
+            onClick={() => onFullscreenChange(!fullscreen)}
+            title={fullscreen ? '退出全屏预览 (Esc)' : '全屏预览'}
+            aria-label={fullscreen ? '退出全屏预览' : '全屏预览'}
+            aria-pressed={fullscreen}
+            data-testid="forge-preview-fullscreen"
+          >
+            {fullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </Button>
+        )}
         <div className="flex bg-white/5 rounded-lg p-0.5">
           <Button
             className={`editor-mode-tab ${editorMode === 'live' ? 'active' : ''}`}

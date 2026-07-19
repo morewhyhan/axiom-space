@@ -552,7 +552,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
     const status = await apiJson(`/api/rag/status?vid=${vault.id}`)
     assert.equal(status.status, 200)
     assert.equal(status.body.success, true)
-    assert.equal(status.body.status.provider, 'lightrag')
+    assert.equal(status.body.status.provider, 'qdrant+lightrag')
     assert.equal(status.body.status.enabled, true)
     assert.equal(status.body.status.health.ok, true)
 
@@ -561,7 +561,7 @@ test('API/RPC contracts follow the 08 test plan for vault, graph, learning, even
     assert.equal(sync.body.success, true)
 
     const ownCardStatus = await waitForRagCardStatus(vault.id, card.id, 'indexed')
-    assert.equal(ownCardStatus.provider, 'lightrag')
+    assert.equal(ownCardStatus.provider, 'qdrant')
     assert.equal(ownCardStatus.synced, true)
 
     const query = await apiJson(`/api/rag/query?vid=${vault.id}`, {

@@ -73,7 +73,6 @@ export default function ForgeResourcePanel({ view }: Props) {
   const panelLayout = useAppStore((s) => s.panelLayout)
   const setPanelLayout = useAppStore((s) => s.setPanelLayout)
   const setRightPanelView = useAppStore((s) => s.setRightPanelView)
-  const chatPanelOpen = useAppStore((s) => s.chatPanelOpen)
   const setForgeResourceView = useAppStore((s) => s.setForgeResourceView)
   const contextTab = useAppStore((s) => s.forgeContextTab)
   const setContextTab = useAppStore((s) => s.setForgeContextTab)
@@ -129,13 +128,11 @@ export default function ForgeResourcePanel({ view }: Props) {
     setMode('forge')
     setRightPanelView('read')
     ensureEditor()
-    if (card.type !== 'permanent') {
-      await openCardThread(card, { openChat: chatPanelOpen })
-      setSelectedPathId(null)
-      setActiveLearningStepId(null)
-      setSelectedNode(card)
-      setRightPanelView('read')
-    }
+    await openCardThread(card, { openChat: true })
+    setSelectedPathId(null)
+    setActiveLearningStepId(null)
+    setSelectedNode(card)
+    setRightPanelView('read')
   }
 
   const handleOpenStep = async (path: LearningPath, step: LearningStep) => {

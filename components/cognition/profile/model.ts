@@ -12,16 +12,18 @@ export const DIMENSION_TONES = [
 ] as const
 
 const DYNAMIC_PROMPT_EFFECTS: Record<string, string> = {
-  learningGoal: '下一轮教学应围绕这个目标决定讲解范围、输出形态和推进顺序。',
-  currentFoundation: '下一轮教学应据此决定哪些前提可以跳过，哪些概念需要先校验。',
-  bestExplanationPath: '下一轮教学应据此选择例子、图解、代码、框架或练习的进入顺序。',
-  stuckPattern: '下一轮教学应提前处理这个卡点，避免继续堆叠新概念。',
-  paceAndLoad: '下一轮教学应据此控制信息块大小、术语密度和确认频率。',
-  masteryCheck: '下一轮教学应据此选择复述、变式题、改错、卡片产出或迁移任务。',
+  learningGoal: '下一轮会把长期愿望收束成一个现在就能行动、也能看见进展的小目标。',
+  currentFoundation: '下一轮会先确认你真正能做到哪一步，不把一次自述当成固定能力。',
+  bestExplanationPath: '下一轮会换成更适合你的讲法，并请你重新表达来确认是否真的理解。',
+  stuckPattern: '下一轮只先处理最可能的一个卡点；如果没有改善，就立即换另一种解释。',
+  paceAndLoad: '下一轮会调整任务大小、提醒力度、同时推进的事情数量和反馈频率。',
+  masteryCheck: '下一轮会先说清怎样算有效；没效果就换方法，已经足够就停止额外干预。',
 }
 
 const SOURCE_LABELS: Record<string, string> = {
   vaultMemory: '画像观察',
+  learningSession: '对话记录',
+  learningMessage: '对话原文',
   assessmentResult: '测评证据',
   card: '卡片证据',
   edge: '图谱证据',
@@ -39,6 +41,7 @@ export type ProfileNode = {
   claim: string
   explanation: string
   promptEffect: string
+  verification: string
   confidence: number
   freshness: string
   evidenceDetail?: string
@@ -46,6 +49,11 @@ export type ProfileNode = {
     sourceLabel: string
     sourceType: string
     sourceId: string
+    sources: Array<{
+      sourceLabel: string
+      sourceType: ProfileDimensionInsight['observations'][number]['sourceType']
+      sourceId: string
+    }>
     sourceLocation: string
     evidence: string
     analysisMode?: string
@@ -55,8 +63,11 @@ export type ProfileNode = {
     mechanismHypothesis?: string
     competingHypotheses?: string[]
     discriminatingEvidence?: string
+    controlVariable?: string
     teachingIntervention?: string
     verificationCriterion?: string
+    failureBranch?: string
+    stopCondition?: string
     interventionProtocol?: ProfileDimensionInsight['observations'][number]['interventionProtocol']
     scope?: string
     status?: string
@@ -230,6 +241,9 @@ function buildDynamicProfileNodes(dimension: ProfileDimensionInsight): ProfileNo
       promptEffect: primary.teachingIntervention
         ? `接下来会这样帮助你：${primary.teachingIntervention}`
         : DYNAMIC_PROMPT_EFFECTS[dimension.key] ?? '下一轮教学只会在证据支持时使用这条画像。',
+      verification: primary.verificationCriterion
+        ? `系统会这样确认：${primary.verificationCriterion}`
+        : '系统会在下一次真实学习行为中继续确认或推翻这条判断。',
       confidence,
       freshness: feedback ? '已校验' : profileStatusLabel(primary.status, confidence),
       evidenceDetail: observations.map(buildObservationEvidenceDetail).join('\n\n'),
@@ -237,6 +251,16 @@ function buildDynamicProfileNodes(dimension: ProfileDimensionInsight): ProfileNo
         sourceLabel,
         sourceType: primary.sourceType,
         sourceId: observations.map((item) => item.sourceId).join(' · '),
+        sources: observations
+          .filter((item) => item.sourceId)
+          .map((item) => ({
+            sourceLabel: SOURCE_LABELS[item.sourceType] ?? item.entryPoint ?? '画像证据',
+            sourceType: item.sourceType,
+            sourceId: item.sourceId,
+          }))
+          .filter((item, sourceIndex, all) => all.findIndex((candidate) => (
+            candidate.sourceType === item.sourceType && candidate.sourceId === item.sourceId
+          )) === sourceIndex),
         sourceLocation: primary.entryPoint || '未标注',
         evidence: observations.map((item) => item.evidence?.trim()).filter(Boolean).slice(0, 6).join('\n') || '当前来源只提供对象引用，尚无可展示的原始证据文本。',
         analysisMode: primary.analysisMode,
@@ -246,8 +270,11 @@ function buildDynamicProfileNodes(dimension: ProfileDimensionInsight): ProfileNo
         mechanismHypothesis: primary.mechanismHypothesis,
         competingHypotheses: primary.competingHypotheses,
         discriminatingEvidence: primary.discriminatingEvidence,
+        controlVariable: primary.controlVariable,
         teachingIntervention: primary.teachingIntervention,
         verificationCriterion: primary.verificationCriterion,
+        failureBranch: primary.failureBranch,
+        stopCondition: primary.stopCondition,
         interventionProtocol: primary.interventionProtocol,
         scope: primary.scope,
         status: primary.status,

@@ -1,4 +1,68 @@
 export type ResourceType = 'document' | 'mindmap' | 'quiz' | 'code' | 'video' | 'svg' | 'diagram' | 'docx' | 'pdf' | 'ppt';
+/** Product-level learning resource semantics. File formats never become graph node types. */
+export type ResourceKind = 'explanation' | 'mindmap' | 'quiz' | 'code-practice' | 'diagram' | 'video';
+export type ResourceFormat = 'markdown' | 'json' | 'mermaid' | 'svg' | 'html' | 'mp4' | 'docx' | 'pdf' | 'pptx';
+
+export interface ResourcePlanItem {
+  kind: ResourceKind;
+  formats: ResourceFormat[];
+}
+
+export const RESOURCE_KINDS: ResourceKind[] = ['explanation', 'mindmap', 'quiz', 'code-practice', 'diagram', 'video'];
+
+export const DEFAULT_RESOURCE_PLAN: ResourcePlanItem[] = [
+  { kind: 'explanation', formats: ['markdown', 'docx', 'pdf', 'pptx'] },
+  { kind: 'mindmap', formats: ['mermaid'] },
+  { kind: 'quiz', formats: ['json'] },
+  { kind: 'code-practice', formats: ['markdown'] },
+  { kind: 'diagram', formats: ['mermaid', 'svg'] },
+  { kind: 'video', formats: ['html', 'mp4'] },
+];
+
+export const RESOURCE_KIND_LABELS: Record<ResourceKind, string> = {
+  explanation: '讲解材料',
+  mindmap: '知识导图',
+  quiz: '练习题',
+  'code-practice': '代码实操',
+  diagram: '关系图示',
+  video: '教学视频',
+};
+
+export const RESOURCE_TARGET_META: Record<ResourceType, { kind: ResourceKind; format: ResourceFormat }> = {
+  document: { kind: 'explanation', format: 'markdown' },
+  docx: { kind: 'explanation', format: 'docx' },
+  pdf: { kind: 'explanation', format: 'pdf' },
+  ppt: { kind: 'explanation', format: 'pptx' },
+  mindmap: { kind: 'mindmap', format: 'mermaid' },
+  quiz: { kind: 'quiz', format: 'json' },
+  code: { kind: 'code-practice', format: 'markdown' },
+  diagram: { kind: 'diagram', format: 'mermaid' },
+  svg: { kind: 'diagram', format: 'svg' },
+  video: { kind: 'video', format: 'html' },
+};
+
+export function targetsForResourcePlan(plan: ResourcePlanItem[]): ResourceType[] {
+  const requested = new Set(plan.flatMap((item) => item.formats.map((format) => `${item.kind}:${format}`)));
+  return RESOURCE_TYPES.filter((target) => {
+    const meta = RESOURCE_TARGET_META[target];
+    return requested.has(`${meta.kind}:${meta.format}`) || (meta.kind === 'video' && requested.has('video:mp4'));
+  });
+}
+
+export function resourcePlanForTargets(targets: ResourceType[]): ResourcePlanItem[] {
+  const grouped = new Map<ResourceKind, Set<ResourceFormat>>()
+  for (const target of targets) {
+    const meta = RESOURCE_TARGET_META[target]
+    const formats = grouped.get(meta.kind) ?? new Set<ResourceFormat>()
+    formats.add(meta.format)
+    if (target === 'video') formats.add('mp4')
+    grouped.set(meta.kind, formats)
+  }
+  return RESOURCE_KINDS.flatMap((kind) => {
+    const formats = grouped.get(kind)
+    return formats?.size ? [{ kind, formats: [...formats] }] : []
+  })
+}
 export type GenerationStatus = 'idle' | 'generating' | 'completed' | 'failed';
 
 export const RESOURCE_TYPES: ResourceType[] = ['document', 'mindmap', 'quiz', 'code', 'video', 'svg', 'diagram', 'docx', 'pdf', 'ppt'];

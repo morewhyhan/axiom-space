@@ -3,7 +3,7 @@
 import type { CSSProperties } from 'react'
 import ResizablePanel from '@/components/layout/ResizablePanel'
 import BottomBar from '@/components/layout/bottom-bar'
-import type { ForgeResourceView } from '@/stores/mode-store'
+import { useAppStore, type ForgeResourceView } from '@/stores/mode-store'
 import { Button } from '@/components/ui'
 import {
   DashboardLeftPanel as DashboardLeft,
@@ -72,11 +72,12 @@ export function ForgeStage({
   onChatPanelOpenChange,
 }: ForgeStageProps) {
   const previewOnly = rightPanelView === 'read' && !resourcePanelOpen && !chatPanelOpen && editorPanelOpen
+  const previewFullscreen = useAppStore((state) => state.previewFullscreen)
 
   return (
     <div className={`mode-stage forge-stage ${active ? 'active' : ''}`} aria-hidden={!active}>
       <section
-        className={`forge-ide pointer-events-auto ${resourcePanelOpen ? 'has-left' : 'no-left'} ${editorPanelOpen ? 'has-right' : 'no-right'} ${chatPanelOpen ? 'has-chat' : 'no-chat'} ${previewOnly ? 'preview-only' : ''}`}
+        className={`forge-ide pointer-events-auto ${resourcePanelOpen ? 'has-left' : 'no-left'} ${editorPanelOpen ? 'has-right' : 'no-right'} ${chatPanelOpen ? 'has-chat' : 'no-chat'} ${previewOnly ? 'preview-only' : ''} ${previewFullscreen ? 'preview-fullscreen' : ''}`}
         style={{
           '--forge-left-live': `${Math.max(240, Math.min(420, forgeLeftWidth || 300))}px`,
           '--forge-right-live': `${Math.max(340, Math.min(720, forgeRightWidth || 460))}px`,

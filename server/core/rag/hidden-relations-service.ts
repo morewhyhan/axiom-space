@@ -3,7 +3,8 @@ import { clampEdgeWeight, normalizeEdgeType, type EdgeType } from '@/server/core
 import { aiManager } from '@/server/core/ai/AIManager'
 import { GRAPH_LINK_SUGGESTION_PROMPT } from '@/server/core/ai/prompts'
 import { scheduleRagIndexCard } from '@/server/core/rag/auto-index'
-import { queryLightRAGContext, syncCardToLightRAG } from './lightrag-service'
+import { queryLightRAGContext } from './lightrag-service'
+import { syncCardToSemanticIndex } from './semantic-index-service'
 
 export type HiddenRelationReviewStatus = 'llm' | 'vector_only'
 
@@ -64,17 +65,17 @@ export async function discoverHiddenRelationsWithRag(params: {
   const threshold = clampEdgeWeight(params.threshold, 0.62)
 
   const indexedCards = await prisma.ragDocumentIndex.count({
-    where: { vaultId: params.vaultId, provider: 'lightrag', status: 'indexed' },
+    where: { vaultId: params.vaultId, provider: 'qdrant', status: 'indexed' },
   })
 
   const sourceCards = await loadSourceCards(params.vaultId, params.cardId, sourceLimit)
   if (params.autoSync && params.cardId && sourceCards[0]) {
     const status = await prisma.ragDocumentIndex.findUnique({
-      where: { provider_cardId: { provider: 'lightrag', cardId: sourceCards[0].id } },
+      where: { provider_cardId: { provider: 'qdrant', cardId: sourceCards[0].id } },
       select: { status: true },
     })
     if (status?.status !== 'indexed') {
-      await syncCardToLightRAG(sourceCards[0].id)
+      await syncCardToSemanticIndex(sourceCards[0].id)
     }
   }
 
@@ -252,7 +253,7 @@ async function loadSourceCards(vaultId: string, cardId: string | null | undefine
     where: {
       vaultId,
       type: { in: ['permanent', 'fleeting'] },
-      ragIndexes: { some: { provider: 'lightrag', status: 'indexed' } },
+      ragIndexes: { some: { provider: 'qdrant', status: 'indexed' } },
     },
     orderBy: { updatedAt: 'desc' },
     take: sourceLimit,

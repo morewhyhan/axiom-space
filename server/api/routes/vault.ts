@@ -188,7 +188,8 @@ const app = new Hono<{ Variables: { userId: string } }>()
     const result = await runWithAgentContext({ userId, vaultId }, () => storage.writeFile(path, content, type))
     if (result.success) {
       const writtenCard = await prisma.card.findUnique({ where: { vaultId_path: { vaultId, path } } }).catch(() => null)
-      scheduleRagIndexCard(writtenCard?.id, 'vault-write')
+      // DbAdapter.writeFile already schedules the saved card. Scheduling it
+      // again here submitted duplicate deep-graph documents for one UI save.
       void emitDomainEvent({
         userId,
         vaultId,

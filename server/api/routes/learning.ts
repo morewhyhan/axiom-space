@@ -3,6 +3,7 @@
  * AI 驱动的学习路径生成 + 进度追踪
  */
 import { Hono, type Context } from 'hono'
+import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/db'
 import { requireAuth } from '../middleware/auth'
 import { resolveVault } from '@/server/api/auth-helper'
@@ -29,8 +30,16 @@ import {
   safeConceptFileName,
 } from '@/server/core/domain/concept-graph'
 import { emitDomainEvent, recordAssessmentResult } from '@/server/core/domain/events'
+import {
+  evaluateInventoryRaceExplanation,
+  isInventoryRaceContext,
+} from '@/server/core/domain/inventory-race-contract'
 import { ROOT_CARD_PATH } from '@/server/core/domain/concept-graph'
-import { DocumentImportError, importDocumentToVault } from '@/server/core/learning/document-import-service'
+import {
+  DocumentImportError,
+  ingestKnowledgeTextToVault,
+  type DocumentImportProgress,
+} from '@/server/core/learning/document-import-service'
 import { pushSuggestionEngine, type PushBoxType, type PushStatus } from '@/server/core/push/push-suggestion-engine'
 import {
   JSON_REPAIR_PROMPT,
@@ -49,6 +58,40 @@ const pushSuggestionsQuerySchema = vaultQuerySchema.extend({
 
 const MAX_IMPORT_DOCUMENT_CHARS = 1_500_000
 const MAX_EMBEDDED_FILE_CHARS = 3_000_000
+const DOCUMENT_IMPORT_JOB_CATEGORY = 'document_import_job'
+
+type DocumentImportJobStatus = DocumentImportProgress & {
+  jobId: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  updatedAt: string
+  error?: string
+}
+
+function documentImportJobKey(jobId: string) {
+  return `document_import_job:${jobId}`
+}
+
+function normalizeDocumentImportJobId(value: unknown) {
+  if (typeof value !== 'string') return null
+  const jobId = value.trim()
+  return /^[a-zA-Z0-9_-]{8,80}$/.test(jobId) ? jobId : null
+}
+
+async function saveDocumentImportJob(vaultId: string, status: DocumentImportJobStatus) {
+  await prisma.vaultMemory.upsert({
+    where: { vaultId_key: { vaultId, key: documentImportJobKey(status.jobId) } },
+    create: {
+      vaultId,
+      key: documentImportJobKey(status.jobId),
+      category: DOCUMENT_IMPORT_JOB_CATEGORY,
+      value: JSON.stringify(status),
+    },
+    update: {
+      category: DOCUMENT_IMPORT_JOB_CATEGORY,
+      value: JSON.stringify(status),
+    },
+  })
+}
 
 type NormalizedImportPayload = {
   document: string
@@ -244,7 +287,7 @@ const app = new Hono<{ Variables: { userId: string } }>()
     if (!vault) return c.json({ success: true, profile: null })
 
     const vid = vault.id
-    const [totalCards, permanentCount, clusterData, recentSessions] = await Promise.all([
+    const [totalCards, permanentCount, clusterData, recentSessions, capabilities] = await Promise.all([
       prisma.card.count({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH } } }),
       prisma.card.count({ where: { vaultId: vid, path: { not: ROOT_CARD_PATH }, type: 'permanent' } }),
       prisma.cluster.findMany({
@@ -258,12 +301,21 @@ const app = new Hono<{ Variables: { userId: string } }>()
         take: 5,
         select: { id: true, domain: true, concept: true, status: true, updatedAt: true },
       }),
+      prisma.vaultCapability.findMany({
+        where: { vaultId: vid },
+        select: { status: true },
+      }),
     ])
+
+    const masteredCount = capabilities.filter((capability) => capability.status === 'mastered').length
 
     const profile = {
       totalCards,
       permanentCount,
-      masteryRate: totalCards > 0 ? Math.round((permanentCount / totalCards) * 100) : 0,
+      // 永久卡表示“这份知识值得长期保存”，不是学生掌握证据。
+      // 掌握率只从能力记录的显式 mastered 状态计算。
+      masteryRate: capabilities.length > 0 ? Math.round((masteredCount / capabilities.length) * 100) : 0,
+      masteredCount,
       domains: clusterData.map(cl => ({
         id: cl.id,
         name: cl.name,
@@ -428,9 +480,9 @@ const app = new Hono<{ Variables: { userId: string } }>()
       take: 50,
     }).catch(() => [])
 
-    const masteredConcepts = capabilities.filter(c => c.masteryLevel >= 80).map(c => c.concept)
-    const learningConcepts = capabilities.filter(c => c.masteryLevel >= 30 && c.masteryLevel < 80).map(c => c.concept)
-    const weakConcepts = capabilities.filter(c => c.masteryLevel < 30).map(c => c.concept)
+    const masteredConcepts = capabilities.filter(c => c.status === 'mastered').map(c => c.concept)
+    const learningConcepts = capabilities.filter(c => c.status !== 'mastered' && c.masteryLevel >= 30).map(c => c.concept)
+    const weakConcepts = capabilities.filter(c => c.status !== 'mastered' && c.masteryLevel < 30).map(c => c.concept)
 
     const capabilityContext = capabilities.length > 0 ? `
 ## 用户能力档案
@@ -724,42 +776,63 @@ ${context.answer.slice(0, 2400)}
         throw new Error('AI returned no usable learning steps')
       }
 
-      const usedPaths = new Set<string>()
-      const createdPaths = []
-      for (const module of modules) {
-        const created = await createGeneratedPathModule({
-          userId,
-          vaultId: vid,
-          vaultName: vault.name,
-          rootTopic: topic,
-          module,
-          usedPaths,
+      // “一句话让 AI 生成”和“导入资料”只在上游输入形态不同。
+      // AI 先产出结构化教学文本，之后与粘贴文本、文件转换文本
+      // 共用 ingestKnowledgeTextToVault 这一个建库边界。
+      // 领域抽取、知识卡落库、图谱连边和学习路径编排管线。
+      const generatedDocument = generatedModulesToStructuredDocument(topic, modules)
+      const unified = await ingestKnowledgeTextToVault({
+        userId,
+        vaultId: vid,
+        document: generatedDocument,
+        topic,
+        source: `AI 主题生成：${topic}`,
+        sourceTitle: `${topic}教学资料`,
+        conversionKind: 'ai-generated-structured-material',
+        skipAiExtraction: true,
+      })
+      if (!unified.pathId) throw new Error('Unified knowledge pipeline returned no learning path')
+
+      const generatedPath = await prisma.learningPath.findUnique({
+        where: { id: unified.pathId },
+        include: { steps: { orderBy: { order: 'asc' } } },
+      })
+      if (!generatedPath) throw new Error('Unified knowledge pipeline path not found')
+      const generatedCardIds = generatedPath.steps
+        .map((step) => step.cardId)
+        .filter((cardId): cardId is string => Boolean(cardId))
+      const generatedCards = generatedCardIds.length > 0
+        ? await prisma.card.findMany({
+          where: { id: { in: generatedCardIds }, vaultId: vid },
+          select: { id: true, title: true, type: true },
         })
-        createdPaths.push(created)
+        : []
+      const primaryPath = learningPathResponse(generatedPath, generatedCards.map((card) => ({
+        id: card.id,
+        title: card.title || '',
+        type: card.type,
+      })))
+      const responsePaths = [primaryPath]
 
-        try {
-          const concepts = created.path.steps?.map((s: { concept?: string | null; title?: string | null }) => s.concept || s.title).filter(Boolean) || []
-          if (concepts.length > 0) {
-            pathAdjustmentEngine.createInitialPath(userId, module.topic, concepts as string[])
-          }
-        } catch { /* non-fatal */ }
-      }
-
-      const responsePaths = createdPaths.map((item) => learningPathResponse(item.path, item.cardRecords))
-      const primaryPath = responsePaths[0]
+      try {
+        const concepts = generatedPath.steps
+          .map((step) => step.concept || step.title)
+          .filter(Boolean)
+        if (concepts.length > 0) pathAdjustmentEngine.createInitialPath(userId, topic, concepts)
+      } catch { /* non-fatal */ }
 
       triggerPushSuggestionScan(userId, vid, 'learning_path_generated', {
-        pathIds: responsePaths.map((path) => path.id),
+        pathIds: [primaryPath.id],
         topic,
-        mode,
-        createdPathCount: responsePaths.length,
+        mode: `${mode}_unified_pipeline`,
+        createdPathCount: 1,
       })
 
       return c.json({
         success: true,
         path: primaryPath,
         paths: responsePaths,
-        createdPathCount: responsePaths.length,
+        createdPathCount: 1,
       })
     } catch (err: unknown) {
       console.error('[Learning] AI generation failed:', err instanceof Error ? err.message : String(err))
@@ -942,14 +1015,9 @@ ${context.answer.slice(0, 2400)}
     })
     if (!stepCard) return c.json({ success: false, error: 'Card not found' }, 404)
 
-    if (stepCard.type === 'permanent') {
-      if (step.status !== 'mastered') {
-        await prisma.learningPathStep.update({
-          where: { id: effectiveStepId },
-          data: { status: 'mastered', mastery: 100 },
-        })
-      }
-    } else if (step.status !== 'learning') {
+    // 打开永久卡只表示“使用这份长期知识”，不能跳过评估把步骤写成 mastered。
+    // 已完成/已掌握步骤在再次打开时也不应被降级。
+    if (step.status === 'available') {
       await prisma.learningPathStep.update({
         where: { id: effectiveStepId },
         data: { status: 'learning' },
@@ -1232,6 +1300,61 @@ ${context.answer.slice(0, 2400)}
       }).catch((error) => {
         console.warn('[Learning] Failed to update initial profile hypotheses:', error)
       })
+
+      // 能力状态只由真实通过的 AssessmentResult 推进。卡片类型、
+      // 卡片数量和打开卡片的行为都不能代替这份证据。
+      if (evaluation.passed && assessmentId) {
+        const capabilityConcept = step.concept?.trim() || step.title
+        const existingCapability = await prisma.vaultCapability.findUnique({
+          where: { vaultId_concept: { vaultId: path.vaultId, concept: capabilityConcept } },
+        })
+        const nextMastery = Math.max(existingCapability?.masteryLevel ?? 0, evaluation.mastery)
+        const strongAreas = Array.from(new Set([
+          ...safeParseJsonArray(existingCapability?.strongAreas),
+          ...sessionEvidence.slice(0, 3).map((item) => item.slice(0, 180)),
+        ])).slice(-8)
+        if (existingCapability) {
+          await prisma.vaultCapability.update({
+            where: { id: existingCapability.id },
+            data: {
+              status: 'mastered',
+              masteryLevel: nextMastery,
+              strongAreas: JSON.stringify(strongAreas),
+              weakAreas: '[]',
+              accessCount: { increment: 1 },
+              lastAccessed: new Date(),
+            },
+          })
+        } else {
+          await prisma.vaultCapability.create({
+            data: {
+              vaultId: path.vaultId,
+              concept: capabilityConcept,
+              status: 'mastered',
+              masteryLevel: nextMastery,
+              strongAreas: JSON.stringify(strongAreas),
+              weakAreas: '[]',
+              accessCount: 1,
+              lastAccessed: new Date(),
+            },
+          })
+        }
+        void emitDomainEvent({
+          userId,
+          vaultId: path.vaultId,
+          aggregateType: 'vaultCapability',
+          aggregateId: existingCapability?.id || capabilityConcept,
+          eventType: 'CapabilityMasteredFromAssessment',
+          payload: {
+            concept: capabilityConcept,
+            mastery: nextMastery,
+            assessmentId,
+            pathId,
+            stepId,
+            cardId: step.cardId,
+          },
+        })
+      }
     }
 
     // Update step
@@ -1851,7 +1974,7 @@ ${context.answer.slice(0, 2400)}
     }
   })
 
-  // GET /api/learning/push-suggestions — 新推送盒：连接推送 + 资源/任务推送
+  // GET /api/learning/push-suggestions — 两类推送：缺失知识对象 + 缺失图谱关系
   .get('/push-suggestions', zValidator('query', pushSuggestionsQuerySchema), async (c) => {
     const userId = c.get('userId') as string
     const query = c.req.valid('query')
@@ -1966,6 +2089,7 @@ ${context.answer.slice(0, 2400)}
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       if (message === 'SUGGESTION_NOT_FOUND') return c.json({ success: false, error: message }, 404)
+      if (message === 'SUGGESTION_OUTSIDE_PUSH_BOUNDARY') return c.json({ success: false, error: message }, 409)
       console.error('[Learning] Failed to execute push suggestion:', error)
       return c.json({ success: false, error: 'PUSH_SUGGESTION_EXECUTE_FAILED', detail: message }, 500)
     }
@@ -2100,6 +2224,30 @@ ${context.answer.slice(0, 2400)}
     }
   })
 
+  // ─── GET /api/learning/import-document/:jobId/status — 真实导入进度 ───
+  .get('/import-document/:jobId/status', zValidator('query', vaultQuerySchema), async (c) => {
+    const userId = c.get('userId') as string
+    if (!userId) return c.json({ success: false, error: 'Unauthorized' }, 401)
+
+    const vault = await resolveVault(c, userId)
+    if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
+    const jobId = normalizeDocumentImportJobId(c.req.param('jobId'))
+    if (!jobId) return c.json({ success: false, error: 'INVALID_IMPORT_JOB_ID' }, 400)
+
+    const record = await prisma.vaultMemory.findUnique({
+      where: { vaultId_key: { vaultId: vault.id, key: documentImportJobKey(jobId) } },
+      select: { value: true, category: true },
+    })
+    if (!record || record.category !== DOCUMENT_IMPORT_JOB_CATEGORY) {
+      return c.json({ success: false, error: 'IMPORT_JOB_NOT_FOUND' }, 404)
+    }
+    try {
+      return c.json({ success: true, job: JSON.parse(record.value) as DocumentImportJobStatus })
+    } catch {
+      return c.json({ success: false, error: 'IMPORT_JOB_CORRUPTED' }, 500)
+    }
+  })
+
   // ─── POST /api/learning/import-document — 导入文档 → 知识卡片 + 学习路径 ───
   .post('/import-document', async (c) => {
     const userId = c.get('userId') as string
@@ -2109,6 +2257,7 @@ ${context.answer.slice(0, 2400)}
     if (!vault) return c.json({ success: false, error: 'Vault not found' }, 404)
 
     const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
+    const jobId = normalizeDocumentImportJobId(body.jobId) ?? randomUUID()
     const normalized = normalizeImportPayload(body)
     const document = normalized.document.trim()
     const topic = (body.topic as string)?.trim()
@@ -2120,8 +2269,18 @@ ${context.answer.slice(0, 2400)}
     if (document.length > maxChars) return c.json({ success: false, error: 'DOCUMENT_TOO_LONG' }, 400)
     if (!source) return c.json({ success: false, error: 'SOURCE_REQUIRED' }, 400)
 
+    await saveDocumentImportJob(vault.id, {
+      jobId,
+      status: 'queued',
+      stage: 'validating',
+      label: '等待导入',
+      message: '任务已进入导入队列',
+      progress: 0,
+      updatedAt: new Date().toISOString(),
+    })
+
     try {
-      const result = await importDocumentToVault({
+      const result = await ingestKnowledgeTextToVault({
         userId,
         vaultId: vault.id,
         document,
@@ -2132,6 +2291,14 @@ ${context.answer.slice(0, 2400)}
         originalFileName: normalized.originalFileName,
         conversionKind: normalized.conversionKind,
         skipAiExtraction: normalized.skipAiExtraction,
+        onProgress: async (progress) => {
+          await saveDocumentImportJob(vault.id, {
+            jobId,
+            status: progress.stage === 'completed' ? 'completed' : 'running',
+            ...progress,
+            updatedAt: new Date().toISOString(),
+          })
+        },
       })
       triggerPushSuggestionScan(userId, vault.id, 'document_imported', {
         topic,
@@ -2161,6 +2328,16 @@ ${context.answer.slice(0, 2400)}
         pathId: result.pathId,
       })
     } catch (err) {
+      await saveDocumentImportJob(vault.id, {
+        jobId,
+        status: 'failed',
+        stage: 'completed',
+        label: '导入失败',
+        message: err instanceof Error ? err.message : String(err),
+        progress: 100,
+        error: err instanceof Error ? err.message : String(err),
+        updatedAt: new Date().toISOString(),
+      }).catch(() => {})
       if (err instanceof DocumentImportError) {
         return c.json({ success: false, error: err.code, detail: err.message }, err.status as 400 | 422 | 500 | 502)
       }
@@ -2474,6 +2651,48 @@ type GeneratedModule = {
   difficulty: string
   clusterName: string
   steps: GeneratedStep[]
+}
+
+export function generatedModulesToStructuredDocument(rootTopic: string, modules: GeneratedModule[]): string {
+  const groups = new Map<string, GeneratedStep[]>()
+  for (const module of modules) {
+    for (const step of module.steps) {
+      const category = normalizeGeneratedText(
+        step.chapter || module.clusterName || module.topic || '核心知识结构',
+        '核心知识结构',
+      )
+      const groupTitle = normalizeConceptLookup(category) === normalizeConceptLookup(rootTopic)
+        ? '核心知识结构'
+        : category
+      const current = groups.get(groupTitle) ?? []
+      current.push(step)
+      groups.set(groupTitle, current)
+    }
+  }
+
+  const sections = [...groups.entries()].map(([groupTitle, steps]) => {
+    const seen = new Set<string>()
+    const concepts = steps.filter((step) => {
+      const title = normalizeGeneratedText(step.concept || step.title, step.title)
+      const key = normalizeConceptLookup(title)
+      if (!key || seen.has(key)) return false
+      seen.add(key)
+      return true
+    }).map((step) => {
+      const title = normalizeGeneratedText(step.concept || step.title, step.title)
+      const description = step.description?.trim() || `理解「${title}」的定义、适用边界与实际用法。`
+      return `### ${title}\n\n${description}`
+    })
+    return `## ${groupTitle}\n\n${concepts.join('\n\n')}`
+  })
+
+  return [
+    `# ${rootTopic}教学资料`,
+    '',
+    `> 由 AXIOM 根据主题「${rootTopic}」生成；后续与文件导入复用同一条知识结构化管线。`,
+    '',
+    ...sections,
+  ].join('\n')
 }
 
 function normalizeGeneratedModules(
@@ -2886,7 +3105,7 @@ function safeParseJsonObject(raw: string | null | undefined): Record<string, unk
 }
 
 type StepAssessmentRubric = {
-  id: 'visitor-transfer-v1' | 'code-execution-v1' | 'concept-transfer-v1'
+  id: 'visitor-transfer-v1' | 'inventory-race-v1' | 'code-execution-v1' | 'concept-transfer-v1'
   requiresExecutionEvidence: boolean
   executionEvidenceLabel: string
   semanticChecks: (explanation: string) => boolean[]
@@ -2912,6 +3131,15 @@ function buildStepAssessmentRubric(input: {
         /反例|边界|不适合|如果/.test(explanation),
         /验证|运行|核对|预测/.test(explanation),
       ],
+    }
+  }
+
+  if (isInventoryRaceContext(context)) {
+    return {
+      id: 'inventory-race-v1',
+      requiresExecutionEvidence: true,
+      executionEvidenceLabel: '并发运行轨迹或可重复测试证据',
+      semanticChecks: (explanation) => Object.values(evaluateInventoryRaceExplanation(explanation)),
     }
   }
 
@@ -3010,6 +3238,11 @@ async function updateInitialProfileHypothesesFromAssessment(input: {
       }),
     },
   })
+  const { refreshLearningProfilePromptSnapshot } = await import('@/server/core/learning/profile-context')
+  void refreshLearningProfilePromptSnapshot({
+    vaultId: input.vaultId,
+    reason: `assessment_calibration:${input.assessmentId || input.concept}`,
+  }).catch((error) => console.warn('[Learning] Prompt refresh after assessment calibration failed:', error))
 }
 
 function repairInitialEducationProfile(profile: Record<string, unknown> | null): Record<string, unknown> | null {
@@ -3026,12 +3259,12 @@ function toRecord(value: unknown): Record<string, unknown> | null {
 }
 
 const EDUCATION_DIMENSION_LABELS: Record<string, string> = {
-  depth: '深度',
-  breadth: '广度',
-  connection: '联接',
-  expression: '表达',
-  application: '应用',
-  learning_pace: '节奏',
+  learningGoal: '愿景与动力',
+  currentFoundation: '我现在在哪',
+  bestExplanationPath: '怎样更容易理解',
+  stuckPattern: '为什么会卡住',
+  paceAndLoad: '怎样更容易行动',
+  masteryCheck: '怎样确认有效',
 }
 
 function summarizeEducationProfileHistory(

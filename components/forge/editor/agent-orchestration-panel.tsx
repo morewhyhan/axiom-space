@@ -40,63 +40,35 @@ type UserFacingAgent = {
 }
 
 const statusLabel = (value: string) => {
-  if (value === 'completed' || value === 'ready') return 'completed'
-  if (value === 'failed') return 'failed'
-  return value || 'pending'
+  if (value === 'completed' || value === 'ready') return '已完成'
+  if (value === 'completed_with_warnings') return '完成，有提醒'
+  if (value === 'failed') return '失败'
+  if (value === 'running' || value === 'generating') return '执行中'
+  return '待执行'
+}
+
+const ROLE_META: Record<string, { name: string; input: string }> = {
+  profile: { name: '画像诊断', input: '学习画像、当前卡片与最近证据' },
+  retriever: { name: '资料检索', input: '当前知识库与可追溯资料' },
+  planner: { name: '资源规划', input: '用户原话、指定类型与格式' },
+  generator: { name: '资源生成', input: '已确认的资源计划与资料上下文' },
+  reviewer: { name: '质量校验', input: '实际产物、结构规则、安全与事实规则' },
+  pusher: { name: '入库与预览', input: '通过校验的资源文件与知识图谱' },
 }
 
 function buildUserFacingAgents(
   orchestration: OrchestrationManifest,
-  resources: AgentOrchestrationPanelProps['resources'] = [],
+  _resources: AgentOrchestrationPanelProps['resources'] = [],
 ): UserFacingAgent[] {
-  const statusByRole = new Map(orchestration.agents.map((agent) => [agent.role, agent.status]))
-  const allDone = orchestration.status === 'completed'
-  const resourceList = resources.length
-    ? resources.map((item) => item.title || item.type).join('、')
-    : '讲解文档、思维导图、练习题、代码实操、教学视频/动画'
-  const sourceTitle = resources.find((item) => item.sourceTitle)?.sourceTitle || '当前卡片与检索资料'
-  const resourceStatus = resources.length > 0 && resources.every((item) => item.status === 'ready' || !item.status)
-    ? 'completed'
-    : statusByRole.get('generator') || orchestration.status
-
-  return [
-    {
-      name: '诊断 Agent',
-      status: statusLabel(statusByRole.get('profile') || orchestration.status),
-      input: '当前卡片、学习画像、最近对话证据',
-      output: `定位当前学习缺口与误区，作为「${sourceTitle}」资源生成依据。`,
-    },
-    {
-      name: '文献 Agent',
-      status: statusLabel(allDone ? 'completed' : orchestration.status),
-      input: '当前卡片、Vault 检索上下文、资料引用',
-      output: '汇总资料依据，避免把无来源内容写成确定事实。',
-    },
-    {
-      name: '路径 Agent',
-      status: statusLabel(statusByRole.get('planner') || orchestration.status),
-      input: '学习路径、当前任务、画像剩余缺口',
-      output: '对齐当前学习步骤，并确定资源要服务的下一步缺口。',
-    },
-    {
-      name: '资源 Agent',
-      status: statusLabel(resourceStatus),
-      input: '资源类型、用户偏好、当前误区',
-      output: `生成资源：${resourceList}。`,
-    },
-    {
-      name: '评估 Agent',
-      status: statusLabel(statusByRole.get('reviewer') || orchestration.status),
-      input: '生成资源正文、事实核查与安全规则',
-      output: '输出清晰、准确、必要的质量校验和 guardrail 报告。',
-    },
-    {
-      name: '观察 Agent',
-      status: statusLabel(statusByRole.get('pusher') || orchestration.status),
-      input: '用户理解证据、资源选择、推送结果',
-      output: '更新画像记录与后续推送依据，沉淀下一步学习状态。',
-    },
-  ]
+  return orchestration.agents.map((agent) => {
+    const meta = ROLE_META[agent.role] ?? { name: agent.role, input: '本次工作流的真实上游产物' }
+    return {
+      name: meta.name,
+      status: statusLabel(agent.status),
+      input: meta.input,
+      output: agent.error ? `${agent.task}（${agent.error}）` : agent.task,
+    }
+  })
 }
 
 export function AgentOrchestrationPanel({ orchestration, resources = [] }: AgentOrchestrationPanelProps) {
@@ -116,7 +88,7 @@ export function AgentOrchestrationPanel({ orchestration, resources = [] }: Agent
           </div>
         </div>
         <span className="rounded-lg border border-white/8 bg-white/[0.025] px-2 py-1 text-white/40" style={{ fontSize: 'var(--f8)' }}>
-          {orchestration.status}
+          {statusLabel(orchestration.status)}
         </span>
       </div>
 
@@ -130,7 +102,7 @@ export function AgentOrchestrationPanel({ orchestration, resources = [] }: Agent
       )}
 
       <div className="mt-4">
-        <div className="mono uppercase text-purple-200/55" style={{ fontSize: 'var(--f8)' }}>Visible Agent Roles</div>
+        <div className="mono uppercase text-purple-200/55" style={{ fontSize: 'var(--f8)' }}>本次真实执行链路</div>
         <div className="mt-2 grid gap-2">
           {userFacingAgents.map((agent) => (
             <div key={agent.name} className="rounded-lg border border-purple-300/10 bg-purple-300/[0.035] p-3">
@@ -139,25 +111,10 @@ export function AgentOrchestrationPanel({ orchestration, resources = [] }: Agent
                 <span className="mono text-purple-100/45" style={{ fontSize: 'var(--f8)' }}>{agent.status}</span>
               </div>
               <p className="mt-1 text-white/35" style={{ fontSize: 'var(--f8)' }}>输入：{agent.input}</p>
-              <p className="mt-1 text-white/52" style={{ fontSize: 'var(--f8)' }}>产物：{agent.output}</p>
+              <p className="mt-1 text-white/52" style={{ fontSize: 'var(--f8)' }}>结果：{agent.output}</p>
             </div>
           ))}
         </div>
-      </div>
-
-      <div className="mt-3 grid gap-2">
-        {orchestration.agents.map((agent, index) => (
-          <div key={`${agent.role}:${index}`} className="rounded-lg border border-white/8 bg-white/[0.025] p-3">
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-white/70" style={{ fontSize: 'var(--f9)' }}>{agent.role}</span>
-              <span className="mono text-white/30" style={{ fontSize: 'var(--f8)' }}>{agent.status}</span>
-            </div>
-            <p className="mt-1 text-white/38" style={{ fontSize: 'var(--f8)' }}>{agent.task}</p>
-            {agent.error && (
-              <p className="mt-1 text-amber-100/60" style={{ fontSize: 'var(--f8)' }}>{agent.error}</p>
-            )}
-          </div>
-        ))}
       </div>
 
       {orchestration.logs && orchestration.logs.length > 0 && (

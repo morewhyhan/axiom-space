@@ -26,6 +26,12 @@ export interface SkillDuplicateInput {
   existingSkills: Array<{ name: string; description: string }>;
 }
 
+export interface SemanticLearningDecisionInput {
+  topic: string;
+  cardsJson: string;
+  capabilitiesJson: string;
+}
+
 export interface SessionSummaryInput {
   messageCount: number;
   conversationText: string;
@@ -242,6 +248,55 @@ ${input.incomingName}: ${input.incomingDescription}
 
 已有技能：
 ${input.existingSkills.map((skill) => `${skill.name}: ${skill.description}`).join('\n')}`,
+});
+
+const semanticLearningDecisionContract = {
+  id: 'utility.semantic-learning-decision',
+  version: '1.0.0',
+  name: 'Semantic Learning Duplicate And Bridge Judge',
+  purpose: 'Separate equivalent knowledge from related knowledge that can be used as a learning bridge.',
+  whenToUse: [
+    'Vector retrieval found cards or capabilities near a requested learning topic.',
+    'The system must decide whether to reuse existing knowledge, suppress repetition, or use prior knowledge as an analogy.',
+  ],
+  whenNotToUse: [
+    'Do not infer mastery merely from semantic similarity.',
+    'Do not treat a prerequisite, example, implementation, consequence, or neighboring topic as an equivalent concept.',
+  ],
+  input: [
+    'topic: the requested concept or learning target.',
+    'cardsJson: vector-retrieved and lexical candidate cards.',
+    'capabilitiesJson: existing capability concepts with their evidence-backed status.',
+  ],
+  process: [
+    'Judge meaning rather than surface wording. Chinese/English aliases and alternate established names may be equivalent.',
+    'Equivalent means learning this candidate again would repeat substantially the same concept or learning objective.',
+    'Analogy means the mechanism can help explain the topic, while important differences remain.',
+    'Keep equivalent and analogy disjoint. When uncertain, prefer analogy or neither instead of destructive deduplication.',
+    'Never upgrade a capability status. Only return candidate identifiers supplied by the caller.',
+  ],
+  output: [
+    'Strict JSON: {"equivalentCardIds":[],"equivalentCapabilityIds":[],"analogyCardIds":[],"analogyCapabilityIds":[],"confidence":0.0,"reason":"one sentence"}.',
+  ],
+  correct: [
+    'Treats “访问者模式” and “Visitor Pattern” as equivalent when their learning objective is the same.',
+    'Treats Strategy and Visitor as potentially analogous/contrastable, not duplicates.',
+  ],
+  incorrect: [
+    'Marks two concepts equivalent only because vector retrieval placed them nearby.',
+    'Claims mastery without using the supplied capability or assessment status.',
+  ],
+};
+
+export const SEMANTIC_LEARNING_DECISION_PROMPT = definePrompt<SemanticLearningDecisionInput>({
+  ...semanticLearningDecisionContract,
+  outputMode: 'json',
+  system: buildSystemPrompt({
+    role: '你是学习知识语义裁决器。你负责区分同义重复与可用于迁移类比的相关机制，只输出严格 JSON。',
+    contract: semanticLearningDecisionContract,
+    standards: [AXIOM_KNOWLEDGE_STANDARD, SUFFICIENT_NECESSARY_EXTRACTION_STANDARD, JSON_OUTPUT_STANDARD],
+  }),
+  buildUserMessage: (input) => `待学习主题：${input.topic}\n\n候选卡片：\n${input.cardsJson}\n\n已有能力状态：\n${input.capabilitiesJson}`,
 });
 
 const sessionSummaryContract = {

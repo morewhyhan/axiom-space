@@ -57,6 +57,12 @@ type FlushDecision = {
   reason: string
 }
 
+type UserEvidenceSource = {
+  messageId: string
+  summary: string
+  quote: string
+}
+
 const inFlightFlushes = new Set<string>()
 const VALID_SECTIONS = new Set(['我的理解', '待补全', '对话沉淀'])
 
@@ -200,6 +206,14 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
       await markSessionFlushed(input.sessionId, metadata, userTurnCount, input.reason, 'no_evidence')
       return { status: 'no_write', reason: 'no_user_evidence', sessionId: input.sessionId, cardId, userTurnCount }
     }
+    const userEvidenceSources = matchUserEvidenceSources(
+      evidence,
+      visibleMessages.filter((message) => message.role === 'user'),
+    )
+    if (userEvidenceSources.length === 0) {
+      await markSessionFlushed(input.sessionId, metadata, userTurnCount, input.reason, 'no_source_message')
+      return { status: 'no_write', reason: 'no_user_source_message', sessionId: input.sessionId, cardId, userTurnCount }
+    }
 
     const marker = `axiom-card-thread-flush:${hashString(`${card.id}:${entryContent}`)}`
     if ((card.content || '').includes(marker)) {
@@ -214,6 +228,7 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
       title: decision.title || inferFlushTitle(section),
       content: entryContent,
       evidence,
+      userEvidenceSources,
       confidence,
       reason: input.reason,
       createdAt: new Date(),
@@ -251,10 +266,11 @@ export async function flushCardThreadInsights(input: FlushInput): Promise<CardTh
             sessionId: input.sessionId,
             trigger: input.reason,
             section,
-            evidence: evidence.map((summary, index) => ({
+            evidence: userEvidenceSources.map((source) => ({
               sourceObjectType: 'learningMessage',
-              sourceObjectId: `card_thread_flush:${input.sessionId}:${userTurnCount}:${index}`,
-              summary,
+              sourceObjectId: source.messageId,
+              summary: source.summary,
+              quote: source.quote,
             })),
           }),
         },
@@ -515,6 +531,7 @@ function buildFlushEntry(input: {
   title: string
   content: string
   evidence: string[]
+  userEvidenceSources: UserEvidenceSource[]
   confidence: number
   reason: CardThreadFlushReason
   createdAt: Date
@@ -532,11 +549,43 @@ function buildFlushEntry(input: {
 
 ${input.content.trim()}
 
-- AI 提炼：以上内容是 Agent2 对当前卡片线程的结构化归纳，不是用户原话搬运。
-- 用户原话证据摘要：${input.evidence.slice(0, 3).map((item) => truncate(item, 90)).join(' / ')}
+- AI 提炼：以上内容是 Agent2 对当前卡片线程的结构化归纳。
+- 用户原话：${input.userEvidenceSources.slice(0, 3).map((item) => `“${truncate(item.quote, 150)}”`).join(' / ')}
+- 证据消息：${input.userEvidenceSources.slice(0, 3).map((item) => item.messageId).join(' / ')}
 - 来源：Agent2 ${formatFlushReason(input.reason)}
 - 置信度：${Math.round(input.confidence * 100)}%
 - 记录状态：自动保存成功；卡片写入记录与来源证据已更新。`
+}
+
+function matchUserEvidenceSources(
+  evidence: string[],
+  userMessages: Array<{ id: string; content: string }>,
+): UserEvidenceSource[] {
+  const available = userMessages
+    .map((message) => ({ ...message, quote: normalizeInlineText(message.content, 220) }))
+    .filter((message) => message.quote.length > 0)
+  if (available.length === 0) return []
+
+  const used = new Set<string>()
+  return evidence.map((summary, index) => {
+    const candidates = available.filter((message) => !used.has(message.id))
+    const pool = candidates.length > 0 ? candidates : available
+    const best = pool.reduce((current, candidate) => {
+      return evidenceOverlapScore(summary, candidate.quote) > evidenceOverlapScore(summary, current.quote)
+        ? candidate
+        : current
+    }, pool[Math.max(0, pool.length - 1 - index)] || pool[pool.length - 1])
+    used.add(best.id)
+    return { messageId: best.id, summary, quote: best.quote }
+  }).filter((source, index, items) => items.findIndex((item) => item.messageId === source.messageId) === index)
+}
+
+function evidenceOverlapScore(summary: string, quote: string): number {
+  const tokens = uniqueStrings([
+    ...summary.match(/[\p{Script=Han}]{2,8}/gu) || [],
+    ...summary.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) || [],
+  ])
+  return tokens.reduce((score, token) => score + (quote.toLowerCase().includes(token.toLowerCase()) ? token.length : 0), 0)
 }
 
 const CARD_FIELD_HEADINGS: Record<keyof FlushDecision['cardFields'], string> = {

@@ -1,3 +1,5 @@
+import { getCurrentSessionId } from './agent-context'
+
 /**
  * 通知事件总线 — 将服务器端事件写入 vaultMemory 表供前端轮询消费
  */
@@ -35,6 +37,8 @@ export interface ResourceProgressEvent {
   path?: string
   fileName?: string
   error?: string
+  sourceSessionId?: string
+  workflowId?: string
   timestamp: number
 }
 
@@ -101,6 +105,8 @@ async function persistResourceProgress(vaultId: string, event: ResourceProgressE
   const { prisma } = await import('@/lib/db')
   try {
     const key = resourceJobKey(event)
+    const sourceSessionId = event.sourceSessionId || getCurrentSessionId()
+    const workflowId = event.workflowId || (sourceSessionId ? `${sourceSessionId}:${event.topic || 'untitled'}` : undefined)
     const existing = await prisma.resourceGenerationJob.findFirst({
       where: {
         vaultId,
@@ -119,7 +125,7 @@ async function persistResourceProgress(vaultId: string, event: ResourceProgressE
       path: event.path,
       fileName: event.fileName,
       error: event.error,
-      metadata: JSON.stringify({ jobKey: key, lastEventAt: event.timestamp }),
+      metadata: JSON.stringify({ jobKey: key, lastEventAt: event.timestamp, sourceSessionId, workflowId }),
     }
     if (existing) {
       await prisma.resourceGenerationJob.update({

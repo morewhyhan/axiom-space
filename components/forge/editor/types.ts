@@ -6,6 +6,8 @@ export interface WikiSuggestion {
 
 export type ResourceManifestItem = {
   type: string
+  kind?: string
+  format?: string
   title: string
   path: string
   ref?: string
@@ -13,6 +15,8 @@ export type ResourceManifestItem = {
   rawRef?: string
   mp4Path?: string
   mp4Ref?: string
+  previewPath?: string
+  previewRef?: string
   fileName: string
   status?: string
   source?: string
@@ -27,6 +31,7 @@ export type ResourceManifestItem = {
 export type RagCardStatusValue = 'pending' | 'indexing' | 'indexed' | 'failed' | 'disabled'
 
 export type RagCardStatus = {
+  provider?: string
   status: RagCardStatusValue
   synced: boolean
   index: {
@@ -34,6 +39,16 @@ export type RagCardStatus = {
     lastError: string | null
     indexedAt: string | null
     lastSyncedAt: string | null
+  } | null
+  semantic?: {
+    status: RagCardStatusValue
+    indexedAt: string | null
+    lastError: string | null
+  } | null
+  graph?: {
+    status: RagCardStatusValue
+    indexedAt: string | null
+    lastError: string | null
   } | null
 }
 

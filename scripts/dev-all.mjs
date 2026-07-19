@@ -104,7 +104,7 @@ process.on('SIGINT', () => shutdown('SIGINT'))
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 
 await ensureDockerAvailable()
-await run('docker', ['compose', 'up', '-d', 'postgres', 'redis', 'ollama'])
+await run('docker', ['compose', 'up', '-d', 'postgres', 'redis', 'qdrant', 'ollama'])
 await ensureOllamaModel(process.env.OLLAMA_EMBEDDING_MODEL || 'bge-m3:latest')
 await run('docker', ['compose', 'up', '-d', 'lightrag'])
 await run('pnpm', ['exec', 'prisma', 'db', 'push'])

@@ -4,18 +4,21 @@ import { useEffect, useMemo, useRef } from 'react'
 import { FileText } from 'lucide-react'
 import { HudPanel } from '@/components/ui'
 import { parseMD, renderMermaidBlocks } from '@/lib/markdown'
+import { MindmapPreview } from './mindmap-preview'
 import { VideoCard } from './video-card'
 import type { GeneratedResourceItem } from './types'
 
 type ResourcePreviewProps = {
   item: GeneratedResourceItem
   expanded?: boolean
+  pure?: boolean
+  fullscreen?: boolean
 }
 
-export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps) {
+export function ResourcePreview({ item, expanded = false, pure = false, fullscreen = false }: ResourcePreviewProps) {
   const ref = useRef<HTMLDivElement>(null)
   const content = item.content || ''
-  const isMermaid = item.type === 'mindmap' || item.type === 'diagram'
+  const isMermaid = item.type === 'diagram'
   const markdown = useMemo(() => {
     if (!content) return '<p style="color:var(--text-dim);font-style:italic;">资源内容为空</p>'
     if (isMermaid) return parseMD(`\`\`\`mermaid\n${normalizeMermaidContent(content, item.type)}\n\`\`\``)
@@ -44,16 +47,40 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
         duration={90}
         topic={item.title || ''}
         expanded={expanded}
+        minimal={pure}
+        fullscreen={fullscreen}
+      />
+    )
+  }
+
+  if (item.type === 'mindmap') {
+    return (
+      <MindmapPreview
+        content={normalizeMermaidContent(content, item.type)}
+        expanded={expanded}
+        fullscreen={fullscreen}
+        title={item.title || '知识导图'}
       />
     )
   }
 
   if (item.type === 'pdf' && content.startsWith('data:application/pdf')) {
-    return <iframe src={content} className={`${expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />
+    return <iframe src={content} className={`${fullscreen ? 'h-full min-h-[70vh]' : expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />
   }
 
   if (item.type === 'svg') {
-    return <iframe sandbox="" srcDoc={extractSvgContent(content)} className={`${expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />
+    return <iframe sandbox="" srcDoc={extractSvgContent(content)} className={`${fullscreen ? 'h-full min-h-[70vh]' : expanded ? 'h-[82vh]' : 'h-80'} w-full rounded-lg bg-white`} title={item.title} />
+  }
+
+  if ((item.type === 'docx' || item.type === 'ppt') && item.previewContent) {
+    return (
+      <iframe
+        sandbox=""
+        srcDoc={item.previewContent}
+        className={`${fullscreen ? 'h-full min-h-[70vh]' : expanded ? 'h-[82vh]' : 'h-[62vh]'} w-full rounded-lg bg-white`}
+        title={`${item.title} 文档预览`}
+      />
+    )
   }
 
   if (item.type === 'docx' || item.type === 'ppt') {
@@ -61,7 +88,7 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
       <HudPanel as="div" className="flex min-h-44 flex-col items-center justify-center rounded-lg text-center">
         <FileText className="mb-3 h-10 w-10 text-white/35" />
         <div className="text-white/70">{item.title}</div>
-        <div className="mt-1 text-xs text-white/35">此格式需要下载后用本地应用打开</div>
+        <div className="mt-1 text-xs text-white/35">预览文件暂不可用，可下载原文件打开</div>
       </HudPanel>
     )
   }
@@ -102,7 +129,7 @@ export function ResourcePreview({ item, expanded = false }: ResourcePreviewProps
     return (
       <div
         ref={ref}
-        className={`markdown-body text-white/80 ${expanded ? 'max-w-4xl' : ''}`}
+        className={`markdown-body text-white/80 ${fullscreen ? 'mx-auto w-full max-w-6xl px-[clamp(0rem,3vw,3rem)] py-4 text-[clamp(1rem,1.15vw,1.2rem)]' : expanded ? 'max-w-4xl' : ''}`}
         dangerouslySetInnerHTML={{ __html: markdown }}
       />
     )

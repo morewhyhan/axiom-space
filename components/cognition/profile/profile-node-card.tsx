@@ -1,8 +1,14 @@
 'use client'
 
-import { useState, type CSSProperties } from 'react'
-import { Check, CircleHelp, Edit3, X } from 'lucide-react'
+import { useEffect, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
+import { Check, CircleHelp, Edit3, ExternalLink, Loader2, X } from 'lucide-react'
 import { HudPanel } from '@/components/ui'
+import {
+  canNavigateProfileEvidenceSource,
+  useOpenProfileEvidenceSource,
+  type ProfileEvidenceSourceType,
+} from '@/hooks/use-cognition'
 import type { ProfileNode, Verdict } from './model'
 
 type ProfileFeedbackInput = {
@@ -36,6 +42,21 @@ export function ProfileNodeCard({
   onSubmitFeedback,
 }: ProfileNodeCardProps) {
   const [evidenceOpen, setEvidenceOpen] = useState(false)
+  const openEvidenceSource = useOpenProfileEvidenceSource()
+
+  useEffect(() => {
+    if (!evidenceOpen) return
+    const previousOverflow = document.body.style.overflow
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEvidenceOpen(false)
+    }
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [evidenceOpen])
 
   const submit = (verdict: Verdict, confidence: number, summary: string) => {
     onSubmitFeedback({
@@ -78,6 +99,7 @@ export function ProfileNodeCard({
             <button
               type="button"
               className="profile-verdict-btn"
+              data-testid="profile-node-evidence-open"
               onClick={() => setEvidenceOpen(true)}
               title="查看这条画像的证据"
             >
@@ -150,19 +172,10 @@ export function ProfileNodeCard({
         </div>
       ) : (
         <>
-          <p className="profile-node-claim" style={{ margin: '0 0 8px', color: 'rgba(255,255,255,0.86)', fontSize: 15, lineHeight: 1.5 }}>
-            {node.claim}
-          </p>
-          <p className="profile-node-explanation" style={{ margin: '0 0 6px', color: 'rgba(255,255,255,0.4)', fontSize: 13, lineHeight: 1.5 }}>
-            {node.explanation}
-          </p>
-          <p className="profile-node-effect" style={{
-            margin: '10px 0 0', padding: '8px 10px', borderRadius: 10,
-            background: 'rgba(255,255,255,0.02)', color: 'rgba(255,255,255,0.25)',
-            fontSize: 12, lineHeight: 1.4,
-          }}>
-            {node.promptEffect}
-          </p>
+          <HumanField label="AI 目前怎样理解你" value={node.claim} strong />
+          <HumanField label="为什么这样判断" value={node.explanation} />
+          <HumanField label="下一轮会怎样改变" value={node.promptEffect} accented />
+          <HumanField label="如何确认或推翻" value={node.verification} />
         </>
       )}
 
@@ -205,150 +218,165 @@ export function ProfileNodeCard({
         </button>
       </div>
 
-      {evidenceOpen && node.evidenceDetail && (
+      {evidenceOpen && node.evidenceDetail && createPortal(
         <div
-          role="dialog"
-          aria-modal="false"
-          aria-label="画像证据"
-          style={{
-            position: 'fixed',
-            right: 28,
-            top: 96,
-            width: 'min(420px, calc(100vw - 40px))',
-            maxHeight: 'min(620px, calc(100vh - 128px))',
-            zIndex: 260,
-            overflow: 'hidden',
-            borderRadius: 16,
-            border: '1px solid rgba(103,232,249,0.18)',
-            background: 'rgba(7,11,23,0.96)',
-            boxShadow: '0 24px 80px rgba(0,0,0,0.42)',
-            backdropFilter: 'blur(18px)',
+          className="profile-evidence-backdrop"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) setEvidenceOpen(false)
           }}
         >
-          <div style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 12,
-            padding: '14px 16px',
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
-          }}>
-            <div>
-              <div style={{
-                fontFamily: 'var(--font-jetbrains-mono), monospace',
-                fontSize: 9,
-                letterSpacing: '0.16em',
-                textTransform: 'uppercase',
-                color: 'rgba(103,232,249,0.55)',
-              }}>
-                Evidence Trace
+          <section
+            className="profile-evidence-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`profile-evidence-title-${node.id}`}
+            data-testid="profile-evidence-dialog"
+          >
+            <header className="profile-evidence-header">
+              <div className="profile-evidence-heading">
+                <span className="profile-evidence-kicker">Evidence Trace · 可追溯画像证据</span>
+                <h2 id={`profile-evidence-title-${node.id}`}>{node.caption}</h2>
+                <p>从原始记录到画像判断，再到下一轮教学动作</p>
               </div>
-              <div style={{ marginTop: 4, color: 'rgba(255,255,255,0.82)', fontSize: 14, lineHeight: 1.35 }}>
-                {node.caption}
+              <div className="profile-evidence-summary">
+                <span>可信度 <strong>{Math.round(node.confidence * 100)}%</strong></span>
+                <span>状态 <strong>{node.freshness}</strong></span>
+                <span>证据 <strong>{node.evidenceTrace?.evidenceCount ?? 1} 条</strong></span>
               </div>
-              <div style={{ marginTop: 3, color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>
-                当前可信度 {Math.round(node.confidence * 100)}% · {node.freshness}
-              </div>
-            </div>
-            <button
-              type="button"
-              className="profile-verdict-btn"
-              onClick={() => setEvidenceOpen(false)}
-              title="关闭证据面板"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-          <div style={{
-            maxHeight: 'calc(min(620px, calc(100vh - 128px)) - 76px)',
-            overflowY: 'auto',
-            padding: '14px 16px 16px',
-          }}>
-            {node.evidenceTrace ? (
-              <div data-testid="profile-evidence-trace" style={{ display: 'grid', gap: 10 }}>
-                <EvidenceField label="画像判断" value={node.claim} />
-                {node.evidenceTrace.evidenceCount && (
-                  <EvidenceField
-                    label="长期观察积累"
-                    value={`这条结论由 ${node.evidenceTrace.evidenceCount} 条相关观察合并而来。`}
-                  />
-                )}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <button
+                type="button"
+                className="profile-evidence-close"
+                onClick={() => setEvidenceOpen(false)}
+                title="关闭证据面板"
+                aria-label="关闭证据面板"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="profile-evidence-body">
+              {node.evidenceTrace ? (
+                <div data-testid="profile-evidence-trace" className="profile-evidence-grid">
+                  <EvidenceField label="画像判断" value={node.claim} wide featured />
+                  {node.evidenceTrace.evidenceCount && (
+                    <EvidenceField
+                      label="长期观察积累"
+                      value={`这条结论由 ${node.evidenceTrace.evidenceCount} 条相关观察合并而来，不是一次对话后的固定标签。`}
+                    />
+                  )}
                   <EvidenceField
                     label="判断性质"
                     value={node.evidenceTrace.sourceType === 'assessmentResult' ? '评估结果' : '证据支持的观察'}
                   />
                   <EvidenceField label="验证状态" value={node.freshness} />
-                </div>
-                <EvidenceField label="证据内容" value={node.evidenceTrace.evidence} />
-                {node.evidenceTrace.observableBehavior && (
-                  <EvidenceField label="我们观察到" value={node.evidenceTrace.observableBehavior} />
-                )}
-                {node.evidenceTrace.mechanismHypothesis && (
-                  <EvidenceField label="我们目前的理解" value={node.evidenceTrace.mechanismHypothesis} />
-                )}
-                {node.evidenceTrace.competingHypotheses?.length ? (
-                  <EvidenceField label="竞争解释" value={node.evidenceTrace.competingHypotheses.join('\n')} />
-                ) : null}
-                {node.evidenceTrace.discriminatingEvidence && (
-                  <EvidenceField label="鉴别与排除依据" value={node.evidenceTrace.discriminatingEvidence} />
-                )}
-                <EvidenceField
-                  label="来源对象"
-                  value={`${node.evidenceTrace.sourceLabel} · ${node.evidenceTrace.sourceLocation}\n${node.evidenceTrace.sourceId}`}
-                />
-                {node.evidenceTrace.analysisMode && (
-                  <EvidenceField label="分析方式" value={node.evidenceTrace.analysisMode} />
-                )}
-                <EvidenceField
-                  label="接下来会这样帮助你"
-                  value={node.evidenceTrace.teachingIntervention || node.promptEffect}
-                />
-                {node.evidenceTrace.verificationCriterion && (
-                  <EvidenceField label="验证标准" value={node.evidenceTrace.verificationCriterion} />
-                )}
-                {node.evidenceTrace.interventionProtocol && (
-                  <>
+                  <EvidenceField label="证据内容" value={node.evidenceTrace.evidence} wide featured />
+                  {node.evidenceTrace.observableBehavior && (
+                    <EvidenceField label="我们观察到" value={node.evidenceTrace.observableBehavior} />
+                  )}
+                  {node.evidenceTrace.mechanismHypothesis && (
+                    <EvidenceField label="我们目前的理解" value={node.evidenceTrace.mechanismHypothesis} />
+                  )}
+                  {node.evidenceTrace.competingHypotheses?.length ? (
+                    <EvidenceField label="竞争解释" value={node.evidenceTrace.competingHypotheses.join('\n')} />
+                  ) : null}
+                  {node.evidenceTrace.discriminatingEvidence && (
+                    <EvidenceField label="鉴别与排除依据" value={node.evidenceTrace.discriminatingEvidence} />
+                  )}
+                  {node.evidenceTrace.controlVariable && (
+                    <EvidenceField label="本轮只改变这一件事" value={node.evidenceTrace.controlVariable} />
+                  )}
+                  <EvidenceSources
+                    sources={node.evidenceTrace.sources}
+                    sourceLocation={node.evidenceTrace.sourceLocation}
+                    pendingSourceId={openEvidenceSource.isPending ? openEvidenceSource.variables?.sourceId : undefined}
+                    error={openEvidenceSource.error?.message}
+                    onOpen={(source) => openEvidenceSource.mutate(source)}
+                  />
+                  {node.evidenceTrace.analysisMode && (
+                    <EvidenceField label="分析方式" value={node.evidenceTrace.analysisMode} />
+                  )}
+                  <EvidenceField
+                    label="接下来会这样帮助你"
+                    value={node.evidenceTrace.teachingIntervention || node.promptEffect}
+                    featured
+                  />
+                  {node.evidenceTrace.verificationCriterion && (
+                    <EvidenceField label="验证标准" value={node.evidenceTrace.verificationCriterion} featured />
+                  )}
+                  {node.evidenceTrace.failureBranch && (
+                    <EvidenceField label="无效时怎样调整" value={node.evidenceTrace.failureBranch} />
+                  )}
+                  {node.evidenceTrace.stopCondition && (
+                    <EvidenceField label="何时停止干预" value={node.evidenceTrace.stopCondition} />
+                  )}
+                  {node.evidenceTrace.interventionProtocol && (
+                    <>
+                      <EvidenceField
+                        label="执行顺序"
+                        value={node.evidenceTrace.interventionProtocol.executionSteps.map((step, index) => `${index + 1}. ${step}`).join('\n')}
+                      />
+                      <EvidenceField label="本轮禁止" value={node.evidenceTrace.interventionProtocol.forbiddenActions.join('\n')} />
+                      <EvidenceField label="失败后调整" value={node.evidenceTrace.interventionProtocol.failureBranch} />
+                      <EvidenceField label="停止条件" value={node.evidenceTrace.interventionProtocol.stopCondition} />
+                    </>
+                  )}
+                  {(node.evidenceTrace.scope || node.evidenceTrace.status) && (
                     <EvidenceField
-                      label="执行顺序"
-                      value={node.evidenceTrace.interventionProtocol.executionSteps.map((step, index) => `${index + 1}. ${step}`).join('\n')}
+                      label="这条结论目前适用于"
+                      value={[profileScopeLabel(node.evidenceTrace.scope), profileEvidenceStatusLabel(node.evidenceTrace.status)].filter(Boolean).join(' · ')}
                     />
-                    <EvidenceField label="本轮禁止" value={node.evidenceTrace.interventionProtocol.forbiddenActions.join('\n')} />
-                    <EvidenceField label="失败后调整" value={node.evidenceTrace.interventionProtocol.failureBranch} />
-                    <EvidenceField label="停止条件" value={node.evidenceTrace.interventionProtocol.stopCondition} />
-                  </>
-                )}
-                {(node.evidenceTrace.scope || node.evidenceTrace.status) && (
-                  <EvidenceField
-                    label="这条结论目前适用于"
-                    value={[profileScopeLabel(node.evidenceTrace.scope), profileEvidenceStatusLabel(node.evidenceTrace.status)].filter(Boolean).join(' · ')}
-                  />
-                )}
-                {node.evidenceTrace.mergedObservations?.length ? (
-                  <EvidenceField label="合并的观察" value={node.evidenceTrace.mergedObservations.join('\n')} />
-                ) : null}
-                {node.feedback && (
-                  <EvidenceField
-                    label="用户校验"
-                    value={`${node.feedback.verdict} · ${node.feedback.summary || node.feedback.note || '已记录反馈'}`}
-                  />
-                )}
-              </div>
-            ) : (
-              <div style={{
-                whiteSpace: 'pre-wrap',
-                fontFamily: 'var(--font-jetbrains-mono), monospace',
-                fontSize: 11,
-                lineHeight: 1.65,
-                color: 'rgba(207,250,254,0.72)',
-              }}>
-                {node.evidenceDetail}
-              </div>
-            )}
-          </div>
-        </div>
+                  )}
+                  {node.evidenceTrace.mergedObservations?.length ? (
+                    <EvidenceField label="合并的观察" value={node.evidenceTrace.mergedObservations.join('\n')} wide />
+                  ) : null}
+                  {node.feedback && (
+                    <EvidenceField
+                      label="用户校验"
+                      value={`${node.feedback.verdict} · ${node.feedback.summary || node.feedback.note || '已记录反馈'}`}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="profile-evidence-raw">{node.evidenceDetail}</div>
+              )}
+            </div>
+          </section>
+        </div>,
+        document.body,
       )}
     </HudPanel>
+  )
+}
+
+function HumanField({
+  label,
+  value,
+  strong = false,
+  accented = false,
+}: {
+  label: string
+  value: string
+  strong?: boolean
+  accented?: boolean
+}) {
+  return (
+    <div style={{
+      marginTop: 7,
+      padding: accented ? '8px 10px' : 0,
+      borderRadius: accented ? 10 : 0,
+      background: accented ? 'rgba(103,232,249,0.035)' : 'transparent',
+    }}>
+      <div style={{ color: accented ? 'rgba(103,232,249,0.54)' : 'rgba(255,255,255,0.3)', fontSize: 9, marginBottom: 3 }}>
+        {label}
+      </div>
+      <div style={{
+        color: strong ? 'rgba(255,255,255,0.86)' : accented ? 'rgba(207,250,254,0.68)' : 'rgba(255,255,255,0.46)',
+        fontSize: strong ? 14 : 12,
+        lineHeight: 1.5,
+      }}>
+        {value}
+      </div>
+    </div>
   )
 }
 
@@ -372,29 +400,87 @@ function profileEvidenceStatusLabel(status?: string): string {
   return status ? labels[status] || status : ''
 }
 
-function EvidenceField({ label, value }: { label: string; value: string }) {
+function EvidenceSources({
+  sources,
+  sourceLocation,
+  pendingSourceId,
+  error,
+  onOpen,
+}: {
+  sources: Array<{ sourceLabel: string; sourceType: ProfileEvidenceSourceType; sourceId: string }>
+  sourceLocation: string
+  pendingSourceId?: string
+  error?: string
+  onOpen: (source: { sourceType: ProfileEvidenceSourceType; sourceId: string }) => void
+}) {
   return (
-    <div style={{
-      border: '1px solid rgba(255,255,255,0.07)',
-      borderRadius: 8,
-      background: 'rgba(255,255,255,0.025)',
-      padding: '9px 10px',
-    }}>
-      <div style={{
-        marginBottom: 4,
-        color: 'rgba(103,232,249,0.5)',
-        fontFamily: 'var(--font-jetbrains-mono), monospace',
-        fontSize: 9,
-      }}>
+    <div className="profile-evidence-field profile-evidence-field-wide profile-evidence-sources">
+      <div className="profile-evidence-field-label">
+        来源对象 · {sourceLocation}
+      </div>
+      <div className="profile-evidence-source-list">
+        {sources.map((source) => {
+          const navigable = canNavigateProfileEvidenceSource(source.sourceType)
+          const pending = pendingSourceId === source.sourceId
+          return (
+            <div
+              key={`${source.sourceType}:${source.sourceId}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                minWidth: 0,
+                color: 'rgba(226,232,240,0.76)',
+                fontSize: 13,
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>{source.sourceLabel}</span>
+              <span className="mono" style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.45 }} title={source.sourceId}>
+                {source.sourceId}
+              </span>
+              {navigable && (
+                <button
+                  type="button"
+                  className="profile-verdict-btn"
+                  data-testid={`profile-evidence-source-link-${source.sourceType}-${source.sourceId}`}
+                  disabled={pending}
+                  onClick={() => onOpen({ sourceType: source.sourceType, sourceId: source.sourceId })}
+                  title={source.sourceType === 'card' ? '打开来源卡片' : '回到来源对话'}
+                >
+                  {pending ? <Loader2 className="h-3 w-3 animate-spin" /> : <ExternalLink className="h-3 w-3" />}
+                  {source.sourceType === 'card' ? '打开卡片' : '回到原记录'}
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {error && (
+        <div className="mt-2 text-red-200/60" data-testid="profile-evidence-source-error" style={{ fontSize: 10 }}>
+          {error}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EvidenceField({
+  label,
+  value,
+  wide = false,
+  featured = false,
+}: {
+  label: string
+  value: string
+  wide?: boolean
+  featured?: boolean
+}) {
+  return (
+    <div className={`profile-evidence-field${wide ? ' profile-evidence-field-wide' : ''}${featured ? ' is-featured' : ''}`}>
+      <div className="profile-evidence-field-label">
         {label}
       </div>
-      <div style={{
-        whiteSpace: 'pre-wrap',
-        overflowWrap: 'anywhere',
-        color: 'rgba(226,232,240,0.76)',
-        fontSize: 12,
-        lineHeight: 1.55,
-      }}>
+      <div className="profile-evidence-field-value">
         {value}
       </div>
     </div>

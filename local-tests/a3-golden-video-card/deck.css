@@ -3130,6 +3130,297 @@ body.director::before {
   margin-top: clamp(11px, 1.35vh, 15px);
 }
 
+/* V18 competition narrative inserts --------------------------------------- */
+.v12-industry-slide .v8-title,
+.v12-architecture-slide .v8-title,
+.v12-innovation-slide .v8-title,
+.v12-evidence-slide .v8-title,
+.v12-outlook-slide .v8-title {
+  max-width: 34ch;
+  font-size: clamp(38px, 3.2vw, 58px);
+}
+
+.v12-signal-grid {
+  gap: clamp(10px, 1vw, 16px);
+  margin-top: clamp(14px, 1.8vh, 20px);
+}
+
+.v12-signal-grid > .v8-card {
+  min-height: clamp(132px, 15vh, 166px);
+  padding: clamp(14px, 1.2vw, 19px);
+}
+
+.v12-signal-grid > .v8-card b {
+  margin-top: 7px;
+  color: var(--teal-deep);
+  font: 360 clamp(36px, 3vw, 54px) / 1 var(--sans);
+}
+
+.v12-signal-grid > .v8-card span {
+  margin-top: 9px;
+  font-size: clamp(12px, 0.8vw, 15px);
+}
+
+.v12-architecture-flow {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) auto minmax(0, 1.18fr) auto minmax(0, 1.15fr) auto minmax(0, 0.85fr);
+  align-items: stretch;
+  margin-top: clamp(14px, 1.8vh, 20px);
+}
+
+.v12-architecture-flow > article {
+  min-width: 0;
+  min-height: clamp(120px, 14vh, 154px);
+  padding: clamp(13px, 1.1vw, 18px);
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.v12-architecture-flow > article.active {
+  border-color: var(--line-strong);
+  background: var(--teal-soft);
+}
+
+.v12-architecture-flow small,
+.v12-architecture-flow b,
+.v12-architecture-flow span {
+  display: block;
+}
+
+.v12-architecture-flow small {
+  color: var(--teal);
+  font: 750 10px / 1.2 var(--mono);
+}
+
+.v12-architecture-flow b {
+  margin-top: 8px;
+  color: var(--graphite);
+  font-size: clamp(15px, 1vw, 19px);
+  line-height: 1.32;
+}
+
+.v12-architecture-flow span {
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: clamp(11px, 0.72vw, 14px);
+  line-height: 1.4;
+}
+
+.v12-architecture-flow > i {
+  align-self: center;
+  padding: 0 8px;
+  color: var(--teal);
+  font-style: normal;
+}
+
+.v12-tech-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: clamp(10px, 1.25vh, 14px);
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.v12-tech-rail > span {
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: clamp(10px, 0.66vw, 13px);
+}
+
+.v12-tech-rail b {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--teal-deep);
+  font-size: clamp(11px, 0.72vw, 14px);
+}
+
+.v12-innovation-grid {
+  gap: clamp(10px, 1vw, 16px);
+  margin-top: clamp(13px, 1.6vh, 18px);
+}
+
+.v12-innovation-grid > article {
+  min-height: clamp(122px, 14vh, 154px);
+  padding: clamp(13px, 1.1vw, 18px);
+}
+
+.v12-difficulty-strip,
+.v12-value-strip {
+  margin-top: clamp(10px, 1.25vh, 14px);
+}
+
+.v12-difficulty-strip > article,
+.v12-value-strip > article {
+  padding: 11px 14px;
+}
+
+.v12-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(10px, 1vw, 16px);
+  margin-top: clamp(13px, 1.6vh, 18px);
+}
+
+.v12-metric-grid > article {
+  min-width: 0;
+  min-height: clamp(105px, 12.5vh, 136px);
+  padding: clamp(12px, 1vw, 16px);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--teal);
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.v12-metric-grid small,
+.v12-metric-grid b,
+.v12-metric-grid span {
+  display: block;
+}
+
+.v12-metric-grid small {
+  color: var(--teal);
+  font: 750 10px / 1.2 var(--mono);
+}
+
+.v12-metric-grid b {
+  margin-top: 6px;
+  color: var(--graphite);
+  font: 360 clamp(30px, 2.45vw, 45px) / 1 var(--sans);
+}
+
+.v12-metric-grid span {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: clamp(11px, 0.72vw, 14px);
+}
+
+.v12-outlook-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: clamp(16px, 1.6vw, 24px);
+  margin-top: clamp(14px, 1.8vh, 20px);
+}
+
+.v12-outlook-layout > section {
+  min-width: 0;
+}
+
+.v12-outlook-layout > section > small {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--teal);
+  font: 750 10px / 1.2 var(--mono);
+}
+
+.v12-role-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.v12-role-grid > article {
+  min-width: 0;
+  padding: 12px 14px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.v12-role-grid b,
+.v12-role-grid span {
+  display: block;
+}
+
+.v12-role-grid b {
+  color: var(--graphite);
+  font-size: clamp(14px, 0.92vw, 17px);
+}
+
+.v12-role-grid span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: clamp(10px, 0.66vw, 13px);
+  line-height: 1.35;
+}
+
+.v12-roadmap {
+  display: grid;
+  gap: 8px;
+}
+
+.v12-roadmap > article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-height: 54px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  background: var(--teal-soft);
+}
+
+.v12-roadmap b {
+  color: var(--teal);
+  font: 750 11px / 1 var(--mono);
+}
+
+.v12-roadmap span {
+  color: var(--graphite-soft);
+  font-size: clamp(12px, 0.78vw, 15px);
+  line-height: 1.35;
+}
+
+.v12-outlook-slide .v8-final-line {
+  margin-top: clamp(11px, 1.35vh, 15px);
+}
+
+/* V23 communication hierarchy --------------------------------------------- */
+[data-scene="01"][data-kind="content"] .v8-kicker,
+[data-scene="13"][data-kind="content"] .v8-kicker {
+  color: var(--teal-deep);
+  font-family: var(--sans);
+  font-size: clamp(18px, 1.25vw, 24px);
+  font-weight: 680;
+  letter-spacing: 0.015em;
+}
+
+[data-scene="01"][data-kind="content"] .v8-story-summary,
+[data-scene="13"][data-kind="content"] .v8-story-summary {
+  display: none;
+}
+
+[data-scene="13"][data-kind="content"] .v8-page {
+  align-content: center;
+  min-height: 100%;
+}
+
+[data-scene="13"][data-kind="content"] .v8-lead {
+  max-width: 66rem;
+  margin-top: 0;
+}
+
+[data-scene="13"][data-kind="content"] .v8-title {
+  max-width: 17ch;
+  font-size: clamp(58px, 5.2vw, 96px);
+}
+
+.v23-final-line {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 68rem;
+  margin-top: clamp(42px, 6vh, 74px);
+}
+
+.v23-final-line strong {
+  border-left: 0;
+  padding: clamp(20px, 2vw, 30px);
+  font-size: clamp(22px, 1.65vw, 32px);
+  font-weight: 620;
+  line-height: 1.45;
+}
+
 [data-scene="11"] .v8-archive {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

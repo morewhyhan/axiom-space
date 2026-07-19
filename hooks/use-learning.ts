@@ -216,7 +216,7 @@ export function useUpdateStepProgress() {
       }
       return data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats', currentVaultId] })
@@ -321,12 +321,48 @@ export interface ImportDocumentResult {
   pathId: string | null
 }
 
+export interface DocumentImportJobStatus {
+  jobId: string
+  status: 'queued' | 'running' | 'completed' | 'failed'
+  stage: string
+  label: string
+  message: string
+  progress: number
+  updatedAt: string
+  error?: string
+}
+
+export function useDocumentImportProgress(jobId: string | null) {
+  const currentVaultId = useAppStore((s) => s.currentVaultId)
+  return useQuery({
+    queryKey: ['document-import-progress', currentVaultId, jobId],
+    enabled: !!currentVaultId && !!jobId,
+    queryFn: async () => {
+      if (!currentVaultId || !jobId) throw new Error('Import job is not ready')
+      const res = await client.api.learning['import-document'][':jobId'].status.$get({
+        param: { jobId },
+        query: { vid: currentVaultId },
+      })
+      const data = await res.json() as ApiResult<{ job: DocumentImportJobStatus }>
+      if (!data.success) throw new Error(data.error || 'Failed to load import progress')
+      return data.job
+    },
+    retry: 8,
+    retryDelay: 250,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'completed' || status === 'failed' ? false : 650
+    },
+  })
+}
+
 export function useImportDocument() {
   const currentVaultId = useAppStore((s) => s.currentVaultId)
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async (params: {
+      jobId: string
       document?: string
       topic: string
       sourceTitle?: string
@@ -426,12 +462,12 @@ export interface DimensionScore {
 export interface EducationProfile {
   userId: string
   dimensions: {
-    depth: DimensionScore
-    breadth: DimensionScore
-    connection: DimensionScore
-    expression: DimensionScore
-    application: DimensionScore
-    learning_pace: DimensionScore
+    learningGoal: DimensionScore
+    currentFoundation: DimensionScore
+    bestExplanationPath: DimensionScore
+    stuckPattern: DimensionScore
+    paceAndLoad: DimensionScore
+    masteryCheck: DimensionScore
   }
   updateHistory: Array<{
     timestamp: number
@@ -676,7 +712,7 @@ export interface PushableResource {
 }
 
 export type PushSuggestionBoxType = 'link' | 'resource'
-export type PushSuggestionItemType = 'link' | 'card' | 'resource' | 'task_group'
+export type PushSuggestionItemType = 'link' | 'card' | 'resource'
 export type PushSuggestionStatus = 'pending' | 'accepted' | 'rejected' | 'edited' | 'executed'
 
 export interface PushSuggestion {
@@ -799,7 +835,7 @@ export function useExecutePushSuggestion() {
       if (!data.success) throw new Error(data.error || 'Execute failed')
       return data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['push-suggestions', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['learning-paths', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['galaxy', currentVaultId] })
@@ -808,6 +844,22 @@ export function useExecutePushSuggestion() {
       queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
       queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
       void useAgentStore.getState().loadSessions()
+      const openCard = data.result?.openCard
+      if (openCard && typeof openCard === 'object') {
+        const card = openCard as { id?: unknown; title?: unknown; type?: unknown }
+        if (typeof card.id === 'string') {
+          const app = useAppStore.getState()
+          app.setSelectedNode({
+            id: card.id,
+            title: typeof card.title === 'string' ? card.title : '生成资源',
+            type: typeof card.type === 'string' ? card.type : 'literature',
+          })
+          app.setRightPanelView('read')
+          app.setPanelLayout({ left: [], right: ['editor'] })
+          app.setChatPanelOpen(false)
+          app.setMode('forge')
+        }
+      }
     },
   })
 }

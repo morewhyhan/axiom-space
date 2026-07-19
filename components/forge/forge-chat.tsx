@@ -8,7 +8,7 @@ import { useAgent } from '@/hooks/use-agent'
 import { useLearningPaths } from '@/hooks/use-learning'
 import { toast } from '@/lib/ui-feedback'
 import { useAppStore } from '@/stores/mode-store'
-import type { AgentConfirmationRequest } from '@/stores/agent-store'
+import type { AgentConfirmationRequest, AgentMessageAction } from '@/stores/agent-store'
 import { useAgentStore } from '@/stores/agent-store'
 import { filterAgentCommands, findAgentCommand } from '@/lib/agent-commands'
 import { ChatMessage } from './chat'
@@ -52,11 +52,12 @@ export default function ForgeChat() {
     ?? null
   const currentSession = sessions.find((session) => session.id === sessionId) ?? null
   const isConversationSession = !!currentSession && !currentSession.cardId && !currentSession.pathId
-  const canChat = (!!selectedNode && selectedNode.type !== 'permanent') || isConversationSession
+  const isReadOnlySession = currentSession?.status === 'completed' || currentSession?.threadStatus === 'archived'
+  const canChat = !isReadOnlySession && ((!!selectedNode && selectedNode.type !== 'permanent') || isConversationSession)
   const commandQuery = inputValue.trim().startsWith('/') ? inputValue.trim().slice(1) : ''
   const filteredCommands = useMemo(() => filterAgentCommands(commandQuery), [commandQuery])
-  const chatPlaceholder = selectedNode?.type === 'permanent'
-    ? '永久知识卡已沉淀，旧对话已归档'
+  const chatPlaceholder = isReadOnlySession
+    ? '历史对话为只读记录，可新建对话继续讨论'
     : !canChat
       ? '先选择一个学习任务、灵感草稿，或新建自由对话...'
       : isConversationSession
@@ -202,6 +203,21 @@ export default function ForgeChat() {
     await cancelOperation(request)
   }
 
+  const handleMessageAction = (action: AgentMessageAction) => {
+    if (action.type !== 'navigate' || action.mode !== 'cognition') return
+    if (currentVaultId) {
+      queryClient.invalidateQueries({ queryKey: ['learning-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['education-profile', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['education-profile-history', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['cognition', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['observations', currentVaultId] })
+      queryClient.invalidateQueries({ queryKey: ['knowledge-gaps', currentVaultId] })
+    }
+    const app = useAppStore.getState()
+    app.setPreviewFullscreen(false)
+    app.setMode('cognition')
+  }
+
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInputValue(e.target.value)
     setShowPalette(e.target.value.startsWith('/'))
@@ -299,6 +315,7 @@ export default function ForgeChat() {
                 streaming={streaming}
                 onConfirmRequest={handleConfirmRequest}
                 onCancelRequest={handleCancelRequest}
+                onMessageAction={handleMessageAction}
               />
             ))
           )}

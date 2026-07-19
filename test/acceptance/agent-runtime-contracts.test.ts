@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { promisify } from 'node:util'
 import {
@@ -24,6 +25,14 @@ import { subscribeResourceProgress, emitResourceProgress } from '@/server/core/a
 import { LLMUsageTracker } from '@/server/core/agent/LLMUsageTracker'
 import { writeLiveAiArtifact } from './live-ai-artifacts'
 import { classifyObservedOutcome, scoreInterventionAlignment } from '@/server/core/learning/profile-intervention-runtime'
+import { isResourceGenerationRequest, parseRequestedResourceTypes, parseResourcePlan } from '@/server/core/agent/resource-request'
+import { RESOURCE_KINDS } from '@/server/core/agent/ResourceGenerationState'
+import { hyperframesHTMLBuilder, normalizeHyperFramesConfig } from '@/server/core/ai/hyperframes/generator'
+import {
+  PUSH_MIN_CONFIDENCE,
+  capPushConfidence,
+  isPushSuggestionWithinBoundary,
+} from '@/server/core/push/push-suggestion-engine'
 
 const execFileAsync = promisify(execFile)
 const RUN_REAL_LIVE_AI = process.env.RUN_REAL_LIVE_AI === '1'
@@ -104,6 +113,39 @@ test('Agent runtime contracts from the 08 test plan are explicit and executable'
     }
   })
 
+  await t.test('push boxes enforce evidence boundaries instead of mixing in learning tasks', () => {
+    assert.ok(PUSH_MIN_CONFIDENCE >= 0.7)
+    assert.equal(isPushSuggestionWithinBoundary({ boxType: 'resource', itemType: 'card' }), true)
+    assert.equal(isPushSuggestionWithinBoundary({ boxType: 'resource', itemType: 'resource' }), true)
+    assert.equal(isPushSuggestionWithinBoundary({ boxType: 'link', itemType: 'link' }), true)
+    assert.equal(isPushSuggestionWithinBoundary({ boxType: 'resource', itemType: 'task_group' }), false)
+    assert.equal(isPushSuggestionWithinBoundary({ boxType: 'link', itemType: 'resource' }), false)
+    assert.equal(capPushConfidence(0.74, 0.96), 0.74)
+    assert.equal(capPushConfidence(0.92, 0.81), 0.81)
+  })
+
+  await t.test('natural-language requests separate resource kinds from output formats', () => {
+    assert.deepEqual(parseRequestedResourceTypes('请生成一个 SVG 图解'), ['svg'])
+    assert.deepEqual(parseResourcePlan('请导出 Word、PDF 和 PPT'), [
+      { kind: 'explanation', formats: ['docx', 'pdf', 'pptx'] },
+    ])
+    assert.deepEqual(parseResourcePlan('请生成 Mermaid 关系图和 SVG'), [
+      { kind: 'diagram', formats: ['mermaid', 'svg'] },
+    ])
+    assert.deepEqual(
+      parseRequestedResourceTypes('请生成讲解文档、思维导图、题库、代码练习、关系图和视频'),
+      ['document', 'mindmap', 'quiz', 'code', 'video', 'diagram'],
+    )
+    const allPlan = parseResourcePlan('请把全部学习资源都生成出来')
+    assert.deepEqual(allPlan.map((item) => item.kind), RESOURCE_KINDS)
+    assert.deepEqual(allPlan.find((item) => item.kind === 'explanation')?.formats, ['markdown', 'docx', 'pdf', 'pptx'])
+    assert.deepEqual(allPlan.find((item) => item.kind === 'diagram')?.formats, ['mermaid', 'svg'])
+    assert.deepEqual(allPlan.find((item) => item.kind === 'video')?.formats, ['html', 'mp4'])
+    assert.equal(isResourceGenerationRequest('帮我做一份 PPT'), true)
+    assert.equal(isResourceGenerationRequest('现在生成全部学习资料'), true)
+    assert.equal(isResourceGenerationRequest('我喜欢看视频'), false)
+  })
+
   await t.test('resource progress events are best-effort and scoped by vaultId', () => {
     const receivedA: unknown[] = []
     const receivedB: unknown[] = []
@@ -124,6 +166,35 @@ test('Agent runtime contracts from the 08 test plan are explicit and executable'
 
     unsubscribeA()
     unsubscribeB()
+  })
+
+  await t.test('HyperFrames upgrades sparse storyboards into narrated deterministic teaching video HTML', () => {
+    const config = normalizeHyperFramesConfig({
+      width: 1920,
+      height: 1080,
+      fps: 24,
+      scenes: [
+        { id: 'one', duration: 6, elements: [
+          { type: 'text', x: 120, y: 420, content: '为什么需要双重分派？' },
+          { type: 'text', x: 120, y: 560, content: '先观察直接调用时发生了什么。' },
+        ] },
+        { id: 'two', duration: 7, elements: [
+          { type: 'text', x: 120, y: 420, content: '编译期先选择重载签名' },
+          { type: 'code', x: 760, y: 420, code: 'visitor.visit(element)', language: 'java' },
+        ] },
+        { id: 'three', duration: 6, elements: [
+          { type: 'text', x: 120, y: 420, content: '运行时再执行重写实现' },
+          { type: 'shape', x: 760, y: 420, width: 300, height: 120, shape: 'rect' },
+        ] },
+      ],
+    })
+    assert.ok(config.scenes.every((scene) => scene.title && scene.narration))
+    const html = hyperframesHTMLBuilder.buildHTML(config)
+    assert.match(html, /scene-title/)
+    assert.match(html, /class="narration"/)
+    assert.match(html, /window\.__hyperframesSeek/)
+    assert.match(html, /data-animation="(?:reveal|float|draw|slideIn|scale|fadeIn)"/)
+    assert.match(html, /progress-fill/)
   })
 
   await t.test('profile interventions separate delivery, observed outcomes, and formal verification signals', () => {
@@ -242,6 +313,21 @@ test('Agent runtime contracts from the 08 test plan are explicit and executable'
     assert.equal(zeroSummary.totalCalls, 1)
     assert.equal(zeroSummary.totalTokens, 0)
     assert.equal(zeroSummary.totalCost, 0)
+  })
+
+  await t.test('visible resource orchestration and document import progress come from the real execution path', () => {
+    const resourceTool = readFileSync('server/core/agent/tool-impl/resource-tools.ts', 'utf8')
+    const importService = readFileSync('server/core/learning/document-import-service.ts', 'utf8')
+    const learningRoute = readFileSync('server/api/routes/learning.ts', 'utf8')
+    const learningWorkspace = readFileSync('components/learn/learn-workspace.tsx', 'utf8')
+
+    assert.doesNotMatch(resourceTool, /executeFlow\(['"]resource_generation['"]/)
+    assert.match(resourceTool, /generationResults\.filter\(\(result\) => result\.status === 'completed'\)/)
+    assert.match(resourceTool, /persistedToGraph = createdResourceNodes\.length > 0 \|\| !!createdResourceCard/)
+    assert.match(importService, /onProgress\?: \(progress: DocumentImportProgress\)/)
+    assert.match(learningRoute, /\/import-document\/:jobId\/status/)
+    assert.match(learningWorkspace, /useDocumentImportProgress\(importJobId\)/)
+    assert.doesNotMatch(learningWorkspace, /if \(!isGenerating\)[\s\S]{0,500}setInterval/)
   })
 
   await t.test('real role prompts execute against the live model and return structured output', { skip: !RUN_REAL_LIVE_AI }, async () => {
