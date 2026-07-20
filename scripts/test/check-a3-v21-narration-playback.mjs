@@ -106,14 +106,34 @@ try {
     }
   })
 
+  await page.locator('#narrationControl').click()
+  await page.waitForFunction(() => document.querySelector('#narrationAudio')?.paused === true)
+  const manualPause = await page.evaluate(() => ({
+    paused: document.querySelector('#narrationAudio')?.paused,
+    pressed: document.querySelector('#narrationControl')?.getAttribute('aria-pressed'),
+    state: document.querySelector('#narrationControl')?.dataset.state,
+  }))
+
+  await page.locator('#narrationControl').click()
+  await page.waitForFunction(() => {
+    const audio = document.querySelector('#narrationAudio')
+    const control = document.querySelector('#narrationControl')
+    return audio && control && !audio.paused && audio.currentTime > 0.2 && control.dataset.state === 'playing'
+  })
+  const manualResume = await page.evaluate(() => ({
+    paused: document.querySelector('#narrationAudio')?.paused,
+    pressed: document.querySelector('#narrationControl')?.getAttribute('aria-pressed'),
+    state: document.querySelector('#narrationControl')?.dataset.state,
+  }))
+
   await mkdir(path.dirname(screenshotPath), { recursive: true })
   await page.screenshot({ path: screenshotPath })
   const relevantMissingFiles = missingFiles.filter((url) => !url.includes('favicon.ico'))
-  const result = { initial, first, second, videoSlide, errors, missingFiles: relevantMissingFiles, screenshotPath }
+  const result = { initial, first, second, videoSlide, manualPause, manualResume, errors, missingFiles: relevantMissingFiles, screenshotPath }
   console.log(JSON.stringify(result, null, 2))
 
   const passed =
-    initial.manualControlPresent === false &&
+    initial.manualControlPresent === true &&
     first.paused === false &&
     first.src.includes('scene-01-opening.mp3') &&
     second.bindings === 17 &&
@@ -122,6 +142,12 @@ try {
     videoSlide.audioPaused === false &&
     videoSlide.videoMuted === true &&
     videoSlide.videoPaused === false &&
+    manualPause.paused === true &&
+    manualPause.pressed === 'false' &&
+    manualPause.state === 'paused' &&
+    manualResume.paused === false &&
+    manualResume.pressed === 'true' &&
+    manualResume.state === 'playing' &&
     relevantMissingFiles.length === 0 &&
     errors.length === 0
   if (!passed) process.exitCode = 1

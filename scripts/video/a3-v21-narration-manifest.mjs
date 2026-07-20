@@ -2,7 +2,7 @@ export const A3_V21_NARRATION_ENGINE = 'Microsoft Edge neural TTS'
 
 export const A3_V21_NARRATION_VOICE = 'zh-CN-XiaoxiaoNeural'
 
-export const A3_V21_NARRATION_RATE = '-4%'
+export const A3_V21_NARRATION_RATE = '-1%'
 
 export const A3_V21_NARRATION_PITCH = '-2Hz'
 

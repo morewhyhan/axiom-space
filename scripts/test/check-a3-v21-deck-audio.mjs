@@ -70,8 +70,8 @@ if (htmlAudioPaths.length !== 17 || new Set(htmlAudioPaths).size !== 17 || missi
 if (!html.includes('id="narrationAudio"') || !html.includes('window.__syncNarration')) {
   throw new Error('Narration player or slide synchronization hook is missing')
 }
-if (html.includes('id="narrationControl"')) {
-  throw new Error('Narration must not require a separate manual playback control')
+if (!html.includes('id="narrationControl"') || !html.includes('autoplay playsinline hidden')) {
+  throw new Error('Narration must keep both the manual control and automatic playback')
 }
 
 const classicScripts = [...html.matchAll(/<script(?![^>]*type="module")(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
@@ -96,7 +96,7 @@ const invalid = report.filter((item) => (
 ))
 const totalSeconds = report.reduce((sum, item) => sum + item.seconds, 0)
 const result = {
-  success: invalid.length === 0 && totalSeconds >= 360 && totalSeconds <= 520,
+  success: invalid.length === 0 && totalSeconds >= 360 && totalSeconds < 420,
   slides: report.length,
   totalSeconds,
   shortestSeconds: Math.min(...report.map((item) => item.seconds)),

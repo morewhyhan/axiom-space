@@ -3,7 +3,7 @@
 > 适用演示：`local-tests/a3-v21-promo-ppt/index.html`  
 > 口播原则：页面负责建立判断，视频负责提供证据，配音负责说明证据为什么有价值。  
 > 产品统一口径：灵感卡代表尚未掌握；永久卡代表学生完成输出并达到本次审核标准。  
-> 音色：微软神经中文女声 `zh-CN-XiaoxiaoNeural`；语速 `-4%`、音高 `-2Hz`，逐页音频位于 `local-tests/a3-v21-promo-ppt/assets/audio/`。
+> 音色：微软神经中文女声 `zh-CN-XiaoxiaoNeural`；语速 `-1%`、音高 `-2Hz`，逐页音频位于 `local-tests/a3-v21-promo-ppt/assets/audio/`。
 
 ## 01｜开篇：学生凭什么算真正学会
 

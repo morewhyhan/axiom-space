@@ -194,6 +194,23 @@
   body.light-bg #nav{background:rgba(255,255,255,.25)}
   body.light-bg #nav .dot{background:rgba(var(--ink-rgb),.25)}
   body.light-bg #nav .dot.active{background:rgba(var(--ink-rgb),.9)}
+  #narrationControl{--narration-progress:0%;position:fixed;left:3vw;bottom:2.25vh;z-index:40;min-width:168px;height:36px;display:flex;align-items:center;gap:10px;padding:0 14px;border:1px solid rgba(var(--paper-rgb),.26);border-radius:999px;background:rgba(var(--ink-rgb),.72);color:var(--paper);font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer;overflow:hidden;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);transition:opacity .25s ease,border-color .25s ease,background .25s ease;appearance:none}
+  #narrationControl::after{content:"";position:absolute;left:0;bottom:0;width:var(--narration-progress);height:2px;background:rgba(var(--paper-rgb),.9);transition:width .2s linear}
+  #narrationControl:hover{border-color:rgba(var(--paper-rgb),.52);background:rgba(var(--ink-rgb),.86)}
+  #narrationControl:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+  #narrationControl[data-state="paused"],#narrationControl[data-state="blocked"],#narrationControl[data-state="ended"]{opacity:.78}
+  #narrationControl .voice-bars{position:relative;z-index:1;width:13px;height:14px;display:flex;align-items:center;justify-content:center;gap:2px;flex:0 0 auto}
+  #narrationControl .voice-bars i{display:block;width:2px;height:5px;background:currentColor;opacity:.72;transform-origin:center}
+  #narrationControl[data-state="playing"] .voice-bars i{animation:voiceBar .76s ease-in-out infinite alternate}
+  #narrationControl[data-state="playing"] .voice-bars i:nth-child(2){animation-delay:-.34s}
+  #narrationControl[data-state="playing"] .voice-bars i:nth-child(3){animation-delay:-.58s}
+  #narrationLabel{position:relative;z-index:1;white-space:nowrap}
+  body.light-bg #narrationControl{border-color:rgba(var(--ink-rgb),.2);background:rgba(var(--paper-rgb),.86);color:var(--ink)}
+  body.light-bg #narrationControl::after{background:rgba(var(--ink-rgb),.82)}
+  body.light-bg #narrationControl:hover{border-color:rgba(var(--ink-rgb),.4);background:rgba(var(--paper-rgb),.96)}
+  body.light-bg #narrationControl:focus-visible{outline-color:var(--ink)}
+  body.low-power #narrationControl .voice-bars i{animation:none!important}
+  @keyframes voiceBar{from{height:4px;opacity:.48}to{height:13px;opacity:1}}
   #hint{position:fixed;bottom:3vh;right:3vw;z-index:30;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;opacity:.4;mix-blend-mode:difference;color:#aaa}
   body.low-power #hint{opacity:.72;color:var(--paper);mix-blend-mode:normal}
   body.light-bg.low-power #hint{color:var(--ink)}
@@ -1158,28 +1175,60 @@
     <div class="value-reel"><div><strong>学生</strong><span>知道哪里没会、为什么</span></div><div><strong>教师干预</strong><span>看到原话、追问与依据</span></div><div><strong>课程</strong><span>积累知识、资源与证据</span></div><div><strong>下一次</strong><span>从已有理解继续</span></div></div>
   </template>
 </div>
+<button id="narrationControl" type="button" aria-pressed="true" data-state="idle" title="暂停或继续逐页配音">
+  <span class="voice-bars" aria-hidden="true"><i></i><i></i><i></i></span>
+  <span id="narrationLabel">配音自动播放</span>
+</button>
 <audio id="narrationAudio" preload="auto" autoplay playsinline hidden></audio>
 <div id="hint">← → 翻页 · B 静态 · ESC 索引</div>
 
 <script>
 /* =============== 逐页配音 ===============
    每页只挂一条 narration。视频保持静音；进入页面时自动尝试，翻页动作直接启动当前页配音。
-   浏览器若拦截首屏有声自动播放，不显示额外控件；第一次正常翻页即完成解锁。
+   控件保留暂停/继续能力；浏览器若拦截首屏有声自动播放，可点击控件开启，第一次正常翻页也会直接解锁。
 */
 (function(){
   const audio=document.getElementById('narrationAudio');
-  let currentSlide=null,overviewOpen=false,playToken=0;
+  const control=document.getElementById('narrationControl');
+  const label=document.getElementById('narrationLabel');
+  let currentSlide=null,overviewOpen=false,playToken=0,enabled=true;
+
+  function formatTime(seconds){
+    if(!Number.isFinite(seconds)||seconds<0)return '0:00';
+    const value=Math.floor(seconds);
+    return Math.floor(value/60)+':'+String(value%60).padStart(2,'0');
+  }
+  function setControl(state,text){
+    control.dataset.state=state;
+    control.setAttribute('aria-pressed',String(enabled));
+    if(text)label.textContent=text;
+  }
+  function updateProgress(){
+    const duration=audio.duration;
+    const progress=Number.isFinite(duration)&&duration>0?Math.min(100,Math.max(0,audio.currentTime/duration*100)):0;
+    control.style.setProperty('--narration-progress',progress+'%');
+    if(!audio.paused&&Number.isFinite(duration))label.textContent='配音 '+formatTime(audio.currentTime)+' / '+formatTime(duration);
+  }
 
   function attemptPlay(){
-    if(overviewOpen||!currentSlide||!currentSlide.dataset.narration)return;
+    if(!enabled||overviewOpen||!currentSlide||!currentSlide.dataset.narration)return;
     const token=++playToken;
     const result=audio.play();
-    if(result&&typeof result.catch==='function')result.catch(function(error){
-      if(token!==playToken)return;
-      if(error&&error.name!=='NotAllowedError'&&error.name!=='AbortError'){
-        console.warn('[narration] playback failed',error);
-      }
-    });
+    if(result&&typeof result.then==='function'){
+      result.then(function(){
+        if(token===playToken&&!audio.paused){setControl('playing','配音播放中');updateProgress();}
+      }).catch(function(error){
+        if(token!==playToken)return;
+        if(error&&error.name==='NotAllowedError'){
+          setControl('blocked','点击开启配音');
+          return;
+        }
+        if(error&&error.name!=='AbortError'){
+          setControl('error','配音播放失败');
+          console.warn('[narration] playback failed',error);
+        }
+      });
+    }
   }
   function syncNarration(slide,options){
     options=options||{};
@@ -1189,27 +1238,50 @@
     if(!source){
       audio.removeAttribute('src');
       audio.load();
+      control.style.setProperty('--narration-progress','0%');
+      setControl('idle','本页无配音');
       return;
     }
     const mediaUrl=new URL(source,document.baseURI);
-    mediaUrl.searchParams.set('voice','xiaoxiao-neural-v1');
+    mediaUrl.searchParams.set('voice','xiaoxiao-neural-v2');
     const absolute=mediaUrl.href;
     if(audio.src!==absolute){audio.src=absolute;audio.load();}
     if(options.restart){try{audio.currentTime=0;}catch(error){}}
-    if(!overviewOpen)attemptPlay();
+    control.style.setProperty('--narration-progress','0%');
+    if(enabled)setControl('loading','配音加载中');
+    else setControl('paused','配音已暂停');
+    if(!overviewOpen&&enabled)attemptPlay();
   }
 
-  audio.addEventListener('error',function(){console.warn('[narration] audio file unavailable',audio.currentSrc);});
+  control.addEventListener('click',function(){
+    if(!currentSlide||!currentSlide.dataset.narration)return;
+    if(!audio.paused&&!audio.ended){
+      enabled=false;
+      ++playToken;
+      audio.pause();
+      setControl('paused','配音已暂停');
+      return;
+    }
+    enabled=true;
+    if(audio.ended){try{audio.currentTime=0;}catch(error){}}
+    setControl('loading','正在开启配音');
+    attemptPlay();
+  });
+  audio.addEventListener('playing',function(){setControl('playing','配音播放中');updateProgress();});
+  audio.addEventListener('timeupdate',updateProgress);
+  audio.addEventListener('durationchange',updateProgress);
+  audio.addEventListener('ended',function(){control.style.setProperty('--narration-progress','100%');setControl('ended','重播本页');});
+  audio.addEventListener('error',function(){setControl('error','配音文件不可用');console.warn('[narration] audio file unavailable',audio.currentSrc);});
   document.addEventListener('visibilitychange',function(){
     if(document.hidden){audio.pause();return;}
-    if(!overviewOpen&&currentSlide)attemptPlay();
+    if(enabled&&!overviewOpen&&currentSlide)attemptPlay();
   });
 
   window.__syncNarration=syncNarration;
   window.__setNarrationOverview=function(on){
     overviewOpen=!!on;
-    if(overviewOpen){++playToken;audio.pause();}
-    else if(currentSlide)attemptPlay();
+    if(overviewOpen){++playToken;audio.pause();setControl('idle','索引模式');}
+    else if(enabled&&currentSlide)attemptPlay();
   };
 })();
 </script>
